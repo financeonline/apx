@@ -1,7 +1,9 @@
 # MOTION — RBAC Model & Permission Matrix
 
-Depends on: `ARCHITECTURAL_DECISIONS.md` (ADR-002, ADR-003, CD-13 to CD-17), `TENANCY_MODEL.md`
+Depends on: `ARCHITECTURAL_DECISIONS.md` (ADR-002, ADR-003, ADR-026, ADR-037, ADR-038, CD-13 to CD-17), `TENANCY_MODEL.md`
 Consumed by: `SECURITY_MODEL.md`, `SERVICE_ARCHITECTURE.md`, `ROUTE_ARCHITECTURE.md`, `TEST_STRATEGY.md`
+
+> **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-026 (every permission re-checked inside `api.*` functions; no direct table writes), ADR-037 (Data menu; Employee `users.view` ✗), ADR-038 (suspension at the database, sole-owner disable guard, invitation email binding, MFA and re-authentication for platform users, audited `/platform` tenant views, signed-URL-only Storage). Findings addressed: F-A-01, F-A-02, F-A-04, F-A-06, F-A-07, F-A-10, F-A-12, F-D-07, F-D-14. See `RED_TEAM_REVIEW.md`.
 
 ## 1. Roles
 
@@ -52,10 +54,10 @@ All keys live in `src/core/permissions/catalogue.ts` as a `const` union; the rol
 | `actions.update_own` | ✓ | ✓ | ✓ | ✓ | ✓ | Status + outcome on actions where `owner_user_id = self` |
 | `alerts.manage` | ✓ | ✓ | ✓ | ✓ | ◐ | Acknowledge/resolve/dismiss alerts; client may acknowledge only |
 | `intelligence.recompute` | ✓ | ✓ | ✓ | ✓ | ✗ | Trigger a manual calculation run |
-| `users.view` | ✓ | ◐ | ✓ | ✓ | ✗ | Employee sees members of assigned org (names, roles), not emails of other orgs |
+| `users.view` | ✓ | ✗ | ✓ | ✓ | ✗ | Employee has no member-list page; member names appear only in assignee pickers via `org_member_profiles` (ADR-037) |
 | `users.invite` | ✓ | ✗ | ✓ | ◐ | ✗ | Admin may invite `admin` or `client`, never `owner` |
 | `users.manage` | ✓ | ✗ | ✓ | ◐ | ✗ | Admin may change/remove `admin`/`client`; cannot touch owners; cannot promote to owner |
-| `assignments.view` | ✓ | ◐ | ✓ | ✓ | ✗ | Employee sees own assignments only |
+| `assignments.view` | ✓ | ◐ | ✓ | ✓ | ✗ | Employee sees own assignments only, served by `/portfolio` (ADR-037) |
 | `assignments.manage` | ✓ | ✗ | ◐ | ✗ | ✗ | Only super admin creates; owner may **revoke** an employee's assignment to their org |
 | `documents.view` | ✓ | ✓ | ✓ | ✓ | ✗ | Open/download source documents; audited |
 | `data.export` | ✓ | ✓ | ✓ | ✓ | ✗ | CSV/XLSX export; audited |
@@ -68,6 +70,8 @@ All keys live in `src/core/permissions/catalogue.ts` as a `const` union; the rol
 | `platform.users.manage` | ✓ | ✗ | ✗ | ✗ | ✗ | Grant/revoke platform roles |
 | `platform.ai_feedback.review` | ✓ | ◐ | ✗ | ✗ | ✗ | Employee reviews feedback for assigned orgs only |
 | `platform.jobs.view` | ✓ | ✗ | ✗ | ✗ | ✗ | |
+
+Every permission in this table is checked twice on a write: by `assertCan` in the TypeScript service and again inside the `api.*` SECURITY DEFINER function that performs the write (`DATABASE_ARCHITECTURE.md §14`, ADR-026). `authenticated` holds no INSERT/UPDATE/DELETE privilege on any table, so there is no write that a permission bit alone can authorise.
 
 ### 2.2 The brief's explicit questions, answered
 
@@ -91,10 +95,13 @@ These cannot be expressed as a permission bit and are enforced in services (and 
 1. **Last-owner protection.** DB trigger on `organization_memberships` rejects UPDATE/DELETE that would leave zero active owners. Service returns a friendly error.
 2. **Role ceiling.** A user may never grant a role higher than their own effective role. Admin ceiling = admin. Enforced in `membership.service` and by an RLS `WITH CHECK` on `organization_memberships` that limits `role` to `('admin','client')` unless the actor is owner or super admin.
 3. **No self-elevation; ownership transfer is a flow.** No user can raise their own role. Sole ownership moves through a two-step transfer (initiate → nominee accepts). Owners cannot demote themselves if they are the last owner; admins can demote themselves to client.
-4. **Employee write scope.** RLS write policies treat `employee` like `admin` for data tables only. Membership, assignment, settings and organization tables have no employee write path.
+4. **Employee write scope.** `role_permissions` grants `employee` the data-table permissions in §2.1 and none of the governance permissions, so the `api.*` functions that write memberships, assignments, settings and organizations refuse an employee; there is no other write path (ADR-026).
 5. **Platform staff exclusivity.** A user with an active `platform_users` row cannot be inserted into `organization_memberships` (trigger). If a platform employee needs to be a customer, they use a separate account.
-6. **Super admin reads are audited.** Every `/app/[orgSlug]/*` request served to a super admin writes one `audit_events` row (`actor_type = 'platform_admin'`, `action = 'org.data_viewed'`, target = route). Reads under `/platform` are not individually audited.
-7. **Suspended state.** `organizations.status = 'suspended'` reduces every member to `dashboard.view` with a banner; `organization_memberships.status = 'suspended'` resolves to `none`.
+6. **Super admin reads are audited.** Every `/app/[orgSlug]/*` request served to a super admin writes one `audit_events` row (`actor_type = 'platform_admin'`, `action = 'org.data_viewed'`, target = route). Under `/platform`, any surface that renders tenant content — opening an item in `/platform/ai-feedback`, expanding an audit row's `before/after`, viewing `/platform/organizations/[orgId]` — writes `org.data_viewed {surface, target_id}` as well; list views that show only organization names, types and dates do not (ADR-038.6).
+7. **Suspended state — enforced at the database.** `app.org_role()` returns `suspended_member` for members and assigned employees of an organization whose `status = 'suspended'`; `role_permissions` maps `suspended_member` to `dashboard.view` only, so RLS reads shrink and every `api.*` write is refused, not just page renders (ADR-038.2). `organization_memberships.status = 'suspended'` resolves to NULL/`none` in both `app.org_role()` and `resolveAccess`. The UI adds the banner.
+9. **Sole-owner disable guard.** `api.disable_user` refuses to disable a user who is the only active owner of any organization unless another owner exists; a super admin must reassign ownership first (ADR-038.12).
+10. **Invitation binding.** `api.accept_invitation` compares `invitations.email` with `auth.jwt()->>'email'` (confirmed) — never with `profiles.email`, which users cannot edit (ADR-038.3) — and re-checks that the inviter is still an active owner/admin with a ceiling ≥ the invited role (F-A-02).
+11. **Platform users need MFA.** Super admins and employees must enrol TOTP before any `/platform` or `/portfolio` access; `app.is_super_admin()` requires `aal2`; magic-link sign-in is refused for platform users; `platform.users.manage`, suspend, `org.delete` and creating assignments require re-authentication within 10 minutes (ADR-038.8).
 8. **AI acts as the user.** Tool calls run with the asking user's `AccessContext`. A client asking the AI for a source document link is refused by the tool exactly as the UI would refuse.
 
 ## 4. Permission enforcement points
@@ -105,14 +112,15 @@ These cannot be expressed as a permission bit and are enforced in services (and 
 | Layout / page | Effective role ≠ `none` for the org; feature flag for the module | Server component throws `NotFound` (not `Forbidden`, to avoid org enumeration) |
 | Server action / route handler | `assertCan(ctx, key)` before any service call | Throws `PermissionDenied`, mapped to 403 JSON / toast |
 | Service | Re-checks permission for privileged operations and applies row-level constraints (§3) | Explicit checks; services never trust callers |
-| Database | RLS: org access on every read; `app.has_permission()` on every write; platform tables super-admin only | Policies in `DATABASE_ARCHITECTURE.md §11` |
-| AI tools | Same `assertCan` on each tool invocation; tools inherit and never exceed the caller's permissions | `AI_ARCHITECTURE.md §4` |
+| Database | RLS bounds every read to the accessible set (narrower per table where stated); **no direct table writes** for `authenticated`; every write is an `api.*` SECURITY DEFINER function that re-checks the permission, the role ceiling and the row invariants, and writes the audit event in the same transaction; platform tables super-admin only (`aal2`) | `DATABASE_ARCHITECTURE.md §11, §14` (ADR-026) |
+| Storage | No Storage policies for `authenticated`; every document or report read is a 60-second signed URL minted by the server after `documents.view`/`reports.view` and an audit event | `TENANCY_MODEL.md §8`, `SECURITY_MODEL.md §7` (ADR-038.1) |
+| AI tools | Same `assertCan` on each tool invocation, with `resolveAccess` re-run before every tool call; tools inherit and never exceed the caller's permissions | `AI_ARCHITECTURE.md §4` |
 
 A request must pass all applicable layers. Tests in `TEST_STRATEGY.md §2` assert that removing any single layer still blocks cross-tenant access.
 
 ## 5. UI behaviour per role
 
-- Navigation items are hidden when the role lacks the *view* permission for the whole section (never partially rendered).
+- Navigation items are hidden when the role lacks the *view* permission for the whole section (never partially rendered). The header **Data** menu (Add data · Imports · Documents · Accounts) is shown to roles with `imports.review` — Owner, Admin, Employee, Super Admin — and never to Client (ADR-037); the Settings gear is shown only with `settings.manage`.
 - Action buttons (Upload, Invite, Export, Assign) are hidden, not disabled, for roles without the permission; the server still enforces.
 - Permission-denied on a deep link shows the friendly "You don't have access to this" state (`UX_ARCHITECTURE.md §8`) with a link back to Home. Organization existence is never confirmed to a non-member (404, not 403).
 
@@ -130,6 +138,6 @@ export function can(ctx: AccessContext, p: Permission): boolean;
 export function assertCan(ctx: AccessContext, p: Permission): void; // throws PermissionDenied
 ```
 
-`scripts/sync-permission-matrix.ts` renders `ROLE_MATRIX` into a migration that fills the read-only `role_permissions (role, permission)` table used by `app.has_permission(org_id, permission)` in RLS write policies. The pgTAP parity test fails CI if the table and the TypeScript matrix differ.
+`scripts/sync-permission-matrix.ts` renders `ROLE_MATRIX` into a migration that fills the read-only `role_permissions (role, permission)` table used by `app.has_permission(org_id, permission)` inside every `api.*` mutation function (ADR-026). The pgTAP parity test fails CI if the table and the TypeScript matrix differ.
 
 The ◐ restrictions are implemented as named guards next to the matrix (`canInviteRole(actorRole, targetRole)`, `canChangeRole(actorRole, fromRole, toRole)`, `canRevokeAssignment(ctx, assignment)`), each with its own unit tests.

@@ -3,6 +3,8 @@
 Depends on: `SOW_v2_extracted.md §21–23`, `ARCHITECTURAL_DECISIONS.md`
 Consumed by: `PRODUCT_REQUIREMENTS.md` (MVP flags), `IMPLEMENTATION_PLAN.md`, `UX_ARCHITECTURE.md`
 
+> **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-026, ADR-027, ADR-029, ADR-030, ADR-033, ADR-037, ADR-038, CD-32. Findings addressed: F-A-01, F-A-11, F-A-12, F-B-03, F-B-04, F-B-15, F-D-10, and the sales/purchase report gap. See `RED_TEAM_REVIEW.md`.
+
 ## 1. The MVP journey, and nothing outside it
 
 SOW §22: **Upload → Validate → Calculate → Dashboard → Health Score → Alerts → AI Analyst → Evidence → Action.**
@@ -19,14 +21,18 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 - All five roles resolved exactly as `RBAC_MATRIX.md`; invitations by email; membership management; last-owner guard; ownership transfer flow.
 - Employee assignments (super admin creates, owner revokes) and the employee `/portfolio` list page (organization cards with health score and open alerts). *(Hard dependency for the My Employee role to be usable at all; the full CFO Command Centre is not included.)*
 - RLS on every tenant table; `role_permissions` mirror; audit events for governance changes.
+- No table-level write privilege for `authenticated`; every mutation is an `api.*` SECURITY DEFINER function with its own pgTAP test (ADR-026).
+- TOTP multi-factor authentication mandatory for every platform user (super admin and employee) before `/platform` or `/portfolio` is reachable (ADR-038.8).
 
 ### 2.2 Platform administration (SOW §5, §23)
 - `/platform`: organizations list/create/suspend/feature flags; platform users (grant/revoke roles); assignments; jobs monitor; AI feedback queue; global audit search. *(Without this a super admin cannot onboard the first customer.)*
 
 ### 2.3 Import engine (SOW §6, §21 Phase 3, §23)
 - File types: **CSV, XLSX** (full); **PDF** per CD-11 (store, text extraction, deterministic table parse, Claude-assisted extraction with mandatory review, scanned = store only).
-- Import types: general ledger, trial balance, P&L report, balance sheet, bank statement, sales invoices, purchase invoices. (Receipts = store as source document + optional manual ledger entry; no OCR.)
-- Full staged pipeline: upload → scan/validate file → parse → map columns (saved mappings, suggestions) → map accounts to standard categories → preview → validate rows → duplicate detection (file + record + fuzzy) → review queue → commit (transactional) → recalculation → import history → roll back.
+- Import types: general ledger, trial balance (cumulative or movement basis confirmed per batch, ADR-027), P&L report, balance sheet, bank statement, sales invoices, purchase invoices, sales report and purchase report (SOW §6; mapped onto the invoice and ledger targets). (Receipts = store as source document + optional manual ledger entry; no OCR.)
+- Full staged pipeline: upload → scan/validate file → parse → map columns (saved mappings, suggestions) → map accounts to standard categories → preview → validate rows → duplicate detection (file + record + fuzzy, re-checked at commit) → review queue → commit (transactional) → recalculation → import history → roll back or **replace** (ADR-029.3).
+- Invoice re-exports update existing invoices (payment status, due dates) by supersession instead of being skipped as duplicates (ADR-029.1).
+- Bank statement wizard captures the statement opening balance ("I don't know" allowed) so cash balances are available from the first import (ADR-035).
 - All row outcomes retained and visible; nothing silently discarded.
 
 ### 2.4 Financial data model (SOW §6, §21 Phase 2)
@@ -35,7 +41,7 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 
 ### 2.5 Calculation engine (SOW §7, §21 Phase 4, §23)
 - Every metric family the SOW §7 lists (the full key registry in `FINANCIAL_ENGINE.md §3`, roughly 40 keys plus variance keys), with these MVP qualifications: customer contribution = revenue contribution (CD-08); product/service contribution excluded (needs invoice lines); budget/forecast variance excluded (no budget data, CD-27).
-- Monthly periods, quarter/year aggregation, period-over-period variance (vs previous month, same month last year, trailing 3-month average).
+- Monthly periods only; quarter/year views are post-MVP (ADR-030.6). Period-over-period variance (vs previous month, same month last year, trailing 3-month average). Defaults, alerts and the health score operate on complete months only (ADR-030).
 - Materialised runs and snapshots; basis and data-quality on every value; deterministic golden-dataset tests.
 
 ### 2.6 Banking (SOW §15, subset)
@@ -43,7 +49,7 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 - **Not** included: transaction-to-ledger matching, live feeds, liquidity ratios beyond cash runway.
 
 ### 2.7 Dashboard — Home (SOW §8, §21 Phase 5, §23)
-- Health score, headline metrics (revenue, gross profit, operating profit, net profit, closing cash), trends (12 months), major expense movements, receivables/payables, top risks (alerts), top opportunities (positive variances), outstanding actions, data quality and last-import status.
+- Health score, headline cards per CD-32 (revenue; gross profit when cost-of-sales accounts exist; operating profit with net profit visibly beneath; closing cash; receivables; payables), trends (12 months), major expense movements, top risks (alerts), top opportunities (positive variances), outstanding actions, data quality and last-import status; bank-only variant for organizations with only bank data (ADR-035).
 - Drill-down chain Dashboard → Analysis → Account/Customer/Category → Transaction → Source Document (the evidence UI).
 
 ### 2.8 Health Score (SOW §9, §21 Phase 6, §23)
@@ -62,7 +68,7 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 - Create from AI recommendation, alert, health dimension or manually; all §17 fields; assign to member/employee; statuses; outcome capture; Actions page and Home widget. No comments thread (CD-26).
 
 ### 2.13 Reports (SOW §20, minimal)
-- **Monthly Management Report** only (ADR-024), on screen and as PDF. Included because Reports is a primary navigation item and a management report is the natural artefact of the MVP journey; it reuses dashboard components and adds no new calculation.
+- **Monthly Management Report** only (ADR-024), on screen and as PDF stored in the private `reports` bucket with a `report_files` row, org-scoped download and audit (ADR-038.7). Included because Reports is a primary navigation item and a management report is the natural artefact of the MVP journey; it reuses dashboard components and adds no new calculation.
 
 ### 2.14 Cross-cutting
 - Audit log UI for owners/admins; data export (CSV) of ledger, bank transactions, invoices, metrics; organization settings; profile; responsive layout to 320 px; empty/loading/error/denied states for every page; type-check, lint, tests, production build in CI (SOW §23).
@@ -97,6 +103,7 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 | Investment Opportunities / pitch decks | §3 | Post-17 | CD-26 |
 | Partner ecosystem, lender marketplace, large third-party integrations, advanced attribution, ESG | §22 | Post-17 | SOW itself lists these as post-MVP |
 | Per-organization alert thresholds, custom roles, multi-currency, groups/consolidation, time-boxed super-admin support access, billing/subscriptions | various | Post-17 | CD-18, CD-10, CD-29, CD-13 |
+| Quarter and year views (materialised aggregate snapshots with per-metric aggregation rules) | §8 | Post-17 | ADR-030.6, F-B-15 |
 | Receipt OCR, email-in of documents | §6 | Post-17 | |
 
 ## 5. MVP acceptance criteria (SOW §23, made testable)
@@ -106,9 +113,9 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 | 1 | A new company can be created and securely isolated | Create org A and org B; user of A requesting any A-scoped URL with B's slug gets 404; pgTAP isolation suite green |
 | 2 | Users authenticate and receive role-appropriate access | Five-role Playwright matrix: each role sees exactly the nav and buttons in `UX_ARCHITECTURE.md §9` |
 | 3 | Supported files can be uploaded and validated | Golden CSV/XLSX/PDF set imports through review to commit; malformed set surfaces every issue |
-| 4 | Invalid and duplicate data is surfaced, not discarded | Batch with 3 exact and 2 fuzzy duplicates shows all 5 in review; `import_rows` count equals file row count |
+| 4 | Invalid and duplicate data is surfaced, not discarded | Batch with 3 exact and 2 fuzzy duplicates shows all 5 in review; `import_rows` count equals the count of non-empty source lines; replacing a corrected statement (roll back old, commit new in one transaction) leaves the accepted row count equal to the corrected file's row count (ADR-029.3) |
 | 5 | Metrics are deterministic | Golden dataset expected values match to the cent across two runs; `input_fingerprint` equal |
-| 6 | Dashboard figures come from calculation services | Every Home figure equals its `metric_snapshots` row; no arithmetic in React (lint rule) |
+| 6 | Dashboard figures come from calculation services | Every Home figure equals the `metric_snapshots` row pointed to by `metric_current` for the latest complete month; no arithmetic in React (lint rule) |
 | 7 | Health Score is explainable | Each dimension panel lists metrics, rules, positives, negatives and data quality that reproduce the score by hand |
 | 8 | Alerts contain evidence and severity | Every alert row has severity and a non-empty evidence bundle |
 | 9 | AI answers supported questions using validated data | Eval set of 40 questions; every number in each answer is present in a tool output |
@@ -117,3 +124,4 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 | 12 | Recommendations become actions | "Create action" from an AI answer creates an `actions` row with evidence and source ids |
 | 13 | Critical/high security issues resolved | Security review checklist in `SECURITY_MODEL.md` signed off |
 | 14 | Type check, lint, tests, build pass | CI green on `main` |
+| 15 | No direct table writes are possible for tenant users | pgTAP: `authenticated` holds no INSERT/UPDATE/DELETE privilege on any `public` table; a direct PostgREST PATCH on `ledger_entries` as owner returns 42501; every `api.*` function has a pgTAP test per role (ADR-026) |

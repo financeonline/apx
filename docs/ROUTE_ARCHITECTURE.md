@@ -3,6 +3,8 @@
 Depends on: `RBAC_MATRIX.md`, `TENANCY_MODEL.md §7`, `ARCHITECTURAL_DECISIONS.md` (ADR-014, ADR-019, ADR-025), `UX_ARCHITECTURE.md`
 Consumed by: `SERVICE_ARCHITECTURE.md`, `TEST_STRATEGY.md`, `IMPLEMENTATION_PLAN.md`
 
+> **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-026, ADR-030, ADR-037, ADR-038. Findings addressed: F-A-01, F-A-03, F-A-04, F-A-07, F-A-11, F-A-12, F-B-08, F-B-15, F-D-07, F-D-09. See `RED_TEAM_REVIEW.md`.
+
 Next.js App Router. Three route families, each with its own root layout and shell. Family membership is decided by the URL prefix and enforced in middleware.
 
 ## 1. Route tree
@@ -21,6 +23,7 @@ Next.js App Router. Three route families, each with its own root layout and shel
 /onboarding                           (authenticated, no org yet) create first organization
 /select-organization                  (authenticated) org switcher when > 1 org
 /account                              (authenticated) profile, password, sessions
+/account/mfa                          (authenticated) TOTP enrolment; mandatory for platform users (ADR-038.8)
 
 /app/[orgSlug]                        → redirects to /home
 /app/[orgSlug]/home
@@ -48,7 +51,6 @@ Next.js App Router. Three route families, each with its own root layout and shel
 /app/[orgSlug]/data/accounts
 /app/[orgSlug]/settings
 /app/[orgSlug]/settings/team
-/app/[orgSlug]/settings/data
 /app/[orgSlug]/settings/audit
 /app/[orgSlug]/settings/billing       (feature flag: billing)
 /app/[orgSlug]/settings/danger
@@ -92,7 +94,8 @@ Next.js App Router. Three route families, each with its own root layout and shel
 |---|---|---|---|---|---|---|---|
 | `/onboarding` | Create the first organization (name, country, currency, fiscal year start) | signed-in with 0 memberships and no platform role | — | — | Server + client form | `tenancy.createOrganization` | Users with ≥1 org redirected to `/select-organization` or last org |
 | `/select-organization` | Switcher | signed-in | — | — | Server | `tenancy.listAccessibleOrganizations` | 0 orgs → `/onboarding`; 1 org → redirect to it |
-| `/account` | Profile, password, sessions, sign-out-everywhere | signed-in | — | — | Server + client forms | `profiles` self | — |
+| `/account` | Profile, password, sessions, sign-out-everywhere | signed-in | — | — | Server + client forms | `profiles` self (column-limited update via `api.update_profile`, ADR-038.3) | — |
+| `/account/mfa` | Enrol/verify TOTP | signed-in | — | — | Client | Supabase Auth MFA | Platform users are redirected here until enrolled |
 
 ## 4. Tenant family `/app/[orgSlug]/*`
 
@@ -100,7 +103,7 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 
 | Route | Purpose | Roles | Permissions | Flag | Render | Data loaded (services) | Empty / denied |
 |---|---|---|---|---|---|---|---|
-| `/home` | Executive dashboard (SOW §8) | all | `dashboard.view` | — | Server; charts client | `health.getCurrent`, `financialEngine.getHeadline(period)`, `financialEngine.getTrend(12)`, `alerts.listTop(5)`, `actions.listOutstanding(5)`, `imports.getCoverage` | No data → onboarding empty state with "Add data" CTA; partial data → coverage banner |
+| `/home` | Executive dashboard (SOW §8) | all | `dashboard.view` | — | Server; charts client | `health.getCurrent`, `financialEngine.getHeadline(period)`, `financialEngine.getTrend(12)`, `alerts.listTop(5)`, `actions.listOutstanding(5)`, `imports.getCoverage` — period = latest complete month (ADR-030) | No data → onboarding empty state with "Add data" CTA; bank-only → bank-only variant (ADR-035); partial current month → "{Month} so far" line |
 | `/insights` | What changed and why: variances, alerts, movements | all | `dashboard.view`, `financials.view` | — | Server | `alerts.list`, `financialEngine.getVariances(period)`, `financialEngine.getExpenseChanges` | No periods with 2 months → "Need two months to compare" |
 | `/money/profit-and-loss` | P&L by standard category, drill to accounts | all | `financials.view` | — | Server | `financialEngine.getPnl(period)`, `expense_by_category`, `expense_by_account` | No P&L data → explains which imports produce a P&L |
 | `/money/cash` | Opening/closing cash, movement, runway | all | `financials.view`, `banking.view` | — | Server | `financialEngine.getCash(period)` | No bank data → prompt to import a statement or enter opening balance (CD-06) |
@@ -115,15 +118,14 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 | `/analyst` | New conversation | all | `ai.use` | — | Client chat shell | `ai.listConversations` | Quota exhausted → notice with reset time |
 | `/analyst/[conversationId]` | Conversation | owner of conversation, org owner/admin | `ai.use` | — | Client | `ai.getConversation` | Other user's conversation → 404 |
 | `/evidence/[bundleId]` | Evidence drawer as page (deep-linkable) | all (document items need `documents.view`) | `financials.view` | — | Server | `evidence.getBundle`, `evidence.resolveItems` | Cross-org → 404; client sees document items as "source document (restricted)" |
-| `/data/imports` | Import history | owner, admin, employee, super_admin | `imports.review` | — | Server | `imports.listBatches` | None → CTA |
+| `/data/imports` | Import history, replace/roll back, data coverage strip, export, recalculate (reached via the header Data menu, ADR-037) | owner, admin, employee, super_admin | `imports.review`; export button `data.export`; recalculate button `intelligence.recompute` | — | Server | `imports.listBatches`, `imports.getCoverage`, `calculationRuns.listRecent` | None → CTA |
 | `/data/imports/new` | Upload wizard (Add data) | same | `imports.create` | — | Client wizard | `imports.listMappings` | — |
 | `/data/imports/[batchId]` | Review, map, resolve, commit, roll back | same | `imports.review` | — | Client | `imports.getBatch`, `imports.listRows(status)` | Cross-org → 404 |
 | `/data/documents` | Document library | same | `documents.view` | — | Server | `documents.list` | None → CTA |
 | `/data/documents/[documentId]` | Viewer with page reference and linked batches | same | `documents.view` | — | Server + client viewer | `documents.get`, `documents.getSignedUrl` (via API) | Client role → 404 |
 | `/data/accounts` | Chart of accounts and category mapping | same | `financials.edit` | — | Client table | `accounts.list` | — |
-| `/settings` | Organization settings | owner, admin, super_admin | `settings.manage` | — | Server + client forms | `organizations.get` | Employee/client → nav hidden; deep link → denied state |
+| `/settings` | Organization settings: name, legal name, industry, fiscal year start, base currency, timezone | owner, admin, super_admin | `settings.manage` | — | Server + client forms | `organizations.get` (writes via `api.update_organization`) | Employee/client → gear hidden; deep link → denied state |
 | `/settings/team` | Members, invitations, MOTION advisers | owner, admin, super_admin | `users.view` (+`users.invite`, `users.manage`, `assignments.view`) | — | Server + client | `tenancy.listMembers`, `tenancy.listInvitations`, `tenancy.listAssignments` | — |
-| `/settings/data` | Import history link, export, recalculate; fiscal year and currency controls | owner, admin, employee, super_admin | Page: `imports.review`; fiscal-year/currency controls additionally `settings.manage`; export `data.export`; recalculate `intelligence.recompute` | — | Server + client | `organizations.get`, `calculationRuns.listRecent` | Employee sees the page without the fiscal-year/currency controls |
 | `/settings/audit` | Org audit log | owner, admin, super_admin | `audit.view` | — | Server; client filters | `audit.query(org)` | — |
 | `/settings/billing` | Plan | owner, super_admin | `billing.manage` | `billing` | Server | `organizations.get` | Flag off → 404 |
 | `/settings/danger` | Delete organization, transfer ownership | owner, super_admin | `org.delete` | — | Client confirm | — | — |
@@ -132,11 +134,11 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 
 | Route | Purpose | Roles | Permissions | Flag | Render | Data loaded | Empty / denied |
 |---|---|---|---|---|---|---|---|
-| `/portfolio` | Cards for assigned organizations: name, health score, open alerts, last import | `platform_employee`, `platform_super_admin` | `assignments.view` | — | Server | `tenancy.listAssignmentsForSelf` then per org `health.getCurrent`, `alerts.countOpen`, `imports.getLastCommitted` (each under that org's context) | No assignments → "No client organizations assigned yet" |
+| `/portfolio` | Cards for assigned organizations: name, health score, open alerts, last import | `platform_employee`, `platform_super_admin` (TOTP enrolled) | `assignments.view` | — | Server | `portfolio.list(ctx)` — one aggregate projection per data type filtered by `organization_id IN (select app.accessible_org_ids())`, cached per organization tag (ADR-038.13) | No assignments → "No client organizations assigned yet" |
 
 ## 6. Platform family `/platform/*`
 
-All routes: `platform_super_admin` only; everyone else 404.
+All routes: `platform_super_admin` only with `aal2` (TOTP verified, ADR-038.8); everyone else 404; a super admin without TOTP is redirected to `/account/mfa`. Suspend, purge, role grants and assignment creation require re-authentication within the last 10 minutes.
 
 | Route | Purpose | Permissions | Render | Data loaded | Empty / denied |
 |---|---|---|---|---|---|
@@ -159,10 +161,10 @@ All routes: `platform_super_admin` only; everyone else 404.
 | `/api/ai/chat` | POST (SSE stream) | session | `ai.use` | 10/min user; org quota | Body `{conversationId?, message, orgSlug}`; org resolved from slug |
 | `/api/documents/[documentId]/url` | GET | session | `documents.view` | 60/min | Writes audit; 60-second signed URL; 404 cross-org |
 | `/api/exports/[kind]` | GET | session | `data.export` | 10/h | `kind ∈ {ledger, bank_transactions, invoices, metrics}`; streams CSV; writes audit |
-| `/api/reports/[reportId]/download` | GET | session | `reports.view` | 30/h | Signed URL to rendered PDF |
+| `/api/reports/[reportId]/download` | GET | session | `reports.view` | 30/h | Resolves `report_files` by `(organization_id, id)` (404 cross-org), writes `report.downloaded`, returns a 60-second signed URL from bucket `reports` (ADR-038.7) |
 | `/api/health` | GET | none | — | 60/min IP | `{ok, version}`; no DB details |
 
-Server actions (in `actions.ts` files colocated with pages) handle all other mutations: membership, invitations, assignments revoke, import mapping/review/commit/rollback, account mapping, bank categorisation, alert status, actions CRUD, settings, feedback. Each begins with `const ctx = await getAccessContext(orgSlug); assertCan(ctx, '…')`.
+Server actions (in `actions.ts` files colocated with pages) handle all other mutations: membership, invitations, assignments revoke, import mapping/review/commit/rollback, account mapping, bank categorisation, alert status, actions CRUD, settings, feedback. Each begins with `const ctx = await getAccessContext(orgSlug); assertCan(ctx, '…')` and then calls a module service, which performs the write by invoking the corresponding `api.*` SECURITY DEFINER function through the user-session client (`rpc`). No server action, route handler or component writes a table directly: the `authenticated` role has no INSERT/UPDATE/DELETE privilege on any table (ADR-026). Storage objects are never read or written with the user JWT; uploads and signed URLs go through `core/storage` (ADR-038.1).
 
 ## 8. Middleware
 
@@ -172,11 +174,12 @@ Server actions (in `actions.ts` files colocated with pages) handle all other mut
 2. Classify the path: `public`, `auth-noorg`, `app`, `portfolio`, `platform`, `api`.
 3. No session: `public` and `api/health` pass; everything else redirects to `/sign-in?next=<path>` (only relative paths accepted for `next`).
 4. Session present, `profiles.disabled_at` set → sign out and redirect to `/sign-in?error=disabled`.
+4a. Session present and the user has a `platform_users` row: if the session's `aal` is not `aal2`, redirect every request except `/account/mfa`, `/account` and sign-out to `/account/mfa` (ADR-038.8). `/auth/callback` refuses a magic-link exchange for platform users and shows "Platform accounts must sign in with a password and authenticator code".
 5. Load the platform role (single cached query per request):
    - `platform_super_admin`: may access every family.
    - `platform_employee`: `/platform/*` → 404; `/app/[orgSlug]` allowed only if an active assignment exists (checked in layout, not middleware, to keep middleware light); `/` and `/select-organization` redirect to `/portfolio`.
    - Members: `/platform/*` and `/portfolio` → 404.
-6. `/` with session → redirect to `profiles.last_active_org_id` slug if still accessible, else `/select-organization`.
+6. `/` with session → redirect to `profiles.last_active_org_id` slug only if that organization is in the user's accessible set (checked in the layout; a stale or foreign id is ignored, never resolved to a slug), else `/select-organization`.
 7. `/app/[orgSlug]/*`: do not resolve access in middleware beyond session; the org layout does it (needs DB and returns 404 uniformly).
 8. Attach `x-request-id` header; apply rate-limit buckets for `/api/*` and auth routes.
 
@@ -205,7 +208,7 @@ Per-route files: `loading.tsx` (skeleton matching the page's layout, `UX_ARCHITE
 
 - Organization slug: `[a-z0-9-]{3,40}`, immutable after creation; renaming the organization does not change the slug.
 - All entity ids are UUIDs and validated with Zod before any query.
-- Period parameter: `YYYY-MM`; ranges as `?from=YYYY-MM&to=YYYY-MM`; default period is the latest month with accepted data.
+- Period parameter: `YYYY-MM` only (monthly granularity in MVP, ADR-030.6); ranges as `?from=YYYY-MM&to=YYYY-MM`; default period is the **latest complete month** (`fiscal_periods.is_complete`), the same rule the AI Analyst uses (`core/periods`).
 - Filters live in search params (`?status=open&severity=high`) so views are shareable; never in cookies.
 - Deep links to evidence (`/evidence/[bundleId]`), documents, batches, actions and conversations are org-scoped by URL; a bundle id from another organization returns 404 even for a user who is a member of both (the URL's slug must own the resource).
 - Redirect targets after auth (`next`) must be same-origin relative paths.
@@ -230,5 +233,11 @@ Expected HTTP status for a representative set. `member-B` = member of another or
 | `POST /api/ai/chat` (org A) | 200 | 200 | 200 | 200 | 404 | 404 | 200 | 401 |
 | Server action `inviteMember(role=owner)` | 200 | 403 | 403 | 403 | 404 | 404 | 200 | 401 |
 | Server action `revokeAssignment` | 200 | 403 | 403 | 403 | 404 | 404 | 200 | 401 |
+| `/app/A/data/imports` | 200 | 200 | 403* | 200 | 404 | 404 | 200 | 302 |
+| `PATCH /rest/v1/ledger_entries?id=eq.X` (direct PostgREST with the user JWT) | 403† | 403† | 403† | 403† | 403† | 403† | 403† | 401 |
+| `POST /rest/v1/jobs` (direct, any payload) | 403† | 403† | 403† | 403† | 403† | 403† | 403† | 401 |
+| `GET /storage/v1/object/authenticated/source-documents/A/…` (direct with user JWT) | 400/403 | 400/403 | 400/403 | 400/403 | 400/403 | 400/403 | 400/403 | 401 |
+| `/platform/organizations` as super admin without `aal2` | — | — | — | — | — | — | 302 → `/account/mfa` | — |
+| `rpc('api.invite_member', role='owner')` as admin | 200 | 403 (function raises) | 403 | 403 | 404 | 404 | 200 | 401 |
 
-`403*` = page renders the friendly permission-denied state (`UX_ARCHITECTURE.md §8`) with HTTP 403; the organization's existence is already known to these users, so 403 does not leak anything.
+`403*` = page renders the friendly permission-denied state (`UX_ARCHITECTURE.md §7.4`) with HTTP 403; the organization's existence is already known to these users, so 403 does not leak anything. `403†` = PostgREST `42501 permission denied` because `authenticated` holds no write privilege on any table (ADR-026); this is independent of RLS and of the caller's role.

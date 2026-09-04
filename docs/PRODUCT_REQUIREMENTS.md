@@ -4,6 +4,8 @@ Source: `docs/SOW_v2_extracted.md` (MOTION Financial Intelligence System SOW, "V
 Depends on: `ARCHITECTURAL_DECISIONS.md` (CD-xx, ADR-xxx), `MVP_SCOPE.md`
 Consumed by: `IMPLEMENTATION_PLAN.md`, `TEST_STRATEGY.md`, acceptance sign-off
 
+> **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-026 to ADR-039 and CD-32 to CD-35; new rows are listed in the "Revision 1.1 changes" section at the end and are numbered after the existing rows in each group (no renumbering). Findings addressed: F-A-01, F-A-04, F-A-08, F-A-11, F-A-12, F-B-01, F-B-02, F-B-03, F-B-04, F-B-05, F-B-08, F-B-15, F-C-01, F-C-03, F-C-13, F-C-16, F-D-02, F-D-07, F-D-12 and the sales/purchase report gap. See `RED_TEAM_REVIEW.md`.
+
 ## How to read this register
 
 Every functional statement in the SOW is one row. SOW wording is preserved as closely as the table format allows; paraphrase is only used where the SOW gives a heading rather than a sentence. Rows marked *Derived from role brief* come from the architect's brief (five roles, seven-item navigation, five customer questions, MVP journey) and are binding to the same degree as the SOW. Rows marked *Architectural* are requirements this architecture adds because a SOW requirement cannot be met without them; each cites the ADR or CD that justifies it.
@@ -187,7 +189,7 @@ MVP column values:
 | REQ-BH-08 | Dimension: Marketing Efficiency (CAC, revenue/contribution per acquisition where available). | SOW §9 | SOW requirement | Post-MVP (P14) | Commercial Intelligence | — |
 | REQ-BH-09 | Dimension: Banking Health (balance trends, inflow/outflow behaviour and transaction anomalies). | SOW §9 | SOW requirement | MVP | REQ-BK-02..06 | — |
 | REQ-BH-10 | Dimension: Funding Readiness (indicative financial and banking readiness factors). | SOW §9 | SOW requirement | Post-MVP (P16) | Funding Readiness | — |
-| REQ-BH-11 | Each dimension shall expose the underlying metrics, rules, positive factors, negative factors and data-quality status. | SOW §9 | SOW requirement | MVP | `health_scores.breakdown` | — |
+| REQ-BH-13 | Each dimension shall expose the underlying metrics, rules, positive factors, negative factors and data-quality status. | SOW §9 | SOW requirement | MVP | `health_scores.breakdown` | — |
 | REQ-BH-12 | Dimensions with insufficient data are excluded and weights renormalised; the score states how many dimensions it is based on; weights and rules are versioned. | SOW §9 | Architectural | MVP | ADR-017, CD-19 | — |
 
 ## 10. Alerts
@@ -206,7 +208,7 @@ MVP column values:
 | REQ-AL-10 | Duplicate transactions. | SOW §13 | SOW requirement | MVP | `dedupe_hash` | — |
 | REQ-AL-11 | Large transaction deviations. | SOW §13 | SOW requirement | MVP | `bank_transactions`, `ledger_entries` | — |
 | REQ-AL-12 | Significant period variance. | SOW §13 | SOW requirement | MVP | REQ-CA-13 | — |
-| REQ-AL-13 | Each alert shall contain severity, explanation, affected metric, period, evidence and recommended next step; alerts contain evidence and severity (acceptance). | SOW §13, §23 | SOW requirement | MVP | `alerts` columns; `evidence_bundle_id` | — |
+| REQ-AL-15 | Each alert shall contain severity, explanation, affected metric, period, evidence and recommended next step; alerts contain evidence and severity (acceptance). | SOW §13, §23 | SOW requirement | MVP | `alerts` columns; `evidence_bundle_id` | — |
 
 ## 11. AI Analyst
 
@@ -235,8 +237,8 @@ MVP column values:
 | REQ-AI-21 | AI prompts and outputs shall be designed to resist prompt-injection attempts and data leakage. | SOW §11 | SOW requirement | MVP | AI_ARCHITECTURE.md defences | — |
 | REQ-AI-22 | The system shall provide a mechanism to report incorrect insights. | SOW §11 | SOW requirement | MVP | `ai_feedback` | CD-25 |
 | REQ-AI-23 | AI Financial Analyst answers supported financial questions using validated data (acceptance). | SOW §23 | SOW requirement | MVP | REQ-AI-03..12 | — |
-| REQ-AI-24 | Claude operates only through a closed set of typed server-side tools; no model-generated SQL; tool calls are logged. | Role brief | Derived from role brief | MVP | `ai_tool_calls`, ADR-010 | — |
-| REQ-AI-25 | AI usage is quota-limited per organization and rate-limited per user. | SOW §26 (API limits) | Architectural | MVP | CD-24 | CD-24 |
+| REQ-AI-28 | Claude operates only through a closed set of typed server-side tools; no model-generated SQL; tool calls are logged. | Role brief | Derived from role brief | MVP | `ai_tool_calls`, ADR-010 | — |
+| REQ-AI-29 | AI usage is quota-limited per organization and rate-limited per user. | SOW §26 (API limits) | Architectural | MVP | CD-24 | CD-24 |
 
 ## 12. Evidence
 
@@ -253,7 +255,7 @@ MVP column values:
 | REQ-EV-09 | Evidence element: Source document. | SOW §12 | SOW requirement | MVP | item_type `source_document` | — |
 | REQ-EV-10 | Evidence element: Accounting period. | SOW §12 | SOW requirement | MVP | item_type `fiscal_period` | — |
 | REQ-EV-11 | A user should be able to move from an AI statement to the calculation and then to the underlying records/source document. | SOW §12 | SOW requirement | MVP | Evidence drawer UI | — |
-| REQ-EV-12 | Progressive drill-down: Dashboard → Analysis → Account/Customer/Category → Transaction → Source Document. | SOW §8 | SOW requirement | MVP | ADR-009 query descriptors | — |
+| REQ-EV-13 | Progressive drill-down: Dashboard → Analysis → Account/Customer/Category → Transaction → Source Document. | SOW §8 | SOW requirement | MVP | ADR-009 query descriptors | — |
 
 ## 13. Actions
 
@@ -434,7 +436,7 @@ Sections of the SOW cited above for completeness: §1 Project Overview (REQ-FD-0
 | NFR-01 | Performance — dashboard | Home renders with all current-period figures from `metric_snapshots` | p95 server render < 800 ms; LCP < 2.5 s on 4G |
 | NFR-02 | Performance — AI | First streamed token after tool calls | p95 < 6 s; hard timeout 60 s; tool calls capped at 8 per answer (CD-24) |
 | NFR-03 | Performance — import | Synchronous commit | ≤ 5,000 rows commit within 30 s; larger batches queued (CD-22) |
-| NFR-04 | Performance — recalculation | Full 36-month recalculation for an organization with 100k ledger entries | < 5 min in the job worker |
+| NFR-04 | Performance — recalculation | Full 36-month recalculation for an organization with 100k ledger entries | < 5 min in the job worker, with L0 aggregation performed in SQL (`app.aggregate_periods`) so worker CPU scales with periods × dimensions, not rows; proven by spike S5 before Phase 6; fallback runtime per CD-34 (ADR-031.4) |
 | NFR-05 | File limits | Per file 25 MB; per import 50,000 rows; XLSX up to 20 sheets; PDF up to 200 pages | Validation errors above limits |
 | NFR-06 | Availability | Application availability (excluding Supabase/Vercel platform incidents) | 99.5% monthly target for MVP |
 | NFR-07 | Data residency | Supabase project and Storage in the region matching customer jurisdiction; no cross-region replication of tenant data | CD-23 |
@@ -444,10 +446,57 @@ Sections of the SOW cited above for completeness: §1 Project Overview (REQ-FD-0
 | NFR-11 | Responsive | Usable from 320 px to 1440 px+ without horizontal scroll | Responsive sweep |
 | NFR-12 | Precision | Money exact to the cent; no floating point on money paths | ADR-006; lint rule |
 | NFR-13 | Determinism | Same inputs and engine version give identical `input_fingerprint` and values | Golden-dataset double run |
-| NFR-14 | Audit retention | `audit_events` retained 7 years; financial import rows retained for life of organization | CD-23 |
-| NFR-15 | AI cost control | Per-org daily message quota (default 100), per-user 10/min | CD-24 |
+| NFR-14 | Audit retention | `audit_events` retained 7 years (metadata, IP and user agent redacted on organization purge, ADR-038.9); financial import rows and every `metric_snapshots` row referenced by evidence, health scores or alerts retained for the life of the organization (ADR-031.5) | CD-23 |
+| NFR-15 | AI cost control | Per-org daily message quota (default 100), per-user 10/min, per-org monthly token ceiling shared with PDF extraction, `ai_extraction_pages_per_day` (default 300); all held in `platform_org_settings`, not tenant-writable | CD-24, ADR-033, ADR-038.5 |
 | NFR-16 | Observability | Error tracking, structured logs with `request_id`, job failure alerts | SECURITY §15 |
-| NFR-17 | Security baseline | OWASP ASVS Level 2 | SECURITY §18 |
+| NFR-17 | Security baseline | OWASP ASVS Level 2; no table write privilege for `authenticated`; TOTP mandatory for platform users | SECURITY §18, ADR-026, ADR-038.8 |
+
+## Revision 1.1 changes (red-team round 1)
+
+New requirement rows added by the review. They belong to the groups named in their ids and are binding at the same level as Architectural rows. Existing rows are unchanged unless listed under "Amended".
+
+| ID | Requirement | SOW § | Type | MVP | Dependencies | Open question |
+|---|---|---|---|---|---|---|
+| REQ-AS-13 | The `authenticated` database role holds no INSERT, UPDATE or DELETE privilege on any table; every user-initiated mutation is a SECURITY DEFINER `api.*` function that derives the actor from the session, checks `app.has_permission`, enforces governance and record invariants, and writes the audit event. | SOW §5 | Architectural | MVP | ADR-026, `DATABASE_ARCHITECTURE.md §14` | — |
+| REQ-AS-14 | Background jobs are enqueued only through `api.enqueue_job` with a job-type → permission map; the worker scopes every job to the `jobs.organization_id` column, never to payload; `org.purge` is enqueued only by the deletion trigger with a 30-day delay and re-verified at run time. | SOW §5 | Architectural | MVP | ADR-026.4, ADR-038.12 | — |
+| REQ-AS-15 | Platform users (super admin and employee) must enrol TOTP; platform surfaces require `aal2`; magic-link sign-in is refused for platform users; suspend, purge, role grants and assignment creation require re-authentication within 10 minutes. | SOW §5 | Architectural | MVP | ADR-038.8 | — |
+| REQ-AS-16 | Organization and membership suspension are enforced inside the RLS helper functions (`app.org_role` returns `suspended_member`), not only in the application layer. | SOW §5 | Architectural | MVP | ADR-038.2 | — |
+| REQ-AS-17 | Any `/platform` surface that renders tenant content writes `org.data_viewed` with the surface and target; audit payloads are collapsed until expanded. | Role brief | Architectural | MVP | ADR-038.6, CD-13 | — |
+| REQ-AS-18 | On organization purge, `audit_events.metadata`, `ip` and `user_agent` are redacted; metadata keys are an allow-list of ids per action. | SOW §5 | Architectural | MVP | ADR-038.9, CD-23 | — |
+| REQ-AS-19 | Every polymorphic reference column is guarded by a `same_org_ref` trigger and every plain FK on a tenant table is org-composite; pgTAP enumerates and enforces both. | SOW §5 | Architectural | MVP | ADR-034 | — |
+| REQ-DO-07 | Storage objects are never readable or listable with the user JWT; all reads are 60-second signed URLs minted by `core/storage/signer.ts` after a permission check and an audit event; deletion removes the object. | SOW §5 | Architectural | MVP | ADR-038.1 | — |
+| REQ-DO-08 | Rendered report PDFs live in the private `reports` bucket with a `report_files` row; download resolves by `(organization_id, id)`, is audited, and the prefix is deleted on purge. | SOW §20 | Architectural | MVP | ADR-038.7 | — |
+| REQ-DO-09 | `import_rows`, `import_batches` and `import_mappings` are readable only with `imports.review`; bank identifiers are stored verbatim in raw fields and masked in `description_normalized`, which client-facing views and AI tools use. | SOW §5 | Architectural | MVP | ADR-038.4, CD-17 | — |
+| REQ-DO-10 | Text-layer page text may be sent to the AI provider for PDF extraction only when `features.ai_pdf_extraction` is on; each send is audited (`document.sent_to_ai`) and the wizard shows a consent line. | SOW §6, §11 | Architectural | MVP | ADR-033, CD-35 | CD-35 |
+| REQ-DI-21 | Trial balance and balance-sheet imports declare `balance_basis` (cumulative or movement) per batch; `period_balances` carry `period_start` per row so multi-period reports fan out correctly; total/subtotal rows are detected and excluded from accounts. | SOW §6 | Architectural | MVP | ADR-027.1, F-B-10 | — |
+| REQ-DI-22 | Re-exported invoices matching `(invoice_type, counterparty, invoice_number)` with changed payment fields are update candidates that supersede the prior row, never duplicates. | SOW §6, §23 | Architectural | MVP | ADR-029.1 | — |
+| REQ-DI-23 | A corrected file replaces its predecessor through a single "Replace" transaction (roll back old, commit new); rolling back a batch that other committed batches depend on is refused with the dependency named. | SOW §23 | Architectural | MVP | ADR-029.3 | — |
+| REQ-DI-24 | Duplicate scope keys use stable identities (account code/name, masked bank identity), duplicate bank-account identities are refused at creation, and the exact-duplicate pass is re-run inside the commit transaction under an organization lock. | SOW §6, §23 | Architectural | MVP | ADR-029.4–5 | — |
+| REQ-DI-25 | Within-batch identical rows that look like batch payments (≥ 3 on one day or payroll wording) default to keep; kept duplicates carry `duplicate_reviewed` and never raise duplicate alerts. | SOW §23 | Architectural | MVP | ADR-029.6 | — |
+| REQ-DI-26 | Sales report and purchase report file types (SOW §6) are supported as import types mapped onto the invoice and ledger targets. | SOW §6 | SOW requirement | MVP | `IMPORT_ENGINE.md §6.1` | — |
+| REQ-DI-27 | The Claude PDF path reconciles extracted rows only against balances captured deterministically or typed by the reviewer; a ±10% line-count check (`IMP-PDF-002`) governs whether page-level confirmation is allowed; every non-empty source line is recorded as a row or a skipped line. | SOW §6, §11 | Architectural | MVP | ADR-033 | — |
+| REQ-DI-28 | The bank statement wizard captures the statement opening balance ("I don't know" allowed). | SOW §6, §15 | Architectural | MVP | ADR-035, CD-06 | — |
+| REQ-CA-22 | Cumulative P&L balances are differenced against the previous balance in the same fiscal year; ledger-basis balance-sheet metrics require an opening balance source or are NULL with a reason. | SOW §7 | Architectural | MVP | ADR-027.2–3 | — |
+| REQ-CA-23 | A pair is a cash transfer only when both legs are cash-like accounts; card and loan repayments count in cash outflows under their category. | SOW §7, §15 | Architectural | MVP | ADR-028 | — |
+| REQ-CA-24 | Revenue is net of VAT where data allows; VAT-inclusive proxies carry `vat_inclusive` and `estimated`; optional net-down from organization VAT settings. | SOW §7 | Architectural | MVP | ADR-027.4 | CD-33 |
+| REQ-CA-25 | `fiscal_periods.is_complete` governs the default period on Home, Reports and the AI; alerts (except record-level rules) and the health score run only on complete periods; `basis_differs` suppresses variance-based rules; the MVP period picker is monthly only. | SOW §8, §13 | Architectural | MVP | ADR-030 | — |
+| REQ-CA-26 | Calculation runs coalesce only while queued, mark themselves stale when data changes mid-run and loop until current, include `as_of` in the fingerprint, aggregate in SQL, and record which run included each batch. | SOW §7, §23 | Architectural | MVP | ADR-031 | CD-34 |
+| REQ-CA-27 | The current metric value is the row pointed to by `metric_current`; snapshots are append-only; referenced snapshots are never archived. | SOW §7, §12 | Architectural | MVP | ADR-031.5 | — |
+| REQ-BH-11 | Health dimension rules that count anomalies derive their counts from conditions over snapshots, never from alert rows; dimensions on estimated data are included capped at 70 with a note. | SOW §9 | Architectural | MVP | ADR-035 | — |
+| REQ-AL-13 | State-type alert rules are keyed by subject (one alert per persistent condition); event-type rules by period; a run creates at most 25 alerts. | SOW §13 | Architectural | MVP | ADR-036 | — |
+| REQ-AL-14 | Alert re-evaluation writes an `alert_revisions` row and an audit event; a severity increase re-opens an acknowledged alert; evidence pins the revision seen. | SOW §5, §13 | Architectural | MVP | ADR-034 | — |
+| REQ-AI-24 | Every number in every part of an AI answer carries a `NumberRef` validated against the exact tool field (value, unit, sign, period); named entities and direction words are grounded; the direct answer, causes, risks, opportunities and recommendations are Statements requiring evidence; the final call is forced to `submit_answer` and text blocks are discarded. | SOW §11 | Architectural | MVP | ADR-032 | — |
+| REQ-AI-25 | Degraded answers remove unverified statements and list them under "Not covered"; "Create action" is available only when grounding passed. | SOW §11, §17 | Architectural | MVP | ADR-032.5 | — |
+| REQ-AI-26 | Evidence tools accept ids only, never model-authored descriptors; all imported free text reaching the model is wrapped and escaped; conversations are bound to (organization, user); access is re-resolved before every tool call. | SOW §11 | Architectural | MVP | ADR-032.6–8 | — |
+| REQ-AI-27 | PDF extraction tokens and pages count against per-organization budgets in `platform_org_settings`; the extraction job has outage-tolerant retries and per-page completion. | SOW §11 | Architectural | MVP | ADR-033, ADR-038.5 | — |
+| REQ-EV-12 | Engine evidence descriptors name account ids resolved at run time; category and record-status history tables make as-of resolution reproducible after remaps, recategorisation and rollback; derived metrics point at their component snapshots. | SOW §12 | Architectural | MVP | ADR-034 | — |
+| REQ-UX-01 | The header Data menu (Add data · Imports · Documents · Accounts) is shown to roles with `imports.review`; there is no Settings → Data. | Role brief | Architectural | MVP | ADR-037 | — |
+| REQ-UX-02 | Home Level 2 shows revenue, gross profit (when applicable), operating profit with net profit visible, cash, receivables and payables; one status badge per number from the canonical table. | SOW §8 | Architectural | MVP | ADR-037 | CD-32 |
+| REQ-UX-03 | The import wizard derives its steps per import type, skips answered steps from saved mappings, and renders a zero-issue fast path. | SOW §6 | Architectural | MVP | ADR-037 | — |
+| REQ-PO-13 | `/portfolio` and platform organization lists use aggregate projections filtered by the caller's accessible organizations, cached per organization tag. | SOW §18 | Architectural | MVP | ADR-038.13 | — |
+| REQ-PO-14 | Jobs have a `cancelled` status; workers defer jobs for suspended or pending-deletion organizations; deletion can be cancelled during the grace period. | SOW §5 | Architectural | MVP | ADR-038.12 | — |
+
+**Amended rows.** REQ-DO-02/REQ-DO-05 now rest on ADR-038.1 (no Storage policies for `authenticated`); REQ-AS-03 now includes `alert.reevaluated`, `document.sent_to_ai`, `job.requeued` and `platform_settings` diffs; REQ-AS-10 covers report downloads; REQ-PO-08 (job queue) is governed by ADR-031 coalescing rules; the "Employee `users.view`" row of the RBAC matrix is now ✗ (ADR-037).
 
 ## Glossary
 
