@@ -1,0 +1,153 @@
+# MOTION — System Architecture
+
+Status: Architecture phase v1.0 (2026-09-04). This is the entry document. Read it first, then the specialised documents it points to.
+Source of truth for scope: `SOW_v2_extracted.md`. Source of truth for decisions: `ARCHITECTURAL_DECISIONS.md`.
+
+## 0. Document map
+
+| Document | Answers |
+|---|---|
+| `PRODUCT_REQUIREMENTS.md` | What the SOW asks for, requirement by requirement, with MVP flags and open questions |
+| `ARCHITECTURAL_DECISIONS.md` | The 30 decisions the product owner must confirm (Part 1) and the 25 decisions engineering has taken (Part 2) |
+| `MVP_SCOPE.md` | What is inside the MVP line and what is explicitly outside |
+| `TENANCY_MODEL.md` | How organizations, members and platform staff relate; how isolation is guaranteed |
+| `RBAC_MATRIX.md` | The five roles and every permission |
+| `SECURITY_MODEL.md` | Threats, enforcement layers, secrets, storage, audit, review checklist |
+| `DATABASE_ARCHITECTURE.md` | Every table, column class, index, RLS policy |
+| `FINANCIAL_ENGINE.md` | Every metric, its formula, edge cases, the Health Score and the Alert Engine |
+| `IMPORT_ENGINE.md` | CSV/XLSX/PDF ingestion from upload to commit |
+| `EVIDENCE_MODEL.md` | How any statement traces back to a source document |
+| `AI_ARCHITECTURE.md` | Claude integration, tools, response contract, defences |
+| `UX_ARCHITECTURE.md` | The customer experience for a non-technical owner, per role |
+| `ROUTE_ARCHITECTURE.md` | The route tree and per-route authorization |
+| `SERVICE_ARCHITECTURE.md` | Module boundaries, service contracts, jobs, error model |
+| `TEST_STRATEGY.md` | What is tested, how, and the CI gates |
+| `IMPLEMENTATION_PLAN.md` | Build order, slices, verify-by lines, checkpoints |
+
+## 1. What MOTION is
+
+MOTION sits above a business's accounting, banking and commercial systems. It ingests their exports, validates them, computes financial truth deterministically, detects what changed, explains why through an AI Financial Analyst, recommends actions, and lets management assign and track them, with every material number traceable to a source document.
+
+The pipeline is fixed and every module maps onto one stage:
+
+```
+DATA ──▶ VALIDATION ──▶ CALCULATION ──▶ INTELLIGENCE ──▶ AI ANALYSIS ──▶ RECOMMENDATION ──▶ ACTION ──▶ OUTCOME
+ │           │              │               │                │                 │              │           │
+documents  imports    financial-engine   health, alerts       ai            ai (contract)   actions    actions
+banking    banking    (snapshots)        evidence          (tools)        + alerts          (assign)   (outcome)
+```
+
+Two invariants hold everywhere:
+
+1. **Financial truth is deterministic.** Only `financial-engine` produces numbers; it writes them as immutable `metric_snapshots`. The UI, the alerts, the health score, the reports and the AI all read the same rows. Claude never calculates (ADR-008, ADR-010).
+2. **Tenant isolation is structural.** Every tenant row carries `organization_id`; RLS on every tenant table; one access resolver in SQL and TypeScript; permissions are strings checked at six layers (ADR-002, ADR-003, `RBAC_MATRIX.md §4`).
+
+## 2. Actors
+
+| Actor | Role key | Lives in | Sees |
+|---|---|---|---|
+| Owner of a customer business | `tenant_owner` | `organization_memberships` | Their organization(s), all features, governance |
+| Administrator inside a customer business | `tenant_admin` | `organization_memberships` | Same data as owner; cannot bill, delete, or touch owners |
+| Client (customer-side user) | `tenant_client` | `organization_memberships` | Read + AI + own actions; no imports, documents, users |
+| My Employee (platform adviser) | `platform_employee` | `platform_users` + `organization_assignments` | Only assigned organizations, operating not governing; `/portfolio` |
+| Super Admin (platform operator) | `platform_super_admin` | `platform_users` | `/platform`; tenant data with audited access (CD-13) |
+
+Owner and Super Admin are different families and are never merged. Employees have no access to anything they are not explicitly assigned to (`TENANCY_MODEL.md §5`).
+
+## 3. Technology stack (pinned)
+
+| Layer | Choice | Notes |
+|---|---|---|
+| Runtime | Node 24.14, npm 11.13 | Toolchain baseline recorded 2026-09-04 |
+| Framework | Next.js 16.3.x, App Router, React Server Components, Server Actions | Vercel hosting assumed (CD-22) |
+| Language | TypeScript strict, `noUncheckedIndexedAccess` | |
+| UI | Tailwind CSS v4, shadcn/ui, Recharts | Design tokens decided in the DESIGN phase before build |
+| Validation | Zod at every boundary | |
+| Money | `decimal.js`; Postgres `NUMERIC(18,2)` | ADR-006 |
+| Database | Supabase PostgreSQL 16 with RLS, pgTAP | ADR-013 |
+| Auth | Supabase Auth (email/password, magic link; MFA post-MVP) | |
+| Storage | Supabase Storage private bucket `source-documents` | `TENANCY_MODEL.md §8` |
+| Jobs | Postgres `jobs` table + Vercel Cron + Edge Function for long tasks | ADR-020 |
+| AI | Anthropic Claude via `src/modules/ai/provider` only | ADR-023; model ids configurable |
+| Parsing | `papaparse` (CSV), `exceljs`/`xlsx` streaming (XLSX), `pdfjs-dist` text layer (PDF) | `IMPORT_ENGINE.md §5` |
+| Testing | Vitest, pgTAP, Playwright, AI eval harness | ADR-021 |
+| Observability | Structured logs with request/org/user ids; Sentry-class error tracking | `SERVICE_ARCHITECTURE.md §9` |
+
+## 4. Logical architecture
+
+```
+┌──────────────────────────────── Browser ────────────────────────────────┐
+│  Next.js client components (shadcn/ui, Recharts)  — no Supabase writes  │
+└───────────────┬───────────────────────────────────────────┬──────────────┘
+                │ server actions / route handlers            │ /api/ai/chat (stream)
+┌───────────────▼───────────────────────────────────────────▼──────────────┐
+│ src/app  (routes, layouts, middleware)  builds AccessContext per request │
+├──────────────────────────────────────────────────────────────────────────┤
+│ src/modules  auth · tenancy · documents · imports · banking ·            │
+│              financial-engine · health · alerts · evidence · ai ·        │
+│              actions · reporting · audit                                 │
+│   each: domain/ (pure) → schemas/ → data/ (only Supabase caller) →       │
+│         services/ (assertCan, orchestrate, audit) → index.ts             │
+├──────────────────────────────────────────────────────────────────────────┤
+│ src/core  permissions · money · periods · db · errors · logging          │
+└───────┬──────────────────────────────┬───────────────────────┬───────────┘
+        │ user-session client (RLS)    │ service-role client   │ Anthropic API
+┌───────▼──────────────────────────────▼──────────┐   (jobs only,        (server only,
+│ Supabase: Postgres (RLS, app.* fns, jobs)       │    withOrgScope)      typed tools)
+│           Auth · Storage (private bucket)        │
+└──────────────────────────────────────────────────┘
+```
+
+Dependencies point downward only. Deep imports across modules are ESLint errors (ADR-022). Business logic never lives in React components (`SERVICE_ARCHITECTURE.md §8`).
+
+## 5. Key data flows
+
+**Import → truth.** Upload → `source_documents` → `import_batches`/`import_rows` (parse, map, validate, dedupe) → human review → transactional commit into `ledger_entries` / `period_balances` / `bank_transactions` / `invoices` → `calculation_runs` → `metric_snapshots` + `health_scores` → `alerts.evaluate` → `alerts` with `evidence_bundles`. Nothing is discarded; rejected rows stay in `import_rows`.
+
+**Question → answer → action.** User asks → `ai.service` resolves period and context → Claude calls typed tools with the user's `AccessContext` → structured answer validated against the contract → grounding check against tool outputs → evidence bundle built from tool outputs → streamed to the user → "Create action" copies the recommendation into `actions` with the bundle.
+
+**Evidence chain.** Any number on any screen → `metric_snapshots` row (components, basis, formula, engine version) → `evidence_query` resolved to records → record's `source_document_id` + `source_ref` → page/row in the viewer. Clients stop at records; other roles reach the document (CD-17).
+
+## 6. Cross-cutting rules
+
+| Rule | Enforced by |
+|---|---|
+| No `NEXT_PUBLIC_` secret, no Anthropic/service-role key in the browser | Env schema check at boot; CI secret scan |
+| No Supabase client in React components; no money arithmetic in components | ESLint rules `no-restricted-imports`, `no-money-math-in-ui` |
+| Every service-role query is org-scoped | Lint rule `no-unscoped-service-query` + `withOrgScope` |
+| Every tenant table has RLS + composite FKs | pgTAP suite enumerates tables |
+| Every metric value has basis, assurance and data quality | DB NOT NULL + engine tests |
+| Every alert and AI finding has evidence | DB constraint + eval harness |
+| Every governance change and document access is audited | Triggers + service events |
+| Post-MVP modules are dark behind `organizations.features` | ADR-025 |
+
+## 7. Post-MVP attachment points
+
+Forecasting/scenarios read `metric_snapshots` and write their own `forecast_*` tables; CRM extends `counterparties`; the adviser command centre is a projection over `organization_assignments`; funding readiness is another rules engine over snapshots; the report suite renders from snapshots, alerts and actions. None require changes to the tenancy or evidence models (`TENANCY_MODEL.md §9`, `MVP_SCOPE.md §4`).
+
+## 8. Architectural red flags — the 20 biggest ways this project fails
+
+Likelihood and impact on a High / Medium / Low scale. Prevention names the control that already exists in these documents.
+
+| # | Risk | Likelihood | Impact | Prevention |
+|---|---|---|---|---|
+| 1 | **Double-counted or wrong headline numbers** because overlapping sources (TB, GL, invoices, bank) are summed | High | High | Precedence rule with recorded basis (CD-03, ADR-005); golden datasets that include overlapping sources; basis shown on every card |
+| 2 | **Cross-tenant data leak** through a missed RLS policy, an unscoped service-role query, or an id accepted from the client | Medium | Critical | RLS on every tenant table with `FORCE`, composite FKs, `withOrgScope` + lint, pgTAP enumeration test, org from slug only, 404 on unknown org |
+| 3 | **Insider access by platform staff** unnoticed | Medium | High | Explicit assignments only, owner-visible and revocable; super-admin reads audited (CD-13); time-boxed support grants post-MVP |
+| 4 | **Claude states a number that no calculation produced** | High | High | Grounding check with regenerate-then-degrade (ADR-010, `AI_ARCHITECTURE.md §7`); numbers only in fact/calculation/estimate statements with tool provenance; eval harness gate |
+| 5 | **Prompt injection via transaction descriptions or PDFs** steers the analyst | Medium | High | Untrusted-data delimiters, tool outputs as data not instructions, read-only tools, no tool that writes, injection corpus in CI |
+| 6 | **PDF bank statements fail to parse** and the SOW promise is broken, or LLM-extracted rows reach the ledger unreviewed | High | High | CD-11: deterministic first, Claude fallback stamped `inferred` + mandatory review, balance reconciliation gate; spike on 3 real layouts before Phase 3 |
+| 7 | **Metric drift**: same metric computed differently in two places (UI, report, AI) | Medium | High | Snapshots are the only source (ADR-008); lint bans arithmetic in components; engine_version stored |
+| 8 | **Misclassified accounts** silently corrupt margins | High | Medium | Mapping confirmation step, `uncategorised` → `incomplete` never excluded (CD-04); remap triggers recalculation and audit |
+| 9 | **Silent data loss during import** (skipped rows, dropped duplicates) | Medium | High | Every row persisted in `import_rows` with status; row-count equality test; review must resolve errors before commit |
+| 10 | **Opening balances unknown** so cash figures are off by a constant | High | Medium | CD-06 ordered sources; "unknown" state instead of zero; onboarding asks for opening balance |
+| 11 | **Health Score nobody can defend** | Medium | High | Deterministic rules with visible thresholds, breakdown stored, product sign-off gate (CD-19), band language "indicative" |
+| 12 | **Alert fatigue** makes users ignore the Insights page | High | Medium | Suppression rules, minimum amounts, dedupe, auto-resolve, three-alert cap on Home, severity discipline |
+| 13 | **Non-technical owner is overwhelmed** by density or jargon | High | High | Seven-item nav, progressive disclosure, plain-language rules, one CTA on empty states, role-specific landing (`UX_ARCHITECTURE.md`) |
+| 14 | **Post-MVP scope creep** (CRM, forecasting, adviser dashboard) delays the core journey | High | High | `MVP_SCOPE.md` with hard-dependency table; feature flags; change control (SOW §28) |
+| 15 | **Request timeouts** on large imports or 36-month recalculations | Medium | Medium | Job queue (ADR-020), 5,000-row synchronous cap, advisory lock per org, incremental period range |
+| 16 | **AI cost blow-out** from unbounded usage | Medium | Medium | Per-org quotas and per-user rate limits (CD-24), 8-tool-call cap, prompt caching, token accounting per org |
+| 17 | **Secrets or documents exposed** via public bucket, long signed URLs, or `NEXT_PUBLIC_` misuse | Low | Critical | Private bucket, 60-second URLs, download audit, env schema, CI secret scan |
+| 18 | **Ambiguous dates and formats** (D/M/Y vs M/D/Y, parentheses negatives) shift transactions across periods | High | Medium | Explicit format choice when ambiguous, row flags, preview before commit (`IMPORT_ENGINE.md §6`) |
+| 19 | **RLS and application authorization disagree** so tests pass on one and the other leaks | Medium | High | One matrix generated into `role_permissions`, pgTAP parity test, shared fixtures for `resolveAccess` vs `app.org_role()` |
+| 20 | **Undecided product questions** (adviser identity, accounting basis, weights, jurisdiction) get decided implicitly in code | High | High | Part 1 of `ARCHITECTURAL_DECISIONS.md` with blocking flags; checkpoints in `IMPLEMENTATION_PLAN.md` before the phase that needs each answer |
