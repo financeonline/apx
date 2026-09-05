@@ -1,0 +1,114 @@
+import { createHmac, randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
+import { config as loadEnv } from 'dotenv';
+import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+
+loadEnv({ path: '.env.local', quiet: true });
+
+export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
+export const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
+export const JWT_SECRET = process.env.SUPABASE_JWT_SECRET!;
+const DB_CONTAINER = process.env.MOTION_DB_CONTAINER ?? 'supabase_db_MOTION';
+
+if (!SUPABASE_URL || !ANON_KEY || !JWT_SECRET) {
+  throw new Error('Integration tests need NEXT_PUBLIC_SUPABASE_URL, the anon key and SUPABASE_JWT_SECRET in .env.local');
+}
+
+const b64url = (input: Buffer | string) =>
+  Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
+
+export interface JwtOptions {
+  email?: string;
+  aal?: 'aal1' | 'aal2';
+  expiresInSeconds?: number;
+  amrTimestamp?: number;
+}
+
+/**
+ * Mint a Supabase-shaped access token. Tests exercise the real RLS path with a real JWT rather
+ * than the service key, which is the only way the policies are actually proven (TEST_STRATEGY.md §1).
+ */
+export function mintJwt(userId: string, options: JwtOptions = {}): string {
+  const now = Math.floor(Date.now() / 1000);
+  const header = { alg: 'HS256', typ: 'JWT' };
+  const payload = {
+    sub: userId,
+    role: 'authenticated',
+    aud: 'authenticated',
+    email: options.email ?? `${userId}@test.motion`,
+    aal: options.aal ?? 'aal1',
+    amr: [{ method: 'password', timestamp: options.amrTimestamp ?? now }],
+    iat: now,
+    exp: now + (options.expiresInSeconds ?? 3600),
+  };
+  const signingInput = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(payload))}`;
+  const signature = b64url(createHmac('sha256', JWT_SECRET).update(signingInput).digest());
+  return `${signingInput}.${signature}`;
+}
+
+/** A client that carries a user's JWT: SELECT under RLS and EXECUTE on api.* — nothing else. */
+export function userClient(jwt: string): SupabaseClient {
+  return createClient(SUPABASE_URL, ANON_KEY, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    global: { headers: { Authorization: `Bearer ${jwt}` } },
+  });
+}
+
+export function clientFor(userId: string, options: JwtOptions = {}): SupabaseClient {
+  return userClient(mintJwt(userId, options));
+}
+
+/** Fixture setup only. Never used to assert what a user can see. */
+export function adminSql(sql: string): string {
+  return execFileSync(
+    'docker',
+    ['exec', '-i', DB_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-c', sql],
+    { encoding: 'utf8' },
+  ).trim();
+}
+
+export function createAuthUser(email: string): string {
+  const id = randomUUID();
+  adminSql(`
+    insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
+                            email_confirmed_at, created_at, updated_at)
+    values ('${id}','00000000-0000-0000-0000-000000000000','authenticated','authenticated',
+            '${email}','x', now(), now(), now())
+  `);
+  return id;
+}
+
+/** Remove everything this suite created, so each file starts from a known state. */
+export function resetFixtures(): void {
+  adminSql(`
+    delete from public.organizations where slug like 'itest-%' or name like 'ITest%';
+    delete from public.platform_users where user_id in
+      (select id from auth.users where email like '%@itest.motion');
+    delete from auth.users where email like '%@itest.motion';
+    delete from public.api_rate_limits;
+  `);
+}
+
+/** Postgres SQLSTATE carried by a PostgREST error, when there is one. */
+export function sqlstate(error: unknown): string | undefined {
+  if (error && typeof error === 'object' && 'code' in error) {
+    return String((error as { code: unknown }).code);
+  }
+  return undefined;
+}
+
+export const PHASE1_TABLES = [
+  'organizations',
+  'profiles',
+  'platform_users',
+  'organization_memberships',
+  'organization_assignments',
+  'invitations',
+  'ownership_transfers',
+  'audit_events',
+  'jobs',
+  'api_rate_limits',
+  'role_permissions',
+  'platform_settings',
+  'platform_org_settings',
+] as const;

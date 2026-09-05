@@ -1,0 +1,134 @@
+name: CI
+
+# Gate order is fixed by TEST_STRATEGY.md §1:
+#   typecheck → lint → unit → pgtap → integration → build → e2e:smoke
+# Every gate is required on `main`. e2e:smoke arrives with Phase 7 (Playwright is not a Phase 1
+# dependency); the job is present and skipped so the pipeline shape is already correct.
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  NODE_VERSION: '24.14.0'
+
+jobs:
+  static:
+    name: typecheck + lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: typecheck
+        run: npm run typecheck
+      - name: lint
+        run: npm run lint
+      - name: permission matrix is in sync with the generated migration
+        run: |
+          npm run permissions:sync
+          git diff --exit-code supabase/migrations/20260905000011_role_permissions.sql
+
+  unit:
+    name: unit tests
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - run: npm run test:unit
+
+  database:
+    name: pgtap + integration
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - uses: supabase/setup-cli@v1
+        with:
+          version: latest
+      - name: start supabase
+        run: supabase start
+      - name: pgTAP — RLS, policies, triggers, api.* per role
+        run: supabase test db
+      - name: write local env for integration tests
+        run: |
+          {
+            echo "NEXT_PUBLIC_SUPABASE_URL=$(supabase status -o json | jq -r .API_URL)"
+            echo "NEXT_PUBLIC_SUPABASE_ANON_KEY=$(supabase status -o json | jq -r .ANON_KEY)"
+            echo "SUPABASE_SERVICE_ROLE_KEY=$(supabase status -o json | jq -r .SERVICE_ROLE_KEY)"
+            echo "SUPABASE_DB_URL=$(supabase status -o json | jq -r .DB_URL)"
+            echo "SUPABASE_JWT_SECRET=$(supabase status -o json | jq -r .JWT_SECRET)"
+          } > .env.local
+      - name: integration tests (real RLS, JWT per role)
+        run: npm run test:integration
+      - name: stop supabase
+        if: always()
+        run: supabase stop
+
+  build:
+    name: production build
+    runs-on: ubuntu-latest
+    needs: [unit, database]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: build
+        run: npm run build
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54421
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: build-time-placeholder
+
+  security:
+    name: security checks
+    runs-on: ubuntu-latest
+    needs: static
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+      - run: npm ci
+      - name: no secret may be exposed to the browser
+        run: |
+          if grep -rn "NEXT_PUBLIC_.*SERVICE_ROLE\|NEXT_PUBLIC_.*ANTHROPIC\|NEXT_PUBLIC_.*JWT_SECRET" --include='*.ts' --include='*.tsx' --include='*.mjs' src/ 2>/dev/null; then
+            echo "A secret is exposed with a NEXT_PUBLIC_ prefix (SECURITY_MODEL.md §5)."; exit 1
+          fi
+      - name: the service-role key is read in at most three files
+        run: |
+          COUNT=$(grep -rl "SUPABASE_SERVICE_ROLE_KEY" --include='*.ts' src/ 2>/dev/null | wc -l | tr -d ' ')
+          echo "files reading the service-role key: $COUNT"
+          test "$COUNT" -le 3
+      - name: dependency audit
+        run: npm audit --audit-level=high
+
+  e2e:
+    name: e2e smoke (Phase 7)
+    runs-on: ubuntu-latest
+    needs: build
+    if: false # Playwright journeys land with the dashboard in Phase 7 (TEST_STRATEGY.md §12).
+    steps:
+      - run: echo "not yet in scope"

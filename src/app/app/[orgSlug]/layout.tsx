@@ -1,0 +1,100 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { getAccessContext } from '@/modules/tenancy';
+import { can, isSuperAdmin } from '@/core/permissions';
+import { isMotionError } from '@/core/errors';
+import { recordAccessEvent } from '@/core/db/server-rpc';
+import { Banner, Badge } from '@/components/ui/surfaces';
+import { ROLE_LABELS } from '@/components/labels';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * The tenant shell (ROUTE_ARCHITECTURE.md §9).
+ *
+ * It is the only place an AccessContext is created for this family. A caller with no access gets
+ * the uniform 404 — never a 403 — so the existence of an organisation is never confirmed to a
+ * non-member (SECURITY_MODEL.md §14).
+ */
+export default async function OrgLayout({
+  children,
+  params,
+}: {
+  children: React.ReactNode;
+  params: Promise<{ orgSlug: string }>;
+}) {
+  const { orgSlug } = await params;
+
+  let ctx;
+  try {
+    ctx = await getAccessContext(orgSlug);
+  } catch (error) {
+    if (isMotionError(error) && error.code === 'NOT_FOUND') notFound();
+    throw error;
+  }
+
+  // CD-13: every super-admin view of tenant data is recorded, and the organisation's owner can see
+  // it in their own audit log.
+  if (isSuperAdmin(ctx) && ctx.orgId) {
+    await recordAccessEvent(
+      { userId: ctx.userId, requestId: ctx.requestId },
+      {
+        organizationId: ctx.orgId,
+        action: 'org.data_viewed',
+        targetTable: 'organizations',
+        targetId: ctx.orgId,
+        metadata: { route: `/app/${orgSlug}` },
+      },
+    );
+  }
+
+  const suspended = ctx.organizationStatus === 'suspended';
+  const pendingDeletion = ctx.organizationStatus === 'pending_deletion';
+  const showSettings = can(ctx, 'settings.manage');
+
+  return (
+    <div className="min-h-dvh">
+      <header className="border-b border-line bg-surface">
+        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3">
+          <Link href={`/app/${orgSlug}/home`} className="text-sm font-semibold tracking-widest uppercase">
+            MOTION
+          </Link>
+          <nav className="flex items-center gap-4 text-sm">
+            <Link href={`/app/${orgSlug}/home`} className="text-ink-muted hover:text-ink">Home</Link>
+            {showSettings && (
+              <Link href={`/app/${orgSlug}/settings`} className="text-ink-muted hover:text-ink">
+                Settings
+              </Link>
+            )}
+          </nav>
+          <div className="ml-auto flex items-center gap-3 text-sm">
+            <Badge tone="neutral">{ROLE_LABELS[ctx.effectiveRole]}</Badge>
+            <Link href="/select-organization" className="text-ink-muted hover:text-ink">Switch</Link>
+            <Link href="/account" className="text-ink-muted hover:text-ink">Account</Link>
+          </div>
+        </div>
+      </header>
+
+      <main className="mx-auto w-full max-w-5xl px-6 py-8">
+        <div className="mb-6 flex flex-col gap-3 empty:mb-0">
+          {isSuperAdmin(ctx) && (
+            <Banner tone="warn" title="You are viewing this organisation as MOTION staff">
+              This visit is recorded in the organisation&rsquo;s own audit log.
+            </Banner>
+          )}
+          {suspended && (
+            <Banner tone="warn" title="This organisation is suspended">
+              You can see this page, but nothing can be changed until it is reactivated.
+            </Banner>
+          )}
+          {pendingDeletion && (
+            <Banner tone="danger" title="This organisation is scheduled for deletion">
+              An owner can still cancel that from Settings.
+            </Banner>
+          )}
+        </div>
+        {children}
+      </main>
+    </div>
+  );
+}

@@ -1,0 +1,50 @@
+{
+  "name": "motion",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint .",
+    "test": "vitest run --project unit",
+    "test:unit": "vitest run --project unit",
+    "test:integration": "vitest run --project integration",
+    "db:start": "supabase start",
+    "db:stop": "supabase stop",
+    "db:reset": "supabase db reset",
+    "db:test": "supabase test db",
+    "permissions:sync": "tsx scripts/sync-permission-matrix.ts",
+    "permissions:print": "tsx scripts/sync-permission-matrix.ts --print"
+  },
+  "dependencies": {
+    "@supabase/ssr": "^0.12.6",
+    "@supabase/supabase-js": "^2.115.0",
+    "next": "^16.3.4",
+    "react": "^19.2.8",
+    "react-dom": "^19.2.8",
+    "server-only": "^0.0.1",
+    "zod": "^4.5.4"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.5",
+    "@tailwindcss/postcss": "^4.3.3",
+    "@types/node": "^24.13.3",
+    "@types/react": "^19.2.18",
+    "@types/react-dom": "^19.2.7",
+    "dotenv": "^17.2.3",
+    "eslint": "^9.39.5",
+    "eslint-config-next": "^16.3.4",
+    "supabase": "^2.116.0",
+    "tailwindcss": "^4.3.3",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.46.0",
+    "vitest": "^3.2.7"
+  }
+}

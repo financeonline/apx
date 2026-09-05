@@ -1,0 +1,62 @@
+import { getPlatformContext } from '@/modules/tenancy';
+import { PageHeader, Card, CardHeader, CardBody, EmptyState } from '@/components/ui/surfaces';
+import { TableWrap, THead, TBody } from '@/components/ui/table';
+import { GrantRoleForm, PlatformUserRow } from './platform-user-forms';
+
+export const dynamic = 'force-dynamic';
+
+interface PlatformUserRecord {
+  user_id: string;
+  platform_role: string;
+  status: string;
+}
+
+export default async function PlatformUsersPage() {
+  const ctx = await getPlatformContext();
+  const { data } = await ctx.db
+    .from('platform_users')
+    .select('user_id, platform_role, status')
+    .order('platform_role');
+
+  const users = (data ?? []) as PlatformUserRecord[];
+
+  return (
+    <>
+      <PageHeader
+        title="Platform accounts"
+        description="Super admins and MOTION advisers. A platform account can never be a member of a customer organisation."
+      />
+      <div className="mt-8 flex flex-col gap-6">
+        <Card>
+          <CardHeader title="Accounts" />
+          <CardBody>
+            {users.length === 0 ? (
+              <EmptyState title="No platform accounts yet">Grant the first one below.</EmptyState>
+            ) : (
+              <TableWrap>
+                <THead columns={['User', 'Role', 'Status', '']} />
+                <TBody>
+                  {users.map((user) => (
+                    <PlatformUserRow
+                      key={user.user_id}
+                      userId={user.user_id}
+                      platformRole={user.platform_role}
+                      status={user.status}
+                    />
+                  ))}
+                </TBody>
+              </TableWrap>
+            )}
+          </CardBody>
+        </Card>
+        <Card>
+          <CardHeader
+            title="Grant a platform role"
+            description="Requires two-step sign-in and a recent re-authentication."
+          />
+          <CardBody><GrantRoleForm /></CardBody>
+        </Card>
+      </div>
+    </>
+  );
+}
