@@ -321,3 +321,169 @@ The architecture is not declared ready because three conditions are unmet, and d
 What can start now without risk of rework: Phase 0 (walking skeleton, CI, DESIGN.md), Phase 1 (identity, MFA enrolment), Phase 2 (permission catalogue, matrix, parity script) and the golden-dataset construction (CD-30). Everything from Phase 3 onward waits on condition 1; everything from Phase 5 onward waits on conditions 2 and 3.
 
 When conditions 1–3 are met and the round-2 findings are folded into a Revision 1.2, the status can be re-assessed. The expectation is READY at that point; it is not READY today.
+
+---
+
+## 6. Round 2 (2026-09-05) — attack on the round-1 fixes
+
+Scope: only the mechanisms introduced in Revision 1.1 (ADR-026 to ADR-039). Three fresh reviewers, same method as §1. Round 2 confirmed the main lines of every round-1 fix (the "Confirmed adequate" lists are reproduced in §6.4) and found the gaps below, all in how the new mechanisms were bounded. Resolutions: ADR-043 to ADR-046 (and ADR-047 for the engine set). Documents carry "Revision 1.2".
+
+### 6.1 Write path, tenancy, security (R2-A)
+
+#### R2-A-01 · Server-produced facts were writable by the browser with the user's JWT
+Severity: CRITICAL · Problem: ADR-026 granted every `api.*` function to `authenticated`, including functions whose arguments are produced by server code after validation (`ai_persist_turn`, `register_document`, `enqueue_job`). Why: a client could persist a forged "grounded" AI answer with a fabricated tool-call log, register an unscanned file as `ready`, or enqueue a full-range recalculation with a future `as_of`. Attack: `POST /rest/v1/rpc/ai_persist_turn` with `grounding_status = 'passed'` and a pinned snapshot id; the owner reviews it as a genuine answer and an admin converts it to an action. Fix: ADR-043 — schema `api_server` executable only by `service_role`, called from one server file with an explicit, re-validated actor; `api` keeps user-intent functions only. Applied: DATABASE_ARCHITECTURE §14, SECURITY §1–2/§6, SERVICE §2–5, TEST §3–4.
+
+#### R2-A-02 · Read-side audit events had no write path
+Severity: HIGH · Problem: with `app.audit()` internal and no table insert, downloads, exports, super-admin views and quarantine events could not be recorded, so the signer's audit-id precondition was unsatisfiable. Fix: ADR-043.2 `api_server.record_access_event` with an action allow-list and per-action permission re-check; ADR-043.5 signer verifies the id. Applied: DATABASE §14.2, SECURITY §12, SERVICE §4, TENANCY §8.
+
+#### R2-A-03 · Employees were MFA-gated only in middleware
+Severity: HIGH · Problem: only `app.is_super_admin()` required `aal2`; an employee password alone yielded a JWT that read and wrote every assigned client's data through PostgREST. Fix: ADR-044.1 `app.is_platform_user()` (aal2) in both employee branches. Applied: TENANCY §4, DATABASE §9, SECURITY §3/§6, TEST §2.
+
+#### R2-A-04 · Raw bank text readable by clients despite masking
+Severity: HIGH · Problem: masking lived in a view function; `description_raw` and `counterparty_name_raw` were selectable under row-level RLS by the client role. Fix: ADR-044.2 column privileges revoked, definer view gated by `imports.review`. Applied: DATABASE §4/§11, TEST §3.
+
+#### R2-A-05 · Job enqueue had no organization input, an unmapped type, caller-controlled payload and an impossible service-role permission check
+Severity: HIGH · Fix: ADR-043.3 (`api.enqueue_job(org, type, payload)` limited to two user types, allow-listed payload keys, derived `asOf`/`trigger`/`requested_by`; workers call `api_server.*` with `actor = jobs.requested_by`; `alerts.evaluate` service-only). Applied: DATABASE §14, SERVICE §5, SECURITY §6.2.
+
+#### R2-A-06 · Definer hygiene unspecified: ownership vs FORCE RLS, missing EXECUTE grant, header-derived audit fields, error leakage, lock coverage, wrong step-up claim
+Severity: MEDIUM · Fix: ADR-044.3. Applied: DATABASE §11/§14, SECURITY §6.1/§18.
+
+#### R2-A-07 · Three suspension semantics; suspension widened client reads
+Severity: MEDIUM · Problem: the read policy ignored `has_permission`; `source_documents` used `<> 'client'`, so a suspended client gained document metadata; `EffectiveRole` lacked the value. Fix: ADR-044.4 (one semantic, allow-list checks, type updated). Applied: TENANCY §4, DATABASE §11, RBAC §1/§6.
+
+#### R2-A-08 · No rate limits on the RPC surface
+Severity: MEDIUM · Fix: ADR-044.5 `app.throttle` with per-function buckets. Applied: DATABASE §14, SECURITY §10, TEST §13.
+
+#### R2-A-09 · Caller-supplied storage path and delete-before-check
+Severity: MEDIUM · Fix: ADR-043.4. Applied: DATABASE §5/§14, SECURITY §7, SERVICE §4.5.
+
+#### R2-A-10 · Organization status was a free column for platform staff; purge could be forced or stranded
+Severity: MEDIUM · Fix: ADR-044.6. Applied: DATABASE §2/§9/§14, SECURITY §16.
+
+#### R2-A-11 · Ownership transfer referenced a table that did not exist; acceptance invariants unspecified; SQL claimed to revoke sessions
+Severity: MEDIUM · Fix: ADR-044.7. Applied: DATABASE §2/§14, RBAC §3, SERVICE §4.3.
+
+#### R2-A-12 · Polymorphic guards incomplete; job foreign keys not composite
+Severity: LOW · Fix: ADR-044.8. Applied: DATABASE §12, TEST §3.
+
+### 6.2 AI grounding and evidence (R2-C)
+
+#### R2-C-01 · A number was bound to its path but not to the metric noun or the month named in the sentence
+Severity: CRITICAL · Attack: "Net profit was £120,000 in April 2026" with a correct revenue `NumberRef` for March passed. Fix: ADR-045.1–2 (`NumberRef.metric_key` with label proximity; prose period tokens must equal the statement period). Applied: AI §5/§7/§12, TEST §10.
+
+#### R2-C-02 · Evidence refs were unrelated to the numbers
+Severity: HIGH · Fix: ADR-045.5 (refs derived from NumberRef rows; kind recomputed from derived items). Applied: AI §6–7, EVIDENCE §5.
+
+#### R2-C-03 · Direction words checked against level signs
+Severity: HIGH · Attack: "Revenue rose to £120,000" passed while revenue fell. Fix: ADR-045.4. Applied: AI §7.
+
+#### R2-C-04 · Degraded text leaked through `unsupported`
+Severity: HIGH · Fix: ADR-045.8 (server-generated topics; text only in `grounding_report`). Applied: AI §5/§7, UX §7 wording unchanged (removal semantics).
+
+#### R2-C-05 · The claim extractor was unspecified
+Severity: HIGH · Fix: ADR-045.6 (§7.9 claim grammar; names with amounts rejected at naming). Applied: AI §7.9, IMPORT §6.6, TEST §10.
+
+#### R2-C-06 · Refusals, clarifications and no-data answers had no admissible form
+Severity: HIGH · Fix: ADR-045.7 (`mode` decided by the validator). Applied: AI §5/§7/§8, TEST §10.
+
+#### R2-C-07 · Entity rule undefined for multi-entity sentences and entity-less rows
+Severity: MEDIUM · Fix: ADR-045.3 (`NumberRef.entity_id`, `subject` on every entity row, name-matching rule). Applied: AI §3/§7.
+
+#### R2-C-08 · Model-authored labels, notes and confidence bypassed grounding and replay wrapping
+Severity: MEDIUM · Fix: ADR-045.9. Applied: AI §5/§9/§10, EVIDENCE §2, TEST §10.
+
+#### R2-C-09 · Immutability asserted only against `authenticated`
+Severity: MEDIUM · Fix: ADR-046.1 `append_only_guard` on eight tables, tested as owner and service role; duplicate alert pointer dropped. Applied: DATABASE §6/§12, EVIDENCE §8, TEST §9.
+
+#### R2-C-10 · As-of gaps: supersede and merge outside the change-set; two instants; unnamed `restored` writer; hash canonicalisation
+Severity: MEDIUM · Fix: ADR-046.2. Applied: FINANCIAL_ENGINE §2.4, DATABASE §6, EVIDENCE §3.
+
+#### R2-C-11 · PDF gate reopened through the suggestion UI; greedy balance regex; unmetered retries; auto-enqueue contradiction
+Severity: MEDIUM · Fix: ADR-046.3. Applied: IMPORT §5.3–5.4, TEST §5.
+
+#### R2-C-12 · Ownership rule bypass via tool 13 and cloned bundles
+Severity: LOW · Fix: ADR-045.10. Applied: AI §3, EVIDENCE §8, TEST §10.
+
+### 6.3 Engine, imports, runs (R2-B)
+
+#### R2-B-01 · Rollback re-linking left restored rows invisible to the engine
+Severity: CRITICAL · Problem: rollback kept `superseded_by` set "as history" while every engine loader, the SQL aggregation and the partial unique index keyed on the column. Attack: roll back a correcting trial balance → February shows £0 revenue with the original batch still "winning" coverage. Fix: ADR-047.1 (column = current state, events = history; rollback resets the column). Applied: IMPORT §12, FINANCIAL_ENGINE §1.3, DATABASE §14, TEST §5.
+
+#### R2-B-02 · State-keyed alerts could never re-fire after resolution; dismissed high/critical alerts never re-opened
+Severity: CRITICAL · Attack: runway 2.4 months in March (alert), 5.0 in June (resolved), 1.2 in November → no open cash alert. Fix: ADR-047.2 (`condition_returned` re-open, `reopened_at`, dismissed re-open on severity increase or after 90 days). Applied: FINANCIAL_ENGINE §8, DATABASE §6, TEST §8.
+
+#### R2-B-03 · Reporting-sign P&L and balance-sheet files stored as natural sign
+Severity: HIGH · Attack: Sales 10,000 imported from a P&L report → revenue −10,000. Fix: ADR-047.3 (`balanceSign` transform with confirmation `IMP-TB-013`; period range for report batches). Applied: IMPORT §6.1/§6.4/§8, FINANCIAL_ENGINE §3, TEST §5.
+
+#### R2-B-04 · Cumulative differencing under-specified across mixed kinds, absent accounts and fiscal-year changes; opening-journal detection weak
+Severity: HIGH · Fix: ADR-047.4. Applied: FINANCIAL_ENGINE §2.2/§3, IMPORT §6.1, DATABASE §14.
+
+#### R2-B-05 · Credit-note conversion negated the total only; receivables formula and tax netting contradicted it
+Severity: HIGH · Attack: a refunded credit note added £2,000 of revenue and £2,400 of receivables. Fix: ADR-047.5. Applied: IMPORT §6.1/§8, FINANCIAL_ENGINE §3/§3.4, DATABASE `platform_settings`.
+
+#### R2-B-06 · Coverage still hinged on the last posting date; `is_complete` unreachable for ledger-only organizations; no fallback when nothing is complete
+Severity: HIGH · Attack: a GL export ending on a Friday 28th never covers that month. Fix: ADR-047.6 (declared export ranges, cash exception, partial fallback). Applied: IMPORT §6.1/§11, FINANCIAL_ENGINE §2.2, TEST §6.
+
+#### R2-B-07 · Chunk continuations and fresh runs could interleave; chunk retries violated the unique key; dead chunks froze silently; as-of differed per chunk
+Severity: HIGH · Fix: ADR-047.7. Applied: FINANCIAL_ENGINE §2.4, SERVICE §5, DATABASE §6, EVIDENCE §3, TEST §6.
+
+#### R2-B-08 · Daily scheduled runs rewrote every period; fingerprint computed after the writes; three retention values
+Severity: HIGH · Fix: ADR-047.8. Applied: FINANCIAL_ENGINE §2.4/§3.6, DATABASE §6, SERVICE §5.
+
+#### R2-B-09 · Rollback refusal deadlocked on overlapping statement chains
+Severity: HIGH · Attack: correcting January under 15th-to-14th statements required twelve rollbacks. Fix: ADR-047.9 (promote dependants in the same transaction). Applied: IMPORT §12, DATABASE §14, TEST §5.
+
+#### R2-B-10 · "Row current at a historical `asOf`" froze corrections out of periods; open-items invoice lists defined revenue and DSO
+Severity: HIGH · Fix: ADR-047.10. Applied: FINANCIAL_ENGINE §3.4, IMPORT §8/§11, DATABASE `import_batches`.
+
+#### R2-B-11 · Alert cap filled by period order; health conditions entangled with user suppression; recurring detection timing unspecified
+Severity: HIGH · Fix: ADR-047.11. Applied: FINANCIAL_ENGINE §2.4/§7/§8, SERVICE §4.7.
+
+#### R2-B-12 · Two `transfer_kind` enums; auto-pairing without a description gate; bank-proxy scope and bank identity underspecified
+Severity: MEDIUM · Attack: a £1,250 customer receipt and a £1,250 supplier payment two days apart on different accounts were paired as a transfer, deleting both from the P&L. Fix: ADR-047.12. Applied: DATABASE §4/§6/§10, FINANCIAL_ENGINE §4.2/§4.4, IMPORT §2/§9.
+
+### 6.4 Round-2 "confirmed adequate"
+
+Each reviewer listed the round-1 fixes it verified to hold as written. In summary: no table write privilege for `authenticated` with pgTAP privilege assertions; governance invariants in SQL; invitation binding to the JWT email; trigger-only purge with re-verification; worker organization from the `jobs` row; Storage without user policies and a path-asserting signer; composite FKs on every plain tenant reference; `aal2` in `app.is_super_admin()`; internal derived audit; job-only intelligence tables; single amendment path for records; client-limited functions; tool 13 ids-only and descriptor never model-visible; forced final tool call and discarded text; typed allowed set; conversation binding and per-tool re-authorisation; platform-owned quotas; consent and audit for extraction; `pdf_text` promotion rule; stable-identity descriptors with category history; leaf/derived evidence; alert revisions with append-only semantics; `same_org_ref`; action creation gated on grounding; compaction guard; period-label restriction; condition-based health inputs; card and loan repayments as cash outflows; ledger balances never reported as movement-since-import; invoice update path; batch-scoped supersession; stable dedupe keys; commit-time dedupe re-check; `duplicate_reviewed`; `basis_differs` as NULL; monthly-only picker; queued-only coalescing; worker-lost recovery for unchunked runs; `metric_current` retiring vacated dimensions; append-only status events; proxy cap; state-vs-event keys; the PDF balance gate.
+
+### 6.5 Round-2 totals
+
+36 findings: 4 CRITICAL, 20 HIGH, 11 MEDIUM, 1 LOW. All resolved by ADR-043 to ADR-047 and applied as Revision 1.2. The four criticals were bounding errors in round-1 mechanisms, not design reversals: which principal may call server-fact functions; that a number must bind to its noun and month; that a supersession column must reflect current state; that a state-keyed alert must re-open.
+
+
+### 6.6 Verification of Revision 1.2
+
+| Check | Result |
+|---|---|
+| Every round-2 finding id (R2-A/B/C) appears in a Revision 1.2 block or in Part 6 | Pass (36 ids) |
+| ADR-043 to ADR-047 each cited by at least one revised document | Pass |
+| Every `api.*` / `api_server.*` function referenced anywhere has a catalogue entry in `DATABASE_ARCHITECTURE.md §14.1/§14.2` | Pass |
+| Withdrawn constructs absent from the revised set (`api.ai_persist_turn`, caller storage paths, `finished_at` as the as-of instant, `orgId:runId:cursor` keys, 12-month snapshot retention, two `transfer_kind` enums, `alerts.evidence_bundle_id`, the 3-day coverage heuristic, `<transaction_description>`, "row current at a historical asOf") | Pass (earlier ADRs carry "refined by" notes; the review's own text quotes them as history) |
+| Requirement register free of duplicate ids; 44 tables defined; SOW §1–30 cited; 22 red flags | Pass |
+| Total | 124,000 words across 19 documents |
+
+Not independently re-attacked: the round-2 resolutions themselves (ADR-043 to ADR-047). They are narrower than the round-1 fixes — bounding rules on mechanisms that round 2 confirmed in their main lines — and were checked mechanically and by targeted reading. They are carried as the residual risk in §7 and assigned to the phase design reviews rather than to a further pre-implementation round.
+
+---
+
+## 7. FINAL ARCHITECTURE STATUS (after round 2)
+
+**READY FOR IMPLEMENTATION.**
+
+The three conditions set at the end of round 1 are met:
+
+1. **Second adversarial pass — done.** Three fresh reviewers attacked the round-1 mechanisms (write path, tenancy and security; grounding and evidence; engine, imports and runs). They confirmed the mechanisms in their main lines (§6.4) and found 36 bounding gaps, four of them critical (§6.5). Every one is resolved by an explicit decision (ADR-043 to ADR-047) and applied across the documents as Revision 1.2, with the consistency checks in §6.6 passing.
+2. **Product decisions no longer block — done.** Every open decision is an adopted default with a named override switch and a recorded rework cost, all of them configuration or additive changes (ADR-040). Checkpoints in the plan read "confirm or override"; nothing waits on an answer.
+3. **Spikes no longer decide the design — done.** Calculation runs are chunked and chained so they fit the SOW's own runtime (ADR-041, tightened by ADR-047.7); each spike has a settings-only fallback (ADR-042). The spikes remain Phase 0 verifications with pass criteria in the plan.
+
+Against the five areas the status was conditioned on:
+
+- **Tenant isolation.** RLS on every read with organization status and MFA evaluated in the database; no table write privilege for users; user-intent writes through `api` functions and server-asserted facts through `api_server` functions executable only by the service role; composite and polymorphic organization guards on every reference; Storage reachable only through a path-asserting, audit-verified signer.
+- **Permissions.** One matrix mirrored into the database, checked at six layers plus the two API schemas, with role ceilings, last-owner and self-elevation rules, ownership transfer and suspension all enforced in SQL; database-side throttles on every user-callable function.
+- **Deterministic calculations.** Corrected balance semantics (cumulative differencing pinned to the preceding fiscal month, reporting-sign transform, credit-note negation, per-row tax treatment), declared export ranges for coverage, SQL-side aggregation feeding pure functions, chunked runs with a single idempotency key and idempotent chunk bodies, fingerprint before writes, narrow scheduled runs, append-only snapshots behind a pointer table, and dependant-promoting rollback.
+- **Evidence.** Stable-identity descriptors, status and category history, the chunk's aggregation instant as the as-of point, derived evidence by snapshot id, alert revisions, mechanised immutability, and the ownership rule applied to every resolution path.
+- **AI security.** Response contract v3 with explicit modes; grounding v3 binding every number to its path, metric, period, entity and direction with a specified claim grammar; evidence derived from the numbers; server-owned labels, notes and confidence; untrusted wrapping with escaping and caps on every imported string including replayed history; ids-only evidence tools; per-tool re-authorisation; the PDF gate closed on both the deterministic and the reviewer side; extraction budgeted.
+
+Residual risk, stated plainly: ADR-043 to ADR-047 have not been attacked by a third independent round. They are bounding rules on confirmed mechanisms, and the implementation plan already places a design review at the start of Phases 3, 6 and 11, where the `api_server` catalogue, the chunk chain and grounding v3 are built; those reviews are the right place for a third pass, and a finding there is a local change, not an architecture change. No application code exists yet and no spike has run; both are Phase 0 work.
+
+Implementation may begin at Phase 0 of `IMPLEMENTATION_PLAN.md`.

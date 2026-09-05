@@ -5,6 +5,8 @@ Consumed by: `IMPLEMENTATION_PLAN.md`, `TEST_STRATEGY.md §11–12`
 
 > **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-030, ADR-032, ADR-033, ADR-035, ADR-036, ADR-037, CD-32. Findings addressed: F-B-08, F-B-09, F-B-15, F-C-05, F-C-06, F-C-08, F-C-14, F-C-16, F-D-03, F-D-04, F-D-07, F-D-08, F-D-09, F-D-10, F-D-11, F-D-15, F-D-18. See `RED_TEAM_REVIEW.md`.
 
+> **Revision 1.2 (red-team round 2, 2026-09-05).** Applies ADR-045.8, ADR-047.7 (the "Updating your numbers…" banner shows chunk progress: "{done} of {total} months", driven by `calculation_runs.progress`). Findings addressed: R2-C-04. A degraded analyst answer never shows removed sentences; the \"Not covered\" list renders server-generated topics only (\"Not covered: marketing spend for March — figure could not be verified\"). See `RED_TEAM_REVIEW.md §6`.
+
 Audience for the product: the owner or manager of a small business who is not technical, does not read accounts for pleasure, and opens MOTION to find out whether things are fine and what to do if they are not. Every rule in this document exists to protect that person from being overwhelmed.
 
 This is a UX *architecture*: structure, states, behaviour and language. Visual design (direction, type, palette) is decided in the fable-5 DESIGN phase before build (§12).

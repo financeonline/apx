@@ -5,6 +5,8 @@ Consumed by: `DATABASE_ARCHITECTURE.md`, `SECURITY_MODEL.md`, `SERVICE_ARCHITECT
 
 > **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-026 (no table writes for `authenticated`; writes via `api.*`), ADR-038 (suspension resolved at the database, `aal2` for super admins, `search_path = ''`, read-only aggregate projections for the portfolio, signed-URL-only Storage with a `reports` bucket, softened index rule, deletion lifecycle). Findings addressed: F-A-01, F-A-04, F-A-06, F-A-13, F-A-16, F-D-05, F-D-14, F-D-16. See `RED_TEAM_REVIEW.md`.
 
+> **Revision 1.2 (red-team round 2, 2026-09-05).** Applies ADR-043 (signer verifies its audit id; register/delete order), ADR-044 (MFA at the database for employees via `app.is_platform_user()`; one suspension semantic; allow-list role checks; column privileges; `ownership_transfers`; completed polymorphic guards). Findings addressed: R2-A-02, R2-A-03, R2-A-04, R2-A-07, R2-A-09, R2-A-11, R2-A-12, R2-C-09. See `RED_TEAM_REVIEW.md §6`.
+
 ## 1. Hierarchy
 
 ```
@@ -58,19 +60,29 @@ language sql stable security definer set search_path = '' as $$
     from public.organization_memberships m
     join public.organizations o on o.id = m.organization_id
    where m.user_id = auth.uid() and m.status = 'active'
-     and o.status in ('active', 'suspended', 'pending_deletion')      -- suspended orgs stay readable, role shrinks (below)
+     and o.status in ('active', 'suspended', 'pending_deletion')      -- suspended: only the five frozen-Home tables are readable (ADR-044.4)
   union
   select a.organization_id
     from public.organization_assignments a
-    join public.platform_users p on p.user_id = a.employee_user_id
     join public.organizations o on o.id = a.organization_id
-   where a.employee_user_id = auth.uid() and a.status = 'active' and p.status = 'active'
-     and p.platform_role = 'employee'
+   where a.employee_user_id = auth.uid() and a.status = 'active'
+     and app.is_platform_user()                                       -- active platform_users row AND aal2 (ADR-044.1; R2-A-03)
+     and exists (select 1 from public.platform_users p
+                  where p.user_id = auth.uid() and p.platform_role = 'employee')
      and (a.starts_at is null or a.starts_at <= now())
      and (a.ends_at   is null or a.ends_at   >  now())
      and o.status in ('active', 'suspended', 'pending_deletion')
   union
   select o.id from public.organizations o where app.is_super_admin() and o.status <> 'deleted';
+$$;
+
+-- True only for an active platform_users row (either role) at authenticator assurance level 2 (TOTP).
+-- An employee whose session is aal1 (password only, before the TOTP challenge) reads nothing and can
+-- execute no data function: MFA is a database fact for every platform user, not only super admins.
+create function app.is_platform_user() returns boolean
+language sql stable security definer set search_path = '' as $$
+  select exists (select 1 from public.platform_users p where p.user_id = auth.uid() and p.status = 'active')
+     and coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2';
 $$;
 revoke all on function app.accessible_org_ids() from public;
 grant execute on function app.accessible_org_ids() to authenticated;
@@ -78,9 +90,9 @@ grant execute on function app.accessible_org_ids() to authenticated;
 -- True only for an active super_admin row AND a session at authenticator assurance level 2 (TOTP), ADR-038.8.
 create function app.is_super_admin() returns boolean
 language sql stable security definer set search_path = '' as $$
-  select exists (select 1 from public.platform_users p
-                  where p.user_id = auth.uid() and p.platform_role = 'super_admin' and p.status = 'active')
-     and coalesce(auth.jwt() ->> 'aal', 'aal1') = 'aal2';
+  select app.is_platform_user()
+     and exists (select 1 from public.platform_users p
+                  where p.user_id = auth.uid() and p.platform_role = 'super_admin');
 $$;
 
 -- Effective role of the caller in one organization, in RBAC §1 order.
@@ -91,7 +103,8 @@ $$;
 create function app.org_role(org uuid) returns text
 language sql stable security definer set search_path = '' as $$ … $$;
 
--- Used inside every api.* mutation function (never per row in a policy): ADR-026.
+-- Used inside every api.* mutation function and, for the narrower SELECT policies, once per statement.
+-- EXECUTE is granted to authenticated as the fourth RLS helper (ADR-044.3; R2-A-06).
 create function app.has_permission(org uuid, perm text) returns boolean
 language sql stable security definer set search_path = '' as $$
   select exists (select 1 from public.role_permissions rp
@@ -99,7 +112,9 @@ language sql stable security definer set search_path = '' as $$
 $$;
 ```
 
-The TypeScript twin `resolveAccess(userId, orgId): AccessContext` implements the identical order (RBAC §1), including organization status and membership status, and is tested against `app.accessible_org_ids()` **and** `app.org_role()` with the same 40-scenario fixture (membership × assignment × status × dates × organization status) so the two can never disagree silently.
+All four helpers plus the actor-parameterised twins `app.org_role_of(actor, org)` / `app.has_permission_of(actor, org, perm)` (used by `api_server.*`, ADR-043) are owned by `motion_definer` (`NOLOGIN`, `NOBYPASSRLS`), the role that owns every `public` table (ADR-044.3). Suspension semantic (ADR-044.4; R2-A-07): a suspended organization remains in the accessible set, but only `organizations`, `metric_current`, `health_current`, `health_scores` and `alerts` have policies that admit `suspended_member`; every other tenant-data policy is an allow-list of the five real roles, so the member sees the frozen Home and nothing else, and a suspended *client* cannot fall through a `<> 'client'` branch into `source_documents`.
+
+The TypeScript twin `resolveAccess(userId, orgId): AccessContext` implements the identical order (RBAC §1), including organization status, membership status and the `aal2` requirement for platform users, and is tested against `app.accessible_org_ids()` **and** `app.org_role()` with the same 40-scenario fixture (membership × assignment × status × dates × organization status) so the two can never disagree silently.
 
 Performance: the helpers are `STABLE`; `organization_id IN (select app.accessible_org_ids())` is an uncorrelated sub-select evaluated once per statement, and the set is small (a user belongs to a handful of organizations). `app.has_permission()` is called once per `api.*` invocation, never per row (ADR-026), so write cost no longer scales with row count. Indexes on `(user_id, status)` for memberships and `(employee_user_id, status)` for assignments keep the resolver sub-millisecond.
 
@@ -123,8 +138,10 @@ Every table in the "tenant" class must satisfy all columns below. `DATABASE_ARCH
 |---|---|
 | `organization_id` | `uuid NOT NULL REFERENCES organizations(id) ON DELETE CASCADE`, first column after PK |
 | Denormalised org id on child tables | Child tables (`import_rows`, `evidence_items`, `ai_messages`, `ai_tool_calls`) carry `organization_id` too, so every RLS policy is a single-table predicate and no policy needs a join |
-| Cross-org FK protection | Composite FK `(organization_id, parent_id) REFERENCES parent(organization_id, id)` on every plain tenant→tenant foreign key, and a `same_org_ref` trigger on every polymorphic reference column (`evidence_items.ref_id`, `evidence_bundles.origin_id`, `alerts.subject_id`, `actions.source_id`, `calculation_runs.trigger_ref_id`, `ai_feedback.*_id`, `import_rows.duplicate_of_id`), so a row can never reference a parent in another organization even under service role (ADR-034). pgTAP enumerates every FK column on tenant tables and fails on any exception |
-| RLS and writes | `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY`; SELECT policy `organization_id IN (select app.accessible_org_ids())` (narrower where the table says so); **no INSERT/UPDATE/DELETE privilege for `authenticated`** — every write is an `api.*` SECURITY DEFINER function that checks `app.has_permission(organization_id, '<permission>')` once and enforces the row invariants (`DATABASE_ARCHITECTURE.md §11, §14`, ADR-026) |
+| Cross-org FK protection | Composite FK `(organization_id, parent_id) REFERENCES parent(organization_id, id)` on every plain tenant→tenant foreign key (including the three references to `jobs`, which carries `UNIQUE (organization_id, id)`), and a `same_org_ref` trigger on every polymorphic reference column (`evidence_items.ref_id`, `evidence_bundles.origin_id`, `alerts.subject_id`, `actions.source_id`, `calculation_runs.trigger_ref_id`, `ai_feedback.*_id`, `import_rows.duplicate_of_id`, `import_rows.committed_record_id`, `record_status_events.record_id`/`related_record_id`, `metric_snapshots.dimension_id`, `metric_current.dimension_id`), so a row can never reference a parent in another organization even under service role (ADR-034, ADR-044.8). pgTAP enumerates every FK column on tenant tables and fails on any exception; `jobs` and `audit_events` are the only named exemptions |
+| RLS and writes | `ENABLE ROW LEVEL SECURITY` + `FORCE ROW LEVEL SECURITY`; SELECT policy `organization_id IN (select app.accessible_org_ids()) AND app.org_role(organization_id) IN (<allow-list of roles>)` (narrower where the table says so; role checks are allow-lists, never `<> 'client'`); **no INSERT/UPDATE/DELETE privilege for `authenticated`** — every write is an `api.*` (user intent) or `api_server.*` (server-asserted, service_role only) SECURITY DEFINER function that checks the permission once and enforces the row invariants (`DATABASE_ARCHITECTURE.md §11, §14`, ADR-026, ADR-043) |
+| Column privileges | Raw imported text (`bank_transactions.description_raw`, `counterparty_name_raw`; `counterparties.email`, `notes`) is revoked from `authenticated` at column level and readable only through definer views gated by `imports.review`/`customers.edit` (ADR-044.2) |
+| Append-only tables | `evidence_bundles`, `evidence_items`, `alert_revisions`, `record_status_events`, `category_history`, `account_category_history`, `metric_snapshots`, `health_scores` carry `append_only_guard`, which raises on UPDATE/DELETE for every principal including the table owner and the service role, except inside `org.purge` (ADR-046.1) |
 | Ownership | Rows are owned by the organization, not by the creating user; `created_by` is informational. Removing a user never deletes their rows |
 | Indexes | Every index on a tenant table leads with `organization_id`, or with a column that is itself org-scoped by a composite FK (`batch_id`, `conversation_id`, `bundle_id`, `message_id`), or is a unique index that includes `organization_id` |
 | Audit | Governance tables and the four financial record tables: trigger-level diff (`audit_diff`); every `api.*` function writes its own event in the same transaction; read audit for documents, reports, exports and super-admin views (including `/platform` surfaces that render tenant content) |
@@ -137,7 +154,7 @@ Table classes:
 | Global identity | `profiles` | Own row; plus name/avatar of users sharing an organization via a security-definer view |
 | Platform | `platform_users`, `jobs` (org nullable), `platform_settings` | `app.is_super_admin()` only; employees read own `platform_users` row |
 | Tenant root | `organizations` | Read if in accessible set; write owner/admin (limited columns) or super admin |
-| Tenant governance | `organization_memberships`, `organization_assignments`, `invitations` | Read: members owner/admin + super admin (+ employee for assignments about self); write: owner/admin (ceiling rules) / super admin |
+| Tenant governance | `organization_memberships`, `organization_assignments`, `invitations`, `ownership_transfers` | Read: members owner/admin + super admin (+ employee for assignments about self; + nominee for their own transfer row); write: `api.*` functions only, with ceiling, last-owner and transfer invariants in SQL |
 | Tenant data | everything else with `organization_id` | Read: accessible set; write: `app.has_permission()` for the owning permission (owner/admin/employee/super admin in practice); client writes only via `app.action_update_own`, `app.alert_set_status` (acknowledge) and own `ai_conversations`/`ai_messages`/`ai_feedback` rows |
 | Append-only | `audit_events` | Insert by services/triggers; select owner/admin (own org) + super admin; no update/delete |
 
@@ -150,7 +167,7 @@ Table classes:
 
 ## 8. Storage tenancy
 
-Two private buckets: `source-documents` (object path `{organization_id}/{document_id}/{original-filename}` and `{organization_id}/{document_id}/text.json`) and `reports` (`{organization_id}/{period}/{job_id}.pdf`). **There are no `storage.objects` policies for `authenticated` or `anon`** (ADR-038.1): a user JWT cannot list or fetch objects. The only reader and writer is `src/core/storage/signer.ts`, a storage-scoped service client that asserts every key starts with the caller's `organization_id`, requires the id of an audit event written in the same request, and mints 60-second signed URLs after `documents.view` / `reports.view` have passed. Uploads pass through the server (validation first, then the signer writes, then `api.register_document`); deletes remove the object before the row; `storage.cleanup_orphans` removes objects with no row; the purge job deletes both prefixes for the organization.
+Two private buckets: `source-documents` (object path `{organization_id}/{document_id}/{original-filename}` and `{organization_id}/{document_id}/text.json`) and `reports` (`{organization_id}/{period}/{job_id}.pdf`). **There are no `storage.objects` policies for `authenticated` or `anon`** (ADR-038.1): a user JWT cannot list or fetch objects. The only reader and writer is `src/core/storage/signer.ts`, a storage-scoped service client that asserts every key starts with the caller's `organization_id`, requires the id of an audit event written in the same request, and mints 60-second signed URLs after `documents.view` / `reports.view` have passed. Uploads pass through the server: validation first, then the signer writes the object, then `api_server.register_document` (which generates the id and path itself and refuses caller-supplied paths) and `api_server.finalize_upload` (which verifies the object exists with the declared size); on failure the signer deletes that key only (ADR-043.4). Deletes mark the row `deleted` first (after reference and quarantine checks), then the signer removes the object; `storage.cleanup_orphans` removes objects with no row or whose row is `deleted`; the purge job deletes both prefixes for the organization. The signer verifies the audit id it is handed — row exists, same actor, same target, written within the last 30 seconds — before minting; read-side events are written by `api_server.record_access_event` (ADR-043.5; R2-A-02).
 
 ## 9. Post-MVP extensions that require no migration of the model
 

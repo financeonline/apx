@@ -4,6 +4,8 @@ Depends on: `ARCHITECTURAL_DECISIONS.md` (ADR-004..008, ADR-016..018, CD-03..CD-
 Consumed by: `EVIDENCE_MODEL.md`, `AI_ARCHITECTURE.md`, `SERVICE_ARCHITECTURE.md`, `TEST_STRATEGY.md`, `UX_ARCHITECTURE.md`
 Module homes: `src/modules/financial-engine` (metrics), `src/modules/banking` (bank rules), `src/modules/health` (score), `src/modules/alerts` (rules)
 
+> **Revision 1.2 (red-team round 2, 2026-09-05).** Applies ADR-041 (chunked runs) and ADR-047 (R2-B-01..12): rollback resets `superseded_by`; state alerts re-open; reporting-sign balances; pinned cumulative differencing; credit-note negation and per-row VAT; declared export ranges and the `is_complete` cash exception; safe chunk chaining; narrow scheduled runs with the fingerprint computed before writes; rollback promotes dependants; receivables use the current row; two-pass alert capping with a data/user suppression split; one `transfer_kind` enum with a description gate. See `RED_TEAM_REVIEW.md §6`.
+
 > **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-027, ADR-028, ADR-029, ADR-030, ADR-031, ADR-032 (§7), ADR-034, ADR-035, ADR-036. Findings addressed: F-B-01, F-B-02, F-B-05, F-B-06, F-B-07, F-B-08, F-B-09, F-B-13, F-B-14, F-B-15, F-B-16, F-B-17, F-C-07, F-C-09, F-C-12, F-C-15, F-C-16, F-D-01, F-D-02, F-D-03, F-D-04, F-D-06, F-D-09, F-D-12, F-D-18 and the below-the-cut notes on `cash.decline`, `payables_days` and coverage of stale invoices. See `RED_TEAM_REVIEW.md`.
 
 ---
@@ -12,7 +14,7 @@ Module homes: `src/modules/financial-engine` (metrics), `src/modules/banking` (b
 
 1. **Deterministic.** Same accepted records + same engine version + same organization settings ⇒ byte-identical `metric_snapshots`. No clocks, no randomness, no network inside `domain/`. "Today" is an explicit input (`asOf`) used only for aging and runway.
 2. **Pure domain functions.** `src/modules/financial-engine/domain/*` are functions of typed inputs to typed outputs. They never import Supabase, Next.js or the Anthropic SDK. `services/` load records through `data/` repositories and hand plain arrays to `domain/`.
-3. **Only accepted records count.** Every loader filters `record_status = 'accepted'` and `superseded_by IS NULL` (ADR-016). `pending`, `needs_review`, `duplicate`, `rejected`, `incomplete` rows are invisible to the engine.
+3. **Only accepted records count.** Every loader filters `record_status = 'accepted'` and `superseded_by IS NULL` (ADR-016). The `superseded_by` column is the *current* state: `api.rollback_import_batch` resets it (and `superseded_at`) to NULL on every restored row and re-points chains, so restored data is visible to the engine, to `app.aggregate_periods` and to the partial unique indexes without any event lookup; `record_status_events` is history and is used only by evidence as-of resolution (ADR-047.1, R2-B-01). `pending`, `needs_review`, `duplicate`, `rejected`, `incomplete` rows are invisible to the engine.
 4. **Decimal arithmetic.** `decimal.js`, 20 significant digits, `ROUND_HALF_UP`, rounding applied once at snapshot write (ADR-006). Money 2 dp; ratios 6 dp stored, 1 dp displayed; days integer; counts integer; HHI 0–1 at 6 dp.
 5. **Never zero-fill.** A metric that cannot be computed is written with `value = NULL` and `data_quality.missing[]` explaining why. Zero means "we know it is zero".
 6. **Versioned and materialised.** Every value is produced by a `calculation_run` and stored append-only in `metric_snapshots` with `engine_version`, `basis`, `assurance_level`, `components`, `data_quality`, `evidence_query` (ADR-008). The pointer table `metric_current` names the current snapshot per (period, key, dimension) (ADR-031.5). UI and AI read current snapshots through that pointer only.
@@ -47,17 +49,22 @@ Rule of thumb: if it can be unit-tested against a golden number, it belongs in t
 
 ### 2.2 Coverage tests (does a source "cover" a period?)
 
+Every batch carries a **declared export range** (`import_batches.period_start/period_end`), captured at mapping from the file (min/max dates, statement period, report header) and confirmed by the reviewer (`IMPORT_ENGINE.md §6.1`, ADR-047.6). Coverage uses the declared range, never the last posting date, so a month whose last working day is the 28th is still covered by an export declared to the 31st.
 A source covers `fiscal_period P` for an organization when:
 
 | Source | Coverage test |
 |---|---|
-| `period_balances` | One *winning batch* per `(P, balance_kind)`: the latest committed, non-rolled-back batch of that kind whose `period_start ≤ P.period_start AND period_end ≥ P.period_end` (ADR-029.2). P&L families accept `trial_balance` or `pnl_report`; balance families accept `trial_balance` or `balance_sheet`. Cumulative-basis P&L also needs the previous cumulative balance in the same fiscal year, else the family is covered but values are NULL with `no_prior_trial_balance` (ADR-027.2). |
-| `ledger` | ≥1 accepted `ledger_entries` row with `period_id = P` **and** (`P.period_end ≤ latest committed GL batch.period_end`, non-strict, **or** an accepted entry dated in the last 3 calendar days of P). A partially loaded month is flagged `partial_month`, not excluded (ADR-030.2). |
-| `invoices` (revenue family) | ≥1 accepted invoice with `period_id = P` from a batch whose `period_start..period_end` spans P. |
-| `invoices` (AR/AP families) | An invoice batch whose period covers P, or a batch committed within 45 days after `P.period_end`, exists (**freshness gate**: a stale invoice list imported once must not define receivables for every later month). Otherwise the family falls through to `period_balances`/`ledger`, and if neither covers P the value is NULL with `stale_invoice_data`. |
-| `bank` | For **every** active `bank_accounts` row (`is_active`, `account_type ∈ {current, savings}` for cash families): ≥1 accepted transaction with `transaction_date` within `P`, **or** a committed statement batch for that account with `period_start ≤ P.period_start AND period_end ≥ P.period_end` (a covered but empty month is fine). Any uncovered active cash-like account → bank coverage `partial`. |
+| `period_balances` | One *winning batch* per `(P, balance_kind)`: the latest committed, non-rolled-back batch of that kind whose declared `period_start ≤ P.period_start AND period_end ≥ P.period_end` (ADR-029.2). **Kind precedence per family (ADR-047.4):** P&L families take `trial_balance` over `pnl_report`; balance families take `trial_balance` over `balance_sheet`. Cumulative-basis P&L also needs the pinned previous balance (§3), else the family is covered but values are NULL with `no_prior_trial_balance`. |
+| `ledger` | ≥1 accepted `ledger_entries` row with `period_id = P` **and** a committed GL batch whose declared range spans P (`period_start ≤ P.period_start AND period_end ≥ P.period_end`). A month inside the declared range with few entries is complete; a month beyond it is `partial_month`. |
+| `invoices` (revenue family) | A committed invoice batch with `invoice_list_kind = full` whose declared range spans P (ADR-047.10). An `open_items` list never defines revenue. |
+| `invoices` (AR/AP families) | An invoice batch (any kind) whose declared range covers P, or a batch committed within 45 days after `P.period_end` (**freshness gate**). Otherwise the family falls through to `period_balances`/`ledger`, and if neither covers P the value is NULL with `stale_invoice_data`. |
+| `bank` | For **every** active `bank_accounts` row (`is_active`, `account_type ∈ {current, savings}` for cash families): a committed statement batch for that account whose declared range spans P (a covered month with no transactions is fine). Any uncovered active cash-like account → bank coverage `partial`, expressed as `data_quality.bank_coverage_partial`. |
 
-Coverage is computed once per run per period and stored in `calculation_runs.stats.coverage[period_id]` for the UI's "data coverage" strip. `fiscal_periods.is_complete` is set from coverage: true when `P.period_end ≤` the latest data date of the chosen P&L source and cash coverage is full (ADR-030.1).
+**Latest data date** per source = max declared `period_end` over committed batches of that source.
+
+**`fiscal_periods.is_complete` (ADR-030.1, ADR-047.6)** = the chosen P&L source's latest data date `≥ P.period_end` **AND** (bank coverage for P is full **OR** the organization has no active cash-like bank account). Partial bank coverage is a data-quality warning, not incompleteness, so a GL organization with quarterly statements still gets complete months. `core/periods.latestCompletePeriod()` returns the latest complete period; when none exists it returns the latest period with accepted data flagged `partial`, and Home, Insights, Reports and the AI all show the "{Month} so far" treatment for it.
+
+Coverage is computed once per run per period and stored in `calculation_runs.stats.coverage[period_id]` for the UI's "data coverage" strip.
 
 ### 2.3 Precedence by metric family (CD-03, ADR-005)
 
@@ -77,77 +84,117 @@ The first covering source wins for the whole family in that period. Sources are 
 - Bank-basis P&L figures carry `data_quality.warnings = ['cash_basis_proxy', 'vat_inclusive']`, `data_quality.proxy = true`, and the UI shows a "cash-basis estimate" tag (CD-03c, ADR-035). When `organizations.settings.vat_registered = true` and `default_vat_rate` is set, proxy revenue and expense categories flagged as taxable are netted down by the rate (still `estimated`; `components.vat_rate_applied` recorded) (ADR-027.4, CD-33).
 - The dashboard header shows the basis of the P&L family for the selected period ("Accrual — from trial balance", "Accrual — from ledger", "Cash-basis estimate — from bank").
 
-### 2.4 Calculation run algorithm (ADR-031)
+### 2.4 Calculation run algorithm (ADR-031, ADR-041, ADR-047)
+
+The run is a chain of **chunks** of at most `CHUNK_PERIODS` (12) consecutive months, oldest first. One run row persists across chunks with `progress` and `chunks[]`; the per-organization advisory lock is taken per chunk and released between chunks. Every `calculation.run` job — first chunk or continuation — carries the single idempotency key `orgId` (ADR-047.7), so at most one calculation job per organization is ever queued and two runs can never interleave.
 
 ```
-runCalculation(orgId, jobId):
-  0. recover: any calculation_runs row for orgId with status 'running' and started_at older than
-     budget × 3 → status 'failed', error {code:'worker_lost'}; any import_batches in 'committing'
-     whose job is dead → 'awaiting_review' with error_summary.stage = 'commit'
-  1. acquire pg_advisory_xact_lock(hash(orgId))          -- one run per org at a time
-  2. change_set = every import_batches row committed or rolled back, every accounts.standard_category
-     change, every bank categorisation/transfer edit and every settings change with a timestamp later
-     than the last *succeeded* run's started_at (never just the triggering batch)
-     affected  = min period over change_set (full range for account_remapped / settings_changed /
-                 recalc_manual / scheduled / engine major bump)
-     period_from = min(affected) − 12 months (comparison inputs, read-only)
-     period_to   = min(latest fiscal_period with accepted P&L or bank records,
-                       current month in organizations.timezone)         -- ADR-030.5
-     as_of       = today in organizations.timezone (core/periods/clock.ts)
-  3. insert calculation_runs {status:'running', engine_version, period_from, period_to, as_of, job_id}
-  4. aggregates = app.aggregate_periods(orgId, period_from, period_to)  -- SQL, service role
+runCalculation(orgId, job):                                   -- job.payload: {trigger, triggerRefId, periodFrom,
+                                                              --   periodTo, cursor?, runId?, restart_from?}
+  0. sweep (every worker tick, not only here): any calculation_runs row 'running' whose latest chunk
+     started longer than budget × 3 ago → if a continuation job for it is missing, re-enqueue it from
+     progress.cursor (attempts + 1); after max attempts → run 'failed' {worker_lost} and pointers restored
+     (step 12). Any import_batches in 'committing' whose job is dead → 'awaiting_review' (stage 'commit').
+  1. acquire pg_advisory_xact_lock(hash(orgId))               -- one chunk per org at a time
+  2. if job.runId is null (first chunk):
+       change_set = every import_batches row committed or rolled back, every accounts.standard_category
+         change, every bank categorisation/transfer edit, every record_status_events row (supersede,
+         unsupersede, reject, restore, promote), every counterparties.merged_into_id change and every
+         settings change with a timestamp later than the last *succeeded* run's started_at
+       affected  = min period over change_set (full range for account_remapped / settings_changed /
+                   recalc_manual / engine major bump)
+       scheduled trigger (ADR-047.8): affected = the current period only, and only registry keys with
+         as_of_dependent = true (receivables_overdue, payables_overdue, *_days, cash_runway_months,
+         recurring status); the pointer rewrite in step 8 is limited to that key set
+       period_from = min(affected) − 12 months (comparison inputs, read-only)
+       period_to   = min(latest fiscal_period with accepted P&L or bank records,
+                         current month in organizations.timezone)         -- ADR-030.5
+       as_of       = today in organizations.timezone (core/periods/clock.ts)
+       fingerprint = sha256(aggregate metadata: max record_status_events.at, row counts per source,
+         accounts.standard_category map, category_history heads, counterparties.merged_into_id map,
+         settings, detector_version, as_of::date when period_to is the current period)
+       if fingerprint = last succeeded run's fingerprint and trigger ∉ {recalc_manual}:
+         insert calculation_runs {status:'succeeded', stats.no_change = true}; return   -- ADR-047.8
+       insert calculation_runs {status:'running', engine_version, period_from, period_to, as_of, job_id,
+         input_fingerprint, progress:{periods_done:0, periods_total}}
+     else (continuation):
+       run = calculation_runs[job.runId]
+       if job.payload.restart_from is set: finish this chunk (steps 3–9), then mark run 'superseded' and
+         enqueue a fresh first chunk with periodFrom = restart_from (ADR-047.7); return
+       assert metric_current for the chunk's boundary period (cursor − 1 month) points at this run,
+         else mark run 'superseded' and return (another run overtook it)
+  3. chunk = periods [cursor, cursor + CHUNK_PERIODS)
+     delete from metric_snapshots where calculation_run_id = run.id and period_id in chunk   -- idempotent retry
+  4. aggregated_at = transaction_timestamp()
+     aggregates = app.aggregate_periods(orgId, chunk_from − 12 months, chunk_to, aggregated_at)  -- SQL
        returns per period × source × standard_category × account_id × counterparty_id × bank_account_id:
-       Σ debit, Σ credit, Σ amount, row_count, min/max date, plus record-status and category snapshots
-       needed for fingerprinting; the TypeScript engine never iterates raw rows for L0
+       Σ debit, Σ credit, Σ amount, row_count, min/max date over accepted, non-superseded records
+       (superseded_by IS NULL — the column, ADR-047.1), excluding is_transfer of every kind for P&L
+       families and cash_transfer legs for cash families; the TypeScript engine never iterates raw rows
      load accounts, counterparties, bank_accounts, opening balances, invoice headers for AR/AP aging
-     (bounded set), recurring groups, organization settings (fiscal year, currency, timezone, VAT)
-  5. coverage = computeCoverage(aggregates, periods); maintain fiscal_periods.is_complete
-  6. for P in periods ascending (only P ≥ affected are written; earlier periods are inputs):
+     (bounded set), organization settings (fiscal year per batch, currency, timezone, VAT)
+  5. banking.detectRecurring(chunk) → recurring_payment_groups (detector_version in the fingerprint), so
+     recurring status is a run input, not a separately timed job (ADR-047.11)
+     coverage = computeCoverage(aggregates, periods); maintain fiscal_periods.is_complete
+  6. for P in chunk ascending (only P ≥ affected are written; earlier periods are inputs):
        basisByFamily = choosePrecedence(coverage[P])
-       compute in dependency order L0..L7 as before (L0 now = the SQL aggregates)
-       alert_conditions(P) = pure rule functions over the snapshots of P (§7 K3/B3, §8) — conditions,
-       not alerts rows, so the score is a function of data only (ADR-035)
-       each metric → MetricResult {value|null, unit, basis, assurance, components, data_quality, evidence_query}
-  7. write in one transaction:
-       insert metric_snapshots (append-only; never updated)
-       delete from metric_current where organization_id = orgId and period_id in written range;
-       insert metric_current pointers for every snapshot written   -- retires vacated dimensions too
-       health_scores rows for complete periods only (ADR-030.4) and health_current pointers
-  8. input_fingerprint = sha256(sorted (table, id, status_event_at) of every record aggregated
-       ∪ accounts.standard_category map ∪ category_history heads ∪ settings ∪ as_of::date when
-       period_to is the current period)
-     update calculation_runs {status:'succeeded', input_fingerprint, stats, finished_at}
-  9. set import_batches.calculation_run_id = this run for every batch in change_set
- 10. enqueue 'alerts.evaluate' {orgId, runId, period_from: affected, period_to}
- 11. stale check: if any change_set-qualifying event has a timestamp > this run's started_at,
-       mark the run stale = true and loop from step 1 (the worker, not a new job)
- 12. on any error: transaction rolls back, run 'failed' with error, previous pointers remain
+       compute in dependency order L0..L7 (L0 = the SQL aggregates); cross-period inputs (opening cash,
+       trailing averages, YoY) read metric_current of the previous period, which this run wrote in the
+       previous chunk (never parallel within a run)
+       conditions(P) = dataSuppressed-filtered outcomes of the pure alert rule functions (§8.3): the
+       same functions and the same data-only suppression feed health K3/B3 and the alert job, so the
+       score never depends on who dismissed what (ADR-047.11)
+       each metric → MetricResult {value|null, unit, basis, assurance, components, data_quality,
+         evidence_query{ …, as_of: {calculation_run_id, aggregated_at} }}
+  7. health for complete periods of the chunk (ADR-030.4)
+  8. write in one transaction:
+       insert metric_snapshots (append-only)
+       for each period in chunk: for each pointer to be replaced, record previous_snapshot_id;
+         delete from metric_current where organization_id = orgId and period_id = P
+           [and metric_key in as_of_dependent set, for scheduled runs];
+         insert pointers for every snapshot written                       -- retires vacated dimensions
+       health_scores rows + health_current pointers
+       calculation_runs.chunks += {cursor, aggregated_at, finished_at}; progress.periods_done += |chunk|
+  9. if more periods: enqueue continuation {runId, cursor: chunk_to + 1 month} (key orgId); return
+ 10. final chunk: update calculation_runs {status:'succeeded', finished_at}
+     set import_batches.calculation_run_id = run.id for every batch in change_set
+     enqueue 'alerts.evaluate' {orgId, runId, period_from: affected, period_to}
+ 11. stale check: if any change_set-qualifying event has a timestamp > run.started_at → run.stale = true
+     and enqueue a fresh first chunk from the earliest affected period (the loop terminates because each
+     new run only covers changes newer than the previous run's start)
+ 12. on failure of the final attempt: run 'failed' with error; restore metric_current for every period
+     the run rewrote from previous_snapshot_id (pointers are never left mixed between runs)
 ```
 
 **Affected periods by trigger** — the table below is the *minimum*; step 2 always unions every change since the last succeeded run, so a second batch committed while a job was queued or running is never lost (F-D-01, F-B-13).
 
 | Trigger | `affected` |
 |---|---|
-| `import_commit` / `import_rollback` | periods of committed/rolled-back rows (`import_batches.period_start/period_end`, set at commit for every batch type) |
+| `import_commit` / `import_rollback` / `import_replace` | periods of committed/rolled-back rows (declared `import_batches.period_start/period_end`) |
 | `account_remapped`, `settings_changed` | every period with data; these triggers **debounce for 5 minutes** and the UI offers an explicit "Apply changes" action so a bookkeeper remapping 15 accounts causes one run |
-| `banking_edit` (category override, transfer pair/unpair, opening balance) | periods of the edited rows onward |
-| `recalc_manual`, `scheduled`, engine major bump | every period with data |
+| `banking_edit` (category override, transfer pair/unpair, opening balance), `record_superseded`, `counterparty_merged` | periods of the edited rows onward |
+| `recalc_manual`, engine major bump | every period with data |
+| `scheduled` (daily) | the current period only, `as_of_dependent` keys only (ADR-047.8) |
 
-**Idempotency.** Re-running with an unchanged `input_fingerprint` and engine version is a no-op unless `trigger ∈ {recalc_manual}`; because `as_of` is part of the fingerprint whenever the current period is in range, a scheduled run always recomputes aging, overdue, runway and recurring status for the current period (F-B-14). Two identical runs produce identical snapshot rows apart from ids and timestamps; `TEST_STRATEGY.md` asserts this.
+**Idempotency and no-change runs.** The fingerprint is computed *before* any write from aggregate metadata (step 2) and compared with the last succeeded run; an equal fingerprint finishes immediately as `succeeded (no_change)` unless the trigger is `recalc_manual`. Because `as_of::date` enters the fingerprint only when the current period is in range, a daily scheduled run recomputes aging, overdue, runway and recurring status for the current period and nothing else (F-B-14, R2-B-08). Two identical runs produce identical snapshot rows apart from ids and timestamps; `TEST_STRATEGY.md` asserts this.
 
-**Coalescing.** `calculation.run` jobs coalesce only while `queued` (merging `periodFrom = LEAST(...)`); a job that is `running` never absorbs a new enqueue silently — the new commit is caught by step 2/11 (`SERVICE_ARCHITECTURE.md §5`).
+**Coalescing and restart (ADR-047.7).** All `calculation.run` jobs share the key `orgId`. A fresh enqueue while a first chunk is `queued` merges `periodFrom = LEAST(...)`. A fresh enqueue while a continuation is `queued` merges `payload.restart_from = LEAST(existing, new)`: the continuation finishes its chunk, marks the run `superseded`, and starts a new run from `restart_from`. A chunk that finds `metric_current` for its boundary period pointing at another run exits `superseded`. A run therefore either completes every chunk under its own pointers or is replaced wholesale; readers never see 2023 from one run and 2024 from another.
 
-**Concurrency and runtime.** The advisory lock serialises runs per organization; runs for different organizations proceed in parallel workers. Because L0 is a single SQL aggregation, worker CPU is proportional to periods × dimensions, not rows; spike S5 (`IMPLEMENTATION_PLAN.md §3`) must show a 36-month, 100k-row run completing within the worker budget, otherwise CD-34 applies. Snapshot and pointer writes are one transaction so readers never see a half-written period. The Home "Updating your numbers…" banner is driven by the existence of a queued/running job for the organization, never by `calculation_runs.status` alone (F-D-03).
+**Evidence instant.** Each chunk records `aggregated_at`; the descriptors of that chunk's snapshots carry it in `as_of`, and the resolver reproduces the chunk's selection as of that instant using `record_status_events` and the history tables (`EVIDENCE_MODEL.md §3`, ADR-046.2/ADR-047.7).
+
+**Retention.** Snapshots referenced by `metric_current`, `evidence_items`, `health_scores.breakdown`, `alerts` or `alert_revisions` are never compacted; unreferenced non-current snapshots are compacted after **90 days** (`snapshots.compact`, stated identically in ADR-031.5, `DATABASE_ARCHITECTURE.md §6` and `SERVICE_ARCHITECTURE.md §5`).
+
+**Concurrency and runtime.** The advisory lock serialises chunks per organization; different organizations proceed in parallel workers. Because L0 is a single SQL aggregation, chunk CPU is proportional to periods × dimensions, not rows: the budget is **≤ 1,500 CPU-ms and ≤ 60 s wall-clock per chunk** in the Supabase Edge Function background task (NFR-04); route handlers never run chunks. Spike S5 (`IMPLEMENTATION_PLAN.md §3`) verifies one 12-period chunk of `golden-mixed` against that budget in CPU-ms; the fallback is `CHUNK_PERIODS` 6, then CD-34. Snapshot and pointer writes are one transaction so readers never see a half-written period. The Home "Updating your numbers… {done} of {total} months" banner is driven by the existence of a queued/running job for the organization and the run's `progress`, never by `calculation_runs.status` alone (F-D-03).
 
 ## 3. Metric registry
 
 Sign conventions used throughout:
 
 - Ledger: for `income`/`liability`/`equity`-type accounts, amount = Σcredit − Σdebit; for `expense`/`asset`-type accounts, amount = Σdebit − Σcredit. Revenue is therefore positive when normal, negative when refunds exceed sales.
-- Period balances (ADR-027): stored in natural sign (`closing_balance = debit − credit`; the account-type rule above converts to the reporting sign). Each batch carries `balance_basis ∈ {cumulative, movement}` (default: trial balance and balance sheet → `cumulative`, P&L report → `movement`; the reviewer confirms, `IMP-TB-012`). For P&L categories: `movement` → the period amount is `closing_balance`; `cumulative` → the period amount is `closing(P) − closing(P_prev)` where `P_prev` is the previous cumulative balance for the same account in the same fiscal year; in the first fiscal month the amount is `closing(P)`; if `P_prev` is missing and P is not the first fiscal month the value is NULL with missing reason `no_prior_trial_balance`. Balance-sheet categories always use `closing(P)`.
-- Ledger balance-sheet balances (ADR-027.3): balance(P) = opening balance + Σ movements to `P.period_end`, where the opening balance comes from, in order, a `balance_sheet` `period_balances` row for the period before the earliest ledger period; an opening-balance journal (entries dated on the fiscal-year start whose description matches `/opening balance|brought forward|b\/f/`, flagged `IMP-GL-011`, excluded from every P&L metric); `bank_accounts.opening_balance` for cash. None → NULL with `no_opening_balance` (the ledger family never reports movements-since-import as a balance).
+- Period balances (ADR-027, ADR-047.3–4): stored in natural sign (`closing_balance = debit − credit`; the account-type rule above converts to the reporting sign). Files that present income and liabilities as positive numbers (every P&L report and balance sheet from Xero, QuickBooks or Sage) are declared `transforms.balanceSign = reporting` at mapping (`IMP-TB-013`) and negated to natural sign at commit, so the engine never sees reporting sign. Each batch carries `balance_basis ∈ {cumulative, movement}` (default: trial balance and balance sheet → `cumulative`, P&L report → `movement`; the reviewer confirms, `IMP-TB-012`) and freezes `fiscal_year_start_month_at_commit`, which is the fiscal year used for differencing; the organization-level fiscal year cannot change while cumulative balances exist unless each affected batch is re-confirmed. For P&L categories: `movement` → the period amount is `closing_balance`; `cumulative` → the period amount is `closing(P) − closing(P_prev)` where **`P_prev` is the row for the same account, same `balance_kind`, same `balance_basis`, in the immediately preceding fiscal month** — never a movement-basis month and never an earlier month; in the first fiscal month the amount is `closing(P)`; if the preceding month's winning batch of that kind exists but lacks the account, `P_prev = 0` with note `account_absent_prior`; if no such batch exists and P is not the first fiscal month the value is NULL with `no_prior_trial_balance`. Balance-sheet categories under `cumulative` use `closing(P)`; under `movement` they are prior balance-sheet closing + Σ movements, else NULL with `no_opening_balance`.
+- Ledger balance-sheet balances (ADR-027.3): balance(P) = opening balance + Σ movements to `P.period_end`, where the opening balance comes from, in order, a `balance_sheet` `period_balances` row for the period before the earliest ledger period; an opening-balance journal (`IMP-GL-011`, ADR-047.4: entries whose `journal_ref`/description matches `/opening balance|brought forward|b\/f\b|b\/d\b|conversion balance|opening balance equity/i`, dated within ± 1 day of the fiscal-year start or the export's first day, flagged per `journal_ref`, promoted to a reviewer confirmation when Σ|amount| > 10% of the batch, togglable with `api.set_opening_balance_flag`; excluded from every P&L metric); `bank_accounts.opening_balance` for cash. None → NULL with `no_opening_balance` (the ledger family never reports movements-since-import as a balance).
 - Bank: `amount > 0` inflow, `< 0` outflow. `is_transfer` rows are excluded from inflow/outflow **only when both legs are on cash-like accounts** (`{current, savings}`); a leg on a cash-like account paired with a `credit_card`/`loan` account is a debt repayment or drawdown and counts in cash metrics under that category (ADR-028). For liability-type bank accounts the statement gate is `−Σ amount = closing − opening`.
-- Invoices: `sales` adds, `sales_credit_note` subtracts; `purchase` adds, `purchase_credit_note` subtracts. `void` excluded. Amounts for P&L are **net of tax**: `subtotal`, else `total_amount − tax_amount`, else `total_amount` with `assurance = estimated` and warning `vat_inclusive` (ADR-027.4). A superseded invoice row is used when the metric's `asOf` falls before its `superseded_at` (ADR-029.1).
+- Invoices: `sales` adds, `sales_credit_note` subtracts; `purchase` adds, `purchase_credit_note` subtracts. `void` excluded. Credit notes are stored with all four money fields positive (`subtotal`, `tax_amount`, `total_amount`, `amount_paid` are negated together at conversion, ADR-047.5) and subtracted by type. Amounts for P&L are **net of tax per row**: `subtotal`, else `total_amount − tax_amount`, else `total_amount` (a `subtotal` of 0 with `total_amount > 0` counts as absent); the metric carries `vat_inclusive` when ≥ 1 contributing row fell back to `total_amount` and `assurance = estimated` when the fallback share > 10%. The bank proxy nets down only the categories in `platform_settings.taxable_categories` (default `{revenue, cost_of_sales, operating_expense, marketing}`, CD-33). Every invoice metric uses the **current** row (ADR-047.10); there is no "row current at a historical asOf".
 
 Category sets:
 
@@ -158,7 +205,7 @@ Category sets:
 
 Evidence descriptor shorthand `EQ(table, filters)` expands to the JSON in `EVIDENCE_MODEL.md §3`. A `standard_categories:[c]` filter in the shorthand is **resolved at run time** to the concrete `account_ids` (ledger, period balances) or `category_account_ids` (bank) that carried that category when the run executed; the stored descriptor never contains a category name (ADR-034). Leaf snapshots store `evidence_query = {kind:'leaf', descriptor}` with `as_of = calculation_run_id`; derived snapshots (gross profit, margins, variances, working capital, runway, concentrations) store `{kind:'derived', components:[{name, snapshot_id}]}` so the drawer and the AI can descend to each input's records.
 
-Common missing-data reasons (`data_quality.missing[]`): `no_source_covers_period`, `no_opening_cash`, `no_opening_balance`, `no_prior_trial_balance`, `stale_invoice_data`, `no_cost_of_sales_accounts`, `uncategorised_amounts_exceed_threshold`, `comparison_period_missing`, `comparison_is_zero`, `bank_coverage_partial`, `no_counterparty_data`, `no_due_dates`, `insufficient_history`.
+Common missing-data reasons (`data_quality.missing[]`): `no_source_covers_period`, `no_opening_cash`, `no_opening_balance`, `no_prior_trial_balance`, `account_absent_prior` (note, value 0), `stale_invoice_data`, `no_cost_of_sales_accounts`, `uncategorised_amounts_exceed_threshold`, `comparison_period_missing`, `comparison_is_zero`, `bank_coverage_partial`, `no_counterparty_data`, `no_due_dates`, `insufficient_history`.
 
 ### 3.1 Profit & loss metrics
 
@@ -225,10 +272,10 @@ Property tests: `closing_cash(P) = opening_cash(P+1)` for consecutive covered pe
 
 | Key | Unit | Inputs | Formula | Edge cases / missing | Evidence |
 |---|---|---|---|---|---|
-| `receivables` | money | invoice basis (fresh per §2.2): accepted `sales`/`sales_credit_note` invoices with `issue_date ≤ asOf` and not `void`, using the invoice row current at `asOf` (superseded rows are used for historical `asOf`, ADR-029.1) | Σ `balance_due` as at `asOf` (uses `amount_paid` and `paid_date`: if `paid_date > asOf` the invoice is treated as unpaid at `asOf`; partial payments without `paid_date` are treated as paid at `asOf` with warning `payment_date_unknown`) | Invoice basis unavailable → `period_balances` closing balance of `receivables` (cumulative), else ledger balance **only when an opening balance exists** (ADR-027.3), else NULL with `no_opening_balance`; aging metrics NULL, `assurance = calculated`. Credit notes with negative balance reduce the total. | `EQ(invoices,{invoice_type:[sales,sales_credit_note], open_as_of:asOf})` |
+| `receivables` | money | invoice basis (fresh per §2.2): accepted, non-superseded `sales`/`sales_credit_note` invoices with `issue_date ≤ asOf` and not `void` — always the **current** row (ADR-047.10; a corrected total therefore flows to every period, matching revenue) | `Σ balance_due(sales) − Σ balance_due(sales_credit_note)` as at `asOf` (uses `amount_paid` and `paid_date`: if `paid_date > asOf` the invoice is treated as unpaid at `asOf`; partial payments without `paid_date` are treated as paid at `asOf` with warning `payment_date_unknown`) | Invoice basis unavailable → `period_balances` closing balance of `receivables` (cumulative), else ledger balance **only when an opening balance exists** (ADR-027.3), else NULL with `no_opening_balance`; aging metrics NULL, `assurance = calculated`. Credit notes with negative balance reduce the total. | `EQ(invoices,{invoice_type:[sales,sales_credit_note], open_as_of:asOf})` |
 | `receivables_overdue` | money | as above | Σ `balance_due` where `due_date < asOf` | Invoices without `due_date` are excluded and counted in `data_quality.warnings: no_due_dates (n)` | descriptor with `overdue_as_of` |
-| `receivables_days` | days (int) | `receivables`, revenue for P, P−1, P−2 | `receivables / Σ sales(3 periods) × 91.25`, where the denominator is **gross-consistent**: Σ invoice `total_amount` (net of credit notes) when receivables are invoice-basis, else net `revenue` with receivables netted down by `default_vat_rate` when known (ADR-027.4); `components.denominator_basis` records the choice | Any of the three values NULL → `insufficient_history`; Σ ≤ 0 → NULL | components |
-| `payables` | money | `purchase`/`purchase_credit_note` invoices (fresh per §2.2), row current at `asOf` | Σ `balance_due` at `asOf` | fallback as `receivables` (cumulative balance, else ledger with opening balance, else NULL `no_opening_balance`) | analogous |
+| `receivables_days` | days (int) | `receivables`, revenue for P, P−1, P−2 | `receivables / Σ sales(3 periods) × 91.25`, where the denominator is **gross-consistent**: Σ invoice `total_amount` (net of credit notes) from `full` invoice lists when receivables are invoice-basis, else net `revenue` with receivables netted down by `default_vat_rate` when known (ADR-027.4); `components.denominator_basis` records the choice | Any of the three values NULL → `insufficient_history`; Σ ≤ 0 → NULL; an `open_items` list in the window → NULL with `open_items_only` (ADR-047.10) | components |
+| `payables` | money | `purchase`/`purchase_credit_note` invoices (fresh per §2.2), current row | `Σ balance_due(purchase) − Σ balance_due(purchase_credit_note)` at `asOf` | fallback as `receivables` (cumulative balance, else ledger with opening balance, else NULL `no_opening_balance`) | analogous |
 | `payables_overdue` | money | | as receivables_overdue | | |
 | `payables_days` | days | `payables`, `cost_of_sales + operating_expenses − payroll − depreciation` over 3 periods | `payables / Σ(cost_of_sales + operating_expense + marketing)(3) × 91.25` (payroll and depreciation never pass through accounts payable, so they are excluded from the denominator) | denominator ≤ 0 or NULL → NULL | |
 | `working_capital` | money | `closing_cash`, `receivables`, `payables`, and where a cumulative TB/BS covers P: `inventory`, `other_current_asset`, `other_current_liability`, `credit_card`, `tax_liability` (all taken as `closing(P)` in reporting sign) | `closing_cash + receivables + inventory + other_current_asset − payables − credit_card − tax_liability − other_current_liability` | Balance-sheet-only categories absent (no TB/BS) → treated as unknown: metric written with `completeness` reduced and warning `partial_working_capital` listing missing categories; if `closing_cash` NULL → NULL. `basis = 'mixed'` whenever inputs differ. | components with each term, its basis and its snapshot id (ADR-034) |
@@ -252,7 +299,7 @@ Property tests: Σ `customer_revenue` (incl. unattributed) = `revenue` (same bas
 
 ### 3.6 Registry summary
 
-Every key above is declared once in `src/modules/financial-engine/domain/registry.ts` with `{key, unit, family, level (L0–L7), dimension_type, dependencies[], formulaId, aggregation}`. `aggregation ∈ {sum, last, recompute}` states how a monthly key rolls up to a quarter or year (flows sum, stocks take the last month, ratios and days recompute from summed components). **MVP exposes months only** (ADR-030.6): the period picker has no quarter/year granularity; when quarter/year views ship they are materialised as snapshots with `period_kind` by the engine, never aggregated in the UI or in React. The registry is the source for the AI's `get_metric` catalogue and for the UI's metric labels and definitions ("What is this?" copy). Unknown metric keys are type errors.
+Every key above is declared once in `src/modules/financial-engine/domain/registry.ts` with `{key, label, unit, family, level (L0–L7), dimension_type, dependencies[], formulaId, aggregation, as_of_dependent}`. `label` is the display label the AI grounding check requires near a quoted number (`AI_ARCHITECTURE.md §7`, ADR-045.1). `as_of_dependent = true` marks keys a daily scheduled run recomputes for the current period (`receivables_overdue`, `payables_overdue`, `receivables_days`, `payables_days`, `cash_runway_months`; recurring status lives on `recurring_payment_groups`), ADR-047.8. `aggregation ∈ {sum, last, recompute}` states how a monthly key rolls up to a quarter or year (flows sum, stocks take the last month, ratios and days recompute from summed components). **MVP exposes months only** (ADR-030.6): the period picker has no quarter/year granularity; when quarter/year views ship they are materialised as snapshots with `period_kind` by the engine, never aggregated in the UI or in React. The registry is the source for the AI's `get_metric` catalogue and for the UI's metric labels and definitions ("What is this?" copy). Unknown metric keys are type errors.
 
 ---
 
@@ -268,7 +315,7 @@ Every key above is declared once in `src/modules/financial-engine/domain/registr
 Uncategorised share drives `completeness` for bank-basis metrics (§5).
 
 ### 4.2 Transfer detection (CD-28, ADR-028)
-For each accepted outflow `t` on any bank account of the org: find an inflow `u` on a *different* `bank_accounts` row of the same org with `|u.amount| = |t.amount|`, `|u.transaction_date − t.transaction_date| ≤ 3 days`, both unpaired. Prefer the closest date, then description similarity. Pair → set `is_transfer = true` and `transfer_pair_id` both ways, and classify the pair:
+For each accepted outflow `t` on any bank account of the org: find an inflow `u` on a *different* `bank_accounts` row of the same org with `|u.amount| = |t.amount|`, `|u.transaction_date − t.transaction_date| ≤ 3 days`, both unpaired, **and** (ADR-047.12) at least one leg's `description_normalized` matches `/transfer|tfr|to savings|from current|own account/` or contains the other account's name. A candidate that meets amount, date and account but fails the description gate is not paired; it is flagged `unpaired_transfer_candidate` for reviewer confirmation, so a customer receipt and a same-amount supplier payment two days apart are never silently cancelled. Prefer the closest date, then description similarity. Pair → set `is_transfer = true` and `transfer_pair_id` both ways, and classify the pair with the single enum `transfer_kind {none, cash_transfer, card_repayment, loan_repayment, loan_drawdown, other_transfer}`:
 
 | Legs | `transfer_kind` | Cash metrics | P&L |
 |---|---|---|---|
@@ -287,8 +334,8 @@ For each accepted outflow `t` on any bank account of the org: find an inflow `u`
 5. `next_expected = last_seen + cadence`; `status = 'stopped'` if `asOf > next_expected + 1.5 × cadence`; `'changed'` if the last amount deviates > tolerance.
 6. Upsert `recurring_payment_groups` (`detector_version`), set `recurring_group_id` on member transactions. Groups are recomputed each run; ids are stable via the unique key.
 
-### 4.4 Bank data → cash metrics
-Only accounts with `account_type ∈ {current, savings}` feed `opening_cash`/`closing_cash`. Credit-card and loan accounts are tracked for balances and appear in `working_capital` via categories, not cash. Bank-basis P&L proxy (when chosen by precedence) maps inflows in `revenue` category to `revenue`, outflows by category to expenses, ignoring `transfer`, `loan`, `drawings`, `equity`, `tax_liability` principal movements.
+### 4.4 Bank data → cash metrics and the bank-basis P&L proxy
+Only accounts with `account_type ∈ {current, savings}` feed `opening_cash`/`closing_cash`. Credit-card and loan accounts are tracked for balances and appear in `working_capital` via categories, not cash. The bank-basis P&L proxy (when chosen by precedence) reads **all active accounts including liability accounts** (card purchases are expenses; the repayment leg is not), maps inflows in `revenue` category to `revenue` and outflows by category to expenses, and excludes `is_transfer` rows of every `transfer_kind` and every `NON_PNL` category (ADR-047.12). Its descriptors carry `bank_account_ids: [all active]` and `exclude_transfers: 'all'` so the drawer reconciles to the same set. When a cash-like account shows outflows categorised `credit_card` and no card statement covers P, the proxy expenses are understated by the unseen card spend: warning `card_spend_unclassified` is set on every proxy P&L metric for P.
 
 ---
 
@@ -299,7 +346,7 @@ Only accounts with `account_type ∈ {current, savings}` feed `opening_cash`/`cl
 ```json
 { "completeness": 0.0–1.0,
   "proxy": false,
-  "warnings": ["cash_basis_proxy", "vat_inclusive", "uncategorised_amounts", "bank_coverage_partial", "statement_balance_mismatch", "unreconciled_statement", "basis_differs", "sign_change", "new_in_period", "partial_working_capital", "no_due_dates", "payment_date_unknown", "fewer_than_5", "high_unattributed_share", "negative_revenue", "unpaired_transfer_candidate", "partial_month"],
+  "warnings": ["cash_basis_proxy", "vat_inclusive", "card_spend_unclassified", "account_absent_prior", "open_items_only", "uncategorised_amounts", "bank_coverage_partial", "statement_balance_mismatch", "unreconciled_statement", "basis_differs", "sign_change", "new_in_period", "partial_working_capital", "no_due_dates", "payment_date_unknown", "fewer_than_5", "high_unattributed_share", "negative_revenue", "unpaired_transfer_candidate", "partial_month"],
   "missing": ["no_source_covers_period", "no_opening_cash", "no_opening_balance", "no_prior_trial_balance", "stale_invoice_data", "no_cost_of_sales_accounts", "comparison_period_missing", "comparison_is_zero", "insufficient_history", "no_counterparty_data", "uncategorised_amounts_exceed_threshold"] }
 ```
 
@@ -315,7 +362,7 @@ Completeness per family:
 | Customer/supplier | 1 − unattributed share |
 | Derived metrics | min of inputs' completeness |
 | Variance | min(current, comparison); NULL to consumers when `basis_differs` |
-| Partial month (`is_complete = false`) | multiplied by `days_covered / days_in_month` for flow metrics (ADR-030.4) |
+| Partial month (`is_complete = false`) | multiplied by `days_covered / days_in_month` for flow metrics (ADR-030.4); a period returned by `latestCompletePeriod()` as the `partial` fallback carries `partial_month` and the UI's "so far" treatment |
 
 Propagation: the Health Score excludes a dimension when its required metrics are NULL or completeness < 0.6, caps a dimension at 70 when its required metrics are `estimated`/`proxy` (§7.2), and is not computed at all for incomplete periods (ADR-030.4); the AI tools return `data_quality` verbatim and the response contract requires the Confidence section to repeat any warning affecting a cited number (`AI_ARCHITECTURE.md`). The Home page shows a single "Data quality" indicator = min completeness of the headline metrics for the selected period, with a link to the coverage panel.
 
@@ -325,7 +372,7 @@ Propagation: the Health Score excludes a dimension when its required metrics are
 
 - `engine_version` is semver in `src/modules/financial-engine/domain/version.ts`. **Patch** = bug fix that changes no golden output; **minor** = new metric or new warning (existing values unchanged); **major** = any change to an existing formula, precedence, or category set.
 - A **major** bump enqueues `calculation.run` (`trigger = 'scheduled'`, full range) for every active organization at deploy time; until it completes the organization sees a "Figures updating" banner and reads old snapshots (their `metric_current` pointers stand until replaced atomically per period).
-- Snapshots are never migrated in place and never updated. Old runs remain readable (their snapshots simply have no `metric_current` pointer) so an AI answer or report generated last month resolves to the numbers it saw. **Retention equals the organization's lifetime**: a snapshot referenced by `evidence_items`, `health_scores.breakdown`, `alerts` or `alert_revisions` is never archived; unreferenced non-current snapshots may be compacted by the `snapshots.compact` job after 12 months (ADR-031.5).
+- Snapshots are never migrated in place and never updated. Old runs remain readable (their snapshots simply have no `metric_current` pointer) so an AI answer or report generated last month resolves to the numbers it saw. **Retention equals the organization's lifetime**: a snapshot referenced by `evidence_items`, `health_scores.breakdown`, `alerts` or `alert_revisions` is never archived; unreferenced non-current snapshots are compacted by the `snapshots.compact` job after 90 days (ADR-031.5, ADR-047.8 — the single retention figure across all documents).
 - Reproducibility guarantee: given `calculation_run_id`, `input_fingerprint` and the tagged engine version from git, the run can be replayed in a test harness and must reproduce every snapshot value (`TEST_STRATEGY.md` "replay" suite on the golden orgs).
 **Plain-language summary sentence.** The one-sentence Home summary (`UX_ARCHITECTURE.md §4`) is generated deterministically from current snapshots and the health breakdown by templates in `modules/health/domain/summary-templates.ts`; it is never produced by the AI and is covered by the same golden-dataset tests as the score.
 
@@ -438,9 +485,9 @@ Templates: "No single customer is more than {share} of revenue", "{customer} is 
 ### 8.1 Global rules
 - Evaluated by job `alerts.evaluate` after every successful calculation run, for every period in the run range, oldest first.
 - **Two rule classes (ADR-036).** *Event* rules describe something that happened in a period and are keyed per period: `dedupe_key = '{rule_key}|{period_id}|{subject_type}|{subject_id or "-"}'`. *State* rules describe a condition that persists and are keyed per subject only: `dedupe_key = '{rule_key}|state|{subject_type}|{subject_id or "-"}'`; `period_id` is updated to the latest evaluated period on each re-evaluation and `first_seen_at` is retained. Class per rule is in §8.2.
-- **Suppression (all rules):** skip when the metric's completeness < 0.5; skip when the variance carries `basis_differs` (ADR-030.3); skip the earliest period with data for variance-based rules (`first-period gate`); on a period with `is_complete = false` evaluate only `duplicate.*`, `bank.unusual_transaction` and `recurring.*` (ADR-030.4); skip when |amount| < `MIN_ABS = max(£100, 0.5% of revenue)`; do not re-open an alert dismissed within the last 90 days for the same dedupe_key (`cooldown`, all severities for `duplicate.transaction`, medium/low otherwise); exclude record pairs where either record has `duplicate_reviewed = true` (ADR-029.6); an alert whose subject record was superseded/rejected is auto-resolved (`status_reason_code = 'record_removed'`).
-- **Per-run cap.** At most 25 new alerts per organization per run, highest severity first; overflow is summarised in one `info` alert "N further items need attention" linking to Insights.
-- **Lifecycle and revisions (ADR-034).** Condition true → if the alert exists and nothing material changed (same severity, same pinned ids, same rounded threshold values) only `last_evaluated_at` moves; otherwise a new `alert_revisions` row is written (severity, explanation, threshold_summary, evidence bundle, run), `alerts.current_revision_id` is repointed, audit `alert.reevaluated {before, after}` is written, and an `acknowledged` alert whose severity increased returns to `open`. Status is otherwise preserved. Condition false → if `open`/`acknowledged` set `resolved` with `status_reason_code = 'condition_cleared'`; if `dismissed` or `resolved` leave untouched. Never delete. The evidence bundle is regenerated only when a new revision is written.
+- **Suppression is split in two (ADR-047.11).** `dataSuppressed(rule, ctx)` depends on data only and is shared by the alert job and the health engine (K3/B3): completeness < 0.5; the variance carries `basis_differs` (ADR-030.3); the earliest period with data for variance-based rules (`first-period gate`); on a period with `is_complete = false` only `duplicate.*`, `bank.unusual_transaction` and `recurring.*` are evaluated (ADR-030.4); |amount| < `MIN_ABS = max(£100, 0.5% of revenue)`; record pairs where either record has `duplicate_reviewed = true` (ADR-029.6). `userSuppressed(existing)` depends on user state and applies only when *persisting* alerts: the dismissal cooldown below. Thresholds that reference "monthly outflows" or medians (`bank.unusual_transaction`, `duplicate.transaction`, `deviation.large_transaction`) use the trailing **three complete** months, never the partial current month (ADR-047.6). An alert whose subject record was superseded/rejected is auto-resolved (`status_reason_code = 'record_removed'`).
+- **Per-run cap (two-pass, ADR-047.11).** All outcomes for all periods are collected first, then sorted by (severity desc, period desc); the cap of 25 applies to *new* rows, `critical` outcomes are exempt from it, and the remainder is summarised in one `info` alert "N further items need attention" linking to Insights. A first import of 24 months can therefore never bury the current month's cash alert under old `info` rows.
+- **Lifecycle and revisions (ADR-034).** Condition true → if the alert exists and nothing material changed (same severity, same pinned ids, same rounded threshold values) only `last_evaluated_at` moves; otherwise a new `alert_revisions` row is written (severity, explanation, threshold_summary, evidence bundle, run), `alerts.current_revision_id` is repointed, audit `alert.reevaluated {before, after}` is written, and an `acknowledged` alert whose severity increased returns to `open`. **Re-opening (ADR-047.2, R2-B-02).** A `resolved` state-class alert whose condition returns gets a new revision and `status ← open`, `status_reason_code = condition_returned`, `reopened_at = now()`, keeping `first_seen_at`. A `dismissed` alert re-opens when its severity increases **or** when `dismissed_at < now() − 90 days` (the cooldown); otherwise a dismissal holds and only `last_evaluated_at` moves. Condition false → if `open`/`acknowledged` set `resolved` with `status_reason_code = 'condition_cleared'`; if `dismissed` or `resolved` leave untouched. Never delete. The evidence bundle is regenerated only when a new revision is written.
 - Severity is computed from the rule table; `critical` only for cash and duplicate-money rules.
 - Every alert gets `recommended_next_step` from the template and an `evidence_bundles` row of kind `alert` (see `EVIDENCE_MODEL.md §5`). `threshold_summary` holds every number used in the explanation as typed fields (`{current:'…', previous:'…', pct_change:'…', period_label:'…'}`); templates render from it and AI tools return it structurally (ADR-032.7).
 
@@ -468,35 +515,48 @@ Templates: "No single customer is more than {share} of revenue", "{customer} is 
 
 Currency symbols in templates follow `organizations.base_currency`. Templates are rendered by the engine (no AI) into `explanation`; placeholders come only from `threshold_summary`, which is also what AI tools and the UI use for numbers (ADR-032.7). `{signature}` and `{customer}` placeholders are rendered from `description_normalized`/counterparty names and are treated as untrusted text by the AI layer.
 
-### 8.3 Evaluation algorithm
+### 8.3 Evaluation algorithm (two-pass, ADR-047.11)
 
 ```
 evaluateAlerts(orgId, runId, periods):
   lock org (advisory)
-  load current snapshots (via metric_current) for periods ∪ trailing 12, recurring groups,
-       accepted records needed by record-level rules, open/acknowledged alerts and their current revisions
-  created = 0
+  load current snapshots (via metric_current) for periods ∪ trailing 12, recurring groups (already
+       recomputed inside the run, ADR-047.11), accepted records needed by record-level rules,
+       all non-resolved alerts and their current revisions
+  -- pass 1: collect
+  outcomes = []
   for P in periods ascending:
-    ctx = {snapshots(P), snapshots(P−1..P−12), asOf, is_complete(P)}
-    for rule in RULES (ordered: cash.* → duplicate.* → revenue → expense → margin → receivables → payables → concentration → recurring → bank/deviation → variance.significant):
-      if suppressed(rule, ctx) continue                   -- §8.1 incl. incomplete-period rule set
-      outcomes = rule.evaluate(ctx)                       -- pure; zero or more {subject, severity, threshold_summary, pins, descriptor}
-      for o in outcomes:
-        key = dedupeKey(rule.class, rule_key, P, o.subject)
-        existing = alerts[key]
-        if existing and unchanged(existing.current_revision, o): touch last_evaluated_at; continue
-        if not existing: if created ≥ 25: overflow += 1; continue; insert alert; created += 1
-        write alert_revisions row; repoint current_revision_id; rebuild evidence bundle
-        if existing.status = 'acknowledged' and o.severity > previous severity: status ← 'open'
-        audit alert.reevaluated / alert.created
-      for existing open/acknowledged event-class alert of rule in P not in outcomes: resolve('condition_cleared')
-      for existing open/acknowledged state-class alert of rule whose subject is not in outcomes for the latest period: resolve('condition_cleared')
+    ctx = {snapshots(P), snapshots(P−1..P−12), asOf, is_complete(P), trailing_complete_3(P)}
+    for rule in RULES:
+      if dataSuppressed(rule, ctx) continue                 -- §8.1, data only; identical to health K3/B3
+      for o in rule.evaluate(ctx):                          -- pure; {subject, severity, threshold_summary, pins, descriptor}
+        outcomes.push({P, rule, o, key: dedupeKey(rule.class, rule.key, P, o.subject)})
+    variance.significant is evaluated after the other rules of P so it can see what already explains P
+  -- pass 2: persist, most important first
+  sort outcomes by (severity desc, P desc, rule order)
+  created = 0
+  for x in outcomes:
+    existing = alerts[x.key]
+    if existing:
+      if userSuppressed(existing, x): touch last_evaluated_at; continue          -- dismissed within 90 d and no severity increase
+      if unchanged(existing.current_revision, x.o): touch last_evaluated_at; continue
+      write alert_revisions row; repoint current_revision_id; rebuild evidence bundle
+      if existing.status = 'acknowledged' and x.o.severity > previous: status ← 'open'
+      if existing.status = 'resolved':  status ← 'open', status_reason_code 'condition_returned', reopened_at
+      if existing.status = 'dismissed' and (severity increased or dismissed_at < now − 90 d):
+                                          status ← 'open', status_reason_code 'condition_returned', reopened_at
+      audit alert.reevaluated
+    else:
+      if x.o.severity ≠ 'critical' and created ≥ 25: overflow += 1; continue      -- critical is exempt
+      insert alert (state or event key); write revision; build bundle; created += 1; audit alert.created
+  -- resolve what did not recur
+  for existing open/acknowledged event-class alert of any rule in periods with no outcome for its key: resolve('condition_cleared')
+  for existing open/acknowledged state-class alert whose subject has no outcome for the latest period: resolve('condition_cleared')
   if overflow > 0: upsert the info alert 'attention.overflow' for the latest period with count
-  variance.significant runs last so it can check "already explained" against alerts written this pass
   write audit event alerts.evaluated {run_id, counts, overflow}
 ```
 
-Rules are pure functions `(ctx) → outcomes[]` in `src/modules/alerts/domain/rules/*.ts`, each with a fixture-based test that asserts the exact `threshold_summary`. The same functions are called by the health engine (§7.3 K3/B3) so score and alerts can never disagree about whether a condition holds.
+Rules are pure functions `(ctx) → outcomes[]` in `src/modules/alerts/domain/rules/*.ts`, each with a fixture-based test that asserts the exact `threshold_summary`. The same functions, behind the same `dataSuppressed()` filter, are called by the health engine (§7.3 K3/B3) inside the calculation chunk, so score and alerts can never disagree about whether a condition holds, and neither depends on dismissals.
 
 ## 9. Test plan summary (details in `TEST_STRATEGY.md §5–7`)
 
@@ -506,4 +566,5 @@ Rules are pure functions `(ctx) → outcomes[]` in `src/modules/alerts/domain/ru
 - **Snapshot/replay tests:** run twice ⇒ identical values and `input_fingerprint`; replay from stored run ⇒ identical.
 - **Health tests:** each rule boundary (exactly at threshold), exclusion and renormalisation, `score = NULL` with < 3 dimensions.
 - **Alert tests:** each rule fires at threshold and not one unit below; dedupe upsert preserves status; `condition_cleared` resolution; dismissed cooldown (all severities for duplicates); first-period gate; evidence bundle non-empty for every fired alert; state-class rules produce one alert per subject across six imported months; per-run cap and overflow alert; a revision is written only on material change; severity increase re-opens an acknowledged alert; `duplicate_reviewed` pairs never fire.
+- **Revision 1.2 cases (ADR-047, R2-B):** rolling back a correcting batch B restores A's rows to `app.aggregate_periods` and the partial unique index accepts a third batch (R2-B-01); a resolved `cash.runway_low` re-opens with `condition_returned` when runway falls again, and a dismissed high alert re-opens after 90 days or on severity increase (R2-B-02); `pnl-reporting-sign.xlsx` yields positive revenue and negative-signed liabilities in natural storage (R2-B-03); cumulative differencing across a movement month, an absent account (`account_absent_prior` = 0), a fiscal-year boundary and a frozen `fiscal_year_start_month_at_commit` (R2-B-04); `credit-note-with-tax.csv` nets revenue and receivables to zero and `IMP-INV-011` trips on an inconsistent row (R2-B-05); a GL declared to 31 Aug whose last posting is 28 Aug covers August; a GL organization with quarterly statements has complete months; `latestCompletePeriod()` falls back to a `partial` period (R2-B-06); a fresh enqueue during a chain supersedes the run and restarts from `restart_from`, a chunk retry is idempotent, a dead continuation is re-enqueued by the sweep, and a failed run restores pointers (R2-B-07); a daily scheduled run rewrites only `as_of_dependent` pointers for the current period and an unchanged fingerprint finishes `no_change` before any write (R2-B-08); three overlapping statements: replacing the first promotes the dependants and leaves the accepted row count unchanged (R2-B-09); a corrected invoice total flows to revenue and receivables alike; `invoices-open-items-only.csv` requires the `IMP-INV-012` confirmation and never defines revenue or DSO (R2-B-10); a first import of 24 months keeps the current month's critical alert and K3/B3 are unchanged by dismissals (R2-B-11); a same-amount receipt and payment two days apart are not auto-paired; `card_spend_unclassified` appears when a card is repaid but no card statement is imported (R2-B-12).
 - **Revision 1.1 cases (each mapped to a finding):** cumulative TB Q1 (`tb_cumulative_q1.xlsx`) gives March revenue = Mar − Feb and NULL with `no_prior_trial_balance` when Feb is absent (F-B-02); card repayment appears in `cash_outflows` and closing cash equals statement closing balances (F-B-01); VAT-inclusive invoice list gives `vat_inclusive` warning and net revenue when `subtotal` present (F-B-05); opening-balance journal `IMP-GL-011` sets ledger receivables/cash and is excluded from P&L; ledger receivables without any opening balance are NULL, never a movement (F-B-06); TB→GL→bank basis switch produces `basis_differs` and fires no variance alert and moves no health rule (F-B-07); incomplete current month gets no score and only record-level alerts, and Home/AI default to the same complete period (F-B-08, F-D-09); two commits 1 s apart both appear in the final snapshots, and a commit during a running run triggers the stale loop (F-D-01, F-B-13); a scheduled run on unchanged records advances overdue and recurring status (F-B-14); remapping an account leaves no `metric_current` pointer for the vacated category (F-B-16); bank-only organization with 30% uncategorised receives a score with three dimensions capped at 70 (F-B-09, F-D-04); K3/B3 are identical between two runs on identical data regardless of alert statuses (F-C-12); `cash.decline` with `opening_cash ≤ 0` uses the absolute floor; `payables_days` excludes payroll.

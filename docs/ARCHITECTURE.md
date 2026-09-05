@@ -5,6 +5,8 @@ Source of truth for scope: `SOW_v2_extracted.md`. Source of truth for decisions:
 
 > **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-026 to ADR-039 and CD-32 to CD-35. Findings addressed at the overview level: F-A-01, F-A-04, F-A-12, F-B-01, F-B-02, F-C-01, F-D-01, F-D-06. See `RED_TEAM_REVIEW.md`.
 
+> **Revision 1.2 (red-team round 2, 2026-09-05).** Applies ADR-040 to ADR-046. Adopted defaults for open decisions, chunked calculation runs, the `api_server` schema, database-side MFA and throttles, grounding v3. See `RED_TEAM_REVIEW.md §6`.
+
 ## 0. Document map
 
 | Document | Answers |
@@ -70,7 +72,7 @@ Owner and Super Admin are different families and are never merged. Employees hav
 | Database | Supabase PostgreSQL 16 with RLS, pgTAP | ADR-013 |
 | Auth | Supabase Auth (email/password, magic link; MFA post-MVP) | |
 | Storage | Supabase Storage private bucket `source-documents` | `TENANCY_MODEL.md §8` |
-| Jobs | Postgres `jobs` table + Vercel Cron + Edge Function for long tasks | ADR-020 |
+| Jobs | Postgres `jobs` table + Vercel Cron for short jobs; Supabase Edge Function background tasks for chunked calculation runs (`CHUNK_PERIODS` = 12) | ADR-020, ADR-041 |
 | AI | Anthropic Claude via `src/modules/ai/provider` only | ADR-023; model ids configurable |
 | Parsing | `papaparse` (CSV), `exceljs`/`xlsx` streaming (XLSX), `pdfjs-dist` text layer (PDF) | `IMPORT_ENGINE.md §5` |
 | Testing | Vitest, pgTAP, Playwright, AI eval harness | ADR-021 |
@@ -125,7 +127,7 @@ Dependencies point downward only. Deep imports across modules are ESLint errors 
 | Platform users authenticate with TOTP (`aal2`) before any platform or portfolio surface | Middleware + `app.is_super_admin()` (ADR-038.8) |
 | The current value of a metric is the row pointed to by `metric_current`; snapshots are append-only | Engine writer + tests (ADR-031.5) |
 | No Supabase client in React components; no money arithmetic in components | ESLint rules `no-restricted-imports`, `no-money-math-in-ui` |
-| Every service-role query is org-scoped | Lint rule `no-unscoped-service-query` + `withOrgScope` |
+| The service role exists in exactly three places: job workers (`withOrgScope`), the Storage signer, and `core/db/server-rpc.ts` for `api_server.*` calls (ADR-043); every service-role query is org-scoped | Lint rules `no-unscoped-service-query`, `no-service-role-outside-sanctioned-files` |
 | Every tenant table has RLS + composite FKs | pgTAP suite enumerates tables |
 | Every metric value has basis, assurance and data quality | DB NOT NULL + engine tests |
 | Every alert and AI finding has evidence | DB constraint + eval harness |

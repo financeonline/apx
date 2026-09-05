@@ -106,6 +106,14 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 | Quarter and year views (materialised aggregate snapshots with per-metric aggregation rules) | §8 | Post-17 | ADR-030.6, F-B-15 |
 | Receipt OCR, email-in of documents | §6 | Post-17 | |
 
+## 4a. Adopted defaults and round-2 corrections (ADR-040, ADR-043 to ADR-047)
+
+Round 2 of the red-team review (`RED_TEAM_REVIEW.md §6`) added the `api_server` schema, database-side MFA and throttles, grounding v3, and the engine corrections in ADR-047 to the MVP; none removes anything from §2.
+
+### Adopted defaults
+
+Every open product decision is implemented on its recommended default; overrides are configuration or additive changes listed in ADR-040. No MVP phase is blocked on a product answer.
+
 ## 5. MVP acceptance criteria (SOW §23, made testable)
 
 | # | SOW criterion | Observable test |

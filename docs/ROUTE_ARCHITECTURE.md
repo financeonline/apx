@@ -5,6 +5,8 @@ Consumed by: `SERVICE_ARCHITECTURE.md`, `TEST_STRATEGY.md`, `IMPLEMENTATION_PLAN
 
 > **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-026, ADR-030, ADR-037, ADR-038. Findings addressed: F-A-01, F-A-03, F-A-04, F-A-07, F-A-11, F-A-12, F-B-08, F-B-15, F-D-07, F-D-09. See `RED_TEAM_REVIEW.md`.
 
+> **Revision 1.2 (red-team round 2, 2026-09-05).** Applies ADR-043. Findings addressed: R2-A-02. Download and export handlers record access events through `api_server.record_access_event` before the signer mints a URL. See `RED_TEAM_REVIEW.md §6`.
+
 Next.js App Router. Three route families, each with its own root layout and shell. Family membership is decided by the URL prefix and enforced in middleware.
 
 ## 1. Route tree
@@ -159,8 +161,8 @@ All routes: `platform_super_admin` only with `aal2` (TOTP verified, ADR-038.8); 
 | `/api/jobs/run` | POST | `CRON_SECRET` header (constant-time compare) | — | Vercel Cron only | Drains up to N jobs per call; returns counts |
 | `/api/imports/upload` | POST multipart | session | `imports.create` for slug in form field resolved server-side | 20/h user, 100/day org | Runs `SECURITY_MODEL.md §8`; returns `source_document_id`, `batch_id` |
 | `/api/ai/chat` | POST (SSE stream) | session | `ai.use` | 10/min user; org quota | Body `{conversationId?, message, orgSlug}`; org resolved from slug |
-| `/api/documents/[documentId]/url` | GET | session | `documents.view` | 60/min | Writes audit; 60-second signed URL; 404 cross-org |
-| `/api/exports/[kind]` | GET | session | `data.export` | 10/h | `kind ∈ {ledger, bank_transactions, invoices, metrics}`; streams CSV; writes audit |
+| `/api/documents/[documentId]/url` | GET | session | `documents.view` | 60/min | Calls `api_server.record_access_event('document.downloaded')` and passes the returned audit id to the signer, which verifies it before minting the 60-second URL (ADR-043.2/5); 404 cross-org |
+| `/api/exports/[kind]` | GET | session | `data.export` | 10/h | `kind ∈ {ledger, bank_transactions, invoices, metrics}`; streams CSV using `description_normalized`; `api_server.record_access_event('export.created')` before the first byte |
 | `/api/reports/[reportId]/download` | GET | session | `reports.view` | 30/h | Resolves `report_files` by `(organization_id, id)` (404 cross-org), writes `report.downloaded`, returns a 60-second signed URL from bucket `reports` (ADR-038.7) |
 | `/api/health` | GET | none | — | 60/min IP | `{ok, version}`; no DB details |
 
