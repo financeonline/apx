@@ -463,6 +463,7 @@ Common contract (ADR-026, ADR-043, ADR-044.3): `SECURITY DEFINER`, owned by `mot
 | `my_organizations()` | every organization the caller can reach, with the role in each | One statement across the accessible set, for the switcher, `/select-organization` and the employee `/portfolio` |
 | `my_platform_role()` | platform role, status, `has_aal2` | Middleware needs to know a platform account exists in order to send an `aal1` session to `/account/mfa`; deliberately does **not** require `aal2` itself (ROUTE_ARCHITECTURE.md §8.4a) |
 | `my_profile()` | own profile plus `disabled` and a validated `last_active_org_id` | A stale or foreign `last_active_org_id` is never resolved to a slug (§8.6) |
+| `is_recalculating(org)` | one boolean: whether a `calculation.run` job is queued or running | `jobs` is readable by platform staff only, and widening that policy to render a banner would expose payloads, worker state and queue depth to a tenant. The function answers the one question the interface needs and nothing else. It keys off the JOB, never off `calculation_runs.status`, so an orphaned run row cannot leave the banner up forever (UX_ARCHITECTURE.md §7.1; F-D-03) |
 | `org_members(org)` / `org_invitations(org)` / `org_advisers(org)` | the team, pending invitations, assigned employees | Joins `profiles`, which is own-row-only under RLS; the function is the audited seam that exposes a co-member's name |
 | `org_audit_events(org, …)` | the organization's audit trail | `audit.view` holders only, paged |
 

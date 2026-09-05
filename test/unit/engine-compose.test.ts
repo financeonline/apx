@@ -264,7 +264,10 @@ describe('determinism (§1.1)', () => {
     const results = composePeriod({
       period: may, coverage: ledgerCoverage(), cells, transferLegs: [], context: context(),
     });
-    const keys = results.map((r) => `${r.key}|${r.dimensionType}|${r.dimensionId ?? ''}`);
+    // A dimension is identified by its id OR its key, depending on whether it is a row (ADR-053).
+    const keys = results.map(
+      (r) => `${r.key}|${r.dimensionType}|${r.dimensionId ?? ''}|${r.dimensionKey ?? ''}`,
+    );
     expect(new Set(keys).size).toBe(keys.length);
   });
 });

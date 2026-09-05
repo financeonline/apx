@@ -124,7 +124,14 @@ export interface MetricResult {
   readonly basis: MetricBasis;
   readonly assurance: AssuranceLevel;
   readonly dimensionType: DimensionType;
+  /** A row id, for the dimensions that are rows. NULL for `none` and `standard_category`. */
   readonly dimensionId: string | null;
+  /**
+   * The dimension identifier when it is NOT a row — a standard category name. `dimension_id` is a
+   * uuid column, and a category has no row to point at, which is also why `same_org_ref` skips that
+   * discriminator (ADR-053).
+   */
+  readonly dimensionKey?: string | null;
   readonly currency: string | null;
   /** Named inputs with their values, so a reader can redo the arithmetic by hand (§1.7). */
   readonly components: Readonly<Record<string, unknown>>;

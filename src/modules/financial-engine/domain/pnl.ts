@@ -399,6 +399,8 @@ function push(
     components: Readonly<Record<string, unknown>>;
     dimensionType?: DimensionType;
     dimensionId?: string | null;
+    /** A category name, for the one dimension that is not a row (ADR-053). */
+    dimensionKey?: string | null;
   },
 ): void {
   const isMoney = spec.unit === 'money';
@@ -413,6 +415,7 @@ function push(
     assurance: spec.figure.assurance,
     dimensionType: spec.dimensionType ?? 'none',
     dimensionId: spec.dimensionId ?? null,
+    dimensionKey: spec.dimensionKey ?? null,
     currency: isMoney ? b.input.currency : null,
     components: spec.components,
     dataQuality: quality(
@@ -955,7 +958,9 @@ function buildExpenseByCategory(b: Builder): void {
       unit: 'money',
       figure,
       dimensionType: 'standard_category',
-      dimensionId: category,
+      // A category is a name, not a row: it travels in `dimensionKey` (ADR-053).
+      dimensionId: null,
+      dimensionKey: category,
       evidence: leafEvidence(
         b.input, b.ctx, total.accountIds,
         CATEGORY_ACCOUNT_TYPE[category] === 'income' ? 'income' : 'expense',

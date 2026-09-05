@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { DataMenu, PrimaryNav } from '@/components/dashboard/nav';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { can, isSuperAdmin } from '@/core/permissions';
@@ -59,15 +60,14 @@ export default async function OrgLayout({
           <Link href={`/app/${orgSlug}/home`} className="text-sm font-semibold tracking-widest uppercase">
             MOTION
           </Link>
-          <nav className="flex items-center gap-4 text-sm">
-            <Link href={`/app/${orgSlug}/home`} className="text-ink-muted hover:text-ink">Home</Link>
+          <PrimaryNav ctx={ctx} orgSlug={orgSlug} />
+          <div className="ml-auto flex items-center gap-3 text-sm">
+            <DataMenu ctx={ctx} orgSlug={orgSlug} />
             {showSettings && (
               <Link href={`/app/${orgSlug}/settings`} className="text-ink-muted hover:text-ink">
                 Settings
               </Link>
             )}
-          </nav>
-          <div className="ml-auto flex items-center gap-3 text-sm">
             <Badge tone="neutral">{ROLE_LABELS[ctx.effectiveRole]}</Badge>
             <Link href="/select-organization" className="text-ink-muted hover:text-ink">Switch</Link>
             <Link href="/account" className="text-ink-muted hover:text-ink">Account</Link>

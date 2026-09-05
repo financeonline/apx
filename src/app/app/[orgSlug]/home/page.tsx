@@ -1,32 +1,298 @@
+import Link from 'next/link';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
-import { PageHeader, Card, CardHeader, CardBody, EmptyState } from '@/components/ui/surfaces';
+import { loadHome, loadTrend, type HomeView, type MetricCardView } from '@/modules/dashboard';
+import { PageHeader, Card, CardBody, Banner } from '@/components/ui/surfaces';
+import { ButtonLink } from '@/components/ui/button';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * Home (UX_ARCHITECTURE.md §4).
+ *
+ * Read top to bottom in bands. A reader should be able to stop after any band and still have a
+ * complete picture at that depth: the health line, then the headline numbers, then what is moving,
+ * then the supporting detail.
+ *
+ * Every figure on this page is a snapshot the engine wrote, read through the `metric_current`
+ * pointer and formatted by `core/money`. Nothing here computes a number, and the
+ * `no-arithmetic-in-components` lint rule fails the build if that ever changes.
+ */
+
+/** One status badge, or none. Basis and warnings go in the tooltip, never as a second badge (§4). */
+function StatusBadge({ card }: { card: MetricCardView }) {
+  const { status } = card;
+  if (status.kind === 'none' || status.label === null) return null;
+
+  const tone =
+    status.kind === 'check' ? 'bg-warn-soft text-warn'
+    : status.kind === 'estimate' ? 'bg-surface-sunken text-ink-muted'
+    : status.kind === 'partial' ? 'bg-warn-soft text-warn'
+    : 'bg-surface-sunken text-ink-muted';
+
+  return (
+    <span
+      className={`inline-flex items-center rounded-[0.375rem] px-2 py-0.5 text-xs ${tone}`}
+      title={status.tooltip}
+    >
+      {status.label}
+    </span>
+  );
+}
+
+/**
+ * The change line.
+ *
+ * Colour carries meaning here and only here: green for a favourable movement, rust for an
+ * unfavourable one, and neutral ink when the direction has no inherent meaning. Direction is
+ * metric-aware and arrives on the view model — a fall in costs is good news (§4).
+ */
+function ChangeLine({ card }: { card: MetricCardView }) {
+  if (!card.change) {
+    return <p className="mt-1 text-sm text-ink-faint">no comparison yet</p>;
+  }
+  if (card.change.basisDiffers) {
+    // ADR-030: the two months were computed from different sources, so a percentage would compare
+    // two different things. The amount is shown, greyed, with the caveat instead.
+    return (
+      <p className="mt-1 text-sm text-ink-faint">
+        <span className="font-mono">{card.change.amount}</span>{' '}
+        <span>compared on a different basis</span>
+      </p>
+    );
+  }
+
+  const tone = card.change.favourable === null ? 'text-ink-muted'
+    : card.change.favourable ? 'text-accent' : 'text-danger';
+
+  return <p className={`mt-1 text-sm ${tone}`}>{card.change.text}</p>;
+}
+
+function MetricCard({ card }: { card: MetricCardView }) {
+  return (
+    <Card>
+      <CardBody className="p-4">
+        <div className="flex items-start justify-between gap-2">
+          <h3 className="text-sm text-ink-muted" title={card.technicalLabel}>{card.label}</h3>
+          <StatusBadge card={card} />
+        </div>
+
+        <p className="mt-2 font-mono text-2xl text-ink tabular-nums" title={card.basisText}>
+          {card.value}
+        </p>
+
+        {card.secondaryLine ? (
+          <p className="mt-1 text-sm text-ink-muted">
+            {card.secondaryLine.label}:{' '}
+            <span className="font-mono tabular-nums">{card.secondaryLine.value}</span>
+          </p>
+        ) : null}
+
+        <ChangeLine card={card} />
+
+        {/* Every number carries a "Why?" affordance opening the evidence drawer (§4). */}
+        <Link
+          href={card.whyHref}
+          className="mt-3 inline-block text-sm text-accent underline underline-offset-2"
+        >
+          Why?
+        </Link>
+      </CardBody>
+    </Card>
+  );
+}
+
+function HeadlineNumbers({ view }: { view: HomeView }) {
+  return (
+    <section aria-labelledby="headline-numbers">
+      <h2 id="headline-numbers" className="sr-only">The headline numbers</h2>
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
+        {view.cards.map((card) => <MetricCard key={card.metricKey} card={card} />)}
+      </div>
+    </section>
+  );
+}
+
+/** §6, exact copy. A first-run page says what to do next, not that something is missing. */
+function FirstRun({ orgSlug, canImport }: { orgSlug: string; canImport: boolean }) {
+  return (
+    <Card>
+      <CardBody className="p-8">
+        <h2 className="font-serif text-2xl text-ink">Let’s get your first numbers on screen.</h2>
+        <p className="mt-3 max-w-prose text-ink-muted">
+          MOTION works from files you already have. Upload a bank statement (CSV or PDF) or an export
+          from your accounting software and we’ll show you how the business is doing, what’s changed
+          and what needs attention.
+        </p>
+        <p className="mt-3 max-w-prose text-sm italic text-ink-faint">
+          Start with a bank statement to see your cash position. Add a ledger export, trial balance
+          or invoice list when you can, and we’ll add profit and customer figures.
+        </p>
+        {canImport ? (
+          <div className="mt-6 flex items-center gap-4">
+            <ButtonLink href={`/app/${orgSlug}/data/imports/new`}>Add data</ButtonLink>
+            <Link href="/legal/terms" className="text-sm text-accent underline underline-offset-2">
+              What files can I upload?
+            </Link>
+          </div>
+        ) : null}
+      </CardBody>
+    </Card>
+  );
+}
+
+/** §6, exact copy. Bank data only: say what it shows, and name the one upload that adds profit. */
+function BankOnlyIntro({ orgSlug, canImport }: { orgSlug: string; canImport: boolean }) {
+  return (
+    <Card>
+      <CardBody className="p-6">
+        <h2 className="font-serif text-xl text-ink">Here’s what your bank statement tells us.</h2>
+        <p className="mt-2 max-w-prose text-ink-muted">
+          Money in, money out and the change in cash. To see your cash balance, enter the balance at
+          the start of the statement. To see profit and customers, add a ledger export or your
+          invoice lists.
+        </p>
+        {canImport ? (
+          <div className="mt-4 flex items-center gap-4">
+            <ButtonLink href={`/app/${orgSlug}/money/cash`}>Enter opening balance</ButtonLink>
+            <Link
+              href={`/app/${orgSlug}/data/imports/new`}
+              className="text-sm text-accent underline underline-offset-2"
+            >
+              Add data
+            </Link>
+          </div>
+        ) : null}
+      </CardBody>
+    </Card>
+  );
+}
 
 export default async function HomePage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
+  const canImport = can(ctx, 'imports.create');
+
+  const state = await loadHome(ctx.db, ctx.orgId!, orgSlug, ctx.requestId);
+
+  if (state.kind === 'first_run') {
+    return (
+      <>
+        <PageHeader title="How is my business doing?" />
+        <div className="mt-8"><FirstRun orgSlug={orgSlug} canImport={canImport} /></div>
+      </>
+    );
+  }
+
+  if (state.kind === 'awaiting_review') {
+    return (
+      <>
+        <PageHeader title="How is my business doing?" />
+        <div className="mt-8">
+          <Card>
+            <CardBody className="p-8">
+              <h2 className="font-serif text-2xl text-ink">Your import is waiting for review.</h2>
+              <p className="mt-3 max-w-prose text-ink-muted">
+                We found {state.rowCount} rows in{' '}
+                <span className="font-mono">{state.filename}</span>. Check the {state.issueCount}{' '}
+                {state.issueCount === 1 ? 'item' : 'items'} we flagged, then confirm, and your
+                numbers will appear here.
+              </p>
+              <div className="mt-6">
+                <ButtonLink href={`/app/${orgSlug}/data/imports/${state.batchId}`}>
+                  Review import
+                </ButtonLink>
+              </div>
+            </CardBody>
+          </Card>
+        </div>
+      </>
+    );
+  }
+
+  const { view } = state;
+  const trend = await loadTrend(ctx.db, ctx.orgId!, view.periods, ctx.requestId);
 
   return (
     <>
-      <PageHeader
-        title="How is my business doing?"
-        description="Your health score, headline numbers and what needs attention will appear here."
-      />
+      <PageHeader title="How is my business doing?" description={view.period.label} />
+
       <div className="mt-8 flex flex-col gap-6">
-        <Card>
-          <CardHeader title="No data yet" />
-          <CardBody>
-            <EmptyState
-              title="There is nothing to show until you add data"
-              actionHref={can(ctx, 'settings.manage') ? `/app/${orgSlug}/settings/team` : undefined}
-              actionLabel={can(ctx, 'settings.manage') ? 'Invite your team' : undefined}
+        {/*
+          §7.1: the banner keys off a queued or running job, never off a run row, so an orphaned run
+          cannot leave it up forever (F-D-03). Stale figures stay visible and tagged rather than
+          being hidden — a reader with an old number and a warning is better served than one with
+          a blank page.
+        */}
+        {view.recalculating ? (
+          <Banner tone="info" title="Updating your numbers…">
+            The figures below are from the last completed calculation and may change shortly.
+          </Banner>
+        ) : null}
+
+        {state.kind === 'bank_only' ? (
+          <BankOnlyIntro orgSlug={orgSlug} canImport={canImport} />
+        ) : null}
+
+        {/* Level 1: the basis and freshness line. Level 1's health card arrives with Phase 8. */}
+        <p className="text-sm text-ink-muted">{view.basisLine}</p>
+
+        {/*
+          §4: a month that is not finished gets one slim line and nothing more — no score, no
+          comparisons, no alerts. A part-month compared with a whole one misleads.
+        */}
+        {view.partialMonth ? (
+          <p className="text-sm text-ink-muted">
+            <span className="text-ink">{view.partialMonth.label}:</span>{' '}
+            {view.partialMonth.summary}{' '}
+            <Link
+              href={view.partialMonth.href}
+              className="text-accent underline underline-offset-2"
             >
-              MOTION reads the files you already have — bank statements, ledgers and invoice lists —
-              and turns them into figures you can check line by line. Importing is the next thing we
-              are building.
-            </EmptyState>
+              See cash
+            </Link>
+          </p>
+        ) : null}
+
+        <HeadlineNumbers view={view} />
+
+        {/* Level 3: what is moving. The trend table is the accessible form (§11). */}
+        <Card>
+          <CardBody className="p-4">
+            <h2 className="font-serif text-lg text-ink">What is moving</h2>
+            <table className="mt-4 w-full text-sm">
+              <caption className="sr-only">
+                Revenue, profit and cash over the last twelve months
+              </caption>
+              <thead>
+                <tr className="border-b border-line text-left text-ink-muted">
+                  <th scope="col" className="py-2 pr-4 font-normal">Month</th>
+                  {trend.map((series) => (
+                    <th key={series.key} scope="col" className="py-2 pr-4 font-normal">
+                      {series.label}
+                    </th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody>
+                {(trend[0]?.points ?? []).map((point, index) => (
+                  <tr key={point.period} className="border-b border-line/60">
+                    <th scope="row" className="py-2 pr-4 font-normal text-ink-muted">
+                      {point.label}
+                    </th>
+                    {trend.map((series) => {
+                      const value = series.points[index]?.value ?? null;
+                      return (
+                        <td key={series.key} className="py-2 pr-4 font-mono tabular-nums text-ink">
+                          {/* A month with no figure is a gap, never a zero (§4). */}
+                          {value === null ? '—' : value}
+                        </td>
+                      );
+                    })}
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </CardBody>
         </Card>
       </div>

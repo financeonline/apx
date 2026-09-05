@@ -68,6 +68,7 @@ function serialiseSnapshot(periodId: string, result: MetricResult): Record<strin
     metric_key: result.key,
     dimension_type: result.dimensionType,
     dimension_id: result.dimensionId,
+    dimension_key: result.dimensionKey ?? null,
     value: result.value,
     unit: result.unit,
     currency: result.currency,

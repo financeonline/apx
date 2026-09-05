@@ -135,14 +135,28 @@ function run(input: PnlInput): readonly MetricResult[] {
   return computePnl(input, CONTEXT, resolver);
 }
 
-function pick(results: readonly MetricResult[], key: string, dimensionId: string | null = null) {
-  const found = results.find((r) => r.key === key && r.dimensionId === dimensionId);
-  if (found === undefined) throw new Error(`no result for ${key}/${dimensionId ?? '-'}`);
+/**
+ * Finds a result by key and dimension.
+ *
+ * A dimension is identified by `dimensionId` when it is a row (an account, a counterparty) and by
+ * `dimensionKey` when it is not (a standard category has no row to point at, and `dimension_id` is
+ * a uuid column — ADR-053). The helper accepts either so a caller can name a category or an account
+ * without knowing which column carries it.
+ */
+function matches(r: MetricResult, key: string, dimension: string | null): boolean {
+  if (r.key !== key) return false;
+  const identity = r.dimensionId ?? r.dimensionKey ?? null;
+  return identity === dimension;
+}
+
+function pick(results: readonly MetricResult[], key: string, dimension: string | null = null) {
+  const found = results.find((r) => matches(r, key, dimension));
+  if (found === undefined) throw new Error(`no result for ${key}/${dimension ?? '-'}`);
   return found;
 }
 
-function maybe(results: readonly MetricResult[], key: string, dimensionId: string | null = null) {
-  return results.find((r) => r.key === key && r.dimensionId === dimensionId);
+function maybe(results: readonly MetricResult[], key: string, dimension: string | null = null) {
+  return results.find((r) => matches(r, key, dimension));
 }
 
 const FULL_MONTH: Partial<Record<StandardCategory, string>> = {
