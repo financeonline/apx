@@ -69,6 +69,8 @@ jobs:
         run: supabase start
       - name: pgTAP — RLS, policies, triggers, api.* per role
         run: supabase test db
+      - name: schema and documentation agree (Phase 4 exit gate)
+        run: npx tsx scripts/check-schema-drift.ts
       - name: write local env for integration tests
         run: |
           {

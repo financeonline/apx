@@ -98,3 +98,71 @@ export async function enqueueServerJob(
   if (error) throw toMotionError(error, actor?.requestId);
   return data as string;
 }
+
+// ---------------------------------------------------------------------------
+// Job queue (ADR-013, ADR-044.6). The worker's two api_server calls live here rather than in the
+// worker, because this file is the sanctioned home for the server-asserted surface — a job claim
+// asserts "this worker now owns this job", which is a fact about the server, not a user intent.
+// ---------------------------------------------------------------------------
+
+export interface ClaimedJobRow {
+  readonly jobId: string;
+  /** NULL for platform-level jobs. This — never the payload — is what scopes the work. */
+  readonly organizationId: string | null;
+  readonly jobType: string;
+  readonly payload: Record<string, unknown>;
+  readonly requestedBy: string | null;
+  readonly attempts: number;
+  readonly maxAttempts: number;
+}
+
+interface RawClaim {
+  job_id: string;
+  organization_id: string | null;
+  job_type: string;
+  payload: Record<string, unknown> | null;
+  requested_by: string | null;
+  attempts: number;
+  max_attempts: number;
+}
+
+/** Atomically claim one runnable job, or return null when the queue is empty. */
+export async function claimJob(workerId: string): Promise<ClaimedJobRow | null> {
+  const { data, error } = await serverClient()
+    .schema('api_server')
+    .rpc('claim_job', { p_worker: workerId });
+
+  if (error) throw new Error(`could not claim a job: ${error.message}`);
+
+  const row = (data as RawClaim[] | null)?.[0];
+  if (!row) return null;
+
+  return {
+    jobId: row.job_id,
+    organizationId: row.organization_id,
+    jobType: row.job_type,
+    payload: row.payload ?? {},
+    requestedBy: row.requested_by,
+    attempts: row.attempts,
+    maxAttempts: row.max_attempts,
+  };
+}
+
+/**
+ * Record a terminal outcome. Deliberately a separate call from the claim: if the worker dies in
+ * between, the job stays `running` and is reclaimed after its budget, rather than being lost.
+ */
+export async function finishJob(
+  jobId: string,
+  status: 'succeeded' | 'failed' | 'dead' | 'deferred_upstream',
+  result: Record<string, unknown> = {},
+  errorMessage: string | null = null,
+): Promise<void> {
+  const { error } = await serverClient()
+    .schema('api_server')
+    .rpc('finish_job', { p_job: jobId, p_status: status, p_result: result, p_error: errorMessage });
+
+  // Must be loud: an unrecorded outcome leaves the job `running`, so it will be reclaimed and the
+  // work may run twice. Swallowing this would hide a real duplicate-execution risk.
+  if (error) throw new Error(`could not record the outcome of job ${jobId}: ${error.message}`);
+}

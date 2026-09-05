@@ -8,7 +8,18 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(93);
+-- Five of the sections below emit ONE assertion per non-partition table in `public`, so the plan
+-- cannot be a literal: it changes every time a migration adds a table, and a stale literal turns a
+-- growing schema into a "Bad plan" parse error rather than a pass or a failure. Twenty-eight
+-- assertions are fixed; the rest are 5 × the table count, read from the catalogue with the same
+-- predicate the loops use.
+select plan(
+  5 * (select count(*)::int
+         from pg_catalog.pg_class c
+         join pg_catalog.pg_namespace n on n.oid = c.relnamespace
+        where n.nspname = 'public' and c.relkind in ('r', 'p')
+          and not exists (select 1 from pg_catalog.pg_inherits i where i.inhrelid = c.oid))
+  + 28);
 
 -- ---------------------------------------------------------------------------
 -- 1. Row Level Security: ENABLE **and** FORCE on every table in `public`.
@@ -122,8 +133,12 @@ select is(
   (select count(*)::int from pg_catalog.pg_proc p
      join pg_catalog.pg_namespace n on n.oid = p.pronamespace
     where n.nspname = 'app' and not p.prosecdef
-      and p.proname not in ('ceiling_allows', 'job_max_runtime', 'jwt', 'role_claim',
-                            'role_rank', 'slugify', 'uid')),
+      -- The pure helpers: catalogue-free, table-free, deterministic. A definer context would buy
+      -- them nothing. `fiscal_position`, `normalize_name` and `standard_category_label` joined the
+      -- list with the Phase 4 financial schema and are pure in exactly the same sense.
+      and p.proname not in ('ceiling_allows', 'fiscal_position', 'job_max_runtime', 'jwt',
+                            'normalize_name', 'role_claim', 'role_rank', 'slugify',
+                            'standard_category_label', 'uid')),
   0, 'every app.* function that touches a table is SECURITY DEFINER');
 
 select is(

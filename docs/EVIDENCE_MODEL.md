@@ -96,7 +96,7 @@ A `query_descriptor` is a declarative, versioned selection that the resolver re-
     "metric_keys": ["revenue"],
     "dimension": { "type": "counterparty", "id": "uuid" }
   },
-  "as_of": { "calculation_run_id": "uuid" },
+  "as_of": { "calculation_run_id": "uuid", "aggregated_at": "2026-04-01T09:15:00Z" },
   "order": [{ "field": "amount", "dir": "desc" }, { "field": "id", "dir": "asc" }],
   "limit": 500
 }

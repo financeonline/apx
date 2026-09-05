@@ -1,0 +1,363 @@
+import { ValidationError } from '@/core/errors';
+import type {
+  DescriptorFilterKey,
+  DescriptorFilters,
+  DescriptorTable,
+  QueryDescriptorV1,
+} from '../domain/descriptor';
+
+/**
+ * The descriptor compiler (EVIDENCE_MODEL.md §3.1).
+ *
+ * "Compiles filters into a fixed query-builder mapping — an allow-list of columns per table; no
+ * string interpolation." Two consequences that are easy to lose sight of:
+ *
+ *  * A filter key that is not allowed for the target table is a **ValidationError**, never a
+ *    silently ignored key. A dropped filter widens a selection, and a widened selection stops
+ *    reconciling to the metric it is supposed to evidence.
+ *  * Nothing here builds a string. Column names come from the per-table tables below; values are
+ *    passed to the query builder as values. There is no `.or('...')` anywhere: the one condition
+ *    that would need it (an invoice open at a date: `paid_date IS NULL OR paid_date > d`) is
+ *    emitted as a post-filter instead, evaluated in the resolver against fetched rows.
+ *
+ * `compileDescriptor` is a pure function returning a plain object, so the compilation of a fixture
+ * descriptor can be asserted — and asserted to be identical twice — without a database.
+ */
+
+export type FilterOp = 'eq' | 'neq' | 'in' | 'lt' | 'lte' | 'gt' | 'isNull';
+
+export interface CompiledFilter {
+  readonly column: string;
+  readonly op: FilterOp;
+  readonly value: string | number | boolean | readonly string[] | null;
+}
+
+/**
+ * A condition the database cannot express without either a `.or()` string or history the row does
+ * not carry. Applied in the resolver, after the as-of state and category history are known.
+ */
+export type PostFilter =
+  /** §3 / FINANCIAL_ENGINE.md §3 `receivables`: unpaid at the date (`paid_date > d` counts as unpaid). */
+  | { readonly kind: 'open_at'; readonly date: string }
+  /** ADR-034: with `as_of` the category comes from `category_history`, not the current column. */
+  | { readonly kind: 'as_of_category_in'; readonly ids: readonly string[] }
+  /** ADR-028: only `cash_transfer` legs are excluded; a card repayment is real cash movement. */
+  | { readonly kind: 'as_of_exclude_cash_transfers' };
+
+export interface CompiledOrder {
+  readonly column: string;
+  readonly ascending: boolean;
+}
+
+export interface CompiledQuery {
+  readonly table: DescriptorTable;
+  /** Explicit select list; never `*`. */
+  readonly columns: readonly string[];
+  readonly filters: readonly CompiledFilter[];
+  readonly postFilters: readonly PostFilter[];
+  readonly order: readonly CompiledOrder[];
+  /** The column summed into `total`, or `null` when a sum would be meaningless. */
+  readonly amountColumn: string | null;
+  readonly asOf: { readonly calculationRunId: string; readonly aggregatedAt: string } | null;
+  readonly limit: number;
+  /** True for the four tables with a `record_status_events` lifecycle. */
+  readonly hasRecordLifecycle: boolean;
+}
+
+/** The page size used when the descriptor omits `limit`. §6 shows "500 of 1,238 rows". */
+export const DEFAULT_DESCRIPTOR_LIMIT = 500;
+
+const CASH_TRANSFER = 'cash_transfer';
+
+interface TableSpec {
+  readonly columns: readonly string[];
+  readonly filters: readonly DescriptorFilterKey[];
+  readonly orderColumns: readonly string[];
+  readonly amountColumn: string | null;
+  readonly hasRecordLifecycle: boolean;
+}
+
+/**
+ * The allow-list. A column absent from `columns` is never selected, a filter key absent from
+ * `filters` is a ValidationError, and an order field absent from `orderColumns` is a
+ * ValidationError.
+ *
+ * `bank_transactions.description_raw` and `counterparty_name_raw` are deliberately **not** here:
+ * SELECT on those columns is revoked from `authenticated` because they carry a third party's sort
+ * code and account number verbatim (ADR-038.4, ADR-044.2). Evidence shows
+ * `description_normalized`.
+ */
+const TABLES: Record<DescriptorTable, TableSpec> = {
+  ledger_entries: {
+    columns: [
+      'id', 'organization_id', 'entry_date', 'period_id', 'account_id', 'counterparty_id',
+      'direction', 'amount', 'currency', 'description', 'reference', 'record_status',
+      'assurance_level', 'superseded_by',
+    ],
+    filters: ['period_ids', 'account_ids', 'counterparty_ids', 'direction'],
+    orderColumns: ['id', 'entry_date', 'amount', 'created_at'],
+    // Unsigned: the sign lives in `direction` (see the ledger_entries table comment). Σ amount is
+    // therefore Σ magnitude, which is what a direction-filtered driver list reconciles to.
+    amountColumn: 'amount',
+    hasRecordLifecycle: true,
+  },
+  bank_transactions: {
+    columns: [
+      'id', 'organization_id', 'transaction_date', 'period_id', 'bank_account_id',
+      'counterparty_id', 'category_account_id', 'amount', 'currency', 'description_normalized',
+      'reference', 'is_transfer', 'transfer_kind', 'record_status', 'assurance_level',
+      'superseded_by',
+    ],
+    filters: [
+      'period_ids', 'bank_account_ids', 'category_account_ids', 'counterparty_ids', 'direction',
+      'exclude_cash_transfers',
+    ],
+    orderColumns: ['id', 'transaction_date', 'amount', 'created_at'],
+    amountColumn: 'amount',
+    hasRecordLifecycle: true,
+  },
+  invoices: {
+    columns: [
+      'id', 'organization_id', 'invoice_type', 'counterparty_id', 'invoice_number', 'issue_date',
+      'due_date', 'period_id', 'total_amount', 'amount_paid', 'balance_due', 'currency', 'status',
+      'paid_date', 'description', 'record_status', 'assurance_level', 'superseded_by',
+    ],
+    filters: ['period_ids', 'counterparty_ids', 'invoice_types', 'open_as_of', 'overdue_as_of'],
+    orderColumns: ['id', 'issue_date', 'due_date', 'total_amount', 'balance_due', 'created_at'],
+    // See the module note in services/resolve.ts: the v1 invoice filters are the receivables /
+    // payables ones, whose metric is Σ balance_due (FINANCIAL_ENGINE.md §3, `receivables`).
+    amountColumn: 'balance_due',
+    hasRecordLifecycle: true,
+  },
+  period_balances: {
+    columns: [
+      'id', 'organization_id', 'period_start', 'period_id', 'account_id', 'closing_balance',
+      'currency', 'balance_kind', 'balance_basis', 'record_status', 'assurance_level',
+      'superseded_by',
+    ],
+    filters: ['period_ids', 'account_ids'],
+    orderColumns: ['id', 'period_start', 'closing_balance', 'created_at'],
+    amountColumn: 'closing_balance',
+    hasRecordLifecycle: true,
+  },
+  metric_snapshots: {
+    columns: [
+      'id', 'organization_id', 'calculation_run_id', 'period_id', 'metric_key', 'dimension_type',
+      'dimension_id', 'value', 'unit', 'currency', 'basis', 'assurance_level', 'created_at',
+    ],
+    filters: ['period_ids', 'metric_keys', 'dimension'],
+    orderColumns: ['id', 'created_at', 'value', 'metric_key', 'period_id'],
+    // A snapshot selection mixes units (money, ratio, count, days). Summing them would produce a
+    // number that means nothing, so `total` is null and the drawer reconciles per component.
+    amountColumn: null,
+    hasRecordLifecycle: false,
+  },
+};
+
+/** Emission order for filters, fixed so two compilations of one descriptor are byte-identical. */
+const FILTER_ORDER: readonly DescriptorFilterKey[] = [
+  'period_ids',
+  'account_ids',
+  'counterparty_ids',
+  'bank_account_ids',
+  'category_account_ids',
+  'invoice_types',
+  'direction',
+  'exclude_cash_transfers',
+  'open_as_of',
+  'overdue_as_of',
+  'metric_keys',
+  'dimension',
+];
+
+function reject(message: string, path: string): never {
+  throw new ValidationError('That evidence descriptor cannot be compiled.', [{ path, message }]);
+}
+
+function byCodeUnit(a: string, b: string): number {
+  return a < b ? -1 : a > b ? 1 : 0;
+}
+
+/** Sorted for the same reason the hash sorts: id order must not change the compiled query. */
+function sortedIds(values: readonly string[]): readonly string[] {
+  return [...values].sort(byCodeUnit);
+}
+
+class FilterSet {
+  private readonly seen = new Set<string>();
+  private readonly out: CompiledFilter[] = [];
+
+  add(filter: CompiledFilter): void {
+    const key = `${filter.column}|${filter.op}|${JSON.stringify(filter.value)}`;
+    if (this.seen.has(key)) return;
+    this.seen.add(key);
+    this.out.push(filter);
+  }
+
+  list(): readonly CompiledFilter[] {
+    return this.out;
+  }
+}
+
+/**
+ * "Open at date D": the invoice existed by D, is not void, and was not paid on or before D.
+ * FINANCIAL_ENGINE.md §3 `receivables` — "if `paid_date > asOf` the invoice is treated as unpaid at
+ * `asOf`". The nullable half of that test is the post-filter.
+ */
+function addOpenAt(filters: FilterSet, post: PostFilter[], date: string): void {
+  filters.add({ column: 'issue_date', op: 'lte', value: date });
+  filters.add({ column: 'status', op: 'neq', value: 'void' });
+  post.push({ kind: 'open_at', date });
+}
+
+function compileFilter(
+  key: DescriptorFilterKey,
+  descriptor: QueryDescriptorV1,
+  filters: FilterSet,
+  post: PostFilter[],
+): void {
+  const f: DescriptorFilters = descriptor.filters;
+  const asOf = descriptor.as_of;
+
+  switch (key) {
+    case 'period_ids':
+      if (f.period_ids) filters.add({ column: 'period_id', op: 'in', value: sortedIds(f.period_ids) });
+      return;
+    case 'account_ids':
+      if (f.account_ids) filters.add({ column: 'account_id', op: 'in', value: sortedIds(f.account_ids) });
+      return;
+    case 'counterparty_ids':
+      if (f.counterparty_ids) {
+        filters.add({ column: 'counterparty_id', op: 'in', value: sortedIds(f.counterparty_ids) });
+      }
+      return;
+    case 'bank_account_ids':
+      if (f.bank_account_ids) {
+        filters.add({ column: 'bank_account_id', op: 'in', value: sortedIds(f.bank_account_ids) });
+      }
+      return;
+    case 'category_account_ids':
+      if (!f.category_account_ids) return;
+      // ADR-034: with as_of the category in force comes from category_history, so it cannot be a
+      // column predicate — the row's current category may be a later recategorisation.
+      if (asOf) post.push({ kind: 'as_of_category_in', ids: sortedIds(f.category_account_ids) });
+      else {
+        filters.add({
+          column: 'category_account_id',
+          op: 'in',
+          value: sortedIds(f.category_account_ids),
+        });
+      }
+      return;
+    case 'invoice_types':
+      if (f.invoice_types) {
+        filters.add({ column: 'invoice_type', op: 'in', value: sortedIds(f.invoice_types) });
+      }
+      return;
+    case 'direction': {
+      const direction = f.direction;
+      if (!direction) return;
+      if (descriptor.table === 'ledger_entries') {
+        if (direction !== 'debit' && direction !== 'credit') {
+          reject(
+            `direction '${direction}' is a cash direction; ledger_entries takes 'debit' or 'credit'`,
+            'filters.direction',
+          );
+        }
+        filters.add({ column: 'direction', op: 'eq', value: direction });
+        return;
+      }
+      // bank_transactions: the amount is signed and the statement's own semantics are inflow /
+      // outflow, so direction is a predicate on the sign rather than on a column.
+      if (direction !== 'inflow' && direction !== 'outflow') {
+        reject(
+          `direction '${direction}' is a ledger direction; bank_transactions takes 'inflow' or 'outflow'`,
+          'filters.direction',
+        );
+      }
+      filters.add({ column: 'amount', op: direction === 'inflow' ? 'gt' : 'lt', value: 0 });
+      return;
+    }
+    case 'exclude_cash_transfers':
+      if (f.exclude_cash_transfers !== true) return;
+      if (asOf) post.push({ kind: 'as_of_exclude_cash_transfers' });
+      else filters.add({ column: 'transfer_kind', op: 'neq', value: CASH_TRANSFER });
+      return;
+    case 'open_as_of':
+      if (f.open_as_of) addOpenAt(filters, post, f.open_as_of);
+      return;
+    case 'overdue_as_of':
+      if (!f.overdue_as_of) return;
+      addOpenAt(filters, post, f.overdue_as_of);
+      // `due_date < d` also drops invoices with no due date, which is the documented behaviour:
+      // they are excluded and counted in data_quality.warnings.no_due_dates (FINANCIAL_ENGINE.md §3).
+      filters.add({ column: 'due_date', op: 'lt', value: f.overdue_as_of });
+      return;
+    case 'metric_keys':
+      if (f.metric_keys) filters.add({ column: 'metric_key', op: 'in', value: [...f.metric_keys] });
+      return;
+    case 'dimension':
+      if (!f.dimension) return;
+      filters.add({ column: 'dimension_type', op: 'eq', value: f.dimension.type });
+      filters.add({ column: 'dimension_id', op: 'eq', value: f.dimension.id });
+      return;
+  }
+}
+
+export function compileDescriptor(descriptor: QueryDescriptorV1): CompiledQuery {
+  const spec = TABLES[descriptor.table];
+  const allowed = new Set<DescriptorFilterKey>(spec.filters);
+
+  for (const key of Object.keys(descriptor.filters) as DescriptorFilterKey[]) {
+    if (descriptor.filters[key] === undefined) continue;
+    if (!allowed.has(key)) {
+      reject(`filter '${key}' is not available on ${descriptor.table}`, `filters.${key}`);
+    }
+  }
+
+  const filters = new FilterSet();
+  const post: PostFilter[] = [];
+
+  if (descriptor.as_of && descriptor.table === 'metric_snapshots') {
+    // §3: pin the run. This is the whole reason metric_snapshots may not be selected without as_of.
+    filters.add({
+      column: 'calculation_run_id',
+      op: 'eq',
+      value: descriptor.as_of.calculation_run_id,
+    });
+  }
+
+  if (spec.hasRecordLifecycle && !descriptor.as_of) {
+    // §3: without as_of the resolver returns currently accepted, non-superseded rows. With as_of no
+    // status predicate is emitted at all — the events decide, because a row rejected today may have
+    // been accepted then, and a row accepted today may not have existed yet.
+    filters.add({ column: 'record_status', op: 'eq', value: 'accepted' });
+    filters.add({ column: 'superseded_by', op: 'isNull', value: null });
+  }
+
+  for (const key of FILTER_ORDER) compileFilter(key, descriptor, filters, post);
+
+  const order: CompiledOrder[] = descriptor.order.map((entry) => {
+    if (!spec.orderColumns.includes(entry.field)) {
+      reject(`order field '${entry.field}' is not available on ${descriptor.table}`, 'order');
+    }
+    return { column: entry.field, ascending: entry.dir === 'asc' };
+  });
+
+  return {
+    table: descriptor.table,
+    columns: spec.columns,
+    filters: filters.list(),
+    postFilters: post,
+    order,
+    amountColumn: spec.amountColumn,
+    asOf: descriptor.as_of
+      ? {
+          calculationRunId: descriptor.as_of.calculation_run_id,
+          aggregatedAt: descriptor.as_of.aggregated_at,
+        }
+      : null,
+    limit: descriptor.limit ?? DEFAULT_DESCRIPTOR_LIMIT,
+    hasRecordLifecycle: spec.hasRecordLifecycle,
+  };
+}
