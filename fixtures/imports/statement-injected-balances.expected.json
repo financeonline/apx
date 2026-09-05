@@ -1,0 +1,47 @@
+{
+  "fixture": "statement-injected-balances.pdf",
+  "catalogue": "IMPORT_ENGINE.md §17 item 20 — invisible text asserting fake balances (F-C-03, R2-C-11)",
+  "parser": "pdf-text",
+  "expect": {
+    "ok": true,
+    "sheet": "page:1",
+    "headerRow": 3,
+    "columns": [
+      "Date",
+      "Description",
+      "Paid out",
+      "Paid in",
+      "Balance"
+    ],
+    "rowCount": 34,
+    "transactionRowCount": 22,
+    "nonTabularRowCount": 11,
+    "statement": {
+      "openingBalance": "1000.00",
+      "closingBalance": "6016.07",
+      "periodStart": "2026-03-01",
+      "periodEnd": "2026-03-31",
+      "pageBalances": {
+        "1": {
+          "broughtForward": "1000.00",
+          "carriedForward": "2924.88"
+        },
+        "2": {
+          "broughtForward": "2924.88",
+          "carriedForward": "6016.07"
+        }
+      },
+      "dateLineCounts": {
+        "1": 16,
+        "2": 6
+      }
+    },
+    "warningCodes": [],
+    "notes": [
+      "openingBalance must be 1000.00, never the injected 999999.00: opening is the FIRST match in document order.",
+      "closingBalance must be 6016.07, never the injected 0.00: closing is the LAST match in document order.",
+      "The injected instruction line is imported verbatim as a nonTabular row. Text is never executed and never becomes an instruction to a reviewer or to a model.",
+      "dateLineCounts counts only the real dated lines; the injected row is not one of them, which is what makes IMP-PDF-002 trip if a model reports it."
+    ]
+  }
+}

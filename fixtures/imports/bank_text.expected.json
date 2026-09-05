@@ -1,0 +1,45 @@
+{
+  "fixture": "bank_text.pdf",
+  "catalogue": "IMPORT_ENGINE.md §17 item 10 — text-layer statement matching G1",
+  "parser": "pdf-text",
+  "expect": {
+    "ok": true,
+    "sheet": "page:1",
+    "headerRow": 3,
+    "columns": [
+      "Date",
+      "Description",
+      "Paid out",
+      "Paid in",
+      "Balance"
+    ],
+    "rowCount": 36,
+    "transactionRowCount": 28,
+    "nonTabularRowCount": 7,
+    "statement": {
+      "openingBalance": "1000.00",
+      "closingBalance": "7320.14",
+      "periodStart": "2026-03-01",
+      "periodEnd": "2026-03-31",
+      "pageBalances": {
+        "1": {
+          "broughtForward": "1000.00",
+          "carriedForward": "2924.88"
+        },
+        "2": {
+          "broughtForward": "2924.88"
+        }
+      },
+      "dateLineCounts": {
+        "1": 16,
+        "2": 12
+      }
+    },
+    "warningCodes": [],
+    "notes": [
+      "Opening is the FIRST match in document order and closing the LAST (ADR-046.3).",
+      "Page 1 carries forward the figure page 2 brings forward, so no IMP-BAL-006 is raised.",
+      "Page 2 ends \"Closing balance\", which is a closing capture but not a carried-forward one."
+    ]
+  }
+}

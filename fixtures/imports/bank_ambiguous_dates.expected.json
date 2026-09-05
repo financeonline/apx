@@ -1,0 +1,32 @@
+{
+  "fixture": "bank_ambiguous_dates.csv",
+  "catalogue": 7,
+  "source": "IMPORT_ENGINE.md \u00a717 item 7; \u00a78.1 IMP-DATE-003",
+  "description": "Every date has day and month <= 12, so day-first and month-first readings both parse and disagree.",
+  "validation": {
+    "ok": true,
+    "encoding": "utf-8",
+    "delimiter": ",",
+    "codes": []
+  },
+  "parse": {
+    "physicalLines": 13,
+    "nonEmptySourceLines": 13,
+    "rowCount": 13,
+    "headerRow": 1,
+    "headerConfirmationRequired": false,
+    "columns": [
+      "Date",
+      "Description",
+      "Amount",
+      "Balance"
+    ],
+    "nonTabularRowNumbers": [],
+    "firstDataSourceRef": "csv:row:2",
+    "warningCodes": []
+  },
+  "downstream": {
+    "owner": "imports/domain/transforms + validate-rows (not this task)",
+    "expected": "every data row raises IMP-DATE-003; the reviewer must confirm transforms.dateOrder"
+  }
+}

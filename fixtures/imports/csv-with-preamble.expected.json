@@ -1,0 +1,44 @@
+{
+  "fixture": "csv-with-preamble.csv",
+  "catalogue": 22,
+  "source": "IMPORT_ENGINE.md \u00a717 item 22; \u00a75.1; finding F-B-18",
+  "description": "Four non-tabular lines and a blank line above the header. Every non-empty source line becomes a row.",
+  "validation": {
+    "ok": true,
+    "encoding": "utf-8",
+    "delimiter": ",",
+    "codes": []
+  },
+  "parse": {
+    "physicalLines": 12,
+    "blankLines": 1,
+    "nonEmptySourceLines": 11,
+    "rowCount": 11,
+    "headerRow": 5,
+    "headerConfirmationRequired": false,
+    "columns": [
+      "Date",
+      "Description",
+      "Paid Out",
+      "Paid In",
+      "Balance"
+    ],
+    "nonTabularRowNumbers": [
+      1,
+      2,
+      3,
+      4
+    ],
+    "headerSourceRef": "csv:row:6",
+    "firstDataSourceRef": "csv:row:7",
+    "lastDataSourceRef": "csv:row:12",
+    "warningCodes": [
+      "IMP-ROW-005"
+    ]
+  },
+  "notes": [
+    "Line 3 reads 'Account Name,Acme Trading Ltd'. It matches one synonym, not three, so it is NOT taken as the header (F-B-18).",
+    "The four preamble rows carry nonTabular:true and become import_rows with status skipped and issue IMP-ROW-005.",
+    "Row 10 quotes a description containing the delimiter."
+  ]
+}

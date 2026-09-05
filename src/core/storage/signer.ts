@@ -1,6 +1,7 @@
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { InternalError, NotFound, PermissionDenied, ValidationError } from '@/core/errors';
+import { sanitiseFilename } from './filenames';
 
 /**
  * The Storage signer — the ONLY reader and writer of object storage in MOTION
@@ -20,6 +21,8 @@ import { InternalError, NotFound, PermissionDenied, ValidationError } from '@/co
  * This is one of exactly three files permitted to read `SUPABASE_SERVICE_ROLE_KEY`; the ESLint rule
  * `motion/no-service-role-outside-sanctioned-files` fails the build anywhere else.
  */
+
+export { sanitiseFilename };
 
 export const SOURCE_DOCUMENTS_BUCKET = 'source-documents';
 export const REPORTS_BUCKET = 'reports';
@@ -181,24 +184,6 @@ export async function removeObject(
 
   const { error } = await storageClient().storage.from(bucket).remove([key]);
   return { removed: !error };
-}
-
-/**
- * Sanitises a user-supplied filename into one path segment.
- *
- * Replacing the disallowed characters is not enough on its own: `.` is a legal filename character,
- * so `../../etc/passwd` becomes `.._.._etc_passwd`, and a filename of exactly `..` would become a
- * traversal segment. Runs of dots are therefore collapsed and leading dots stripped, which also
- * removes the dotfile case. A name that sanitises away entirely falls back rather than producing an
- * empty segment.
- */
-export function sanitiseFilename(filename: string): string {
-  const collapsed = filename
-    .replace(/[^A-Za-z0-9._-]+/g, '_')
-    .replace(/\.{2,}/g, '.')
-    .replace(/^[._-]+/, '');
-  const trimmed = collapsed.slice(0, 120).replace(/[._-]+$/, '');
-  return trimmed === '' ? 'upload' : trimmed;
 }
 
 /** The object key for a source document, built only from server-generated parts. */

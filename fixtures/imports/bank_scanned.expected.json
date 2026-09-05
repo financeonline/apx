@@ -1,0 +1,17 @@
+{
+  "fixture": "bank_scanned.pdf",
+  "catalogue": "IMPORT_ENGINE.md §17 item 12 — image only, no text layer",
+  "parser": "pdf-scanned",
+  "expect": {
+    "hasTextLayer": false,
+    "pageCount": 1,
+    "message": "This PDF is a scanned image. MOTION has stored it as a source document. Please upload the same statement as CSV or XLSX from your bank.",
+    "pdfTextParse": {
+      "ok": false,
+      "reason": "no_text_layer"
+    },
+    "notes": [
+      "source_documents.status = unreadable, no batch is created, no OCR is attempted (§5.5)."
+    ]
+  }
+}

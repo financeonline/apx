@@ -30,10 +30,77 @@ export {
 export { countRowsByStatus, listBatchRows, listBatches, listDocuments } from './data/repository';
 
 export {
+  commitImportBatch,
+  confirmPdfPage,
   decideImportRows,
   deleteDocument,
+  fixImportRow,
+  recordBatchConfirmation,
   rejectImportBatch,
+  replaceImportBatch,
+  rollbackImportBatch,
   saveImportMapping,
   setStatementBalances,
   startImportBatch,
+  type CommitResult,
 } from './services';
+
+export {
+  SYNC_ROW_LIMIT,
+  parseAndValidate,
+  type ParseAndValidateDeps,
+  type ParseAndValidateInput,
+} from './services/parse-and-validate';
+
+// ---------------------------------------------------------------------------------------------
+// The Phase 3 (plan Phase 5) import pipeline. Exposed through the barrel because the parsers, the
+// transforms and the tests all speak these types, and `motion/no-deep-module-import` — correctly —
+// refuses a path into `domain/`.
+// ---------------------------------------------------------------------------------------------
+export type {
+  BatchIssue,
+  ColumnSuggestion,
+  FileValidationResult,
+  IssueSeverity,
+  MappedRow,
+  MappingSnapshot,
+  ParsedRow,
+  ParsedTable,
+  RowIssue,
+  StatementMetadata,
+  TargetField,
+  Transforms,
+  ValidatedRow,
+  ValidationResult,
+} from './domain/pipeline-types';
+
+export { parseCsv, type CsvParseOptions } from './domain/parsers/csv';
+export * from './domain/parsers/xlsx';
+export * from './domain/parsers/pdf-text';
+export * from './domain/parsers/pdf-scanned';
+
+export {
+  DEDUPE_VERSION,
+  absoluteAmountKey,
+  dedupeHash,
+  detectDuplicates,
+  detectReExport,
+  normalizeBankName,
+  normalizeDescription,
+  scopeKey,
+} from './domain/dedupe';
+
+export {
+  REQUIRED_FIELDS,
+  checkBatch,
+  looksLikeOpenItems,
+  requiredConfirmations,
+  satisfiedFieldSet,
+  statusForIssues,
+  validateRow,
+} from './domain/validate-rows';
+
+export { runPipeline, type PipelineInput, type PipelineResult } from './domain/pipeline';
+
+export * from './domain/mapping';
+export * from './domain/transforms';

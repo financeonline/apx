@@ -2,7 +2,7 @@ import 'server-only';
 import { z } from 'zod';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { callApi } from '@/core/db';
-import { ValidationError } from '@/core/errors';
+import { ConflictError, ValidationError } from '@/core/errors';
 import {
   DecideImportRowsInput, SaveImportMappingInput, SetStatementBalancesInput, StartImportBatchInput,
 } from '../domain/validation';
@@ -108,4 +108,89 @@ export async function deleteDocument(
   db: SupabaseClient, documentId: string, requestId?: string,
 ): Promise<string> {
   return callApi<string>(db, 'delete_document', { p_document: documentId }, requestId);
+}
+
+/**
+ * Commit, rollback and replace (IMPORT_ENGINE.md §11, §12).
+ *
+ * Each is a thin wrapper over the SECURITY DEFINER function that does the real work. The gate, the
+ * duplicate re-check, the supersession rules and the promotion of dependants all live in SQL, where
+ * a direct PostgREST call cannot go round them. What these add is a typed result and — for the one
+ * case the database deliberately signals rather than raises — a readable error.
+ */
+
+export interface CommitResult {
+  readonly status: 'committed' | 'conflict';
+  readonly committed: number;
+  readonly superseded: number;
+  readonly collisions?: number;
+  readonly job?: string | null;
+}
+
+/**
+ * Commits a reviewed batch.
+ *
+ * A duplicate collision comes back as a RESULT rather than an exception, because raising inside the
+ * transaction would roll back the re-flagging the reviewer needs to see (§9.3). It is turned into a
+ * ConflictError here, at the boundary, once the flagging is safely committed.
+ */
+export async function commitImportBatch(
+  db: SupabaseClient, batchId: string, requestId?: string,
+): Promise<CommitResult> {
+  const result = await callApi<CommitResult>(db, 'commit_import_batch', { p_batch: batchId }, requestId);
+
+  if (result.status === 'conflict') {
+    throw new ConflictError(
+      `${result.collisions ?? 0} row${result.collisions === 1 ? '' : 's'} now duplicate data committed since this file was checked. The rows have been re-flagged for review.`,
+      { batchId, collisions: result.collisions },
+    );
+  }
+  return result;
+}
+
+export async function rollbackImportBatch(
+  db: SupabaseClient, batchId: string, reason: string, requestId?: string,
+): Promise<{ rejected: number; promoted: number; restored: number }> {
+  if (reason.trim() === '') {
+    throw new ValidationError('Say why this import is being rolled back.');
+  }
+  return callApi(db, 'rollback_import_batch', { p_batch: batchId, p_reason: reason }, requestId);
+}
+
+/** The corrected-file path: roll back the old batch and commit the new one in one transaction. */
+export async function replaceImportBatch(
+  db: SupabaseClient, oldBatchId: string, newBatchId: string, reason: string, requestId?: string,
+): Promise<unknown> {
+  if (reason.trim() === '') {
+    throw new ValidationError('Say why this import is being replaced.');
+  }
+  return callApi(db, 'replace_import_batch', {
+    p_old_batch: oldBatchId, p_new_batch: newBatchId, p_reason: reason,
+  }, requestId);
+}
+
+/** Records one of the confirmations §8.2 requires before a batch of this shape may commit. */
+export async function recordBatchConfirmation(
+  db: SupabaseClient, batchId: string, code: string, value: Record<string, unknown>,
+  requestId?: string,
+): Promise<string> {
+  return callApi<string>(db, 'record_batch_confirmation', {
+    p_batch: batchId, p_code: code, p_value: value,
+  }, requestId);
+}
+
+/** A reviewer edit. `raw_data` is never touched, and the row must be re-validated before it commits. */
+export async function fixImportRow(
+  db: SupabaseClient, batchId: string, rowId: string, patch: Record<string, unknown>,
+  reviewToken?: string, requestId?: string,
+): Promise<string> {
+  return callApi<string>(db, 'fix_import_row', {
+    p_batch: batchId, p_row: rowId, p_patch: patch, p_review_token: reviewToken ?? null,
+  }, requestId);
+}
+
+export async function confirmPdfPage(
+  db: SupabaseClient, batchId: string, page: number, requestId?: string,
+): Promise<string> {
+  return callApi<string>(db, 'confirm_pdf_page', { p_batch: batchId, p_page: page }, requestId);
 }

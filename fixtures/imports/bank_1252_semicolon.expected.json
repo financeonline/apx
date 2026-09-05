@@ -1,0 +1,42 @@
+{
+  "fixture": "bank_1252_semicolon.csv",
+  "catalogue": 8,
+  "source": "IMPORT_ENGINE.md \u00a717 item 8; \u00a74 IMP-FILE-005 / IMP-FILE-006",
+  "description": "A UK/European bank export: Windows-1252 bytes (no BOM), semicolon delimiter, 1.234,56 numbers, CRLF line endings.",
+  "encodingProof": {
+    "bytes": {
+      "0xA3": "\u00a3",
+      "0x96": "\u2013 en dash",
+      "0x97": "\u2014 em dash",
+      "0x93/0x94": "smart quotes",
+      "0xE9": "\u00e9"
+    },
+    "note": "These byte sequences are not valid UTF-8, so strict UTF-8 fails and the Windows-1252 fallback is what makes the file readable."
+  },
+  "validation": {
+    "ok": true,
+    "encoding": "windows-1252",
+    "delimiter": ";",
+    "codes": []
+  },
+  "parse": {
+    "physicalLines": 6,
+    "nonEmptySourceLines": 6,
+    "rowCount": 6,
+    "headerRow": 1,
+    "headerConfirmationRequired": false,
+    "columns": [
+      "Date",
+      "Description",
+      "Amount",
+      "Balance"
+    ],
+    "nonTabularRowNumbers": [],
+    "firstDataSourceRef": "csv:row:2",
+    "warningCodes": []
+  },
+  "notes": [
+    "Read as commas the file also looks consistent, at 3 fields. The semicolon reading is 4 fields wide and wins, which is what keeps 1.234,56 in one cell.",
+    "Decimal comma and dot thousands separators are transforms (\u00a76.4), not this task."
+  ]
+}

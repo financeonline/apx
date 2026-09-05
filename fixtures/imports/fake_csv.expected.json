@@ -1,0 +1,35 @@
+{
+  "fixture": "fake_csv.pdf",
+  "catalogue": 14,
+  "source": "IMPORT_ENGINE.md \u00a717 item 14; \u00a74 IMP-FILE-001; SECURITY_MODEL.md \u00a78 step 2",
+  "description": "A genuine, minimal, one-page PDF with a text layer. The point of the fixture is the NAME it is uploaded under.",
+  "cases": [
+    {
+      "uploadedAs": "august-statement.csv",
+      "declaredMimeType": "text/csv",
+      "validation": {
+        "ok": false,
+        "quarantine": true,
+        "codes": [
+          "IMP-FILE-001"
+        ]
+      },
+      "why": "Magic bytes say %PDF-; the extension and Content-Type say CSV. The bytes decide."
+    },
+    {
+      "uploadedAs": "august-statement.pdf",
+      "declaredMimeType": "application/pdf",
+      "validation": {
+        "ok": true,
+        "codes": [],
+        "pageCount": 1,
+        "hasTextLayer": true
+      },
+      "why": "Same bytes under an honest name: a readable one-page statement PDF."
+    }
+  ],
+  "notes": [
+    "The content stream is uncompressed so the text-layer probe can read it without inflating; the probe handles FlateDecode too.",
+    "The file carries no /JavaScript, /OpenAction, /Launch or /EmbeddedFile, so IMP-FILE-008 does not fire."
+  ]
+}

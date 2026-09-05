@@ -1,0 +1,41 @@
+{
+  "fixture": "bank_text_multiline.pdf",
+  "catalogue": "IMPORT_ENGINE.md §17 item 10 — multi-line descriptions",
+  "parser": "pdf-text",
+  "expect": {
+    "ok": true,
+    "sheet": "page:1",
+    "headerRow": 3,
+    "columns": [
+      "Date",
+      "Description",
+      "Paid out",
+      "Paid in",
+      "Balance"
+    ],
+    "rowCount": 26,
+    "transactionRowCount": 16,
+    "nonTabularRowCount": 9,
+    "statement": {
+      "openingBalance": "5000.00",
+      "closingBalance": "7511.25",
+      "periodStart": "2026-03-01",
+      "periodEnd": "2026-03-31",
+      "pageBalances": {
+        "1": {
+          "broughtForward": "5000.00",
+          "carriedForward": "7511.25"
+        }
+      },
+      "dateLineCounts": {
+        "1": 16
+      }
+    },
+    "warningCodes": [],
+    "notes": [
+      "Each wrapped line is appended to the description of the transaction above it AND kept as its own nonTabular row, so no line is lost and the row count still equals the source lines.",
+      "A continuation is never a balance candidate.",
+      "Row 5 (page:1;line:5) must read \"FASTER PAYMENT TO J SMITH BUILDING SERVICES INVOICE 20261 KITCHEN FIT\" in the description column."
+    ]
+  }
+}

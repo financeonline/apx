@@ -1,0 +1,27 @@
+{
+  "fixture": "tb_march_off.xlsx",
+  "catalogue": "IMPORT_ENGINE.md §17 item 4 — trial balance, off by 10",
+  "parser": "xlsx",
+  "expect": {
+    "sheet": "Trial Balance",
+    "headerRow": 4,
+    "columns": [
+      "Code",
+      "Account",
+      "Debit",
+      "Credit"
+    ],
+    "rowCount": 17,
+    "nonTabularRowCount": 3,
+    "hiddenRowCount": 0,
+    "headerConfirmationRequired": false,
+    "availableSheets": null,
+    "warningCodes": [],
+    "debitTotal": "139360.00",
+    "creditTotal": "139350.00",
+    "notes": [
+      "The three preamble lines are rows with nonTabular = true (IMP-ROW-005).",
+      "Debits exceed credits by 10.00; the batch check must refuse the commit."
+    ]
+  }
+}

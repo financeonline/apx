@@ -1,0 +1,40 @@
+{
+  "fixture": "pnl_multi_period.xlsx",
+  "catalogue": "IMPORT_ENGINE.md §17 item 5 — 12 month columns to fan out, plus total rows",
+  "parser": "xlsx",
+  "expect": {
+    "sheet": "Profit and Loss",
+    "headerRow": 3,
+    "columns": [
+      "Account",
+      "Jan 2026",
+      "Feb 2026",
+      "Mar 2026",
+      "Apr 2026",
+      "May 2026",
+      "Jun 2026",
+      "Jul 2026",
+      "Aug 2026",
+      "Sep 2026",
+      "Oct 2026",
+      "Nov 2026",
+      "Dec 2026"
+    ],
+    "rowCount": 14,
+    "nonTabularRowCount": 2,
+    "hiddenRowCount": 0,
+    "headerConfirmationRequired": true,
+    "availableSheets": null,
+    "warningCodes": [],
+    "totalRowLabels": [
+      "Total income",
+      "Total expenses"
+    ],
+    "notes": [
+      "The 12 month columns fan out to one period_balances row each (ADR-027).",
+      "\"Total income\" and \"Total expenses\" are IMP-ROW-004 total rows and are never accounts.",
+      "Row 3 is proposed, not detected: one synonym match is short of the three §5.2 requires,",
+      "so headerConfirmationRequired is true and the reviewer confirms the row."
+    ]
+  }
+}

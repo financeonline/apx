@@ -1,0 +1,45 @@
+{
+  "fixture": "bank_text_balance_break.pdf",
+  "catalogue": "IMPORT_ENGINE.md §17 item 10 — chain break on page 2 (IMP-BAL-006)",
+  "parser": "pdf-text",
+  "expect": {
+    "ok": true,
+    "sheet": "page:1",
+    "headerRow": 3,
+    "columns": [
+      "Date",
+      "Description",
+      "Paid out",
+      "Paid in",
+      "Balance"
+    ],
+    "rowCount": 33,
+    "transactionRowCount": 25,
+    "nonTabularRowCount": 7,
+    "statement": {
+      "openingBalance": "2000.00",
+      "closingBalance": "6498.96",
+      "periodStart": "2026-03-01",
+      "periodEnd": "2026-03-31",
+      "pageBalances": {
+        "1": {
+          "broughtForward": "2000.00",
+          "carriedForward": "3924.88"
+        },
+        "2": {
+          "broughtForward": "4374.88"
+        }
+      },
+      "dateLineCounts": {
+        "1": 16,
+        "2": 9
+      }
+    },
+    "warningCodes": [
+      "IMP-BAL-006"
+    ],
+    "notes": [
+      "Page 1 carries forward 3924.88; page 2 brings forward 4374.88. The warning must name both pages."
+    ]
+  }
+}

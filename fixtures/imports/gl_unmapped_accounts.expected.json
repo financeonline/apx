@@ -1,0 +1,33 @@
+{
+  "fixture": "gl_unmapped_accounts.xlsx",
+  "catalogue": "IMPORT_ENGINE.md §17 item 3 — accounts with no keyword match",
+  "parser": "xlsx",
+  "expect": {
+    "sheet": "General Ledger",
+    "headerRow": 2,
+    "columns": [
+      "Date",
+      "Journal",
+      "Code",
+      "Description",
+      "Debit",
+      "Credit"
+    ],
+    "rowCount": 12,
+    "nonTabularRowCount": 1,
+    "hiddenRowCount": 0,
+    "headerConfirmationRequired": false,
+    "availableSheets": null,
+    "warningCodes": [],
+    "unmappedCodes": [
+      "9910",
+      "9920",
+      "9930",
+      "9940"
+    ],
+    "notes": [
+      "Codes 9910/9920/9930/9940 match no keyword and must land on `uncategorised`",
+      "with IMP-ACCT-005 — never a guessed category (§6.5)."
+    ]
+  }
+}

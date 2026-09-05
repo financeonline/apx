@@ -5,6 +5,8 @@ export {
   enqueueServerJob,
   claimJob,
   finishJob,
+  registerDocument,
+  finalizeUpload,
   type ClaimedJobRow,
   type ServerRpcActor,
 } from './server-rpc';

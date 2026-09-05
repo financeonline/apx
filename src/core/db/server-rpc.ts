@@ -166,3 +166,61 @@ export async function finishJob(
   // work may run twice. Swallowing this would hide a real duplicate-execution risk.
   if (error) throw new Error(`could not record the outcome of job ${jobId}: ${error.message}`);
 }
+
+// ---------------------------------------------------------------------------
+// Documents (ADR-043.4). The upload handshake is server-asserted end to end: the browser may not
+// choose the id, the storage path, or whether its own file passed a scan.
+// ---------------------------------------------------------------------------
+
+/**
+ * Creates the `source_documents` row and RETURNS the id the server generated. The storage path is
+ * derived from that id inside SQL, so a caller cannot aim a write at another organization's prefix.
+ * A file whose bytes already exist raises CONFLICT carrying the earlier document's id.
+ */
+export async function registerDocument(
+  actor: ServerRpcActor,
+  organizationId: string,
+  meta: Record<string, unknown>,
+): Promise<string> {
+  const { data, error } = await serverClient()
+    .schema('api_server')
+    .rpc('register_document', {
+      p_actor: actor.userId,
+      p_org: organizationId,
+      p_meta: meta,
+      p_request_id: actor.requestId ?? null,
+    });
+
+  if (error) throw toMotionError(error, actor.requestId);
+  return data as string;
+}
+
+/**
+ * Closes the handshake. The document becomes `ready` only after SQL has confirmed the object exists
+ * at the declared size — a row claiming a file that is not there would give the parser something to
+ * read that does not exist.
+ */
+export async function finalizeUpload(
+  actor: ServerRpcActor,
+  organizationId: string,
+  input: {
+    documentId: string;
+    byteSize: number;
+    scanResult: unknown;
+    status: string;
+  },
+): Promise<void> {
+  const { error } = await serverClient()
+    .schema('api_server')
+    .rpc('finalize_upload', {
+      p_actor: actor.userId,
+      p_org: organizationId,
+      p_document: input.documentId,
+      p_byte_size: input.byteSize,
+      p_scan_result: input.scanResult,
+      p_status: input.status,
+      p_request_id: actor.requestId ?? null,
+    });
+
+  if (error) throw toMotionError(error, actor.requestId);
+}

@@ -1,0 +1,281 @@
+/**
+ * Sign transforms (IMPORT_ENGINE.md §6.4: "Bank sign convention", "GL direction", "Balance sign",
+ * "Liability bank accounts"; ADR-047.3, ADR-028).
+ *
+ * Three different files can hold the same figure with three different signs, and every one of them
+ * has to reach storage as the same natural-sign number. Nothing here guesses: where the document
+ * requires a human answer — "Are payments out shown as negative?" (`transforms.bankSign`), and the
+ * balance-sign confirmation (`IMP-TB-013`) — these functions return the question, not an answer.
+ */
+
+import { Decimal, negate, parseMoney, toMoneyString, ZERO } from '@/core/money';
+import { CATEGORY_ACCOUNT_TYPE, type StandardCategory } from '@/modules/financials';
+import type { BalanceSign, BankSign, GlSign, RowIssue } from '../pipeline-types';
+
+// -----------------------------------------------------------------------------------------------
+// Bank sign (§6.4, ADR-028)
+// -----------------------------------------------------------------------------------------------
+
+/** The bank-account types `bank_accounts.account_type` holds. */
+export type BankAccountType = 'current' | 'savings' | 'credit_card' | 'loan' | 'other';
+
+/** ADR-028: on a card or a loan a purchase or drawdown INCREASES the balance owed. */
+export function isLiabilityBankAccount(accountType: BankAccountType): boolean {
+  return accountType === 'credit_card' || accountType === 'loan';
+}
+
+/**
+ * The bank sign for a single signed amount column, or `null` when the reviewer must answer.
+ *
+ * §6.4 gives a default only for the liability accounts; for a current account the mapping step asks
+ * with three sample rows, and reading a current account's column the wrong way round would invert
+ * every cash movement in the file.
+ */
+export function resolveBankSign(
+  explicit: BankSign | undefined,
+  accountType: BankAccountType,
+): BankSign | null {
+  if (explicit !== undefined) return explicit;
+  return isLiabilityBankAccount(accountType) ? 'positive_out' : null;
+}
+
+export interface BankAmountResult {
+  /** Signed money string: positive is money into the account. */
+  readonly amount: string | null;
+  readonly issue: RowIssue | null;
+}
+
+/**
+ * `amount = money_in − money_out` (§6.4).
+ *
+ * Both columns populated is `IMP-AMT-002` (error, §8.1): a row that is both a payment and a receipt
+ * is not a row anyone can net, and netting it silently would hide half of it.
+ */
+export function bankAmountFromInOut(
+  moneyIn: string | null | undefined,
+  moneyOut: string | null | undefined,
+): BankAmountResult {
+  const hasIn = moneyIn !== null && moneyIn !== undefined && moneyIn !== '';
+  const hasOut = moneyOut !== null && moneyOut !== undefined && moneyOut !== '';
+  if (hasIn && hasOut) {
+    const inValue = parseMoney(moneyIn);
+    const outValue = parseMoney(moneyOut);
+    if (!inValue.isZero() && !outValue.isZero()) {
+      return {
+        amount: null,
+        issue: {
+          code: 'IMP-AMT-002',
+          severity: 'error',
+          message: 'This row has both a money-in and a money-out amount',
+          suggestion: 'Split the row, or map only the column that carries the movement.',
+        },
+      };
+    }
+  }
+  if (!hasIn && !hasOut) return { amount: null, issue: null };
+  const credit = hasIn ? parseMoney(moneyIn) : ZERO;
+  const debit = hasOut ? parseMoney(moneyOut) : ZERO;
+  return { amount: toMoneyString(credit.minus(debit)), issue: null };
+}
+
+/**
+ * A single signed column read under the confirmed `transforms.bankSign`.
+ *
+ * `negative_out`: the file already writes payments out as negative, so the column is kept as it is.
+ * `positive_out`: the file writes payments out as positive (the credit-card convention), so the
+ * whole column is negated — which also turns the card's repayments and refunds back into inflows.
+ */
+export function bankAmountFromSigned(amount: string, bankSign: BankSign): string {
+  const value = parseMoney(amount);
+  return toMoneyString(bankSign === 'positive_out' ? negate(value) : value);
+}
+
+export interface ReconciliationInput {
+  /** Σ of the batch's signed amounts, after `bankAmountFrom*`. */
+  readonly sumAmount: string;
+  readonly openingBalance: string;
+  readonly closingBalance: string;
+  readonly accountType: BankAccountType;
+}
+
+export interface ReconciliationResult {
+  readonly expected: string;
+  readonly actual: string;
+  readonly difference: string;
+  readonly reconciled: boolean;
+}
+
+/**
+ * The `IMP-BAL-006` gate (§8.2): `Σ amount = closing − opening`, and for a liability account
+ * `−Σ amount = closing − opening` (ADR-028) — a card's spending raises the balance owed, so the
+ * movement and the balance run in opposite directions.
+ */
+export function bankReconciliation(input: ReconciliationInput): ReconciliationResult {
+  const sum = parseMoney(input.sumAmount);
+  const actual = isLiabilityBankAccount(input.accountType) ? negate(sum) : sum;
+  const expected = parseMoney(input.closingBalance).minus(parseMoney(input.openingBalance));
+  const difference = actual.minus(expected);
+  return {
+    expected: toMoneyString(expected),
+    actual: toMoneyString(actual),
+    difference: toMoneyString(difference),
+    reconciled: difference.abs().lessThanOrEqualTo(new Decimal('0.01')),
+  };
+}
+
+// -----------------------------------------------------------------------------------------------
+// GL direction (§6.4)
+// -----------------------------------------------------------------------------------------------
+
+export type EntryDirection = 'debit' | 'credit';
+
+export interface DirectedAmountResult {
+  readonly direction: EntryDirection | null;
+  /** Unsigned; `ledger_entries.amount` never carries the sign (the direction does). */
+  readonly amount: string | null;
+  readonly issue: RowIssue | null;
+}
+
+/**
+ * Debit/credit columns → `direction` + a positive amount (§6.4).
+ *
+ * A row with figures in both columns is not a journal line, it is two; netting it would post a
+ * single line for the difference and lose both originals.
+ */
+export function glFromDebitCredit(
+  debit: string | null | undefined,
+  credit: string | null | undefined,
+): DirectedAmountResult {
+  const debitValue = debit !== null && debit !== undefined && debit !== '' ? parseMoney(debit) : null;
+  const creditValue = credit !== null && credit !== undefined && credit !== '' ? parseMoney(credit) : null;
+  const debitPosted = debitValue !== null && !debitValue.isZero();
+  const creditPosted = creditValue !== null && !creditValue.isZero();
+
+  if (debitPosted && creditPosted) {
+    return {
+      direction: null,
+      amount: null,
+      issue: {
+        code: 'IMP-AMT-002',
+        severity: 'error',
+        message: 'This row has both a debit and a credit amount',
+        suggestion: 'Split the row into one line per side of the journal.',
+      },
+    };
+  }
+  if (debitPosted) return { direction: 'debit', amount: toMoneyString(debitValue.abs()), issue: null };
+  if (creditPosted) return { direction: 'credit', amount: toMoneyString(creditValue.abs()), issue: null };
+  if (debitValue !== null || creditValue !== null) {
+    // A posted zero is a real line in some exports; it keeps the side it was written on.
+    const direction: EntryDirection = debitValue !== null ? 'debit' : 'credit';
+    return { direction, amount: toMoneyString(ZERO), issue: null };
+  }
+  return { direction: null, amount: null, issue: null };
+}
+
+/**
+ * A signed single column: "positive = debit unless the user overrides in `transforms.glSign`"
+ * (§6.4). Unlike the bank sign this one HAS a stated default, so it does not ask.
+ */
+export function glFromSigned(amount: string, glSign: GlSign = 'positive_debit'): DirectedAmountResult {
+  const value = parseMoney(amount);
+  const positiveIsDebit = glSign === 'positive_debit';
+  const isDebit = value.isNegative() ? !positiveIsDebit : positiveIsDebit;
+  return { direction: isDebit ? 'debit' : 'credit', amount: toMoneyString(value.abs()), issue: null };
+}
+
+// -----------------------------------------------------------------------------------------------
+// Balance sign (§6.4, ADR-047.3)
+// -----------------------------------------------------------------------------------------------
+
+/** One mapped TB / P&L / balance-sheet row, as the detector needs it. */
+export interface BalanceSignRow {
+  /** The signed value from the file's single balance column. */
+  readonly amount: string;
+  /** The category suggested for the row's account (`mapping/category-keywords.ts`). */
+  readonly category: StandardCategory;
+  /** The account label, so the confirmation can quote two real rows. */
+  readonly label?: string;
+}
+
+export interface BalanceSignSample {
+  readonly label: string | null;
+  readonly amount: string;
+  readonly category: StandardCategory;
+}
+
+export interface BalanceSignDetection {
+  /** What the mapping step proposes; `IMP-TB-013` records the reviewer's confirmation. */
+  readonly proposed: BalanceSign;
+  readonly incomeTotal: string;
+  readonly expenseTotal: string;
+  readonly incomeRows: number;
+  readonly expenseRows: number;
+  /** The two sample rows §6.4 shows: "Sales 10,000 will be read as income; Rent 2,000 as an expense". */
+  readonly incomeSample: BalanceSignSample | null;
+  readonly expenseSample: BalanceSignSample | null;
+}
+
+/**
+ * Propose `natural` or `reporting` for a single signed balance column (§6.4, ADR-047.3).
+ *
+ * "Both positive → propose `reporting`": every P&L from Xero, QuickBooks or Sage prints income and
+ * expenses as positive numbers, which cannot both be natural sign — in natural sign (debit − credit)
+ * income is negative. If either side comes back negative or zero the file is already natural and is
+ * left alone.
+ *
+ * A file with separate debit and credit columns never reaches here: §6.1 makes that `natural` by
+ * construction.
+ */
+export function detectBalanceSign(rows: readonly BalanceSignRow[]): BalanceSignDetection {
+  let incomeTotal = ZERO;
+  let expenseTotal = ZERO;
+  let incomeRows = 0;
+  let expenseRows = 0;
+  let incomeSample: BalanceSignSample | null = null;
+  let expenseSample: BalanceSignSample | null = null;
+
+  for (const row of rows) {
+    const type = CATEGORY_ACCOUNT_TYPE[row.category];
+    const value = parseMoney(row.amount);
+    if (type === 'income') {
+      incomeTotal = incomeTotal.plus(value);
+      incomeRows += 1;
+      incomeSample = incomeSample ?? { label: row.label ?? null, amount: toMoneyString(value), category: row.category };
+    } else if (type === 'expense') {
+      expenseTotal = expenseTotal.plus(value);
+      expenseRows += 1;
+      expenseSample = expenseSample ?? { label: row.label ?? null, amount: toMoneyString(value), category: row.category };
+    }
+  }
+
+  const bothPositive = incomeTotal.greaterThan(ZERO) && expenseTotal.greaterThan(ZERO);
+  return {
+    proposed: bothPositive ? 'reporting' : 'natural',
+    incomeTotal: toMoneyString(incomeTotal),
+    expenseTotal: toMoneyString(expenseTotal),
+    incomeRows,
+    expenseRows,
+    incomeSample,
+    expenseSample,
+  };
+}
+
+/**
+ * Apply the confirmed balance sign at commit (§6.4, ADR-047.3).
+ *
+ * `reporting` negates income-, liability- and equity-type lines so that what is stored is always
+ * natural sign (debit − credit). "The engine never sees reporting sign": every reader downstream
+ * assumes natural, so this is the last point at which the two conventions exist.
+ */
+export function applyBalanceSign(
+  amount: string,
+  category: StandardCategory,
+  balanceSign: BalanceSign,
+): string {
+  const value = parseMoney(amount);
+  if (balanceSign === 'natural') return toMoneyString(value);
+  const type = CATEGORY_ACCOUNT_TYPE[category];
+  const negated = type === 'income' || type === 'liability' || type === 'equity';
+  return toMoneyString(negated ? negate(value) : value);
+}

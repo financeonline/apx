@@ -1,0 +1,27 @@
+{
+  "fixture": "tb_march.xlsx",
+  "catalogue": "IMPORT_ENGINE.md §17 item 4 — trial balance",
+  "parser": "xlsx",
+  "expect": {
+    "sheet": "Trial Balance",
+    "headerRow": 4,
+    "columns": [
+      "Code",
+      "Account",
+      "Debit",
+      "Credit"
+    ],
+    "rowCount": 16,
+    "nonTabularRowCount": 3,
+    "hiddenRowCount": 0,
+    "headerConfirmationRequired": false,
+    "availableSheets": null,
+    "warningCodes": [],
+    "debitTotal": "139350.00",
+    "creditTotal": "139350.00",
+    "notes": [
+      "The three preamble lines are rows with nonTabular = true (IMP-ROW-005).",
+      "Debits equal credits."
+    ]
+  }
+}

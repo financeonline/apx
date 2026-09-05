@@ -1,0 +1,45 @@
+{
+  "fixture": "statement-fake-closing-line.pdf",
+  "catalogue": "IMPORT_ENGINE.md §17 item 24 — a \"closing\" transaction inside the grid (R2-C-11)",
+  "parser": "pdf-text",
+  "expect": {
+    "ok": true,
+    "sheet": "page:1",
+    "headerRow": 3,
+    "columns": [
+      "Date",
+      "Description",
+      "Paid out",
+      "Paid in",
+      "Balance"
+    ],
+    "rowCount": 34,
+    "transactionRowCount": 26,
+    "nonTabularRowCount": 7,
+    "statement": {
+      "openingBalance": "9000.00",
+      "closingBalance": "11126.06",
+      "periodStart": "2026-03-01",
+      "periodEnd": "2026-03-31",
+      "pageBalances": {
+        "1": {
+          "broughtForward": "9000.00",
+          "carriedForward": "9135.74"
+        },
+        "2": {
+          "broughtForward": "9135.74",
+          "carriedForward": "11126.06"
+        }
+      },
+      "dateLineCounts": {
+        "1": 17,
+        "2": 9
+      }
+    },
+    "warningCodes": [],
+    "notes": [
+      "The three CLOSING lines have a date in the date column, so they are transactions and can never be balance candidates, whatever their words say.",
+      "closingBalance must be 11126.06 — the page-2 footer — and never 2300.00, 250.00 or 1100.00."
+    ]
+  }
+}

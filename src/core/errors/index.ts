@@ -21,6 +21,8 @@ export interface SerialisedError {
   issues?: Array<{ path: string; message: string }>;
   resetAt?: string;
   requestId?: string;
+  /** Ids a caller needs to act on a conflict — see ConflictError. Never free text or user data. */
+  context?: Readonly<Record<string, unknown>>;
 }
 
 export abstract class MotionError extends Error {
@@ -76,8 +78,20 @@ export class ValidationError extends MotionError {
 export class ConflictError extends MotionError {
   readonly code = 'CONFLICT' as const;
   readonly status = 409;
-  constructor(message = 'That change conflicts with the current state.') {
+  /**
+   * `context` carries the ids a caller needs to act on the conflict — the earlier document when a
+   * file is uploaded twice (IMPORT_ENGINE.md §2.3), the batch that already holds the rows. Without
+   * it the interface can say "this already exists" but cannot offer a link to it, which is the
+   * difference between a useful refusal and a dead end.
+   */
+  constructor(
+    message = 'That change conflicts with the current state.',
+    public readonly context?: Readonly<Record<string, unknown>>,
+  ) {
     super(message);
+  }
+  override toJSON(): SerialisedError {
+    return { ...super.toJSON(), context: this.context };
   }
 }
 
