@@ -125,7 +125,7 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 | `/data/imports/[batchId]` | Review, map, resolve, commit, roll back | same | `imports.review` | — | Client | `imports.getBatch`, `imports.listRows(status)` | Cross-org → 404 |
 | `/data/documents` | Document library | same | `documents.view` | — | Server | `documents.list` | None → CTA |
 | `/data/documents/[documentId]` | Viewer with page reference and linked batches | same | `documents.view` | — | Server + client viewer | `documents.get`, `documents.getSignedUrl` (via API) | Client role → 404 |
-| `/data/accounts` | Chart of accounts and category mapping | same | `financials.edit` | — | Client table | `accounts.list` | — |
+| `/data/accounts` | Chart of accounts and category mapping | same | `financials.view` to read; the re-map control needs `financials.edit` | — | Client table | `accounts.list` | — |
 | `/settings` | Organization settings: name, legal name, industry, fiscal year start, base currency, timezone | owner, admin, super_admin | `settings.manage` | — | Server + client forms | `organizations.get` (writes via `api.update_organization`) | Employee/client → gear hidden; deep link → denied state |
 | `/settings/team` | Members, invitations, MOTION advisers | owner, admin, super_admin | `users.view` (+`users.invite`, `users.manage`, `assignments.view`) | — | Server + client | `tenancy.listMembers`, `tenancy.listInvitations`, `tenancy.listAssignments` | — |
 | `/settings/audit` | Org audit log | owner, admin, super_admin | `audit.view` | — | Server; client filters | `audit.query(org)` | — |
