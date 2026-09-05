@@ -226,6 +226,17 @@ function applyPostFilters(
         });
         break;
       }
+      case 'as_of_exclude_all_transfers': {
+        // The bank-basis P&L proxy: a transfer is never income or expenditure, whatever its kind
+        // (§4.4, ADR-047.12). As with the cash case, the kind is taken from the categorisation in
+        // force at the run's instant, not from the row's current value (ADR-034).
+        out = out.filter((row) => {
+          const state = projection.bankCategory.get(String(row.id));
+          const kind = state ? state.transferKind : String(row.transfer_kind ?? 'none');
+          return kind === 'none';
+        });
+        break;
+      }
     }
   }
   return out;

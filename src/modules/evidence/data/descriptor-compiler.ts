@@ -42,7 +42,8 @@ export type PostFilter =
   /** ADR-034: with `as_of` the category comes from `category_history`, not the current column. */
   | { readonly kind: 'as_of_category_in'; readonly ids: readonly string[] }
   /** ADR-028: only `cash_transfer` legs are excluded; a card repayment is real cash movement. */
-  | { readonly kind: 'as_of_exclude_cash_transfers' };
+  | { readonly kind: 'as_of_exclude_cash_transfers' }
+  | { readonly kind: 'as_of_exclude_all_transfers' };
 
 export interface CompiledOrder {
   readonly column: string;
@@ -110,7 +111,9 @@ const TABLES: Record<DescriptorTable, TableSpec> = {
     ],
     filters: [
       'period_ids', 'bank_account_ids', 'category_account_ids', 'counterparty_ids', 'direction',
-      'exclude_cash_transfers',
+      'exclude_transfers',
+      'exclude_transfers',
+  'exclude_cash_transfers',
     ],
     orderColumns: ['id', 'transaction_date', 'amount', 'created_at'],
     amountColumn: 'amount',
@@ -163,6 +166,7 @@ const FILTER_ORDER: readonly DescriptorFilterKey[] = [
   'category_account_ids',
   'invoice_types',
   'direction',
+  'exclude_transfers',
   'exclude_cash_transfers',
   'open_as_of',
   'overdue_as_of',
@@ -278,8 +282,24 @@ function compileFilter(
       filters.add({ column: 'amount', op: direction === 'inflow' ? 'gt' : 'lt', value: 0 });
       return;
     }
+    case 'exclude_transfers': {
+      // 'all' drops every transfer leg, which is what the bank-basis P&L proxy needs: a transfer is
+      // never income or expenditure whatever its kind (§4.4, ADR-047.12). 'cash_only' drops just the
+      // cash-neutral pairs, so a card repayment stays in the cash figures (ADR-028).
+      if (f.exclude_transfers === 'all') {
+        if (asOf) post.push({ kind: 'as_of_exclude_all_transfers' });
+        else filters.add({ column: 'is_transfer', op: 'eq', value: false });
+      } else if (f.exclude_transfers === 'cash_only') {
+        if (asOf) post.push({ kind: 'as_of_exclude_cash_transfers' });
+        else filters.add({ column: 'transfer_kind', op: 'neq', value: CASH_TRANSFER });
+      }
+      return;
+    }
     case 'exclude_cash_transfers':
+      // The original spelling, equivalent to 'cash_only'. Kept so descriptors already written by an
+      // earlier run stay resolvable — evidence must outlive the schema that produced it.
       if (f.exclude_cash_transfers !== true) return;
+      if (f.exclude_transfers) return;   // the canonical key wins when both are present
       if (asOf) post.push({ kind: 'as_of_exclude_cash_transfers' });
       else filters.add({ column: 'transfer_kind', op: 'neq', value: CASH_TRANSFER });
       return;

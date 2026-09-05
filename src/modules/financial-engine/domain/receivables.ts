@@ -1,0 +1,743 @@
+/**
+ * Receivables, payables and working capital (FINANCIAL_ENGINE.md §3.4, ADR-027.3/.4, ADR-047.5/.10).
+ *
+ * Seven keys: `receivables`, `receivables_overdue`, `receivables_days`, `payables`,
+ * `payables_overdue`, `payables_days`, `working_capital`.
+ *
+ * Three decisions carry most of the weight:
+ *
+ *  1. **Aging is as at an explicit date.** `asOf` is `P.period_end` for a historical period and the
+ *     run's `asOf` for the current one, and which of the two was used is written into
+ *     `components.as_of`. Nothing here reads a clock (§1.1).
+ *  2. **Always the current invoice row** (ADR-047.10). There is no "row current at a historical
+ *     `asOf`": a corrected total flows to every period, which is what makes receivables reconcile
+ *     with revenue instead of drifting away from it. Time enters only through `paid_date`.
+ *  3. **A days figure needs a gross-consistent denominator** (ADR-027.4). Receivables include VAT;
+ *     revenue does not. Dividing one by the other without saying so overstates DSO by the VAT rate,
+ *     so the choice is made explicitly and recorded in `components.denominator_basis`.
+ */
+
+import {
+  Decimal,
+  ROUND_HALF_UP,
+  add,
+  divide,
+  isPositive,
+  multiply,
+  parseDecimal,
+  sum,
+  toMoneyString,
+} from '@/core/money';
+import { monthsBetween, yearMonthOf } from '@/core/periods';
+import type { InvoiceStatus, InvoiceType, StandardCategory } from '@/modules/financials';
+import {
+  combineBasis,
+  dedupeCodes,
+  derivedEvidence,
+  leafEvidence,
+  metricQuality,
+  weakerAssurance,
+  type PeriodMetrics,
+} from './cash';
+import type {
+  AssuranceLevel,
+  BasisChoice,
+  DataQualityMissing,
+  DataQualityWarning,
+  EngineContext,
+  EvidenceQuery,
+  MetricBasis,
+  MetricResult,
+  PeriodRef,
+} from './types';
+
+/** `365 / 4`: the number of days the three-month window of §3.4 stands for. */
+export const DAYS_PER_QUARTER = '91.25';
+
+const SALES_TYPES: readonly InvoiceType[] = ['sales', 'sales_credit_note'];
+const PURCHASE_TYPES: readonly InvoiceType[] = ['purchase', 'purchase_credit_note'];
+
+/** ADR-047.5: credit notes are stored positive and subtracted by type. */
+const CREDIT_NOTE_TYPES: readonly InvoiceType[] = ['sales_credit_note', 'purchase_credit_note'];
+
+/** §3.4: the balance-sheet terms of working capital, beyond cash, receivables and payables. */
+export const WORKING_CAPITAL_ASSETS: readonly StandardCategory[] = ['inventory', 'other_current_asset'];
+export const WORKING_CAPITAL_LIABILITIES: readonly StandardCategory[] = [
+  'credit_card', 'tax_liability', 'other_current_liability',
+];
+
+// ---------------------------------------------------------------------------------------------
+// Inputs
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * The invoice fields aging needs. `Invoice` (`@/modules/financials`) satisfies it structurally; the
+ * narrower shape keeps the domain function honest about what it actually reads, and keeps a test
+ * fixture down to the ten fields that matter.
+ *
+ * The loader has already filtered to `record_status = 'accepted'` and `superseded_by IS NULL` (§1.3).
+ */
+export interface AgingInvoice {
+  readonly id: string;
+  readonly invoiceType: InvoiceType;
+  readonly counterpartyId: string | null;
+  readonly issueDate: string;
+  readonly dueDate: string | null;
+  readonly totalAmount: string;
+  readonly amountPaid: string;
+  readonly balanceDue: string;
+  readonly paidDate: string | null;
+  readonly status: InvoiceStatus;
+}
+
+/** ADR-047.10: only a `full` list defines revenue and the DSO denominator. */
+export type InvoiceListKind = 'full' | 'open_items';
+
+/**
+ * The two fallbacks of §3.4 when the invoice basis is unavailable, in precedence order.
+ *
+ * The ledger branch is deliberately gated on an opening balance: "the ledger family never reports
+ * movements-since-import as a balance" (ADR-027.3). A GL exported from March does not know what was
+ * owed in February, and summing its movements would present a fragment as a total.
+ */
+export interface CategoryBalanceFallback {
+  /** Accounts carrying the category when the run executed, for the evidence descriptor (ADR-034). */
+  readonly accountIds: readonly string[];
+  /** `period_balances` closing balance of the category, in reporting sign. */
+  readonly periodBalanceClosing?: string | null;
+  readonly ledger?: { readonly openingBalance: string | null; readonly movements: string } | null;
+}
+
+/** One balance-sheet term of `working_capital`, as `closing(P)` in reporting sign. */
+export interface BalanceSheetTerm {
+  readonly value: string;
+  readonly basis: MetricBasis;
+  readonly accountIds?: readonly string[];
+}
+
+/** The three-period denominators of §3.4, so a chunk boundary does not lose the window. */
+export interface DenominatorInputs {
+  /** Net `revenue` for the period (§3.1). */
+  readonly revenue: string | null;
+  /** Σ invoice `total_amount` net of credit notes, from `full` lists only (ADR-047.10). */
+  readonly invoiceSalesTotal: string | null;
+  /** `cost_of_sales + operating_expense + marketing` — payroll and depreciation never pass through AP. */
+  readonly payablesExpenseBase: string | null;
+  /** An `open_items` invoice list covering the period makes the DSO denominator meaningless. */
+  readonly hasOpenItemsList: boolean;
+}
+
+export interface ReceivablesPeriodInput extends DenominatorInputs {
+  readonly period: PeriodRef;
+  /** The AR/AP family's precedence outcome for this period (§2.3). */
+  readonly basis: BasisChoice;
+  /**
+   * `false` for the current period, where aging is as at the run's `asOf` rather than the period end
+   * (§3.4). The run decides which period is current; the domain never asks a clock.
+   */
+  readonly asOfIsPeriodEnd: boolean;
+  /** The current rows of every non-void invoice, or null when the invoice basis does not cover P. */
+  readonly invoices: readonly AgingInvoice[] | null;
+  readonly receivablesFallback: CategoryBalanceFallback;
+  readonly payablesFallback: CategoryBalanceFallback;
+  /** Present only where a cumulative TB/BS covers P (§3.4). */
+  readonly balanceSheetClosings: Readonly<Partial<Record<StandardCategory, BalanceSheetTerm>>>;
+  /** `closing_cash` for the same period, from `computeCash`. */
+  readonly closingCash: MetricResult | null;
+  /** Why the invoice basis is unavailable, when the caller knows (e.g. `stale_invoice_data`). */
+  readonly invoiceBasisUnavailableReason?: DataQualityMissing;
+}
+
+export interface ReceivablesSeriesOptions {
+  /** Denominator inputs for the periods before the first input, oldest first. */
+  readonly priorDenominators?: readonly DenominatorInputs[];
+}
+
+// ---------------------------------------------------------------------------------------------
+// Aging
+// ---------------------------------------------------------------------------------------------
+
+interface BalanceResolution {
+  readonly value: Decimal | null;
+  readonly overdue: Decimal | null;
+  readonly basis: MetricBasis;
+  readonly assurance: AssuranceLevel;
+  readonly warnings: readonly DataQualityWarning[];
+  readonly missing: readonly DataQualityMissing[];
+  readonly completeness: number;
+  readonly components: Readonly<Record<string, unknown>>;
+  readonly evidence: EvidenceQuery | null;
+  readonly overdueEvidence: EvidenceQuery | null;
+  /** True when aging is available at all — the balance fallbacks cannot age (§3.4). */
+  readonly aged: boolean;
+}
+
+/**
+ * What one invoice still owed at `asOf`.
+ *
+ * `paid_date > asOf` means the payment had not happened yet, so the whole invoice was outstanding.
+ * A partial payment with no `paid_date` cannot be placed in time at all; §3.4 treats it as paid at
+ * `asOf` — the alternative, treating it as unpaid, would inflate receivables on every invoice
+ * somebody part-paid — and raises `payment_date_unknown` so the figure is not read as exact.
+ */
+function outstandingAt(invoice: AgingInvoice, asOf: string): Decimal {
+  if (invoice.paidDate !== null && invoice.paidDate > asOf) {
+    return parseDecimal(invoice.totalAmount, 'total_amount');
+  }
+  return parseDecimal(invoice.balanceDue, 'balance_due');
+}
+
+function paymentDateUnknown(invoice: AgingInvoice): boolean {
+  return invoice.paidDate === null && !parseDecimal(invoice.amountPaid, 'amount_paid').isZero();
+}
+
+/** ADR-047.5: `Σ balance_due(sales) − Σ balance_due(sales_credit_note)`. */
+function signedOutstanding(invoice: AgingInvoice, asOf: string): Decimal {
+  const outstanding = outstandingAt(invoice, asOf);
+  return CREDIT_NOTE_TYPES.includes(invoice.invoiceType) ? outstanding.negated() : outstanding;
+}
+
+function fromInvoices(
+  ctx: EngineContext,
+  invoices: readonly AgingInvoice[],
+  types: readonly InvoiceType[],
+  asOf: string,
+  basis: BasisChoice,
+): BalanceResolution {
+  // Sorted by id so the sum, the counts and the components never depend on row order (§1.1).
+  const contributing = invoices
+    .filter(
+      (invoice) =>
+        types.includes(invoice.invoiceType) &&
+        invoice.status !== 'void' &&
+        invoice.issueDate <= asOf,
+    )
+    .sort((a, b) => a.id.localeCompare(b.id));
+
+  let total = new Decimal(0);
+  let overdue = new Decimal(0);
+  let withoutDueDate = 0;
+  let paymentDateUnknownCount = 0;
+
+  for (const invoice of contributing) {
+    const signed = signedOutstanding(invoice, asOf);
+    total = total.plus(signed);
+    if (paymentDateUnknown(invoice)) paymentDateUnknownCount += 1;
+    if (invoice.dueDate === null) {
+      // §3.4: excluded from overdue and counted, never guessed at. An invoice with no due date is
+      // not "not overdue" — it is unknown, and the count is what says so.
+      withoutDueDate += 1;
+      continue;
+    }
+    if (invoice.dueDate < asOf) overdue = overdue.plus(signed);
+  }
+
+  const warnings: DataQualityWarning[] = [...basis.warnings];
+  if (withoutDueDate > 0) warnings.push('no_due_dates');
+  if (paymentDateUnknownCount > 0) warnings.push('payment_date_unknown');
+
+  const invoiceTypes = [...types].sort();
+  return {
+    value: total,
+    overdue,
+    basis: 'invoices',
+    assurance: basis.assurance,
+    warnings,
+    missing: [],
+    // §5, AR/AP (invoices): `1 − (invoices without due_date / invoices)`.
+    completeness: contributing.length === 0 ? 1 : 1 - withoutDueDate / contributing.length,
+    components: {
+      as_of: asOf,
+      invoice_count: contributing.length,
+      invoices_without_due_date: withoutDueDate,
+      invoices_with_unknown_payment_date: paymentDateUnknownCount,
+    },
+    evidence: leafEvidence(ctx, 'invoices', { invoice_types: invoiceTypes, open_as_of: asOf }),
+    overdueEvidence: leafEvidence(ctx, 'invoices', {
+      invoice_types: invoiceTypes,
+      overdue_as_of: asOf,
+    }),
+    aged: true,
+  };
+}
+
+/**
+ * The `period_balances` → `ledger` fallback (§3.4, §2.3).
+ *
+ * Both give a total and no aging, so `assurance = calculated` and the two overdue metrics are NULL.
+ * When neither is available the answer is NULL with `no_opening_balance`, never zero.
+ */
+function fromBalances(
+  ctx: EngineContext,
+  fallback: CategoryBalanceFallback,
+  period: PeriodRef,
+  unavailableReason: DataQualityMissing | undefined,
+): BalanceResolution {
+  const base = {
+    overdue: null,
+    assurance: 'calculated' as AssuranceLevel,
+    warnings: [] as readonly DataQualityWarning[],
+    overdueEvidence: null,
+    aged: false,
+  };
+  const accountIds = [...fallback.accountIds].sort();
+  const descriptorFilters =
+    accountIds.length > 0 ? { period_ids: [period.id], account_ids: accountIds } : { period_ids: [period.id] };
+
+  const closing = fallback.periodBalanceClosing;
+  if (closing !== null && closing !== undefined) {
+    return {
+      ...base,
+      value: parseDecimal(closing, 'closing_balance'),
+      basis: 'period_balances',
+      missing: [],
+      // §5, AR/AP (balances): a total with no aging behind it.
+      completeness: 0.7,
+      components: { source: 'period_balances', closing_balance: toMoneyString(closing) },
+      evidence: leafEvidence(ctx, 'period_balances', descriptorFilters),
+    };
+  }
+
+  const ledger = fallback.ledger ?? null;
+  if (ledger !== null && ledger.openingBalance !== null) {
+    return {
+      ...base,
+      value: add(ledger.openingBalance, ledger.movements),
+      basis: 'ledger',
+      missing: [],
+      completeness: 0.7,
+      components: {
+        source: 'ledger',
+        opening_balance: toMoneyString(ledger.openingBalance),
+        movements: toMoneyString(ledger.movements),
+      },
+      evidence: leafEvidence(ctx, 'ledger_entries', descriptorFilters),
+    };
+  }
+
+  return {
+    ...base,
+    value: null,
+    basis: 'none',
+    missing: [unavailableReason ?? 'no_opening_balance'],
+    completeness: 0,
+    components: {
+      source: 'none',
+      ledger_movements_seen: ledger === null ? null : toMoneyString(ledger.movements),
+    },
+    evidence: null,
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Days
+// ---------------------------------------------------------------------------------------------
+
+export type DenominatorBasis =
+  | 'invoice_total_gross'
+  | 'revenue_net_of_vat'
+  | 'revenue_vat_unknown'
+  | 'expense_categories';
+
+/** The label recorded in `components.denominator_basis` before the VAT branch refines it. */
+function denominatorLabel(useInvoiceTotals: boolean): DenominatorBasis {
+  return useInvoiceTotals ? 'invoice_total_gross' : 'revenue_net_of_vat';
+}
+
+interface DaysOutcome {
+  readonly value: Decimal | null;
+  readonly components: Readonly<Record<string, unknown>>;
+  readonly warnings: readonly DataQualityWarning[];
+  readonly missing: readonly DataQualityMissing[];
+}
+
+/** Days are integers (§1.4). Rounded once, here, at the metric's own boundary. */
+function toDaysString(value: Decimal): string {
+  return value.toDecimalPlaces(0, ROUND_HALF_UP).toFixed(0);
+}
+
+/**
+ * `balance / Σ flow(3 periods) × 91.25`, with both sides on the same VAT footing (ADR-027.4).
+ *
+ * When receivables come from invoices the denominator is Σ invoice `total_amount`, which includes
+ * VAT exactly as the receivable does. Otherwise the denominator is net revenue, and the receivable
+ * is netted down by `default_vat_rate` — when the rate is unknown the figure is still written, with
+ * `vat_inclusive`, because a DSO overstated by 20% is more useful than no DSO at all as long as the
+ * warning travels with it.
+ */
+function daysFrom(
+  numerator: Decimal | null,
+  window: readonly DenominatorInputs[] | null,
+  useInvoiceTotals: boolean,
+  vatRate: string | null,
+): DaysOutcome {
+  if (window === null) {
+    return { value: null, components: {}, warnings: [], missing: ['insufficient_history'] };
+  }
+  if (window.some((entry) => entry.hasOpenItemsList)) {
+    // ADR-047.10: an aged-debtors list is not a sales history; using it as one understates sales and
+    // so overstates DSO, sometimes by a multiple.
+    return {
+      value: null,
+      components: { denominator_basis: denominatorLabel(useInvoiceTotals) },
+      warnings: [],
+      missing: ['open_items_only'],
+    };
+  }
+
+  const raw = window.map((entry) => (useInvoiceTotals ? entry.invoiceSalesTotal : entry.revenue));
+  const stated = raw.filter((value): value is string => value !== null);
+  if (stated.length < raw.length || numerator === null) {
+    return {
+      value: null,
+      components: { denominator_basis: denominatorLabel(useInvoiceTotals) },
+      warnings: [],
+      missing: ['insufficient_history'],
+    };
+  }
+
+  const denominator = sum(stated);
+  const warnings: DataQualityWarning[] = [];
+  let basis: DenominatorBasis = 'invoice_total_gross';
+  let adjusted = numerator;
+
+  if (!useInvoiceTotals) {
+    if (vatRate !== null) {
+      basis = 'revenue_net_of_vat';
+      const netted = divide(numerator, add(1, vatRate));
+      if (netted === null) return { value: null, components: {}, warnings: [], missing: ['comparison_is_zero'] };
+      adjusted = netted;
+    } else {
+      basis = 'revenue_vat_unknown';
+      warnings.push('vat_inclusive');
+    }
+  }
+
+  const components = {
+    denominator_basis: basis,
+    denominator: toMoneyString(denominator),
+    numerator: toMoneyString(adjusted),
+    days_in_window: DAYS_PER_QUARTER,
+    vat_rate_applied: basis === 'revenue_net_of_vat' ? vatRate : null,
+  };
+
+  if (!isPositive(denominator)) {
+    // A quarter with no sales gives no meaningful days figure. §3.4: "Σ ≤ 0 → NULL".
+    return { value: null, components, warnings, missing: ['comparison_is_zero'] };
+  }
+  const ratio = divide(adjusted, denominator);
+  if (ratio === null) return { value: null, components, warnings, missing: ['comparison_is_zero'] };
+  return { value: multiply(ratio, DAYS_PER_QUARTER), components, warnings, missing: [] };
+}
+
+/** `payables_days`, whose denominator excludes payroll and depreciation (ADR-027.5). */
+function payablesDaysFrom(
+  numerator: Decimal | null,
+  window: readonly DenominatorInputs[] | null,
+): DaysOutcome {
+  if (window === null || numerator === null) {
+    return { value: null, components: {}, warnings: [], missing: ['insufficient_history'] };
+  }
+  const raw = window.map((entry) => entry.payablesExpenseBase);
+  const stated = raw.filter((value): value is string => value !== null);
+  const components = { denominator_basis: 'expense_categories' as DenominatorBasis, days_in_window: DAYS_PER_QUARTER };
+  if (stated.length < raw.length) {
+    return { value: null, components, warnings: [], missing: ['insufficient_history'] };
+  }
+  const denominator = sum(stated);
+  const full = { ...components, denominator: toMoneyString(denominator), numerator: toMoneyString(numerator) };
+  if (!isPositive(denominator)) {
+    return { value: null, components: full, warnings: [], missing: ['comparison_is_zero'] };
+  }
+  const ratio = divide(numerator, denominator);
+  if (ratio === null) return { value: null, components: full, warnings: [], missing: ['comparison_is_zero'] };
+  return { value: multiply(ratio, DAYS_PER_QUARTER), components: full, warnings: [], missing: [] };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The series
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Compute the seven AR/AP keys for every input period.
+ *
+ * A series rather than a period at a time, because `receivables_days` and `payables_days` need the
+ * three-month flow window ending at P, and the window has to survive a chunk boundary
+ * (`options.priorDenominators`).
+ */
+export function computeReceivables(
+  ctx: EngineContext,
+  inputs: readonly ReceivablesPeriodInput[],
+  options: ReceivablesSeriesOptions = {},
+): readonly PeriodMetrics[] {
+  const ordered = [...inputs].sort(
+    (a, b) =>
+      a.period.periodStart.localeCompare(b.period.periodStart) || a.period.id.localeCompare(b.period.id),
+  );
+  const prior = options.priorDenominators ?? [];
+
+  return ordered.map((input, index) => {
+    const { period } = input;
+    const asOf = input.asOfIsPeriodEnd ? period.periodEnd : ctx.asOf;
+    const currency = ctx.settings.baseCurrency;
+
+    const receivables =
+      input.invoices === null
+        ? fromBalances(ctx, input.receivablesFallback, period, input.invoiceBasisUnavailableReason)
+        : fromInvoices(ctx, input.invoices, SALES_TYPES, asOf, input.basis);
+    const payables =
+      input.invoices === null
+        ? fromBalances(ctx, input.payablesFallback, period, input.invoiceBasisUnavailableReason)
+        : fromInvoices(ctx, input.invoices, PURCHASE_TYPES, asOf, input.basis);
+
+    const asOfComponents = {
+      as_of: asOf,
+      as_of_source: input.asOfIsPeriodEnd ? 'period_end' : 'run_as_of',
+    };
+
+    const window = denominatorWindow(ordered, prior, index);
+    const receivablesDays = daysFrom(
+      receivables.value,
+      window,
+      receivables.basis === 'invoices',
+      ctx.settings.vatRegistered ? ctx.settings.defaultVatRate : null,
+    );
+    const payablesDays = payablesDaysFrom(payables.value, window);
+
+    const metrics: MetricResult[] = [
+      balanceMetric('receivables', receivables, asOfComponents, currency),
+      overdueMetric('receivables_overdue', receivables, asOfComponents, currency),
+      daysMetric('receivables_days', receivables, receivablesDays, asOfComponents),
+      balanceMetric('payables', payables, asOfComponents, currency),
+      overdueMetric('payables_overdue', payables, asOfComponents, currency),
+      daysMetric('payables_days', payables, payablesDays, asOfComponents),
+      workingCapital(input, receivables, payables, currency),
+    ];
+    return { periodId: period.id, metrics };
+  });
+}
+
+/** The three consecutive months ending at `index`, or null when they are not all available. */
+function denominatorWindow(
+  ordered: readonly ReceivablesPeriodInput[],
+  prior: readonly DenominatorInputs[],
+  index: number,
+): readonly DenominatorInputs[] | null {
+  const window: DenominatorInputs[] = [];
+  for (let offset = 0; offset < 3; offset += 1) {
+    const at = index - offset;
+    if (at >= 0) {
+      const entry = ordered[at];
+      if (entry === undefined) return null;
+      const next = ordered[at + 1];
+      if (
+        next !== undefined &&
+        monthsBetween(yearMonthOf(entry.period.periodStart), yearMonthOf(next.period.periodStart)) !== 1
+      ) {
+        return null;
+      }
+      window.push(entry);
+      continue;
+    }
+    const carried = prior[prior.length + at];
+    if (carried === undefined) return null;
+    window.push(carried);
+  }
+  return window;
+}
+
+function balanceMetric(
+  key: 'receivables' | 'payables',
+  resolution: BalanceResolution,
+  asOfComponents: Readonly<Record<string, unknown>>,
+  currency: string,
+): MetricResult {
+  return {
+    key,
+    value: resolution.value === null ? null : toMoneyString(resolution.value),
+    unit: 'money',
+    basis: resolution.basis,
+    assurance: resolution.assurance,
+    dimensionType: 'none',
+    dimensionId: null,
+    currency,
+    components: { ...asOfComponents, ...resolution.components },
+    dataQuality: metricQuality(resolution.completeness, resolution.warnings, resolution.missing),
+    evidenceQuery: resolution.evidence,
+  };
+}
+
+/**
+ * Overdue exists only on the invoice basis: a category total carries no due dates, so it cannot be
+ * aged (§3.4, "aging metrics NULL, assurance = calculated"). `no_due_dates` is the reason recorded,
+ * because that is literally what is absent.
+ */
+function overdueMetric(
+  key: 'receivables_overdue' | 'payables_overdue',
+  resolution: BalanceResolution,
+  asOfComponents: Readonly<Record<string, unknown>>,
+  currency: string,
+): MetricResult {
+  // `overdue` is null exactly when the resolution came from a balance rather than from invoices, so
+  // the two conditions are one condition; keeping them separate would imply a third state.
+  const overdue = resolution.aged ? resolution.overdue : null;
+  return {
+    key,
+    value: overdue === null ? null : toMoneyString(overdue),
+    unit: 'money',
+    basis: resolution.basis,
+    assurance: resolution.assurance,
+    dimensionType: 'none',
+    dimensionId: null,
+    currency,
+    components: { ...asOfComponents, ...resolution.components },
+    dataQuality: metricQuality(
+      resolution.completeness,
+      resolution.warnings,
+      overdue === null ? dedupeCodes([...resolution.missing, 'no_due_dates']) : resolution.missing,
+    ),
+    evidenceQuery: resolution.overdueEvidence,
+  };
+}
+
+function daysMetric(
+  key: 'receivables_days' | 'payables_days',
+  resolution: BalanceResolution,
+  outcome: DaysOutcome,
+  asOfComponents: Readonly<Record<string, unknown>>,
+): MetricResult {
+  return {
+    key,
+    value: outcome.value === null ? null : toDaysString(outcome.value),
+    unit: 'days',
+    basis: resolution.basis,
+    assurance: resolution.assurance,
+    dimensionType: 'none',
+    dimensionId: null,
+    currency: null,
+    components: { ...asOfComponents, ...outcome.components },
+    dataQuality: metricQuality(
+      resolution.completeness,
+      [...resolution.warnings, ...outcome.warnings],
+      dedupeCodes([...resolution.missing, ...outcome.missing]),
+    ),
+    evidenceQuery: derivedEvidence([
+      key === 'receivables_days' ? 'receivables' : 'payables',
+      key === 'receivables_days' ? 'revenue' : 'operating_expenses',
+    ]),
+  };
+}
+
+/**
+ * `working_capital` = cash + receivables + inventory + other current assets − payables − card −
+ * tax − other current liabilities (§3.4).
+ *
+ * A missing balance-sheet term is *unknown*, not zero: the metric is still written — a working
+ * capital figure without inventory is useful to a service business and honest about what it omits —
+ * with `partial_working_capital` naming every term that could not be seen. Only a missing
+ * `closing_cash` nulls it, because cash is the term the figure is mostly about.
+ */
+function workingCapital(
+  input: ReceivablesPeriodInput,
+  receivables: BalanceResolution,
+  payables: BalanceResolution,
+  currency: string,
+): MetricResult {
+  const cash = input.closingCash;
+  const cashValue = cash?.value ?? null;
+
+  const terms: Array<{ name: string; sign: 1 | -1; value: Decimal | null; basis: MetricBasis }> = [
+    { name: 'closing_cash', sign: 1, value: cashValue === null ? null : parseDecimal(cashValue), basis: cash?.basis ?? 'none' },
+    { name: 'receivables', sign: 1, value: receivables.value, basis: receivables.basis },
+    ...WORKING_CAPITAL_ASSETS.map((category) => termOf(input, category, 1)),
+    { name: 'payables', sign: -1 as const, value: payables.value, basis: payables.basis },
+    ...WORKING_CAPITAL_LIABILITIES.map((category) => termOf(input, category, -1)),
+  ];
+
+  const missingTerms = terms.filter((term) => term.value === null).map((term) => term.name).sort();
+  const knownTerms = terms.filter((term) => term.value !== null);
+
+  const componentValues: Record<string, unknown> = {};
+  for (const term of terms) {
+    componentValues[term.name] = term.value === null ? null : toMoneyString(term.value);
+  }
+  componentValues.bases = Object.fromEntries(terms.map((term) => [term.name, term.basis]));
+  componentValues.missing_terms = missingTerms;
+
+  const inputCompleteness = [
+    cash?.dataQuality.completeness ?? 0,
+    receivables.completeness,
+    payables.completeness,
+  ];
+  const baseCompleteness = Math.min(...inputCompleteness) * (knownTerms.length / terms.length);
+  const warnings: DataQualityWarning[] = [
+    ...(cash?.dataQuality.warnings ?? []),
+    ...receivables.warnings,
+    ...payables.warnings,
+  ];
+  if (missingTerms.length > 0) warnings.push('partial_working_capital');
+
+  const assurance = weakerAssurance(
+    weakerAssurance(cash?.assurance ?? 'calculated', receivables.assurance),
+    payables.assurance,
+  );
+  const basis = combineBasis(knownTerms.map((term) => term.basis));
+
+  if (cashValue === null) {
+    return {
+      key: 'working_capital',
+      value: null,
+      unit: 'money',
+      basis,
+      assurance,
+      dimensionType: 'none',
+      dimensionId: null,
+      currency,
+      components: componentValues,
+      dataQuality: metricQuality(
+        baseCompleteness,
+        warnings,
+        dedupeCodes([
+          ...(cash?.dataQuality.missing ?? ['no_opening_cash']),
+          ...receivables.missing,
+          ...payables.missing,
+        ]),
+      ),
+      evidenceQuery: derivedEvidence(terms.map((term) => term.name)),
+    };
+  }
+
+  let total = new Decimal(0);
+  for (const term of terms) {
+    if (term.value === null) continue;
+    total = term.sign === 1 ? total.plus(term.value) : total.minus(term.value);
+  }
+
+  return {
+    key: 'working_capital',
+    value: toMoneyString(total),
+    unit: 'money',
+    basis,
+    assurance,
+    dimensionType: 'none',
+    dimensionId: null,
+    currency,
+    components: componentValues,
+    dataQuality: metricQuality(baseCompleteness, warnings, []),
+    evidenceQuery: derivedEvidence(terms.map((term) => term.name)),
+  };
+}
+
+function termOf(
+  input: ReceivablesPeriodInput,
+  category: StandardCategory,
+  sign: 1 | -1,
+): { name: string; sign: 1 | -1; value: Decimal | null; basis: MetricBasis } {
+  const term = input.balanceSheetClosings[category];
+  return {
+    name: category,
+    sign,
+    value: term === undefined ? null : parseDecimal(term.value, category),
+    basis: term?.basis ?? 'none',
+  };
+}

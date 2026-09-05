@@ -142,7 +142,13 @@ const noUnscopedServiceQuery = {
           receiver?.type === 'Identifier' ? receiver.name : receiver?.property?.name ?? '';
         if (!/service|admin|scoped/i.test(String(receiverName))) return;
         const table = node.arguments[0]?.type === 'Literal' ? String(node.arguments[0].value) : 'table';
-        // Walk up the chain looking for .eq('organization_id', …)
+        // `public.organizations` is the one table whose OWN primary key is the organization id, so
+        // `.eq('id', orgId)` scopes it exactly as `.eq('organization_id', …)` scopes every other
+        // table. Naming it here rather than loosening the rule keeps the exemption to one table.
+        const scopeColumns = table === 'organizations'
+          ? ['organization_id', 'id']
+          : ['organization_id'];
+        // Walk up the chain looking for the scope filter.
         let cur = node.parent;
         let scoped = false;
         while (cur && (cur.type === 'MemberExpression' || cur.type === 'CallExpression' || cur.type === 'AwaitExpression')) {
@@ -152,7 +158,7 @@ const noUnscopedServiceQuery = {
             cur.callee.property?.type === 'Identifier' &&
             ['eq', 'match', 'in'].includes(cur.callee.property.name) &&
             cur.arguments[0]?.type === 'Literal' &&
-            String(cur.arguments[0].value) === 'organization_id'
+            scopeColumns.includes(String(cur.arguments[0].value))
           ) {
             scoped = true;
             break;

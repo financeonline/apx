@@ -83,6 +83,19 @@ const FiltersSchema = z.strictObject({
   category_account_ids: z.array(uuid).min(1).optional(),
   invoice_types: z.array(z.enum(INVOICE_TYPES)).min(1).optional(),
   direction: z.enum(DESCRIPTOR_DIRECTIONS).optional(),
+  /**
+   * Which transfer legs the selection drops.
+   *
+   * Two spellings existed in the documents and neither covered both needs (ADR-049.7, now resolved
+   * by ADR-051): `EVIDENCE_MODEL.md §3` had `exclude_cash_transfers: true`, which cash metrics need
+   * — a cash-like↔cash-like pair cancels, but a card repayment is a real outflow and must stay
+   * (ADR-028). `FINANCIAL_ENGINE.md §4.4` and ADR-047.12 need `exclude_transfers: 'all'` for the
+   * bank-basis P&L proxy, where every transfer kind is excluded.
+   *
+   * `exclude_transfers` is the canonical key and expresses both. `exclude_cash_transfers: true` is
+   * retained as the equivalent of `'cash_only'` so descriptors already written stay valid.
+   */
+  exclude_transfers: z.enum(['all', 'cash_only']).optional(),
   exclude_cash_transfers: z.boolean().optional(),
   open_as_of: isoDate.optional(),
   overdue_as_of: isoDate.optional(),

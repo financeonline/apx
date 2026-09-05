@@ -1,0 +1,270 @@
+/**
+ * Composition: aggregate cells in, one period's metrics out (FINANCIAL_ENGINE.md §2.4 step 6).
+ *
+ * The metric modules each take a shaped input; this maps the single SQL aggregation onto those
+ * shapes and runs them in registry order. It is the only place that knows both the aggregate's
+ * layout and the modules' inputs, which is what keeps each module ignorant of where its numbers
+ * came from — and therefore unit-testable against a golden number.
+ *
+ * Pure. No I/O, no clock: `asOf` arrives on the context.
+ */
+
+import { Decimal, parseDecimalOrNull } from '@/core/money';
+import { ledgerAmount, naturalToReporting } from './sign';
+import { computeCash, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions } from './cash';
+import type { TransferKind } from '@/modules/banking';
+import { computeConcentration, type ConcentrationPeriodInput } from './concentration';
+import { computePnl, type AccountAmount, type PnlInput, type SnapshotIdResolver } from './pnl';
+import { choosePrecedence } from './coverage';
+import { isCashLikeBankAccount } from './categories';
+import type {
+  AggregateCell, BasisChoice, EngineContext, MetricResult, PeriodCoverage, PeriodRef,
+} from './types';
+
+export interface TransferLegCell {
+  readonly periodId: string;
+  readonly bankAccountId: string;
+  readonly transferKind: string;
+  readonly inflow: string;
+  readonly outflow: string;
+}
+
+export interface ComposeInput {
+  readonly period: PeriodRef;
+  readonly coverage: PeriodCoverage;
+  readonly cells: readonly AggregateCell[];
+  readonly transferLegs: readonly TransferLegCell[];
+  readonly context: EngineContext;
+  /** Cash carries forward from the previous period; supplied by the run loop. */
+  readonly cashOptions?: CashSeriesOptions;
+  readonly resolveSnapshotId?: SnapshotIdResolver;
+}
+
+/** The aggregate source each basis reads from. */
+function sourceForBasis(basis: BasisChoice['basis']): AggregateCell['source'] | null {
+  switch (basis) {
+    case 'period_balances': return 'period_balances';
+    case 'ledger': return 'ledger';
+    case 'invoices': return 'invoices';
+    case 'bank': return 'bank';
+    default: return null;
+  }
+}
+
+/**
+ * Folds the aggregate into per-account amounts for the P&L, IN REPORTING SIGN.
+ *
+ * The aggregate deliberately carries debit and credit separately and leaves `amount` in natural sign
+ * (debit − credit), because the account-type rule is a property of the chart, not of the sum. This
+ * is where that rule is applied — once, through `sign.ts`, so the engine and the SQL cannot disagree
+ * about whether revenue is positive (§3).
+ *
+ * A bank cell is already signed by the statement, so it is converted from its category's account
+ * type rather than from a debit/credit pair.
+ */
+function accountAmounts(
+  cells: readonly AggregateCell[],
+  periodId: string,
+  source: AggregateCell['source'],
+  accounts: EngineContext['accounts'],
+): AccountAmount[] {
+  const byAccount = new Map(accounts.map((a) => [a.id, a]));
+  const totals = new Map<string, { amount: Decimal; rowCount: number }>();
+
+  for (const cell of cells) {
+    if (cell.periodId !== periodId || cell.source !== source) continue;
+    if (!cell.accountId) continue;
+    const account = byAccount.get(cell.accountId);
+    if (!account) continue;
+
+    const reporting = source === 'bank'
+      // A bank amount is already signed: positive is an inflow. The account-type rule turns it into
+      // the reporting sign for its category.
+      ? naturalToReporting(account.accountType, new Decimal(cell.amount).negated())
+      : ledgerAmount({ accountType: account.accountType, debit: cell.debit, credit: cell.credit });
+
+    const existing = totals.get(cell.accountId);
+    totals.set(cell.accountId, {
+      amount: (existing?.amount ?? new Decimal(0)).plus(reporting),
+      rowCount: (existing?.rowCount ?? 0) + cell.rowCount,
+    });
+  }
+
+  const out: AccountAmount[] = [];
+  for (const [accountId, total] of totals) {
+    const account = byAccount.get(accountId);
+    if (!account) continue;
+    out.push({
+      accountId,
+      category: account.standardCategory,
+      amount: total.amount.toFixed(2),
+      rowCount: total.rowCount,
+    });
+  }
+  // Sorted so the written snapshot order — and therefore the run's output — is deterministic.
+  return out.sort((a, b) => a.accountId.localeCompare(b.accountId));
+}
+
+/** Rows the source could not attribute to a category, for the completeness haircut (§3.1). */
+function uncategorisedExposure(
+  cells: readonly AggregateCell[],
+  periodId: string,
+  source: AggregateCell['source'],
+): { absoluteAmount: string; totalAbsoluteAmount: string } {
+  let uncategorised = new Decimal(0);
+  let total = new Decimal(0);
+  for (const cell of cells) {
+    if (cell.periodId !== periodId || cell.source !== source) continue;
+    const magnitude = (parseDecimalOrNull(cell.amount) ?? new Decimal(0)).abs();
+    total = total.plus(magnitude);
+    if (cell.standardCategory === null || cell.standardCategory === 'uncategorised') {
+      uncategorised = uncategorised.plus(magnitude);
+    }
+  }
+  return { absoluteAmount: uncategorised.toFixed(2), totalAbsoluteAmount: total.toFixed(2) };
+}
+
+/** Bank movements for the cash module, with transfer legs kept so ADR-028 can be applied there. */
+function bankMovements(
+  cells: readonly AggregateCell[],
+  periodId: string,
+  bankAccounts: EngineContext['bankAccounts'],
+): BankAggregateCell[] {
+  const cashLike = new Set(
+    bankAccounts.filter((a) => isCashLikeBankAccount(a.accountType)).map((a) => a.id),
+  );
+
+  void cashLike;
+  return cells
+    .filter((c) => c.periodId === periodId && c.source === 'bank' && c.bankAccountId !== null)
+    .map((c) => ({
+      ...c,
+      source: 'bank' as const,
+      bankAccountId: c.bankAccountId!,
+      transferKind: (c.transferKind ?? 'none') as TransferKind,
+      unpairedTransferCandidate: c.unpairedTransferCandidate === true,
+    }))
+    .sort((a, b) => a.bankAccountId.localeCompare(b.bankAccountId)
+      || a.transferKind.localeCompare(b.transferKind));
+}
+
+/** Revenue and spend per counterparty, for the concentration module. */
+function counterpartyAmounts(
+  cells: readonly AggregateCell[],
+  periodId: string,
+  source: AggregateCell['source'],
+  accounts: EngineContext['accounts'],
+  want: 'revenue' | 'expense',
+) {
+  const categoryOf = new Map(accounts.map((a) => [a.id, a.standardCategory]));
+  const totals = new Map<string | null, Decimal>();
+
+  for (const cell of cells) {
+    if (cell.periodId !== periodId || cell.source !== source) continue;
+    const category = cell.standardCategory
+      ?? (cell.accountId ? categoryOf.get(cell.accountId) : undefined)
+      ?? null;
+
+    const isRevenue = category === 'revenue' || category === 'other_income'
+      || cell.invoiceType === 'sales' || cell.invoiceType === 'sales_credit_note';
+    if (want === 'revenue' ? !isRevenue : isRevenue) continue;
+
+    const key = cell.counterpartyId;
+    const magnitude = (parseDecimalOrNull(cell.amount) ?? new Decimal(0)).abs();
+    totals.set(key, (totals.get(key) ?? new Decimal(0)).plus(magnitude));
+  }
+
+  return [...totals.entries()]
+    .map(([counterpartyId, amount]) => ({ counterpartyId, amount: amount.toFixed(2) }))
+    // NULL — the "Unattributed" bucket — sorts last so the output order is stable.
+    .sort((a, b) => (a.counterpartyId ?? '￿').localeCompare(b.counterpartyId ?? '￿'));
+}
+
+const NO_SNAPSHOT: SnapshotIdResolver = () => null;
+
+/**
+ * Runs one period's metrics.
+ *
+ * The families are computed independently and each takes its own basis from precedence, which is
+ * why a period can legitimately have an accrual P&L from a trial balance and cash from the bank.
+ * `basis = 'mixed'` on a derived metric records that.
+ */
+export function composePeriod(input: ComposeInput): MetricResult[] {
+  const { period, coverage, cells, context } = input;
+  const resolve = input.resolveSnapshotId ?? NO_SNAPSHOT;
+  const results: MetricResult[] = [];
+
+  // ---- P&L ----
+  const pnlBasis = choosePrecedence(coverage, 'pnl');
+  const pnlSource = sourceForBasis(pnlBasis.basis);
+
+  const pnlInput: PnlInput = {
+    period,
+    basis: pnlBasis,
+    currency: context.settings.baseCurrency,
+    accounts: context.accounts,
+    accountAmounts: pnlSource
+      ? accountAmounts(cells, period.id, pnlSource, context.accounts)
+      : [],
+    uncategorised: pnlSource
+      ? uncategorisedExposure(cells, period.id, pnlSource)
+      : { absoluteAmount: '0', totalAbsoluteAmount: '0' },
+  };
+  results.push(...computePnl(pnlInput, context, resolve));
+
+  // ---- Cash ----
+  const cashBasis = choosePrecedence(coverage, 'cash');
+  const cashInput: CashPeriodInput = {
+    period,
+    basis: cashBasis,
+    movements: bankMovements(cells, period.id, context.bankAccounts),
+    openingCandidates: context.bankAccounts
+      .filter((a) => a.openingBalance !== null && isCashLikeBankAccount(a.accountType))
+      .map((a) => ({
+        bankAccountId: a.id,
+        source: 'bank_account_opening_balance' as const,
+        value: a.openingBalance!,
+        asAtDate: a.openingBalanceDate,
+      })),
+    coveredBankAccountIds: context.bankAccounts
+      .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType))
+      .map((a) => a.id),
+  };
+  const cashSeries = computeCash(context, [cashInput], input.cashOptions ?? {});
+  for (const periodMetrics of cashSeries) {
+    if (periodMetrics.periodId === period.id) results.push(...periodMetrics.metrics);
+  }
+
+  // ---- Customers and suppliers ----
+  const counterpartyBasis = choosePrecedence(coverage, 'counterparty');
+  const counterpartySource = sourceForBasis(counterpartyBasis.basis);
+  const revenueResult = results.find((r) => r.key === 'revenue' && r.dimensionType === 'none') ?? null;
+
+  const concentrationInput: ConcentrationPeriodInput = {
+    period,
+    basis: counterpartyBasis,
+    customerRevenue: counterpartySource
+      ? counterpartyAmounts(cells, period.id, counterpartySource, context.accounts, 'revenue')
+      : [],
+    supplierSpend: counterpartySource
+      ? counterpartyAmounts(cells, period.id, counterpartySource, context.accounts, 'expense')
+      : [],
+    revenue: revenueResult,
+    revenueAccountIds: context.accounts
+      .filter((a) => a.standardCategory === 'revenue' || a.standardCategory === 'other_income')
+      .map((a) => a.id),
+    expenseAccountIds: context.accounts
+      .filter((a) => a.accountType === 'expense')
+      .map((a) => a.id),
+  };
+  for (const periodMetrics of computeConcentration(context, [concentrationInput])) {
+    if (periodMetrics.periodId === period.id) results.push(...periodMetrics.metrics);
+  }
+
+  // A stable order makes two runs over identical data write byte-identical snapshots, which is the
+  // guarantee §1.1 makes and TEST_STRATEGY asserts.
+  return results.sort(
+    (a, b) => a.key.localeCompare(b.key)
+      || (a.dimensionId ?? '').localeCompare(b.dimensionId ?? ''),
+  );
+}

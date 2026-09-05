@@ -49,7 +49,8 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
-      - run: npm run test:unit
+      - name: unit tests with the coverage gate (IMPLEMENTATION_PLAN.md Phase 6 exit gate)
+        run: npx vitest run --project unit --coverage
 
   database:
     name: pgtap + integration
