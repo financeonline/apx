@@ -29,6 +29,8 @@ export default defineConfig({
         'src/modules/tenancy/domain/**',
         'src/modules/financial-engine/domain/**',
         'src/modules/banking/domain/**',
+        'src/modules/health/domain/**',
+        'src/modules/alerts/domain/**',
       ],
       thresholds: {
         /*
@@ -50,6 +52,26 @@ export default defineConfig({
         },
         'src/modules/banking/domain/**': {
           lines: 95, branches: 88, functions: 95, statements: 95,
+        },
+        /*
+         * The health engine is a calculation engine and is gated like one: it produces the single
+         * most prominent number in the product, and a wrong band is a wrong claim about somebody's
+         * business. Branches sit at 90 rather than 95 because the residue is defensive — the
+         * unreachable catch-all in `bandOf` (asserted by a test that constructs a broken rule), and
+         * null guards on values the database's own types make impossible.
+         */
+        'src/modules/health/domain/**': {
+          lines: 95, branches: 90, functions: 95, statements: 95,
+        },
+        /*
+         * The condition rules health counts. Their branch figure is held at 85: most of the residue
+         * is the `?? null` and optional-chaining tails on values that arrive from `numeric` columns
+         * and therefore cannot be unreadable in production — the guards are kept because a rule that
+         * throws would take a whole calculation run down with it, and deleting them to chase a
+         * number would be trading a real protection for a percentage.
+         */
+        'src/modules/alerts/domain/**': {
+          lines: 95, branches: 85, functions: 95, statements: 95,
         },
         'src/core/permissions/**': { lines: 90, branches: 95, functions: 50, statements: 90 },
         'src/core/money/**': { lines: 90, branches: 85, functions: 90, statements: 90 },

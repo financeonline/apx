@@ -79,6 +79,26 @@ export function parseDecimalOrNull(
   return parseDecimal(value, field);
 }
 
+/**
+ * Parse a value that MIGHT be rubbish, without raising.
+ *
+ * `parseDecimalOrNull` returns null for a MISSING value and raises for an unreadable one, which is
+ * right at a data-access boundary where rubbish is a bug. It is exactly wrong wherever unreadable
+ * input is the ordinary case the caller exists to handle: the import validator, which must attach an
+ * error to the row rather than abandon it (SOW §23), and the alert condition rules, which must not
+ * bring down a whole calculation run because one value could not be read.
+ *
+ * Both had grown their own private copy of this function. One copy, here, so the distinction between
+ * "absent" and "unreadable" is drawn in one place.
+ */
+export function tryParseDecimal(value: DecimalInput | null | undefined): Decimal | null {
+  try {
+    return parseDecimalOrNull(value);
+  } catch {
+    return null;
+  }
+}
+
 /** Parse a money column (`NUMERIC(18,2)`). Same rules; the name records the intent at the call site. */
 export function parseMoney(value: DecimalInput, field?: string): Decimal {
   return parseDecimal(value, field);

@@ -27,6 +27,7 @@ export {
   toMoneyStringOrNull,
   toRatioString,
   toRatioStringOrNull,
+  tryParseDecimal,
   type DecimalInput,
 } from './parse';
 

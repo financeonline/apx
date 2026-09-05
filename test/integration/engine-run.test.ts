@@ -267,6 +267,52 @@ describe('the pointer rewrite (§2.4 step 8, F-B-16)', () => {
     expect(previous).toBe('true');
   });
 
+  /** A category-dimensioned snapshot: `dimension_key`, never `dimension_id` (ADR-053). */
+  const categorySnapshot = (category: string, value: string) => ({
+    period_id: periodMay, metric_key: 'expense_by_category',
+    dimension_type: 'standard_category', dimension_id: null, dimension_key: category,
+    value, unit: 'money', currency: 'GBP',
+    basis: 'ledger', assurance_level: 'calculated',
+    data_quality: { completeness: 1, proxy: false, warnings: [], missing: [] },
+    components: {}, evidence_query: null,
+  });
+
+  it('restores category-dimensioned pointers with their categories intact (ADR-055.1)', () => {
+    /*
+     * The defect this test was written for: the failed-run restore was last written before
+     * `dimension_key` existed, so it put every category pointer back with a NULL key. Because the
+     * uniqueness index is NULLS NOT DISTINCT, all of them collapsed into ONE row pointing at an
+     * arbitrary category's snapshot — and spending by category would have shown one category's
+     * figure under every category's name, silently, only after a run failed.
+     */
+    const first = startRun('a1a1');
+    writeChunk(first, [
+      categorySnapshot('marketing', '3000.00'),
+      categorySnapshot('payroll', '18000.00'),
+      categorySnapshot('software', '450.00'),
+    ]);
+    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
+
+    const second = startRun('b2b2');
+    writeChunk(second, [
+      categorySnapshot('marketing', '9000.00'),
+      categorySnapshot('payroll', '19000.00'),
+      categorySnapshot('software', '460.00'),
+    ]);
+    serverRpc('finish_calculation_run', { p_org: orgId, p_run: second, p_status: 'failed' });
+
+    const restored = adminSql(`
+      select string_agg(c.dimension_key || '=' || s.value::text, ',' order by c.dimension_key)
+        from public.metric_current c
+        join public.metric_snapshots s
+          on s.organization_id = c.organization_id and s.id = c.snapshot_id
+       where c.organization_id = '${orgId}' and c.metric_key = 'expense_by_category'`);
+
+    expect(restored).toBe(
+      'marketing=3000.000000,payroll=18000.000000,software=450.000000',
+    );
+  });
+
   it('restores the previous pointers when a run fails (§2.4 step 12)', () => {
     const first = startRun('a1a1');
     writeChunk(first, [snapshot('revenue', '10000.00')]);

@@ -1,6 +1,10 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { varianceKey } from '@/modules/financial-engine';
+import {
+  loadHealthCard, loadHealthHistory, summarySentence,
+  type HealthCardView, type HealthHistoryPoint, type SummarySentence,
+} from '@/modules/health';
 import * as repo from '../data/repository';
 import {
   changeFrom, formatValue, labelFor, toMetricCard,
@@ -64,6 +68,15 @@ export interface HomeView {
   readonly recalculating: boolean;
   /** True when no cost-of-sales account exists, so the gross-profit card is omitted (CD-05). */
   readonly hidesGrossProfit: boolean;
+  /**
+   * The health score for this period, or NULL when none was written — which happens for exactly one
+   * reason: the period is not complete (ADR-030.4). The card is omitted rather than showing a zero.
+   */
+  readonly health: HealthCardView | null;
+  /** The one plain sentence at level 1, from `modules/health` templates — never from the AI. */
+  readonly summary: SummarySentence;
+  /** The label of the month the change is measured against, for the card's change line. */
+  readonly comparisonLabel: string | null;
 }
 
 /** The Level 2 cards, in the order §4 fixes. Order is part of the contract, not a preference. */
@@ -80,6 +93,17 @@ function index(rows: readonly SnapshotRow[]): Map<string, SnapshotRow> {
     if (row.dimensionType === 'none') map.set(row.metricKey, row);
   }
   return map;
+}
+
+/**
+ * The organisation's currency, taken from the figures themselves.
+ *
+ * Every money snapshot carries the currency it was computed in, so the sentence is rendered with the
+ * same symbol as the cards. Falling back to a hard-coded 'GBP' would be a silent assumption about
+ * somebody's business; falling back to the first money row's currency is a statement of fact.
+ */
+function currencyOf(rows: readonly SnapshotRow[]): string {
+  return rows.find((r) => r.unit === 'money' && r.currency !== null)?.currency ?? 'GBP';
 }
 
 function formatDate(iso: string | null): string | null {
@@ -199,6 +223,24 @@ export async function loadHome(
     }
   }
 
+  const health = await loadHealthCard(db, orgId, period.id, previous?.id ?? null, requestId);
+
+  /*
+   * The summary sentence reads the same snapshots the cards do, so it can never describe a month
+   * differently from the numbers beside it. `hasPnlSource` is the inverse of the bank-only test
+   * above, which is why it is derived from it rather than asked again.
+   */
+  const summary = summarySentence({
+    periodLabel: period.label,
+    currency: currencyOf(snapshots),
+    netProfit: byKey.get('net_profit')?.value ?? null,
+    netCashMovement: byKey.get('net_cash_movement')?.value ?? null,
+    cashInflows: byKey.get('cash_inflows')?.value ?? null,
+    cashOutflows: byKey.get('cash_outflows')?.value ?? null,
+    hasPnlSource: !noPnlSource,
+    score: health,
+  });
+
   const view: HomeView = {
     period,
     periods: periods.filter((p) => withData.has(p.id)),
@@ -207,6 +249,9 @@ export async function loadHome(
     partialMonth: partialLine,
     recalculating,
     hidesGrossProfit,
+    health,
+    summary,
+    comparisonLabel: previous?.label ?? null,
   };
 
   return bankOnly ? { kind: 'bank_only', view } : { kind: 'ready', view };
@@ -244,3 +289,21 @@ export async function loadTrend(
 }
 
 export { BASIS_TEXT, changeFrom };
+
+/**
+ * The health score history for the chart (§Level 1).
+ *
+ * Read separately from `loadHome` because it is a level-1 detail on the explain page rather than
+ * something Home needs before its first paint, and because a twelve-month read should not sit in
+ * front of the six cards a reader came for.
+ */
+export async function loadHealthTrend(
+  db: SupabaseClient,
+  orgId: string,
+  periods: readonly PeriodLabel[],
+  requestId?: string,
+): Promise<{ points: readonly HealthHistoryPoint[]; labels: Map<string, string> }> {
+  const window = [...periods].slice(0, 12).reverse();
+  const points = await loadHealthHistory(db, orgId, window.map((p) => p.id), requestId);
+  return { points, labels: new Map(window.map((p) => [p.id, p.label])) };
+}

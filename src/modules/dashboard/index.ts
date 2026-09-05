@@ -43,6 +43,7 @@ export {
 
 export {
   latestCompletePeriod,
+  loadHealthTrend,
   loadHome,
   loadTrend,
   partialPeriod,

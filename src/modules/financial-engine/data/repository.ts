@@ -209,6 +209,57 @@ export interface FingerprintSources {
   readonly categoryHistoryHeads: Record<string, string>;
 }
 
+/**
+ * The organisation's earliest period that carries any accepted record.
+ *
+ * The first-period gate (§8.1) silences variance-based rules there: the earliest month has nothing
+ * to compare against, and a rule that fires on "up from nothing" would greet every new customer with
+ * a spike alert on their first import.
+ *
+ * Four indexed `limit 1` reads once per run, plus `period_balances`, which carries no date of its
+ * own and is matched on its period. Ordering happens against `allPeriods` rather than on uuids,
+ * because a period id says nothing about when the period was.
+ */
+export async function loadFirstPeriodWithData(
+  scoped: SupabaseClient, orgId: string, allPeriods: readonly PeriodRef[],
+): Promise<string | null> {
+  const dated = [
+    ['ledger_entries', 'entry_date'],
+    ['bank_transactions', 'transaction_date'],
+    ['invoices', 'issue_date'],
+  ] as const;
+
+  const periodIds = new Set<string>();
+
+  for (const [table, dateColumn] of dated) {
+    const { data } = await scoped
+      .from(table)
+      .select(`period_id, ${dateColumn}`)
+      .eq('organization_id', orgId)
+      .eq('record_status', 'accepted')
+      .is('superseded_by', null)
+      .order(dateColumn, { ascending: true })
+      .limit(1);
+    const periodId = (data?.[0] as { period_id?: string } | undefined)?.period_id;
+    if (periodId !== undefined) periodIds.add(periodId);
+  }
+
+  const { data: balances } = await scoped
+    .from('period_balances')
+    .select('period_id')
+    .eq('organization_id', orgId)
+    .eq('record_status', 'accepted')
+    .is('superseded_by', null);
+  for (const row of (balances ?? []) as Array<{ period_id: string }>) {
+    periodIds.add(row.period_id);
+  }
+
+  for (const period of allPeriods) {
+    if (periodIds.has(period.id)) return period.id;
+  }
+  return null;
+}
+
 export async function loadFingerprintSources(
   scoped: SupabaseClient, orgId: string,
 ): Promise<FingerprintSources> {

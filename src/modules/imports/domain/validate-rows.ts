@@ -13,7 +13,7 @@
  * data-loss engine (SOW §23).
  */
 
-import { Decimal, parseDecimalOrNull } from '@/core/money';
+import { Decimal, parseDecimalOrNull, tryParseDecimal } from '@/core/money';
 
 /**
  * A non-throwing parse.
@@ -24,13 +24,7 @@ import { Decimal, parseDecimalOrNull } from '@/core/money';
  * instead of attaching `IMP-AMT-002` to it. Discarding a record because it is malformed is the one
  * thing this engine must never do (SOW §23).
  */
-function readAmount(value: string): Decimal | null {
-  try {
-    return parseDecimalOrNull(value);
-  } catch {
-    return null;
-  }
-}
+const readAmount = (value: string): Decimal | null => tryParseDecimal(value);
 import type { StandardCategory } from '@/modules/financials';
 import type {
   BatchIssue, MappedRow, RowIssue, ValidatedRow,

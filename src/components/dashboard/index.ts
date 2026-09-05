@@ -7,6 +7,9 @@
  */
 
 export { MetricCard, type MetricCardVariant } from './metric-card';
+export { Disclaimer, HealthScoreCard, HealthScoreInline } from './health-score-card';
+export { HealthExplainPanel } from './health-explain';
+export { HealthHistoryChart } from './health-history-chart';
 export { TrendChart } from './trend-chart';
 export { PeriodPicker } from './period-picker';
 export { DataQualityBadge, StatusBadgeView } from './data-quality-badge';
@@ -40,6 +43,30 @@ export {
   StaleFigureTag,
   SuspendedBanner,
 } from './states';
+
+export {
+  BAND_SCALE,
+  BAND_TONES,
+  CHANGE_TONE_CLASS,
+  DIMENSION_DESCRIPTIONS,
+  DIMENSION_LABELS,
+  EXCLUSION_TEXT,
+  HEALTH_DISCLAIMER,
+  NOT_ENOUGH_DATA_BODY,
+  NOT_ENOUGH_DATA_TITLE,
+  NO_SCORE_FOR_PARTIAL_MONTH,
+  PROXY_CAP_NOTE,
+  RULE_LABELS,
+  SKIP_TEXT,
+  bandText,
+  bandTone,
+  changeText,
+  changeTone,
+  dimensionsNote,
+  orderedDimensions,
+  pointsText,
+  skipText,
+} from './health-presentation';
 
 export type { EmptyStateCopy } from './empty-state-copy';
 export type { ErrorVariant, StateCopy } from './state-copy';

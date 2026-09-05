@@ -4,6 +4,8 @@ import { createUserClient } from '@/core/db/user-client';
 import { listMyOrganizations } from '@/modules/tenancy';
 import { PageHeader, Card, CardBody, EmptyState, Badge } from '@/components/ui/surfaces';
 import { ORG_STATUS_LABELS } from '@/components/labels';
+import { loadPortfolioScores } from '@/modules/health';
+import { Disclaimer, HealthScoreInline } from '@/components/dashboard';
 
 export const dynamic = 'force-dynamic';
 
@@ -17,6 +19,11 @@ export default async function PortfolioPage() {
   if (!data.user) redirect('/sign-in?next=/portfolio');
 
   const organizations = await listMyOrganizations(db);
+  /*
+   * ONE read for every card (ADR-038.13). The scores arrive keyed by organisation; an organisation
+   * with no scored month simply has no entry, and its card says so rather than showing a zero.
+   */
+  const scores = await loadPortfolioScores(db);
 
   return (
     <main className="mx-auto w-full max-w-4xl px-6 py-12">
@@ -38,8 +45,16 @@ export default async function PortfolioPage() {
                     <CardBody className="flex items-start justify-between gap-3">
                       <span>
                         <span className="block font-medium">{organization.name}</span>
-                        <span className="block text-sm text-ink-muted">
-                          Health score and alerts arrive with the dashboard.
+                        <span className="mt-2 block">
+                          <HealthScoreInline
+                            score={scores.get(organization.organizationId)?.score ?? null}
+                            band={scores.get(organization.organizationId)?.band ?? null}
+                            dimensionsUsed={scores.get(organization.organizationId)?.dimensionsUsed ?? 0}
+                            dimensionsTotal={scores.get(organization.organizationId)?.dimensionsTotal ?? 6}
+                          />
+                        </span>
+                        <span className="mt-1 block text-sm text-ink-muted">
+                          Open alerts arrive with the alert engine.
                         </span>
                       </span>
                       {organization.status !== 'active' && (
@@ -53,6 +68,8 @@ export default async function PortfolioPage() {
           </ul>
         )}
       </div>
+      {/* SOW §9. Once for the list rather than on every card. */}
+      {organizations.length > 0 ? <Disclaimer /> : null}
     </main>
   );
 }

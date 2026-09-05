@@ -47,6 +47,7 @@ export interface RunOutcome {
   readonly status: 'succeeded' | 'no_change' | 'nothing_to_do' | 'failed';
   readonly periodsWritten: number;
   readonly snapshotsWritten: number;
+  readonly healthScoresWritten: number;
 }
 
 /**
@@ -90,6 +91,28 @@ export interface RunDeps {
     runId: string, status: 'succeeded' | 'failed', stats: Record<string, unknown>, error?: unknown,
   ) => Promise<void>;
   readonly setCompleteness: (periods: string[], complete: boolean[]) => Promise<void>;
+  /**
+   * Scores the complete periods of a chunk (FINANCIAL_ENGINE.md §7).
+   *
+   * Injected rather than imported so this loop stays unaware of the health rules, and so the health
+   * module can depend on the engine without the engine depending back. It is called AFTER the
+   * chunk commits, because §7.4 pins the snapshot behind every metric a dimension rested on and an
+   * uncommitted snapshot has no id.
+   */
+  readonly scoreHealth: (input: HealthChunkInput) => Promise<{ written: number }>;
+}
+
+/** What the health step needs from the chunk that just committed. */
+export interface HealthChunkInput {
+  readonly organizationId: string;
+  readonly calculationRunId: string;
+  readonly chunkPeriodIds: readonly string[];
+  readonly windowPeriodIds: readonly string[];
+  readonly aggregatedAt: string;
+  readonly currency: string;
+  readonly completeness: ReadonlyMap<string, boolean>;
+  readonly bankCoverage: ReadonlyMap<string, number>;
+  readonly firstPeriodWithDataId: string | null;
 }
 
 export async function runCalculation(
@@ -109,6 +132,9 @@ export async function runCalculation(
       repo.loadFingerprintSources(scoped, orgId),
     ]);
 
+  // The first-period gate (§8.1) needs this once per run, not once per chunk.
+  const firstPeriodWithDataId = await repo.loadFirstPeriodWithData(scoped, orgId, allPeriods);
+
   const currentPeriod = allPeriods.find(
     (p) => p.periodStart <= request.asOf && p.periodEnd >= request.asOf,
   );
@@ -121,7 +147,10 @@ export async function runCalculation(
   });
 
   if (!range.affectedFrom || !range.to) {
-    return { runId: null, status: 'nothing_to_do', periodsWritten: 0, snapshotsWritten: 0 };
+    return {
+      runId: null, status: 'nothing_to_do',
+      periodsWritten: 0, snapshotsWritten: 0, healthScoresWritten: 0,
+    };
   }
 
   const affectedIndex = allPeriods.findIndex((p) => p.id === range.affectedFrom);
@@ -170,12 +199,16 @@ export async function runCalculation(
 
   if (started.noChange) {
     // Nothing the engine reads has changed. The existing pointers stand.
-    return { runId: started.runId, status: 'no_change', periodsWritten: 0, snapshotsWritten: 0 };
+    return {
+      runId: started.runId, status: 'no_change',
+      periodsWritten: 0, snapshotsWritten: 0, healthScoresWritten: 0,
+    };
   }
 
   const runId = started.runId;
   let snapshotsWritten = 0;
   let periodsWritten = 0;
+  let healthScoresWritten = 0;
 
   try {
     for (const chunk of chunkPeriods(toWrite)) {
@@ -211,6 +244,7 @@ export async function runCalculation(
       const snapshots: Record<string, unknown>[] = [];
       const completePeriods: string[] = [];
       const completeFlags: boolean[] = [];
+      const bankCoverage = new Map<string, number>();
 
       for (const period of chunk) {
         const rowCounts: Record<string, number> = {};
@@ -236,6 +270,7 @@ export async function runCalculation(
 
         completePeriods.push(period.id);
         completeFlags.push(isPeriodComplete(coverage, period, bankAccounts));
+        bankCoverage.set(period.id, coverage.bankCoverageRatio);
       }
 
       const written = await deps.finishChunk({
@@ -254,13 +289,48 @@ export async function runCalculation(
       periodsWritten += chunk.length;
 
       await deps.setCompleteness(completePeriods, completeFlags);
+
+      /*
+       * The health score, last, and only for the periods this chunk just proved complete.
+       *
+       * `setCompleteness` runs first because `api_server.finish_health` refuses a score for a period
+       * whose `is_complete` is not true (ADR-030.4) — the flag has to be on the row before the score
+       * is offered against it. A scheduled as-of-only run is skipped: it rewrites aging and runway
+       * for the current, partial period, which is never scored anyway (ADR-047.8).
+       */
+      if (!range.asOfDependentOnly) {
+        /*
+         * Completeness for the WHOLE window, not just this chunk: the trailing rules (C3, G2, B1)
+         * and the "trailing complete months" thresholds walk backwards past the chunk boundary, and
+         * a lookback period missing from this map would be read as incomplete and silently dropped
+         * from a three-month trend.
+         */
+        const completeness = new Map<string, boolean>(
+          window.map((p) => [p.id, p.isComplete]),
+        );
+        completePeriods.forEach((periodId, index) => {
+          completeness.set(periodId, completeFlags[index] === true);
+        });
+        const health = await deps.scoreHealth({
+          organizationId: orgId,
+          calculationRunId: runId,
+          chunkPeriodIds: chunk.map((p) => p.id),
+          windowPeriodIds: window.map((p) => p.id),
+          aggregatedAt,
+          currency: settings.baseCurrency,
+          completeness,
+          bankCoverage,
+          firstPeriodWithDataId,
+        });
+        healthScoresWritten += health.written;
+      }
     }
 
     await deps.finishRun(runId, 'succeeded', {
-      periods: periodsWritten, snapshots: snapshotsWritten,
+      periods: periodsWritten, snapshots: snapshotsWritten, health_scores: healthScoresWritten,
     });
 
-    return { runId, status: 'succeeded', periodsWritten, snapshotsWritten };
+    return { runId, status: 'succeeded', periodsWritten, snapshotsWritten, healthScoresWritten };
   } catch (cause) {
     // §2.4 step 12: mark the run failed and restore every pointer it replaced. Leaving a range mixed
     // between two runs is the one outcome that must never happen — a reader would see this month

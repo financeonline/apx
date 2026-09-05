@@ -4,6 +4,7 @@ import { can } from '@/core/permissions';
 import { loadHome, loadTrend, type HomeView, type MetricCardView } from '@/modules/dashboard';
 import { PageHeader, Card, CardBody, Banner } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
+import { HealthScoreCard } from '@/components/dashboard';
 
 export const dynamic = 'force-dynamic';
 
@@ -234,7 +235,24 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
           <BankOnlyIntro orgSlug={orgSlug} canImport={canImport} />
         ) : null}
 
-        {/* Level 1: the basis and freshness line. Level 1's health card arrives with Phase 8. */}
+        {/*
+          Level 1 (§4): the score, one plain sentence, then the basis and freshness line.
+          The sentence comes from `modules/health` templates, not from the AI — it is the first
+          thing an owner reads about their own month and has to be reproducible from the snapshots.
+        */}
+        {view.health ? (
+          <HealthScoreCard
+            view={view.health}
+            periodLabel={view.period.label}
+            comparisonLabel={view.comparisonLabel}
+            explainHref={`/app/${orgSlug}/home/health`}
+          />
+        ) : null}
+
+        {view.summary.text ? (
+          <p className="text-base text-ink">{view.summary.text}</p>
+        ) : null}
+
         <p className="text-sm text-ink-muted">{view.basisLine}</p>
 
         {/*
