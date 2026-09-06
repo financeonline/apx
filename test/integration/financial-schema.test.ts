@@ -345,9 +345,16 @@ describe('a system account cannot be re-categorised (ADR-004)', () => {
         values ('${orgId}', 'Facebook Ads', 'facebook ads', 'expense', 'operating_expense', 'imported')
         returning id)
       select id from inserted`);
-    adminSql(`
-      insert into public.account_category_history (organization_id, account_id, standard_category)
-      values ('${orgId}', '${imported}', 'operating_expense')`);
+    /*
+     * No hand-written opening row any more. `open_category_history` writes it when the account is
+     * created (ADR-060): before that trigger existed, `account_category_history` was empty until
+     * somebody re-categorised something, and this fixture's manual insert was the workaround that
+     * let the assertion below pass while the real table stayed empty in production.
+     */
+    expect(Number(adminSql(`
+      select count(*) from public.account_category_history
+       where account_id = '${imported}' and valid_to is null`)),
+    'creating an account opens its first interval').toBe(1);
 
     const { error } = await rpc(ownerId, 'remap_account', {
       p_account: imported, p_category: 'marketing',

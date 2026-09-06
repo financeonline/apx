@@ -121,9 +121,8 @@ begin
           'expense', 'operating_expense')
   returning id into v_acct;
 
-  -- The open history row api.remap_account must close (ADR-034).
-  insert into public.account_category_history (organization_id, account_id, standard_category)
-  values (p_org, v_acct, 'operating_expense');
+  -- The open history row api.remap_account must close is opened by `open_category_history`
+  -- when the account is created (ADR-060), which is what the assertion below checks.
 
   insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount)
   values (p_org, '2026-02-10', v_acct, 'debit', 100) returning period_id into v_period;

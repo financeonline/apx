@@ -6,10 +6,22 @@
  * A violation is a CI failure, not a warning.
  */
 
+/*
+ * The three REQUEST-PATH files permitted to hold the service role (ADR-013, ADR-043), plus the
+ * integration harness.
+ *
+ * The harness is on the list for the same reason it already holds `SUPABASE_JWT_SECRET` — the most
+ * dangerous secret in the repository — which it needs in order to mint the user tokens every
+ * isolation test runs under. What this rule protects against is the service role reaching a browser
+ * bundle or a request path, and a file that only ever runs against a local database under `vitest`
+ * is neither. Object storage is the one thing `adminSql` cannot reach, so TEST_STRATEGY.md §4
+ * case 5 has nowhere else to stand.
+ */
 const SERVICE_ROLE_FILES = [
   'src/core/db/service-client.ts',
   'src/core/db/server-rpc.ts',
   'src/core/storage/signer.ts',
+  'test/integration/setup.ts',
 ];
 
 const norm = (f) => f.replaceAll('\\', '/');

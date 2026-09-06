@@ -76,12 +76,11 @@ begin
     (organization_id, bank_account_id, transaction_date, amount, description_raw)
   values (p_org, v_bank, '2026-03-14', -30, 'SO 12-34-56 ' || p_tag) returning id into v_txn;
 
-  -- The two history tables and the lifecycle log. Seeded so the "reads ZERO rows" assertions below
-  -- are refusals rather than empty tables: a zero over an empty table proves nothing.
-  insert into public.account_category_history (organization_id, account_id, standard_category)
-  values (p_org, v_acct, 'revenue');
-  insert into public.category_history (organization_id, bank_transaction_id, category_account_id, source)
-  values (p_org, v_txn, v_acct, 'rule');
+  -- The lifecycle log, so the "reads ZERO rows" assertions below are refusals rather than empty
+  -- tables: a zero over an empty table proves nothing. The two history tables need no seeding —
+  -- `open_category_history` opened an interval when the account and the transaction were created
+  -- (ADR-060), which is a stronger fixture than a hand-written row because it is the production
+  -- path.
   insert into public.record_status_events (organization_id, record_table, record_id, event)
   values (p_org, 'ledger_entries', v_ledger, 'accepted');
   insert into public.recurring_payment_groups

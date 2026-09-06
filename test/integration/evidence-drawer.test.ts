@@ -2,7 +2,8 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '@/core/permissions';
 import { drainJobs } from '@/modules/jobs';
 import {
-  buildBundleForMetric, getBundle, getDocumentReference, loadEvidenceDrawer, resolveItem,
+  buildBundleForMetric, getBundle, getDocumentReference, loadEvidenceDrawer, resolveDescriptor,
+  resolveItem, type QueryDescriptorV1,
 } from '@/modules/evidence';
 import type { AccessContext } from '@/modules/tenancy';
 import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
@@ -27,6 +28,7 @@ let clientUserId: string;
 let orgId: string;
 let mayPeriodId: string;
 let documentId: string;
+let importedRevenueAccount: string;
 
 const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 
@@ -98,7 +100,9 @@ beforeAll(async () => {
             'csv', '2026-05-01', '2026-05-31', now())
     returning id`);
 
-  const post = (category: string, direction: string, amount: string, day: string, line: number) => {
+  const postTo = (
+    account: string, direction: string, amount: string, day: string, line: number,
+  ) => {
     const rowId = one(`
       insert into public.import_rows
              (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
@@ -108,7 +112,7 @@ beforeAll(async () => {
       insert into public.ledger_entries
              (organization_id, entry_date, account_id, direction, amount, period_id, record_status,
               source_document_id, import_batch_id, import_row_id, source_ref)
-      values ('${orgId}', '2026-05-${day}', '${accountId(category)}', '${direction}', ${amount},
+      values ('${orgId}', '2026-05-${day}', '${account}', '${direction}', ${amount},
               '00000000-0000-0000-0000-000000000000', 'accepted',
               '${documentId}', '${batchId}', '${rowId}', 'csv:row:${line}')
       returning id`);
@@ -127,8 +131,21 @@ beforeAll(async () => {
       values ('${orgId}', 'ledger_entries', '${entryId}', 'accepted', '${batchId}')`);
   };
 
+  const post = (category: string, direction: string, amount: string, day: string, line: number) =>
+    postTo(accountId(category), direction, amount, day, line);
+
+  /*
+   * One of the two revenue accounts is the customer's OWN, not a system account. `api.remap_account`
+   * refuses to re-categorise a system account (ADR-004), and the F-C-07 case below has to remap
+   * something a customer could really remap.
+   */
+  importedRevenueAccount = one(`
+    insert into public.accounts (organization_id, code, name, standard_category, account_type)
+    values ('${orgId}', '4100', 'Consulting fees', 'revenue', 'income')
+    returning id`);
+
   post('revenue', 'credit', '20000.00', '10', 2);
-  post('revenue', 'credit', '5000.00', '18', 3);
+  postTo(importedRevenueAccount, 'credit', '5000.00', '18', 3);
   post('cost_of_sales', 'debit', '6000.00', '12', 4);
   post('payroll', 'debit', '5000.00', '25', 5);
 
@@ -276,6 +293,76 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
     expect(after.selection.rows.map((r) => r.id).sort())
       .toEqual(before.selection.rows.map((r) => r.id).sort());
   });
+  /*
+   * F-C-07, the rest of it (TEST_STRATEGY.md §9).
+   *
+   * "After remapping an account, overriding a bank category, superseding an invoice and rolling
+   * back a batch, resolving the original descriptor with its `as_of` returns the original rows and
+   * `total` equals the cited value to the cent." Supersession is covered above; these are the other
+   * two the ledger fixture can reach. Each is a way the data can legitimately change AFTER a figure
+   * was published, and the promise is that the figure's evidence does not change with it.
+   */
+  it('survives the account behind it being re-categorised (F-C-07)', async () => {
+    const ctx = contextFor(ownerId, 'owner');
+    const item = (await getBundle(ctx, await buildBundleForMetric(ctx, snapshotOf('revenue'))))
+      .items.find((i) => i.itemType === 'query')!;
+
+    const before = await resolveItem(ctx, item.id);
+    if (before.kind !== 'query') throw new Error('expected a selection');
+    const account = importedRevenueAccount;
+
+    const { error } = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
+      .schema('api').rpc('remap_account', { p_account: account, p_category: 'other_income' });
+    expect(error, 'the remap itself must succeed, or the test proves nothing').toBeNull();
+
+    const after = await resolveItem(ctx, item.id);
+    if (after.kind !== 'query') throw new Error('expected a selection');
+
+    // A descriptor names account IDS, never categories (ADR-034) — which is exactly why a remap
+    // cannot move rows into or out of a published figure.
+    expect(after.selection.rows.map((r) => r.id)).toEqual(before.selection.rows.map((r) => r.id));
+    expect(after.selection.total).toBe(before.selection.total);
+
+    // And the category shown against each row is the one in force at the as-of instant, from
+    // `account_category_history` — not the one the account carries today (§3).
+    expect(after.selection.rows[0]!.standardCategory, 'as-of, not current').toBe('revenue');
+    expect(one(`select standard_category::text from public.accounts where id = '${account}'`))
+      .toBe('other_income');
+  });
+
+  it('survives the batch behind it being rolled back (F-C-07)', async () => {
+    const ctx = contextFor(ownerId, 'owner');
+    const item = (await getBundle(ctx, await buildBundleForMetric(ctx, snapshotOf('revenue'))))
+      .items.find((i) => i.itemType === 'query')!;
+
+    const before = await resolveItem(ctx, item.id);
+    if (before.kind !== 'query') throw new Error('expected a selection');
+
+    const batch = one(`
+      select b.id::text from public.import_batches b
+       where b.organization_id = '${orgId}' and b.status = 'committed' limit 1`);
+    const { error } = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
+      .schema('api').rpc('rollback_import_batch', {
+        p_batch: batch, p_reason: 'itest: the evidence must survive this',
+      });
+    expect(error).toBeNull();
+
+    /*
+     * The rows are `rejected` now and no future run will count them. The published figure still
+     * resolves to exactly what it was computed from, because membership at an instant is read from
+     * `record_status_events` and never from the current status (ADR-047.1) — otherwise "why did you
+     * tell me revenue was £25,000 in May" would become unanswerable the moment somebody corrected
+     * an import.
+     */
+    const after = await resolveItem(ctx, item.id);
+    if (after.kind !== 'query') throw new Error('expected a selection');
+    expect(after.selection.rows.map((r) => r.id)).toEqual(before.selection.rows.map((r) => r.id));
+    expect(after.selection.total).toBe(before.selection.total);
+    expect(one(`
+      select count(*) from public.ledger_entries
+       where organization_id = '${orgId}' and record_status = 'rejected'`))
+      .not.toBe('0');
+  });
 });
 
 /**
@@ -347,6 +434,102 @@ describe('a bundle that pins specific rows (§4)', () => {
   });
 });
 
+/**
+ * The bank half of F-C-07 (TEST_STRATEGY.md §9): "overriding a bank category".
+ *
+ * A bank descriptor can select BY category — the bank-basis P&L proxy does exactly that — so a
+ * re-categorisation is the one change that can move a row into or out of a published selection.
+ * §3 is explicit that the category in force at the as-of instant comes from `category_history`, and
+ * this is the case that proves it: the same descriptor, before and after the override, must return
+ * the same rows and the same total.
+ */
+describe('a published selection survives a bank row being re-categorised (F-C-07)', () => {
+  let bankAccount: string;
+  let marketingAccount: string;
+  let payrollAccount: string;
+  let movedTxn: string;
+  let descriptor: QueryDescriptorV1;
+
+  beforeAll(() => {
+    bankAccount = one(`
+      insert into public.bank_accounts
+             (organization_id, name, account_type, bank_name, account_number_masked, is_active)
+      values ('${orgId}', 'Current', 'current', 'Test Bank', '****4321', true)
+      returning id`);
+    marketingAccount = accountId('marketing');
+    payrollAccount = accountId('payroll');
+
+    const spend = (amount: string, day: string, category: string) => {
+      const id = one(`
+        insert into public.bank_transactions
+               (organization_id, bank_account_id, transaction_date, amount, description_raw,
+                category_account_id, category_source, record_status, period_id)
+        values ('${orgId}', '${bankAccount}', '2026-05-${day}', ${amount}, 'CARD PAYMENT',
+                '${category}', 'rule', 'accepted', '00000000-0000-0000-0000-000000000000')
+        returning id`);
+      adminSql(`
+        insert into public.record_status_events (organization_id, record_table, record_id, event)
+        values ('${orgId}', 'bank_transactions', '${id}', 'accepted')`);
+      return id;
+    };
+
+    movedTxn = spend('-400.00', '06', marketingAccount);
+    spend('-250.00', '14', marketingAccount);
+    spend('-900.00', '21', payrollAccount);
+
+    const runId = one(`
+      select id::text from public.calculation_runs
+       where organization_id = '${orgId}' order by started_at desc limit 1`);
+
+    descriptor = {
+      v: 1,
+      table: 'bank_transactions',
+      filters: { bank_account_ids: [bankAccount], category_account_ids: [marketingAccount] },
+      as_of: { calculation_run_id: runId, aggregated_at: new Date().toISOString() },
+      order: [{ field: 'transaction_date', dir: 'asc' }, { field: 'id', dir: 'asc' }],
+    } as QueryDescriptorV1;
+  });
+
+  it('keeps the rows and the total the selection was published with', async () => {
+    const ctx = contextFor(ownerId, 'owner');
+
+    const before = await resolveDescriptor(ctx, descriptor);
+    expect(before.count, 'the two marketing payments, and not the payroll one').toBe(2);
+    expect(before.total).toBe('-650.00');
+
+    // A reviewer decides one of them was really payroll. Every future figure changes; no published
+    // one may.
+    const { error } = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
+      .schema('api').rpc('override_bank_category', {
+        p_txn: movedTxn, p_account: payrollAccount,
+      });
+    expect(error, 'the override itself must succeed, or the test proves nothing').toBeNull();
+    expect(one(`
+      select category_account_id::text from public.bank_transactions where id = '${movedTxn}'`))
+      .toBe(payrollAccount);
+
+    const after = await resolveDescriptor(ctx, descriptor);
+    expect(after.rows.map((r) => r.id), 'the same rows, in the same order')
+      .toEqual(before.rows.map((r) => r.id));
+    expect(after.total, 'and the same total, to the cent').toBe(before.total);
+  });
+
+  /*
+   * The other half of the same rule. §3: "Without `as_of` (user-facing filters only) the resolver
+   * returns currently accepted, non-superseded rows" — so the SAME filters, asked as a question
+   * about today rather than about a run, must see the change. If they did not, the history would be
+   * winning arguments it was never meant to enter.
+   */
+  it('while the same filters asked about today do see the change', async () => {
+    const ctx = contextFor(ownerId, 'owner');
+    const { as_of: _asOf, ...withoutAsOf } = descriptor;
+
+    const current = await resolveDescriptor(ctx, withoutAsOf as QueryDescriptorV1);
+    expect(current.count, 'one marketing payment left').toBe(1);
+    expect(current.total).toBe('-250.00');
+  });
+});
+
 describe('the permission stop at the document level (§9, §10, CD-17)', () => {
   it('a client reads statement, metric, calculation and records', async () => {
     const ctx = contextFor(clientUserId, 'client');
@@ -356,11 +539,11 @@ describe('the permission stop at the document level (§9, §10, CD-17)', () => {
   });
 
   it('and is told the document level is locked, rather than shown an empty panel', async () => {
+    // Pinned by its source reference, not by category: the F-C-07 case above re-categorises an
+    // account, and a test that selected by category would quietly follow it to a different row.
     const recordId = one(`
-      select e.id::text from public.ledger_entries e
-       join public.accounts a on a.id = e.account_id
-      where e.organization_id = '${orgId}' and a.standard_category = 'revenue'
-      order by e.amount asc limit 1`);
+      select id::text from public.ledger_entries
+       where organization_id = '${orgId}' and source_ref = 'csv:row:3'`);
 
     const asClient = await getDocumentReference(
       contextFor(clientUserId, 'client'), { table: 'ledger_entries', id: recordId },

@@ -112,3 +112,18 @@ export const PHASE1_TABLES = [
   'platform_settings',
   'platform_org_settings',
 ] as const;
+
+/**
+ * A service-role client for the ONE thing `adminSql` cannot reach: object storage.
+ *
+ * Fixture setup only, exactly like `adminSql` — never used to assert what a user can see. Storage
+ * has no SQL surface, so a test about signed URLs (TEST_STRATEGY.md §4 case 5) has to put an object
+ * there first.
+ */
+export function serviceStorage(): SupabaseClient {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) throw new Error('the local Supabase service-role key is not configured');
+  return createClient(SUPABASE_URL, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+  });
+}
