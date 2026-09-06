@@ -61,3 +61,26 @@ export function isSelfElevation(
 export function canRevokeAssignment(actorRole: EffectiveRole): boolean {
   return actorRole === 'super_admin' || actorRole === 'owner';
 }
+
+/**
+ * `alerts.manage` is `◐` for a client: acknowledge only (RBAC_MATRIX.md §2.1).
+ *
+ * The bit says "may manage alerts", and it cannot say "may say I have seen this, but not decide it
+ * is dealt with" — which is the actual rule. Resolving or dismissing is a judgement the
+ * organisation's own staff make about their own figures.
+ *
+ * Mirrored exactly inside `api.set_alert_status` (ADR-026), so a forged request achieves nothing.
+ * This copy exists only so the interface can HIDE the buttons a role may not use rather than draw
+ * them and refuse (§7.4).
+ */
+export function canSetAlertStatus(actorRole: EffectiveRole, status: string): boolean {
+  /*
+   * An ALLOW-LIST, never `role !== 'client'`.
+   *
+   * The negation reads correctly and is wrong: `suspended_member` is not `client`, so it would fall
+   * through to full access — precisely the failure R2-A-07 and ADR-003 are about. Written this way,
+   * a role nobody thought of gets nothing.
+   */
+  if (actorRole === 'client') return status === 'acknowledged';
+  return ['owner', 'admin', 'employee', 'super_admin'].includes(actorRole);
+}

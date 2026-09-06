@@ -10,7 +10,9 @@
  */
 
 import { Decimal, toMoneyString, toRatioString } from '@/core/money';
-import { componentOf, dimensionsOf, usableValue, type RuleContext } from '../context';
+import {
+  accountIdsInCategory, componentOf, dimensionsOf, queryPin, usableValue, type RuleContext,
+} from '../context';
 import { minAbsThreshold } from '../suppression';
 import { varianceKey } from '@/modules/financial-engine';
 import type { MetricObservation, RuleOutcome } from '../types';
@@ -28,6 +30,91 @@ const VARIANCE_KEY = varianceKey('expense_by_category', 'prev_period');
 /** The category a dimensioned observation is about; `dimension_key`, never `dimension_id` (ADR-053). */
 function categoryOf(observation: MetricObservation): string | null {
   return observation.dimensionKey ?? null;
+}
+
+const ACCOUNT_VARIANCE_KEY = varianceKey('expense_by_account', 'prev_period');
+
+/**
+ * `expense.spike_account` (§8.2): the same test, one level down.
+ *
+ * Scoped to the ledger and trial-balance bases, because an account is a chart-of-accounts concept
+ * and a bank-basis figure has no account behind it. The overlap with the category rule — an account
+ * spiking inside a category that already fired — is suppressed by the evaluator through
+ * `RULES['expense.spike_account'].supersededBy`, so the test lives in one place rather than being
+ * re-derived here.
+ */
+export function evaluateExpenseSpikeAccount(ctx: RuleContext): readonly RuleOutcome[] {
+  const revenue = usableValue(
+    ctx.snapshots.find(
+      (s) => s.periodId === ctx.periodId && s.metricKey === 'revenue' && s.dimensionId === null,
+    ),
+  );
+  const floor = minAbsThreshold(revenue);
+  const materialRise = revenue === null
+    ? SPIKE_ABSOLUTE_FLOOR
+    : revenue.times(SPIKE_REVENUE_SHARE);
+
+  const accountsById = new Map(ctx.accounts.map((a) => [a.id, a]));
+  const outcomes: RuleOutcome[] = [];
+
+  const variances = [...dimensionsOf(ctx.snapshots, ctx.periodId, ACCOUNT_VARIANCE_KEY)]
+    .filter((v) => v.dimensionId !== null)
+    // §8.2: ledger/TB basis only.
+    .filter((v) => v.basis === 'ledger' || v.basis === 'period_balances')
+    .sort((a, b) => a.dimensionId!.localeCompare(b.dimensionId!));
+
+  for (const variance of variances) {
+    const rise = usableValue(variance);
+    const pctChange = componentOf(variance, 'pct_change');
+    if (rise === null || pctChange === null) continue;
+    if (pctChange.lessThan(SPIKE_PCT_THRESHOLD)) continue;
+    if (rise.lessThan(materialRise)) continue;
+    if (rise.abs().lessThan(floor)) continue;
+
+    const account = accountsById.get(variance.dimensionId!);
+
+    outcomes.push({
+      ruleKey: 'expense.spike_account',
+      severity: 'medium',
+      subject: { type: 'account', id: variance.dimensionId, key: null },
+      periodId: ctx.periodId,
+      metricKey: 'expense_by_account',
+      thresholdSummary: {
+        account: account?.name ?? null,
+        category: account?.standardCategory ?? null,
+        current: typeof variance.components.current === 'string' ? variance.components.current : null,
+        previous: typeof variance.components.comparison === 'string'
+          ? variance.components.comparison : null,
+        value: toMoneyString(rise),
+        pct_change: toRatioString(pctChange),
+        threshold_pct: toRatioString(SPIKE_PCT_THRESHOLD),
+        threshold_value: toMoneyString(materialRise),
+      },
+      snapshotIds: variance.snapshotId === null ? [] : [variance.snapshotId],
+      recordIds: [],
+      evidence: [
+        ...(variance.snapshotId === null ? [] : [{
+          itemType: 'metric_snapshot' as const,
+          refId: variance.snapshotId,
+          queryDescriptor: null,
+          label: `${account?.name ?? 'The account'} against last month`,
+          claim: 'The rise this alert is about',
+          assuranceLevel: variance.assurance,
+        }]),
+        ...queryPin(ctx, 'ledger_entries', {
+          period_ids: [ctx.periodId],
+          account_ids: [variance.dimensionId!],
+        }, {
+          label: `The five largest entries on ${account?.name ?? 'this account'}`,
+          claim: 'What the rise was made of',
+          order: [{ field: 'amount', dir: 'desc' }],
+          limit: 5,
+        }),
+      ],
+    });
+  }
+
+  return outcomes;
 }
 
 /**
@@ -70,6 +157,7 @@ export function evaluateExpenseSpikeCategory(ctx: RuleContext): readonly RuleOut
 
     const isHigh = pctChange.greaterThanOrEqualTo(SPIKE_HIGH_PCT)
       || (highRise !== null && rise.greaterThanOrEqualTo(highRise));
+    const accountIds = accountIdsInCategory(ctx, category);
 
     outcomes.push({
       ruleKey: 'expense.spike_category',
@@ -89,6 +177,34 @@ export function evaluateExpenseSpikeCategory(ctx: RuleContext): readonly RuleOut
       },
       snapshotIds: variance.snapshotId === null ? [] : [variance.snapshotId],
       recordIds: [],
+      evidence: [
+        ...(variance.snapshotId === null ? [] : [{
+          itemType: 'metric_snapshot' as const,
+          refId: variance.snapshotId,
+          queryDescriptor: null,
+          label: `${category} against last month`,
+          claim: 'The rise this alert is about',
+          assuranceLevel: variance.assurance,
+        }]),
+        /*
+         * §8.2 pins the five largest records in the category. A DESCRIPTOR rather than five ids: the
+         * resolver reads it as of this run (ADR-034), so opening the alert in six months shows the
+         * five that were largest THEN, not the five that are largest now.
+         *
+         * The category is resolved to ACCOUNT IDS here rather than stored as a category filter,
+         * which the v1 vocabulary deliberately has no room for — a category is a mutable property of
+         * an account, and a stored category filter would make this evidence follow a later remap.
+         */
+        ...(accountIds.length === 0 ? [] : queryPin(ctx, 'ledger_entries', {
+          period_ids: [ctx.periodId],
+          account_ids: accountIds,
+        }, {
+          label: `The five largest ${category} transactions this period`,
+          claim: 'What the rise was made of',
+          order: [{ field: 'amount', dir: 'desc' }],
+          limit: 5,
+        })),
+      ],
     });
   }
 

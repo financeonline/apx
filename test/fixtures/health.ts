@@ -11,7 +11,9 @@ import { PERFECT_QUALITY } from '@/modules/financial-engine';
 import type {
   DataQualityMissing, DataQualityWarning, MetricUnit,
 } from '@/modules/financial-engine';
-import type { MetricObservation, RecordObservation, RuleContext } from '@/modules/alerts';
+import type {
+  AccountObservation, MetricObservation, RecordObservation, RuleContext,
+} from '@/modules/alerts';
 import type { HealthInput } from '@/modules/health';
 
 export const ORG = '00000000-0000-4000-8000-000000000001';
@@ -122,10 +124,18 @@ export function baselineSnapshots(): MetricObservation[] {
   ];
 }
 
+export const ACCOUNTS: readonly AccountObservation[] = [
+  { id: 'acct-1', name: 'Marketing', standardCategory: 'marketing' },
+  { id: 'acct-2', name: 'Payroll', standardCategory: 'payroll' },
+];
+
 export function emptyRuleContext(overrides: Partial<RuleContext> = {}): RuleContext {
   return {
     organizationId: ORG,
+    calculationRunId: '00000000-0000-4000-8000-0000000000ff',
+    aggregatedAt: '2026-04-01T00:00:00.000Z',
     periodId: CURRENT,
+    periodEnd: '2026-03-31',
     isComplete: true,
     isFirstPeriodWithData: false,
     snapshots: [],
@@ -134,6 +144,8 @@ export function emptyRuleContext(overrides: Partial<RuleContext> = {}): RuleCont
     recurringGroups: [],
     trailingCompletePeriodIds: PERIODS.slice(0, -1),
     newCounterpartyIds: [],
+    accounts: ACCOUNTS,
+    counterpartyNames: new Map([['cp-acme', 'Acme Ltd'], ['cp-globex', 'Globex']]),
     ...overrides,
   };
 }
@@ -198,4 +210,26 @@ export function record(spec: Partial<RecordObservation> = {}): RecordObservation
     recurringGroupId: null,
     ...spec,
   };
+}
+
+/** An invoice row, for the receivables and payables rules. */
+export function invoice(spec: Partial<RecordObservation> = {}): RecordObservation {
+  return record({
+    table: 'invoices',
+    invoiceType: 'sales',
+    outstanding: '5000.00',
+    dueDate: '2026-02-15',
+    amount: '5000.00',
+    ...spec,
+  });
+}
+
+/** A ledger entry, for the large-transaction rule. */
+export function entry(spec: Partial<RecordObservation> = {}): RecordObservation {
+  return record({
+    table: 'ledger_entries',
+    accountId: 'acct-1',
+    amount: '-500.00',
+    ...spec,
+  });
 }

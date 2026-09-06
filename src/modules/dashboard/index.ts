@@ -117,3 +117,12 @@ export {
   type InsightsView,
   type MovementView,
 } from './services/insights';
+
+export {
+  loadAlertDetail,
+  loadAlertsPage,
+  loadTopRisks,
+  type AlertHistoryView,
+  type AlertView,
+  type AlertsPageView,
+} from './services/alerts';

@@ -113,6 +113,9 @@ export interface HealthChunkInput {
   readonly completeness: ReadonlyMap<string, boolean>;
   readonly bankCoverage: ReadonlyMap<string, number>;
   readonly firstPeriodWithDataId: string | null;
+  readonly periodEnds: ReadonlyMap<string, string>;
+  readonly accounts: ReadonlyArray<{ id: string; name: string; standardCategory: string }>;
+  readonly counterpartyNames: ReadonlyMap<string, string>;
 }
 
 export async function runCalculation(
@@ -321,6 +324,11 @@ export async function runCalculation(
           completeness,
           bankCoverage,
           firstPeriodWithDataId,
+          periodEnds: new Map(window.map((p) => [p.id, p.periodEnd])),
+          accounts: accounts.map((a) => ({
+            id: a.id, name: a.name, standardCategory: a.standardCategory,
+          })),
+          counterpartyNames: new Map(counterparties.map((c) => [c.id, c.name])),
         });
         healthScoresWritten += health.written;
       }

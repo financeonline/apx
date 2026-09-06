@@ -12,7 +12,9 @@
  */
 
 import { Decimal, tryParseDecimal } from '@/core/money';
-import type { MetricObservation, RecordObservation } from './types';
+import type {
+  AccountObservation, EvidencePin, MetricObservation, RecordObservation,
+} from './types';
 
 /** A recurring group as the recurring rules see it (a subset of `banking`'s `RecurringGroup`). */
 export interface RecurringGroupObservation {
@@ -40,7 +42,24 @@ export interface RecurringGroupObservation {
  */
 export interface RuleContext {
   readonly organizationId: string;
+  /**
+   * The run and the instant this evaluation is about.
+   *
+   * Every `query` evidence descriptor carries them as its `as_of` (ADR-034, ADR-047.7): the ten
+   * largest payments an alert pinned in March must still resolve to the ten that were largest THEN,
+   * even after a later import supersedes one of them.
+   */
+  readonly calculationRunId: string;
+  readonly aggregatedAt: string;
   readonly periodId: string;
+  /**
+   * The last day of the period, ISO `yyyy-mm-dd`.
+   *
+   * "Overdue" is a comparison against a date, and the date has to be the period's end rather than
+   * today: an alert raised for March must say what was overdue in March, whether it is read in April
+   * or next year (§1.1 — nothing in the engine reads a clock).
+   */
+  readonly periodEnd: string;
   readonly isComplete: boolean;
   /** True when no earlier period has data — the first-period gate (§8.1). */
   readonly isFirstPeriodWithData: boolean;
@@ -65,6 +84,18 @@ export interface RuleContext {
   readonly trailingCompletePeriodIds: readonly string[];
   /** Counterparty ids first seen in this period; the unusual-transaction rule needs "new". */
   readonly newCounterpartyIds: readonly string[];
+  /**
+   * The chart of accounts, for the rules that name an account in a sentence and for the
+   * category/account supersession in §8.2. Empty is legitimate — a bank-only organisation.
+   */
+  readonly accounts: readonly AccountObservation[];
+  /**
+   * Counterparty display names, for `{customer}` and `{supplier}` placeholders.
+   *
+   * Rendered from stored names and treated as UNTRUSTED TEXT by the AI layer (§8.2), which is why
+   * they arrive as data for a template rather than being interpolated into a prompt anywhere.
+   */
+  readonly counterpartyNames: ReadonlyMap<string, string>;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -160,4 +191,56 @@ export function medianAbsoluteDeviation(values: readonly Decimal[]): Decimal | n
   const centre = median(values);
   if (centre === null) return null;
   return median(values.map((v) => v.minus(centre).abs()));
+}
+
+// ---------------------------------------------------------------------------------------------
+// Evidence descriptors
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * A `query` evidence pin, built against the CLOSED v1 filter vocabulary
+ * (`EVIDENCE_MODEL.md §3`, ADR-034).
+ *
+ * The vocabulary has no `standard_categories` filter, and that absence is deliberate: a category is
+ * a mutable property of an account, so a stored category filter would make March's evidence follow a
+ * remap made in July and quietly change what an old alert points at. Categories are therefore
+ * resolved to concrete account ids HERE, at rule time, and the ids are what the descriptor stores.
+ */
+export function queryPin(
+  ctx: RuleContext,
+  table: 'ledger_entries' | 'bank_transactions' | 'invoices' | 'period_balances',
+  filters: Readonly<Record<string, unknown>>,
+  options: {
+    readonly label: string;
+    readonly claim: string | null;
+    readonly order?: ReadonlyArray<{ field: string; dir: 'asc' | 'desc' }>;
+    readonly limit?: number;
+  },
+): EvidencePin[] {
+  return [{
+    itemType: 'query',
+    refId: null,
+    queryDescriptor: {
+      v: 1,
+      table,
+      filters,
+      as_of: {
+        calculation_run_id: ctx.calculationRunId,
+        aggregated_at: ctx.aggregatedAt,
+      },
+      ...(options.order === undefined ? {} : { order: options.order }),
+      ...(options.limit === undefined ? {} : { limit: options.limit }),
+    },
+    label: options.label,
+    claim: options.claim,
+    assuranceLevel: 'verified',
+  }];
+}
+
+/** The accounts that carry a standard category, for the descriptors that used to name the category. */
+export function accountIdsInCategory(ctx: RuleContext, category: string): string[] {
+  return ctx.accounts
+    .filter((a) => a.standardCategory === category)
+    .map((a) => a.id)
+    .sort();
 }

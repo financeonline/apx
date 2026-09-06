@@ -46,9 +46,44 @@ export interface AlertSubject {
 export const NO_SUBJECT: AlertSubject = { type: 'none', id: null, key: null };
 
 /**
- * The six rule keys whose conditions the health score counts (§7.3 K3 and B3). The full catalogue
- * of seventeen arrives with the alert job in Phase 9; this union is deliberately not widened before
- * the rules exist, so an unimplemented rule key cannot be counted as a condition that did not fire.
+ * Every rule key in the §8.2 catalogue.
+ *
+ * Seventeen rows, eighteen keys — `recurring.missed` and `recurring.inflow_missed` share a row
+ * because they are the same test in opposite directions, and §8.2 gives the inflow case its own key
+ * and severity. `attention.overflow` is the nineteenth and is not a rule: it is the summary the
+ * per-run cap writes, and it is listed here because it needs a dedupe key like any other alert.
+ */
+export const ALERT_RULE_KEYS = [
+  'expense.spike_category',
+  'expense.spike_account',
+  'revenue.decline',
+  'margin.deterioration',
+  'cash.decline',
+  'cash.runway_low',
+  'receivables.deterioration',
+  'payables.deterioration',
+  'concentration.customer',
+  'concentration.supplier',
+  'recurring.amount_changed',
+  'recurring.missed',
+  'recurring.inflow_missed',
+  'recurring.new',
+  'duplicate.transaction',
+  'bank.unusual_transaction',
+  'deviation.large_transaction',
+  'variance.significant',
+] as const;
+export type AlertRuleKey = (typeof ALERT_RULE_KEYS)[number];
+
+/** The cap's summary row (§8.1). Not a rule: nothing evaluates it, the two-pass persist writes it. */
+export const OVERFLOW_RULE_KEY = 'attention.overflow';
+
+/**
+ * The six whose conditions the HEALTH SCORE counts (§7.3 K3 and B3).
+ *
+ * Kept as its own list rather than derived from a family prefix: K3 and B3 name specific rules, and
+ * a future `bank.*` rule must not silently start moving a health score because its key happens to
+ * begin with the right word.
  */
 export const CONDITION_RULE_KEYS = [
   'expense.spike_category',
@@ -57,8 +92,18 @@ export const CONDITION_RULE_KEYS = [
   'recurring.missed',
   'recurring.inflow_missed',
   'duplicate.transaction',
-] as const;
+] as const satisfies readonly AlertRuleKey[];
 export type ConditionRuleKey = (typeof CONDITION_RULE_KEYS)[number];
+
+/**
+ * Rule class (ADR-036).
+ *
+ * An EVENT happened in a period and is keyed per period, so six months of spikes are six alerts. A
+ * STATE persists and is keyed per subject only, so six months of the same 55% customer are ONE
+ * alert whose `first_seen_at` is the first month. Getting this backwards is the difference between
+ * a useful list and an inbox nobody opens (F-D-12).
+ */
+export type AlertRuleClass = 'state' | 'event';
 
 /** The families B3 counts (§7.3): `bank.*`, `recurring.*` and `duplicate.*`. */
 export const BANKING_ANOMALY_RULE_KEYS: readonly ConditionRuleKey[] = [
@@ -78,13 +123,39 @@ export const BANKING_ANOMALY_RULE_KEYS: readonly ConditionRuleKey[] = [
  * rows produced a count (§7.4).
  */
 export interface RuleOutcome {
-  readonly ruleKey: ConditionRuleKey;
+  readonly ruleKey: AlertRuleKey;
   readonly severity: AlertSeverity;
   readonly subject: AlertSubject;
   readonly periodId: string;
+  /** The metric the alert is about, for `alerts.metric_key`. NULL for record-level rules. */
+  readonly metricKey?: string | null;
   readonly thresholdSummary: Readonly<Record<string, string | null>>;
+  /**
+   * The snapshots and records the CONDITION rests on — what the health breakdown pins so a reader
+   * can see which rows produced a count (§7.4).
+   *
+   * Deliberately not the same as `evidence` below. The condition for a category spike rests on one
+   * variance snapshot; the evidence a reader wants is the five largest transactions in that category.
+   * Collapsing the two would either under-pin the count or over-pin the explanation.
+   */
   readonly snapshotIds: readonly string[];
   readonly recordIds: readonly string[];
+  /** What the alert's evidence bundle should contain (§8.2 "Evidence pinned", EVIDENCE_MODEL.md §5). */
+  readonly evidence?: readonly EvidencePin[];
+}
+
+/** One row destined for `evidence_items` (DATABASE_ARCHITECTURE.md §6). */
+export interface EvidencePin {
+  readonly itemType:
+    | 'metric_snapshot' | 'calculation_run' | 'ledger_entry' | 'bank_transaction' | 'invoice'
+    | 'period_balance' | 'counterparty' | 'account' | 'fiscal_period' | 'query';
+  /** Exactly one of `refId` and `queryDescriptor` is set (`evidence_item_xor`). */
+  readonly refId: string | null;
+  readonly queryDescriptor: Readonly<Record<string, unknown>> | null;
+  readonly label: string;
+  /** The statement this item supports. */
+  readonly claim: string | null;
+  readonly assuranceLevel: AssuranceLevel;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -115,7 +186,13 @@ export interface MetricObservation {
   readonly dataQuality: DataQuality;
 }
 
-/** A record-level row, as the duplicate and unusual-transaction rules see it. */
+/**
+ * A record-level row, as the record-level rules see it.
+ *
+ * One shape for all four record tables rather than four. The rules that care about the difference
+ * filter on `table`; the ones that do not — the amount floor, the trailing median — would otherwise
+ * need a copy each.
+ */
 export interface RecordObservation {
   readonly id: string;
   readonly table: 'ledger_entries' | 'bank_transactions' | 'invoices' | 'period_balances';
@@ -132,4 +209,17 @@ export interface RecordObservation {
   readonly duplicateReviewed: boolean;
   readonly isTransfer: boolean;
   readonly recurringGroupId: string | null;
+  /** The account a ledger entry was coded to, or a bank transaction categorised into. */
+  readonly accountId?: string | null;
+  /** Invoices only: what is still owed, and when it was due (§8.2 receivables/payables). */
+  readonly outstanding?: string | null;
+  readonly dueDate?: string | null;
+  readonly invoiceType?: string | null;
+}
+
+/** An account, as the rules that name one in a sentence see it. */
+export interface AccountObservation {
+  readonly id: string;
+  readonly name: string;
+  readonly standardCategory: string;
 }

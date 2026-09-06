@@ -10,14 +10,20 @@
  */
 
 export {
+  ALERT_RULE_KEYS,
   BANKING_ANOMALY_RULE_KEYS,
   CONDITION_RULE_KEYS,
-  NO_SUBJECT,
+  OVERFLOW_RULE_KEY,
   SEVERITY_ORDER,
+  NO_SUBJECT,
+  type AccountObservation,
+  type AlertRuleClass,
+  type AlertRuleKey,
   type AlertSeverity,
   type AlertSubject,
   type AlertSubjectType,
   type ConditionRuleKey,
+  type EvidencePin,
   type MetricObservation,
   type RecordObservation,
   type RuleOutcome,
@@ -49,4 +55,72 @@ export {
   type SuppressionReason,
 } from './domain/suppression';
 
+export {
+  RULES,
+  RULE_ORDER,
+  dedupeKey,
+  familyOf,
+  overflowDedupeKey,
+  type RuleDefinition,
+} from './domain/catalogue';
+
 export * from './domain/rules';
+
+export {
+  TEMPLATES,
+  renderAlert,
+  renderOverflow,
+  thresholdNoteFor,
+  whyItMattersFor,
+  type RenderedAlert,
+} from './domain/templates';
+
+export {
+  DISMISSAL_COOLDOWN_DAYS,
+  dismissalHolds,
+  isMaterialChange,
+  statusOnAbsence,
+  statusOnRecurrence,
+  userSuppressed,
+  type AlertStatus,
+  type ExistingAlert,
+  type StatusDecision,
+  type StatusReasonCode,
+} from './domain/lifecycle';
+
+export {
+  PER_RUN_CAP,
+  planEvaluation,
+  type EvaluateInput,
+  type EvaluationPlan,
+  type Evaluator,
+  type PeriodPlanInput,
+  type PlannedChange,
+  type PlannedInsert,
+  type PlannedResolve,
+  type PlannedRevision,
+  type PlannedTouch,
+} from './domain/evaluate';
+
+// ---------------------------------------------------------------------------------------------
+// Data and services. Server-only; components never call these (SERVICE_ARCHITECTURE.md §8).
+// ---------------------------------------------------------------------------------------------
+
+export {
+  loadAlertHistory,
+  loadAlerts,
+  loadExistingAlerts,
+  loadInvoiceRecords,
+  loadLedgerRecords,
+  setAlertStatus,
+  type AlertListRow,
+  type AlertQuery,
+  type AlertRevisionRow,
+} from './data/repository';
+
+export {
+  evaluateAlerts,
+  type AlertEvaluationDeps,
+  type AlertEvaluationOutcome,
+  type AlertEvaluationRequest,
+} from './services/evaluate';

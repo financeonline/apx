@@ -4,6 +4,7 @@ export { can, assertCan, permissionsFor, isSuperAdmin, isPlatformStaff, type Aut
 export {
   ceilingAllows,
   canInviteRole,
+  canSetAlertStatus,
   canChangeRole,
   canRevokeAssignment,
   isSelfElevation,

@@ -2,9 +2,15 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
-import { loadInsights, type MovementView } from '@/modules/dashboard';
-import { PageHeader, Card, CardBody } from '@/components/ui/surfaces';
+import { loadAlertsPage, loadInsights, type MovementView } from '@/modules/dashboard';
+import { PageHeader, Card, CardBody, EmptyState } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
+import {
+  AlertCard, NO_ALERTS_BODY, NO_ALERTS_FILTERED_BODY, NO_ALERTS_FILTERED_TITLE, NO_ALERTS_TITLE,
+  bySeverity,
+} from '@/components/dashboard';
+import { AlertActions } from './alerts/alert-actions';
+import { AlertFilters, parseAlertFilters } from './alerts/filters';
 
 export const dynamic = 'force-dynamic';
 
@@ -15,7 +21,9 @@ export const dynamic = 'force-dynamic';
  * category that doubled from £40 to £80 is not news, and one that rose 12% on £90,000 is. Ranking
  * by percentage would put the noise at the top of the page every month.
  *
- * Alerts arrive with Phase 9; until then this page answers the "what changed" half.
+ * The open alerts sit ABOVE the movements. A movement is something a reader has to interpret; an
+ * alert is something the engine has already interpreted and thinks needs a decision. Putting the
+ * interpreted things first is the difference between a page you scan and a page you act on.
  */
 
 function MovementRow({ movement }: { movement: MovementView }) {
@@ -54,15 +62,25 @@ function MovementRow({ movement }: { movement: MovementView }) {
   );
 }
 
-export default async function InsightsPage({ params }: { params: Promise<{ orgSlug: string }> }) {
+export default async function InsightsPage({
+  params, searchParams,
+}: {
+  params: Promise<{ orgSlug: string }>;
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const { orgSlug } = await params;
+  const filters = parseAlertFilters(await searchParams);
   const ctx = await getAccessContext(orgSlug);
 
   // The section is hidden in the navigation for a role that lacks it; a deep link gets the uniform
   // not-found rather than a page describing what it cannot show (§7.4).
   if (!can(ctx, 'financials.view')) notFound();
 
-  const state = await loadInsights(ctx.db, ctx.orgId!, orgSlug, ctx.requestId);
+  const [state, alerts] = await Promise.all([
+    loadInsights(ctx.db, ctx.orgId!, orgSlug, ctx.requestId),
+    loadAlertsPage(ctx.db, ctx.orgId!, orgSlug, filters.query, ctx.requestId),
+  ]);
+  const canManageAlerts = can(ctx, 'alerts.manage');
 
   if (state.kind === 'needs_two_periods') {
     return (
@@ -105,6 +123,42 @@ export default async function InsightsPage({ params }: { params: Promise<{ orgSl
       />
 
       <div className="mt-8 flex flex-col gap-6">
+        <section aria-labelledby="alerts-heading">
+          <div className="flex flex-wrap items-baseline justify-between gap-3">
+            <h2 id="alerts-heading" className="font-serif text-lg text-ink">
+              Alerts{alerts.openCount > 0 ? ` (${alerts.openCount} open)` : null}
+            </h2>
+            <AlertFilters orgSlug={orgSlug} active={filters} />
+          </div>
+
+          {alerts.alerts.length === 0 ? (
+            <div className="mt-3">
+              <EmptyState title={filters.any ? NO_ALERTS_FILTERED_TITLE : NO_ALERTS_TITLE}>
+                {filters.any ? NO_ALERTS_FILTERED_BODY : NO_ALERTS_BODY}
+              </EmptyState>
+            </div>
+          ) : (
+            <ul className="mt-3 grid gap-3">
+              {bySeverity(alerts.alerts.map((a) => ({ ...a, lastEvaluatedAt: a.firstSeenLabel })))
+                .map((alert) => (
+                  <li key={alert.id}>
+                    <AlertCard
+                      alert={alert}
+                      actions={canManageAlerts ? (
+                        <AlertActions
+                          orgSlug={orgSlug}
+                          alertId={alert.id}
+                          status={alert.status}
+                          role={ctx.effectiveRole}
+                        />
+                      ) : undefined}
+                    />
+                  </li>
+                ))}
+            </ul>
+          )}
+        </section>
+
         {/* §6 "no adjacent month": say so, rather than presenting a two-month change as one. */}
         {view.comparison && !view.comparisonIsAdjacent ? (
           <Card>

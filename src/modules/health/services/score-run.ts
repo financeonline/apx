@@ -1,7 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { log } from '@/core/logging';
-import type { RuleContext } from '@/modules/alerts';
+import type { AccountObservation, RuleContext } from '@/modules/alerts';
 import { computeHealthScore } from '../domain/score';
 import type { HealthInput, HealthScore } from '../domain/types';
 import * as repo from '../data/repository';
@@ -35,6 +35,11 @@ export interface HealthChunkRequest {
   readonly bankCoverage: ReadonlyMap<string, number>;
   /** The organisation's earliest period that has any data, for the first-period gate (§8.1). */
   readonly firstPeriodWithDataId: string | null;
+  /** The chart of accounts and counterparty names the rules render sentences from (§8.2). */
+  readonly accounts: readonly AccountObservation[];
+  readonly counterpartyNames: ReadonlyMap<string, string>;
+  /** The last day of each period, for the rules that test "overdue" against a period end. */
+  readonly periodEnds: ReadonlyMap<string, string>;
 }
 
 export interface HealthRunDeps {
@@ -104,7 +109,10 @@ export async function scoreChunk(
 
     const conditions: RuleContext = {
       organizationId: orgId,
+      calculationRunId: request.calculationRunId,
+      aggregatedAt: request.aggregatedAt,
       periodId,
+      periodEnd: request.periodEnds.get(periodId) ?? '',
       isComplete: true,
       isFirstPeriodWithData: request.firstPeriodWithDataId === periodId,
       snapshots,
@@ -113,6 +121,8 @@ export async function scoreChunk(
       recurringGroups,
       trailingCompletePeriodIds: trailingComplete,
       newCounterpartyIds: newCounterpartyIdsIn(records, periodId, request.windowPeriodIds),
+      accounts: request.accounts,
+      counterpartyNames: request.counterpartyNames,
     };
 
     const input: HealthInput = {

@@ -136,6 +136,17 @@ export function evaluateDuplicateTransaction(ctx: RuleContext): readonly RuleOut
       },
       snapshotIds: [],
       recordIds: [pair.left.id, pair.right.id],
+      // §8.2 pins both records, and nothing else: the whole finding is that these two rows exist.
+      evidence: [pair.left, pair.right].map((r) => ({
+        itemType: r.table === 'invoices' ? 'invoice' as const
+          : r.table === 'ledger_entries' ? 'ledger_entry' as const
+          : 'bank_transaction' as const,
+        refId: r.id,
+        queryDescriptor: null,
+        label: `${r.descriptionNormalized ?? 'Transaction'} on ${r.date}`,
+        claim: 'One of the two payments that look like duplicates',
+        assuranceLevel: 'verified' as const,
+      })),
     });
   }
 

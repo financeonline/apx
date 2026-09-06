@@ -15,7 +15,7 @@
 
 import { Decimal } from '@/core/money';
 import { observationOf, type RuleContext } from './context';
-import type { ConditionRuleKey } from './types';
+import type { AlertRuleKey } from './types';
 
 /** Below this, the engine has seen too little of the period to judge it (§8.1). */
 export const MIN_COMPLETENESS = 0.5;
@@ -27,32 +27,61 @@ export const MIN_COMPLETENESS = 0.5;
  * that already happened; they do not become truer at month end. Everything comparative does, which
  * is why nothing else is evaluated on a partial month.
  */
-export const INCOMPLETE_PERIOD_RULES: readonly ConditionRuleKey[] = [
+export const INCOMPLETE_PERIOD_RULES: readonly AlertRuleKey[] = [
   'duplicate.transaction',
   'bank.unusual_transaction',
   'recurring.amount_changed',
   'recurring.missed',
   'recurring.inflow_missed',
+  'recurring.new',
 ];
 
-/** Rules whose condition reads a variance, and which the first-period gate therefore silences. */
-export const VARIANCE_RULES: readonly ConditionRuleKey[] = ['expense.spike_category'];
+/**
+ * Rules whose condition reads a variance, and which the first-period gate therefore silences.
+ *
+ * The organisation's earliest month has nothing to compare against, so "up from nothing" would fire
+ * on every category, every account and every figure at once — greeting a new customer's first import
+ * with a screenful of alerts about the fact that they had no data last month.
+ */
+export const VARIANCE_RULES: readonly AlertRuleKey[] = [
+  'expense.spike_category',
+  'expense.spike_account',
+  'revenue.decline',
+  'margin.deterioration',
+  'cash.decline',
+  'receivables.deterioration',
+  'payables.deterioration',
+  'variance.significant',
+];
 
 /**
  * The metric whose completeness decides whether a rule can see enough of the period.
  *
  * §8.1 gives the threshold ("completeness < 0.5") without naming the figure it is measured on.
- * Each rule names the figure it actually depends on: the spike rule cannot judge spending it has
- * not seen, and the three bank-record rules cannot judge payments from a statement that covers half
- * the month. Recorded as ADR-054.2 rather than defaulted silently.
+ * Each rule names the figure it actually depends on: the spike rules cannot judge spending they have
+ * not seen, the bank rules cannot judge payments from a statement covering half the month, and the
+ * receivables rules cannot judge collection from a partial invoice ledger. Recorded as ADR-054.2
+ * rather than defaulted silently.
  */
-export const COMPLETENESS_METRIC: Readonly<Record<ConditionRuleKey, string>> = {
+export const COMPLETENESS_METRIC: Readonly<Record<AlertRuleKey, string>> = {
   'expense.spike_category': 'operating_expenses',
-  'bank.unusual_transaction': 'cash_outflows',
+  'expense.spike_account': 'operating_expenses',
+  'revenue.decline': 'revenue',
+  'margin.deterioration': 'gross_margin',
+  'cash.decline': 'closing_cash',
+  'cash.runway_low': 'cash_runway_months',
+  'receivables.deterioration': 'receivables',
+  'payables.deterioration': 'payables',
+  'concentration.customer': 'customer_concentration_top1',
+  'concentration.supplier': 'supplier_concentration_top1',
   'recurring.amount_changed': 'cash_outflows',
   'recurring.missed': 'cash_outflows',
   'recurring.inflow_missed': 'cash_inflows',
+  'recurring.new': 'cash_outflows',
   'duplicate.transaction': 'cash_outflows',
+  'bank.unusual_transaction': 'cash_outflows',
+  'deviation.large_transaction': 'operating_expenses',
+  'variance.significant': 'revenue',
 };
 
 /**
@@ -83,7 +112,7 @@ export interface SuppressionReason {
  * nothing" are different things, and a health breakdown that cannot tell them apart would report a
  * clean month for an organisation whose data never arrived.
  */
-export function dataSuppression(rule: ConditionRuleKey, ctx: RuleContext): SuppressionReason {
+export function dataSuppression(rule: AlertRuleKey, ctx: RuleContext): SuppressionReason {
   if (!ctx.isComplete && !INCOMPLETE_PERIOD_RULES.includes(rule)) {
     return { suppressed: true, reason: 'incomplete_period' };
   }
@@ -101,6 +130,6 @@ export function dataSuppression(rule: ConditionRuleKey, ctx: RuleContext): Suppr
 }
 
 /** The boolean form, for callers that only branch on it (§8.3 writes it this way). */
-export function dataSuppressed(rule: ConditionRuleKey, ctx: RuleContext): boolean {
+export function dataSuppressed(rule: AlertRuleKey, ctx: RuleContext): boolean {
   return dataSuppression(rule, ctx).suppressed;
 }

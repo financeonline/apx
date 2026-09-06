@@ -1,10 +1,12 @@
 import Link from 'next/link';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
-import { loadHome, loadTrend, type HomeView, type MetricCardView } from '@/modules/dashboard';
+import {
+  loadHome, loadTopRisks, loadTrend, type AlertView, type HomeView, type MetricCardView,
+} from '@/modules/dashboard';
 import { PageHeader, Card, CardBody, Banner } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
-import { HealthScoreCard } from '@/components/dashboard';
+import { AlertCard, HealthScoreCard, NO_ALERTS_BODY, NO_ALERTS_TITLE } from '@/components/dashboard';
 
 export const dynamic = 'force-dynamic';
 
@@ -212,7 +214,10 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
   }
 
   const { view } = state;
-  const trend = await loadTrend(ctx.db, ctx.orgId!, view.periods, ctx.requestId);
+  const [trend, topRisks] = await Promise.all([
+    loadTrend(ctx.db, ctx.orgId!, view.periods, ctx.requestId),
+    loadTopRisks(ctx.db, ctx.orgId!, orgSlug, 3, ctx.requestId),
+  ]);
 
   return (
     <>
@@ -275,6 +280,13 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
         <HeadlineNumbers view={view} />
 
         {/* Level 3: what is moving. The trend table is the accessible form (§11). */}
+        {/*
+          Level 3 (§4): up to three OPEN alerts, highest severity first, in the compact variant.
+          Acknowledged ones are excluded — somebody has already said they have seen it, and putting
+          it back at the top of Home every morning is how people stop reading Home.
+        */}
+        <TopRisks orgSlug={orgSlug} risks={topRisks} />
+
         <Card>
           <CardBody className="p-4">
             <h2 className="font-serif text-lg text-ink">What is moving</h2>
@@ -315,5 +327,34 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
         </Card>
       </div>
     </>
+  );
+}
+
+/** Level 3's top risks band (§4). Compact cards; the full text lives on Insights. */
+function TopRisks({ orgSlug, risks }: { orgSlug: string; risks: readonly AlertView[] }) {
+  return (
+    <section aria-labelledby="top-risks-heading">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 id="top-risks-heading" className="font-serif text-lg text-ink">Top risks</h2>
+        <Link href={`/app/${orgSlug}/insights`} className="text-sm text-accent underline underline-offset-2">
+          See all alerts
+        </Link>
+      </div>
+
+      {risks.length === 0 ? (
+        <Card className="mt-3">
+          <CardBody className="p-4">
+            <p className="text-ink">{NO_ALERTS_TITLE}</p>
+            <p className="mt-1 text-sm text-ink-muted">{NO_ALERTS_BODY}</p>
+          </CardBody>
+        </Card>
+      ) : (
+        <ul className="mt-3 grid gap-3 sm:grid-cols-3">
+          {risks.map((risk) => (
+            <li key={risk.id}><AlertCard alert={risk} variant="compact" /></li>
+          ))}
+        </ul>
+      )}
+    </section>
   );
 }

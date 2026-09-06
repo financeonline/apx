@@ -14,7 +14,7 @@
  */
 
 import { Decimal, tryParseDecimal, toMoneyString, toRatioString } from '@/core/money';
-import { medianAbsoluteDeviation, median, type RuleContext } from '../context';
+import { medianAbsoluteDeviation, median, queryPin, type RuleContext } from '../context';
 import { monthlyOutflows } from './duplicate-transaction';
 import type { RecordObservation, RuleOutcome } from '../types';
 
@@ -105,6 +105,24 @@ export function evaluateBankUnusualTransaction(ctx: RuleContext): readonly RuleO
       },
       snapshotIds: [],
       recordIds: [record.id],
+      evidence: [{
+        itemType: 'bank_transaction' as const,
+        refId: record.id,
+        queryDescriptor: null,
+        label: `${record.descriptionNormalized ?? 'Payment'} on ${record.date}`,
+        claim: 'The payment this alert is about',
+        assuranceLevel: 'verified' as const,
+      },
+      // §8.2: "descriptor of outflows in P", so the reader can see what usual looks like.
+      ...queryPin(ctx, 'bank_transactions', {
+        period_ids: [ctx.periodId],
+        direction: 'outflow',
+      }, {
+        label: 'Payments this period, largest first',
+        claim: 'What this month’s spending usually looks like',
+        order: [{ field: 'amount', dir: 'asc' }],
+        limit: 20,
+      })],
     });
   }
 
