@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { extractClaims, normalise, type ClaimContext } from '@/modules/ai/domain/claims';
-import { escapeUntrusted, untrusted, untrustedJson, UNTRUSTED_MAX_LENGTH } from '@/modules/ai/domain/untrusted';
+import {
+  escapeUntrusted, extractClaims, normalise, untrusted, untrustedJson, UNTRUSTED_MAX_LENGTH,
+  type ClaimContext,
+} from '@/modules/ai';
 
 /**
  * The fixed-corpus claim-grammar test (AI_ARCHITECTURE.md §7.9) and **Spike S3's deterministic
