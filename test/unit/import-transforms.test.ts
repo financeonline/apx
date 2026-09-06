@@ -240,9 +240,30 @@ describe('bank sign (§6.4, ADR-028)', () => {
   });
 
   it('negates the column only when payments out are shown positive', () => {
-    expect(bankAmountFromSigned('-40.00', 'negative_out')).toBe('-40.00');
-    expect(bankAmountFromSigned('40.00', 'positive_out')).toBe('-40.00');
-    expect(bankAmountFromSigned('-40.00', 'positive_out')).toBe('40.00');
+    expect(bankAmountFromSigned('-40.00', 'negative_out').amount).toBe('-40.00');
+    expect(bankAmountFromSigned('40.00', 'positive_out').amount).toBe('-40.00');
+    expect(bankAmountFromSigned('-40.00', 'positive_out').amount).toBe('40.00');
+  });
+
+  /*
+   * The header row of a file whose first line was not recognised as a header arrives here as data.
+   * Reporting it as one bad row is the difference between one flagged line and a dead import
+   * (ADR-058.5).
+   */
+  it('reports unreadable text rather than throwing', () => {
+    const out = bankAmountFromInOut(null, 'Paid Out');
+    expect(out.amount).toBeNull();
+    expect(out.issue).toMatchObject({ code: 'IMP-AMT-002', severity: 'error', field: 'money_out' });
+
+    const inbound = bankAmountFromInOut('Paid In', null);
+    expect(inbound.issue).toMatchObject({ code: 'IMP-AMT-002', field: 'money_in' });
+
+    const signed = bankAmountFromSigned('Amount', 'positive_out');
+    expect(signed.amount).toBeNull();
+    expect(signed.issue).toMatchObject({ code: 'IMP-AMT-002', field: 'amount' });
+
+    // An empty cell is absence, not corruption: no amount and no complaint.
+    expect(bankAmountFromSigned('', 'positive_out')).toEqual({ amount: null, issue: null });
   });
 
   it('evaluates a liability reconciliation as −Σ amount (ADR-028)', () => {

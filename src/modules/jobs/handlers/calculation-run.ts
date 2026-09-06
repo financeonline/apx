@@ -37,9 +37,23 @@ export async function runCalculationJob(
   const payload = job.payload;
 
   const trigger = (typeof payload.trigger === 'string' ? payload.trigger : 'recalc_manual') as CalculationTrigger;
+
+  /*
+   * `app.enqueue_recalculation` writes `{trigger, triggerRefId}` and no period ids — for an import
+   * that ref is the BATCH, and the periods it touched are a property of the batch rather than
+   * something the trigger could know.
+   *
+   * Without resolving them, `affectedRange` had nothing to work from and every commit finished as
+   * `nothing_to_do`: the job succeeded, wrote no snapshots, and Home stayed on its empty state
+   * (ADR-058.6).
+   */
+  const triggerRefId = typeof payload.triggerRefId === 'string' ? payload.triggerRefId
+    : typeof payload.trigger_ref === 'string' ? payload.trigger_ref
+    : null;
+
   const changedPeriodIds = Array.isArray(payload.period_ids)
     ? (payload.period_ids as unknown[]).filter((id): id is string => typeof id === 'string')
-    : [];
+    : await periodsTouchedBy(scoped, orgId, triggerRefId);
 
   /*
    * "Today" in the organisation's timezone, resolved once and passed in (ADR-030.5). The engine
@@ -77,7 +91,7 @@ export async function runCalculationJob(
   }, {
     organizationId: orgId,
     trigger,
-    triggerRefId: typeof payload.trigger_ref === 'string' ? payload.trigger_ref : null,
+    triggerRefId,
     asOf,
     jobId: job.jobId,
     changedPeriodIds,
@@ -144,4 +158,46 @@ async function organisationToday(db: SupabaseClient, orgId: string): Promise<str
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: timezone, year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date());
+}
+
+/**
+ * The fiscal periods a batch's declared range covers.
+ *
+ * The batch declares what it covers (§2.2) rather than having it inferred from its rows, so this is
+ * the honest answer to "what changed": a statement covering March changes March, even if its last
+ * transaction is on the 20th.
+ *
+ * An empty result would leave the run with nothing to do, so a batch that cannot be resolved falls
+ * back to every period the organisation has — a wider recompute is wasteful, and silently computing
+ * nothing after somebody imported a file is not.
+ */
+async function periodsTouchedBy(
+  db: SupabaseClient, orgId: string, batchId: string | null,
+): Promise<string[]> {
+  if (batchId !== null) {
+    const { data: batch } = await db
+      .from('import_batches')
+      .select('period_start, period_end')
+      .eq('organization_id', orgId)
+      .eq('id', batchId)
+      .maybeSingle();
+
+    const range = batch as { period_start?: string; period_end?: string } | null;
+    if (range?.period_start != null && range.period_end != null) {
+      const { data } = await db
+        .from('fiscal_periods')
+        .select('id')
+        .eq('organization_id', orgId)
+        .lte('period_start', range.period_end)
+        .gte('period_end', range.period_start);
+      const ids = ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
+      if (ids.length > 0) return ids;
+    }
+  }
+
+  const { data } = await db
+    .from('fiscal_periods')
+    .select('id')
+    .eq('organization_id', orgId);
+  return ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
 }

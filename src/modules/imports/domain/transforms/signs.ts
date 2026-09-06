@@ -8,7 +8,7 @@
  * balance-sign confirmation (`IMP-TB-013`) — these functions return the question, not an answer.
  */
 
-import { Decimal, negate, parseMoney, toMoneyString, ZERO } from '@/core/money';
+import { Decimal, negate, parseMoney, toMoneyString, tryParseDecimal, ZERO } from '@/core/money';
 import { CATEGORY_ACCOUNT_TYPE, type StandardCategory } from '@/modules/financials';
 import type { BalanceSign, BankSign, GlSign, RowIssue } from '../pipeline-types';
 
@@ -45,6 +45,26 @@ export interface BankAmountResult {
   readonly issue: RowIssue | null;
 }
 
+/** Reads a money cell, or reports it as unreadable. Never throws (ADR-058.5). */
+function readMoneyCell(
+  value: string | null | undefined, field: 'debit' | 'credit' | 'amount' | 'money_in' | 'money_out',
+): { value: Decimal | null; issue: RowIssue | null } {
+  if (value === null || value === undefined || value === '') return { value: null, issue: null };
+  const parsed = tryParseDecimal(value);
+  if (parsed === null) {
+    return {
+      value: null,
+      issue: {
+        code: 'IMP-AMT-002',
+        severity: 'error',
+        field,
+        message: `"${value}" is not an amount MOTION can read.`,
+      },
+    };
+  }
+  return { value: parsed, issue: null };
+}
+
 /**
  * `amount = money_in − money_out` (§6.4).
  *
@@ -55,26 +75,35 @@ export function bankAmountFromInOut(
   moneyIn: string | null | undefined,
   moneyOut: string | null | undefined,
 ): BankAmountResult {
-  const hasIn = moneyIn !== null && moneyIn !== undefined && moneyIn !== '';
-  const hasOut = moneyOut !== null && moneyOut !== undefined && moneyOut !== '';
-  if (hasIn && hasOut) {
-    const inValue = parseMoney(moneyIn);
-    const outValue = parseMoney(moneyOut);
-    if (!inValue.isZero() && !outValue.isZero()) {
-      return {
-        amount: null,
-        issue: {
-          code: 'IMP-AMT-002',
-          severity: 'error',
-          message: 'This row has both a money-in and a money-out amount',
-          suggestion: 'Split the row, or map only the column that carries the movement.',
-        },
-      };
-    }
+  /*
+   * Unreadable input is REPORTED, not thrown — the same contract, and the same trap, as
+   * `glFromDebitCredit`. A header row reaching this as data ("Paid Out" in the money-out column)
+   * used to take down the whole import instead of becoming one flagged row (ADR-058.5).
+   */
+  const inRead = readMoneyCell(moneyIn, 'money_in');
+  if (inRead.issue !== null) return { amount: null, issue: inRead.issue };
+  const outRead = readMoneyCell(moneyOut, 'money_out');
+  if (outRead.issue !== null) return { amount: null, issue: outRead.issue };
+
+  const inValue = inRead.value;
+  const outValue = outRead.value;
+
+  if (inValue !== null && outValue !== null && !inValue.isZero() && !outValue.isZero()) {
+    return {
+      amount: null,
+      issue: {
+        code: 'IMP-AMT-002',
+        severity: 'error',
+        message: 'This row has both a money-in and a money-out amount',
+        suggestion: 'Split the row, or map only the column that carries the movement.',
+      },
+    };
   }
-  if (!hasIn && !hasOut) return { amount: null, issue: null };
-  const credit = hasIn ? parseMoney(moneyIn) : ZERO;
-  const debit = hasOut ? parseMoney(moneyOut) : ZERO;
+
+  if (inValue === null && outValue === null) return { amount: null, issue: null };
+
+  const credit = inValue ?? ZERO;
+  const debit = outValue ?? ZERO;
   return { amount: toMoneyString(credit.minus(debit)), issue: null };
 }
 
@@ -85,9 +114,15 @@ export function bankAmountFromInOut(
  * `positive_out`: the file writes payments out as positive (the credit-card convention), so the
  * whole column is negated — which also turns the card's repayments and refunds back into inflows.
  */
-export function bankAmountFromSigned(amount: string, bankSign: BankSign): string {
-  const value = parseMoney(amount);
-  return toMoneyString(bankSign === 'positive_out' ? negate(value) : value);
+export function bankAmountFromSigned(amount: string, bankSign: BankSign): BankAmountResult {
+  // Reports rather than throws, for the reason given on `bankAmountFromInOut` (ADR-058.5).
+  const read = readMoneyCell(amount, 'amount');
+  if (read.issue !== null) return { amount: null, issue: read.issue };
+  if (read.value === null) return { amount: null, issue: null };
+  return {
+    amount: toMoneyString(bankSign === 'positive_out' ? negate(read.value) : read.value),
+    issue: null,
+  };
 }
 
 export interface ReconciliationInput {
@@ -146,8 +181,21 @@ export function glFromDebitCredit(
   debit: string | null | undefined,
   credit: string | null | undefined,
 ): DirectedAmountResult {
-  const debitValue = debit !== null && debit !== undefined && debit !== '' ? parseMoney(debit) : null;
-  const creditValue = credit !== null && credit !== undefined && credit !== '' ? parseMoney(credit) : null;
+  /*
+   * Unreadable input is REPORTED, not thrown.
+   *
+   * This function's own return type carries an `issue` for exactly this case, and it could not
+   * honour that contract while parsing with something that raises: a header row reaching it as data
+   * — "Debit" in the debit column — took down the whole import rather than becoming one flagged row
+   * (ADR-058.5).
+   */
+  const debitRead = readMoneyCell(debit, 'debit');
+  if (debitRead.issue !== null) return { direction: null, amount: null, issue: debitRead.issue };
+  const creditRead = readMoneyCell(credit, 'credit');
+  if (creditRead.issue !== null) return { direction: null, amount: null, issue: creditRead.issue };
+
+  const debitValue = debitRead.value;
+  const creditValue = creditRead.value;
   const debitPosted = debitValue !== null && !debitValue.isZero();
   const creditPosted = creditValue !== null && !creditValue.isZero();
 
@@ -178,7 +226,11 @@ export function glFromDebitCredit(
  * (§6.4). Unlike the bank sign this one HAS a stated default, so it does not ask.
  */
 export function glFromSigned(amount: string, glSign: GlSign = 'positive_debit'): DirectedAmountResult {
-  const value = parseMoney(amount);
+  const read = readMoneyCell(amount, 'amount');
+  if (read.issue !== null) return { direction: null, amount: null, issue: read.issue };
+  if (read.value === null) return { direction: null, amount: null, issue: null };
+
+  const value = read.value;
   const positiveIsDebit = glSign === 'positive_debit';
   const isDebit = value.isNegative() ? !positiveIsDebit : positiveIsDebit;
   return { direction: isDebit ? 'debit' : 'credit', amount: toMoneyString(value.abs()), issue: null };

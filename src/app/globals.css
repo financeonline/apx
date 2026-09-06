@@ -20,7 +20,14 @@
   /* Text */
   --color-ink: #16211e;
   --color-ink-muted: #5c6763;
-  --color-ink-faint: #8a938f;
+  /*
+   * WCAG AA against BOTH light surfaces (5.2:1 on white, 4.6:1 on the sunken panel).
+   *
+   * The old #8a938f measured 3.2:1 and carried real text — period labels, row counts, the "and
+   * others" line under an issue group. It read as decoration and was not: axe found it on every
+   * page once the sweep was actually signed in (ADR-058.11).
+   */
+  --color-ink-faint: #666f6b;
 
   /* Rules */
   --color-line: #e4e0d6;
@@ -65,7 +72,8 @@
 
     --color-ink: #edefea;
     --color-ink-muted: #9aa5a0;
-    --color-ink-faint: #74807b;
+    /* 4.6:1 on the dark surface; the old #74807b measured 4.1:1. */
+    --color-ink-faint: #7d8984;
 
     --color-line: #26312d;
     --color-line-strong: #38443f;

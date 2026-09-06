@@ -324,3 +324,44 @@ export async function batchCoverage(
     p_org: orgId, p_from: from, p_to: to,
   }).then((rows) => rows ?? []);
 }
+
+// ---------------------------------------------------------------------------
+// The import pipeline's three server-asserted writes (IMPORT_ENGINE.md §7).
+//
+// What the parser OBSERVED about a file — these rows, these issues, this failure — is a server fact
+// (ADR-043). A browser must not be able to assert that a row validated cleanly.
+// ---------------------------------------------------------------------------
+
+export async function writeImportRows(
+  actor: ServerRpcActor, orgId: string, batchId: string, rows: unknown[],
+): Promise<number> {
+  const written = await serverRpc<number>('write_import_rows', {
+    p_actor: actor.userId, p_org: orgId, p_batch: batchId, p_rows: rows,
+  });
+  return Number(written ?? 0);
+}
+
+export async function setBatchValidation(
+  actor: ServerRpcActor,
+  orgId: string,
+  batchId: string,
+  batchIssues: unknown[],
+  required: string[],
+  rowCounts: Record<string, number>,
+  statement: Record<string, unknown> | null,
+): Promise<void> {
+  await serverRpc('set_batch_validation', {
+    p_actor: actor.userId, p_org: orgId, p_batch: batchId,
+    p_batch_issues: batchIssues, p_required: required,
+    p_row_counts: rowCounts, p_statement: statement,
+  });
+}
+
+export async function failImportBatch(
+  actor: ServerRpcActor, orgId: string, batchId: string, stage: string, message: string,
+): Promise<void> {
+  await serverRpc('fail_import_batch', {
+    p_actor: actor.userId, p_org: orgId, p_batch: batchId,
+    p_stage: stage, p_message: message, p_deferred: false,
+  });
+}

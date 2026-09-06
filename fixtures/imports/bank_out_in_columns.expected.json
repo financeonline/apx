@@ -1,0 +1,25 @@
+{
+  "fixture": "bank_out_in_columns.csv",
+  "catalogue": 6,
+  "source": "IMPORT_ENGINE.md \u00a717 item 6; \u00a76.4 \"Bank sign convention\"",
+  "description": "The G1 layout: separate money-out and money-in columns, so the sign needs no human answer.",
+  "validation": {
+    "ok": true,
+    "encoding": "utf-8",
+    "delimiter": ",",
+    "codes": []
+  },
+  "transforms": {
+    "bankSign": null
+  },
+  "amountsAfterTransform": [
+    "-24.10",
+    "2500.00",
+    "-88.40",
+    "-950.00",
+    "12.00"
+  ],
+  "notes": [
+    "amount = money_in \u2212 money_out (\u00a76.4). No transforms.bankSign is needed or resolved for this layout."
+  ]
+}

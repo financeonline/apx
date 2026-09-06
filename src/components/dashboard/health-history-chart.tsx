@@ -62,6 +62,9 @@ export function HealthHistoryChart({
         viewBox={`0 0 ${box.width} ${box.height}`}
         className="w-full"
         role="img"
+        // An `img` with no accessible NAME is announced as "graphic" and nothing else. The
+        // description says where the numbers are; the label says what the picture is (§11).
+        aria-label="Health score by month"
         aria-describedby={tableFallbackId}
       >
         {/* The band boundaries, so a reader can see which band a month sat in without a key. */}

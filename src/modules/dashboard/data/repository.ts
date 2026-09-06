@@ -155,12 +155,49 @@ export async function loadPeriods(
 export async function loadPeriodsWithData(
   db: SupabaseClient, orgId: string, requestId?: string,
 ): Promise<Set<string>> {
+  /*
+   * A period has data when a figure has a VALUE, not merely when a pointer exists.
+   *
+   * A run over an organisation whose records were all rolled back still writes a full set of
+   * snapshots — every one of them NULL with a reason. Counting pointers made Home treat that as
+   * "ready" and show six dashed cards; the honest state is the first-run one, which asks for a file
+   * (ADR-058.8).
+   */
   const { data, error } = await db
     .from('metric_current')
-    .select('period_id')
-    .eq('organization_id', orgId);
+    .select('period_id, metric_snapshots!inner (value)')
+    .eq('organization_id', orgId)
+    .not('metric_snapshots.value', 'is', null);
 
   return new Set(unwrap(data, error, requestId).map((r) => r.period_id as string));
+}
+
+/**
+ * Does this organisation hold any figures of its own?
+ *
+ * "Has data" cannot be answered from `metric_current`: the engine writes a KNOWN ZERO for cash in
+ * every period, covered or not, so an organisation whose only import was rolled back still has
+ * hundreds of non-null snapshots — all of them zero. Home read that as "ready" and offered a
+ * dashboard built on nothing (ADR-058.8).
+ *
+ * The honest question is whether any accepted record exists, and that is what this asks.
+ */
+export async function hasAcceptedRecords(
+  db: SupabaseClient, orgId: string, requestId?: string,
+): Promise<boolean> {
+  const tables = ['ledger_entries', 'bank_transactions', 'invoices', 'period_balances'] as const;
+
+  for (const table of tables) {
+    const { count, error } = await db
+      .from(table)
+      .select('id', { count: 'exact', head: true })
+      .eq('organization_id', orgId)
+      .eq('record_status', 'accepted')
+      .is('superseded_by', null);
+    if (error) throw toMotionError(error, requestId);
+    if ((count ?? 0) > 0) return true;
+  }
+  return false;
 }
 
 /** Whether a recalculation is in flight, for the "Updating your numbers" banner (§7.1, F-D-03). */

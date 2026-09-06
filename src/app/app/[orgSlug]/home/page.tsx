@@ -215,7 +215,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
 
   const { view } = state;
   const [trend, topRisks] = await Promise.all([
-    loadTrend(ctx.db, ctx.orgId!, view.periods, ctx.requestId),
+    loadTrend(ctx.db, ctx.orgId!, view.periods, ctx.requestId, view.period.id),
     loadTopRisks(ctx.db, ctx.orgId!, orgSlug, 3, ctx.requestId),
   ]);
 

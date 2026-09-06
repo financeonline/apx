@@ -13,6 +13,9 @@
  */
 
 import { maskDescription } from './transforms';
+import {
+  bankAmountFromInOut, bankAmountFromSigned, glFromDebitCredit, glFromSigned,
+} from './transforms/signs';
 import { detectDuplicates, dedupeHash, normalizeDescription, scopeKey, type DedupeCandidateRow, type ExistingInvoice, type ExistingRecord } from './dedupe';
 import { checkBatch, looksLikeOpenItems, requiredConfirmations, statusForIssues, validateRow, satisfiedFieldSet } from './validate-rows';
 import type {
@@ -137,6 +140,21 @@ export function runPipeline(input: PipelineInput): PipelineResult {
   const staged: Staged[] = table.rows.map((row) => {
     const { mapped, raw } = mapRow(table.columns, row.cells, columnMap);
     const accountValue = mapped.account ?? null;
+
+    /*
+     * Money into the shape the target table stores it in (§7.3).
+     *
+     * A file says "Debit 9,000" or "Paid Out 500"; `ledger_entries` stores a magnitude and a side,
+     * and `bank_transactions` stores one signed number. Without this step `mapped_data` carried the
+     * file's own columns and no `direction` or `amount`, so no ledger could ever commit — the
+     * insert failed on a NOT NULL constraint (ADR-058.4).
+     *
+     * `signs.ts` owns every one of these conversions, so the importer and the engine cannot disagree
+     * about which way a debit points.
+     */
+    if (!row.nonTabular) {
+      normaliseMoney(mapped, input.targetTable, input.transforms);
+    }
 
     if (!row.nonTabular && accountValue) {
       const byCode = mapped.code ? accountsByCode.get(mapped.code.toLowerCase()) : undefined;
@@ -319,4 +337,58 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     unmappedAccounts: [...unmappedAccounts],
     newCounterparties: [...newCounterparties],
   };
+}
+
+/**
+ * Fills in `direction` and `amount` from whichever columns the file actually used.
+ *
+ * Mutates the mapped row in place, which is what the rest of the staging step expects. Anything it
+ * cannot resolve is LEFT ALONE rather than guessed: `validateRows` then reports it as an issue the
+ * reviewer sees, which is the whole design — a row MOTION cannot read is shown, never dropped.
+ */
+function normaliseMoney(
+  mapped: Record<string, string | null>,
+  targetTable: ImportTarget,
+  transforms: Transforms,
+): void {
+  if (targetTable === 'ledger_entries') {
+    if (mapped.direction && mapped.amount) return;
+
+    if (mapped.debit !== undefined || mapped.credit !== undefined) {
+      const result = glFromDebitCredit(mapped.debit, mapped.credit);
+      if (result.direction !== null && result.amount !== null) {
+        mapped.direction = result.direction;
+        mapped.amount = result.amount;
+      }
+      return;
+    }
+
+    if (mapped.amount) {
+      const result = glFromSigned(mapped.amount, transforms.glSign);
+      if (result.direction !== null && result.amount !== null) {
+        mapped.direction = result.direction;
+        mapped.amount = result.amount;
+      }
+    }
+    return;
+  }
+
+  if (targetTable === 'bank_transactions') {
+    if (mapped.amount) {
+      /*
+       * A single signed column is only readable under the reviewer's answer to "Are payments out
+       * shown as negative?" (§6.4). Absent that answer the column is left exactly as the file wrote
+       * it: guessing would invert every movement in a credit-card export.
+       */
+      if (transforms.bankSign !== undefined) {
+        const result = bankAmountFromSigned(mapped.amount, transforms.bankSign);
+        if (result.amount !== null) mapped.amount = result.amount;
+      }
+      return;
+    }
+    if (mapped.money_in !== undefined || mapped.money_out !== undefined) {
+      const result = bankAmountFromInOut(mapped.money_in, mapped.money_out);
+      if (result.amount !== null) mapped.amount = result.amount;
+    }
+  }
 }

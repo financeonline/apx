@@ -104,3 +104,22 @@ export { runPipeline, type PipelineInput, type PipelineResult } from './domain/p
 
 export * from './domain/mapping';
 export * from './domain/transforms';
+
+/**
+ * The wizard (§2–§8) and the two screens it feeds. Server-only; the pages render their view models.
+ */
+export {
+  startImport,
+  targetFor,
+  type StartImportInput,
+  type StartImportResult,
+} from './services/wizard';
+
+export {
+  groupIssues,
+  loadBatchReview,
+  loadImportHistory,
+  type BatchIssueGroup,
+  type BatchReview,
+  type ImportHistoryRow,
+} from './services/review';

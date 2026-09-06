@@ -77,8 +77,8 @@ const PRIMARY: readonly NavItem[] = [
  * adviser or admin still reaches the pages they work in with one click. A client never sees it.
  */
 const DATA_MENU: readonly { label: string; path: string; built: boolean }[] = [
-  { label: 'Add data', path: 'data/imports/new', built: false },
-  { label: 'Imports', path: 'data/imports', built: false },
+  { label: 'Add data', path: 'data/imports/new', built: true },
+  { label: 'Imports', path: 'data/imports', built: true },
   { label: 'Documents', path: 'data/documents', built: false },
   { label: 'Accounts', path: 'data/accounts', built: true },
 ];

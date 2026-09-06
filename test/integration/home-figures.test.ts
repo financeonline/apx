@@ -55,6 +55,25 @@ function writeMetric(periodId: string, key: string, value: string | null, over: 
   return snapshotId;
 }
 
+/**
+ * One accepted record, so Home's first-run gate sees an organisation that has data.
+ *
+ * These suites write snapshots directly, which no real organisation ever has without records behind
+ * them — and Home asks about RECORDS, because a rolled-back import leaves a full set of snapshots
+ * whose every cash figure is a known zero (ADR-058.8). A fixture with figures and no records is a
+ * state the product cannot reach.
+ */
+function seedOneRecord(periodId: string): void {
+  adminSql(`
+    insert into public.ledger_entries
+           (organization_id, entry_date, account_id, direction, amount, period_id, record_status)
+    values ('${orgId}', '2026-05-15',
+            (select id from public.accounts
+              where organization_id = '${orgId}' and standard_category = 'revenue' limit 1),
+            'credit', 1.00, '${periodId}', 'accepted')
+    on conflict do nothing`);
+}
+
 function markComplete(periodId: string, complete: boolean): void {
   adminSql(`update public.fiscal_periods set is_complete = ${complete} where id = '${periodId}'`);
 }
@@ -95,7 +114,9 @@ beforeEach(() => {
     delete from public.calculation_runs where organization_id = '${orgId}';
     delete from public.jobs where organization_id = '${orgId}';
     update public.fiscal_periods set is_complete = false where organization_id = '${orgId}';
+    delete from public.ledger_entries where organization_id = '${orgId}';
     commit;`);
+  seedOneRecord(march);
 });
 
 describe('every figure Home shows is the snapshot for that month', () => {
@@ -251,6 +272,15 @@ describe('the bank-only variant (ADR-035)', () => {
 });
 
 describe('first run and awaiting review are different pages (§6)', () => {
+  // The one suite that needs NO records: it is about the state before any exist.
+  beforeEach(() => {
+    adminSql(`
+      begin;
+      set local app.purge = 'on';
+      delete from public.ledger_entries where organization_id = '${orgId}';
+      commit;`);
+  });
+
   it('says first run when nothing has been added', async () => {
     const state = await loadHome(clientFor(ownerId), orgId, orgSlug);
     expect(state.kind).toBe('first_run');

@@ -129,14 +129,23 @@ export async function loadHome(
   orgSlug: string,
   requestId?: string,
 ): Promise<HomeState> {
-  const [periods, withData, recalculating, lastData] = await Promise.all([
+  const [periods, withData, recalculating, lastData, hasRecords] = await Promise.all([
     repo.loadPeriods(db, orgId, requestId),
     repo.loadPeriodsWithData(db, orgId, requestId),
     repo.isRecalculating(db, orgId, requestId),
     repo.loadLastDataDate(db, orgId, requestId),
+    repo.hasAcceptedRecords(db, orgId, requestId),
   ]);
 
-  if (withData.size === 0) {
+  /*
+   * The first-run test is about RECORDS, not snapshots (ADR-058.8).
+   *
+   * An organisation whose only import was rolled back still has a full set of snapshots — every cash
+   * figure a known zero. Asking `metric_current` would call that "ready" and build a dashboard on
+   * nothing; asking whether any record survives gives the true answer, and Home goes back to asking
+   * for a file.
+   */
+  if (!hasRecords || withData.size === 0) {
     // Nothing computed yet — but "you have not added anything" and "you added something and it is
     // waiting for you" need completely different sentences (§6).
     const pending = await repo.loadPendingBatch(db, orgId, requestId);
@@ -257,6 +266,25 @@ export async function loadHome(
   return bankOnly ? { kind: 'bank_only', view } : { kind: 'ready', view };
 }
 
+/**
+ * The twelve months ENDING at the period on screen, oldest first.
+ *
+ * Not simply the twelve newest periods the organisation has: a fiscal calendar runs ahead of the
+ * data, and the engine writes a known zero for cash in every period — so "the newest twelve" was a
+ * year of empty future months, and the chart showed 2027 to a business whose figures stop in May
+ * 2026 (ADR-058.9).
+ */
+function trailingWindow(
+  periods: readonly PeriodLabel[], endingAt: string | undefined, count: number,
+): PeriodLabel[] {
+  const ordered = [...periods].sort((a, b) => a.periodStart.localeCompare(b.periodStart));
+  const endIndex = endingAt === undefined
+    ? ordered.length - 1
+    : ordered.findIndex((p) => p.id === endingAt);
+  const end = endIndex < 0 ? ordered.length - 1 : endIndex;
+  return ordered.slice(Math.max(0, end - count + 1), end + 1);
+}
+
 /** The trend chart's three series (§4 level 3). */
 export interface TrendSeries {
   readonly key: string;
@@ -269,8 +297,9 @@ export async function loadTrend(
   orgId: string,
   periods: readonly PeriodLabel[],
   requestId?: string,
+  endingAt?: string,
 ): Promise<TrendSeries[]> {
-  const window = [...periods].slice(0, 12).reverse();
+  const window = trailingWindow(periods, endingAt, 12);
   const keys = ['revenue', 'operating_profit', 'closing_cash'];
   const rows = await repo.loadMetricSeries(db, orgId, keys, window.map((p) => p.id), requestId);
 
@@ -302,8 +331,9 @@ export async function loadHealthTrend(
   orgId: string,
   periods: readonly PeriodLabel[],
   requestId?: string,
+  endingAt?: string,
 ): Promise<{ points: readonly HealthHistoryPoint[]; labels: Map<string, string> }> {
-  const window = [...periods].slice(0, 12).reverse();
+  const window = trailingWindow(periods, endingAt, 12);
   const points = await loadHealthHistory(db, orgId, window.map((p) => p.id), requestId);
   return { points, labels: new Map(window.map((p) => [p.id, p.label])) };
 }

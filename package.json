@@ -21,7 +21,10 @@
     "db:test": "supabase test db",
     "permissions:sync": "tsx scripts/sync-permission-matrix.ts",
     "permissions:print": "tsx scripts/sync-permission-matrix.ts --print",
-    "check:schema": "tsx scripts/check-schema-drift.ts"
+    "check:schema": "tsx scripts/check-schema-drift.ts",
+    "e2e": "playwright test",
+    "e2e:smoke": "playwright test journey-1 journey-8",
+    "e2e:ui": "playwright test --ui"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.6",
@@ -37,7 +40,9 @@
     "zod": "^4.5.4"
   },
   "devDependencies": {
+    "@axe-core/playwright": "^4.13.0",
     "@eslint/js": "^9.39.5",
+    "@playwright/test": "^1.63.0",
     "@tailwindcss/postcss": "^4.3.3",
     "@types/node": "^24.13.3",
     "@types/react": "^19.2.18",

@@ -9,3 +9,6 @@ supabase/.temp/
 coverage/
 next-env.d.ts
 tsconfig.tsbuildinfo
+e2e/.auth/
+test-results/
+playwright-report/

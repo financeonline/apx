@@ -1,0 +1,19 @@
+{
+  "fixture": "bank_signed.csv",
+  "catalogue": 6,
+  "source": "IMPORT_ENGINE.md \u00a717 item 6; \u00a76.4 \"Bank sign convention\"; ADR-028",
+  "validation": {
+    "ok": true,
+    "encoding": "utf-8",
+    "delimiter": ",",
+    "codes": []
+  },
+  "description": "One signed amount column on a current account: payments out could be either sign, so \u00a76.4 makes the answer a human's.",
+  "transforms": {
+    "bankSign": null
+  },
+  "notes": [
+    "resolveBankSign(undefined, 'current') is null. The wizard refuses the file rather than guessing, before anything is stored (ADR-058.1, ADR-058.13).",
+    "Nothing here asserts amounts: MOTION has no answer to apply until the mapping step asks the question."
+  ]
+}

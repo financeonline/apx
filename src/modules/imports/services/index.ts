@@ -194,3 +194,28 @@ export async function confirmPdfPage(
 ): Promise<string> {
   return callApi<string>(db, 'confirm_pdf_page', { p_batch: batchId, p_page: page }, requestId);
 }
+
+/**
+ * Creates the accounts a file names that the chart does not have yet (§6.5).
+ *
+ * `ledger_entries.account_id` is NOT NULL, so a ledger naming accounts MOTION has never seen cannot
+ * commit at all until they exist. §6.5's rule is that they are created and left `uncategorised`
+ * until a human confirms them — visible on `/data/accounts`, and marked incomplete everywhere they
+ * feed a figure, rather than guessed at silently.
+ */
+export async function createImportAccounts(
+  db: SupabaseClient,
+  batchId: string,
+  accounts: ReadonlyArray<{ name: string; code?: string | null; standardCategory?: string | null }>,
+  requestId?: string,
+): Promise<number> {
+  if (accounts.length === 0) return 0;
+  return callApi<number>(db, 'create_import_accounts', {
+    p_batch: batchId,
+    p_accounts: accounts.map((a) => ({
+      name: a.name,
+      code: a.code ?? null,
+      standard_category: a.standardCategory ?? null,
+    })),
+  }, requestId);
+}

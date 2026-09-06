@@ -52,8 +52,12 @@ export function PeriodPicker({
           <span className="tabular">{option.label}</span>
           {option.isLatestComplete ? (
             <>
-              {/* The default month, named in words as well as marked (§11). */}
-              <span aria-hidden="true" className="ml-1.5 text-xs text-ink-faint">
+              {/*
+                The default month, named in words as well as marked (§11).
+                `ink-muted`, not `ink-faint`: this label sits on the accent-soft chip of the selected
+                period, where the faint token measures 4.5:1 on white but only 3.9:1 here.
+              */}
+              <span aria-hidden="true" className="ml-1.5 text-xs text-ink-muted">
                 latest complete
               </span>
               <span className="sr-only"> — the latest complete month</span>

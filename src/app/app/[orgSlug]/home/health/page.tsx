@@ -42,7 +42,7 @@ export default async function HealthPage({ params }: { params: Promise<{ orgSlug
   }
 
   const { view } = state;
-  const trend = await loadHealthTrend(ctx.db, ctx.orgId!, view.periods, ctx.requestId);
+  const trend = await loadHealthTrend(ctx.db, ctx.orgId!, view.periods, ctx.requestId, view.period.id);
 
   return (
     <>

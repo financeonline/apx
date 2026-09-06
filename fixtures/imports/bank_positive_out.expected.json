@@ -1,0 +1,26 @@
+{
+  "fixture": "bank_positive_out.csv",
+  "catalogue": 6,
+  "source": "IMPORT_ENGINE.md \u00a717 item 6; \u00a76.4 \"Bank sign convention\"; ADR-028",
+  "validation": {
+    "ok": true,
+    "encoding": "utf-8",
+    "delimiter": ",",
+    "codes": []
+  },
+  "description": "Credit-card style: one signed amount column where a PURCHASE is positive and a refund or repayment is negative.",
+  "transforms": {
+    "bankSign": "positive_out"
+  },
+  "amountsAfterTransform": [
+    "-45.20",
+    "-128.75",
+    "28.75",
+    "-210.00",
+    "1000.00"
+  ],
+  "notes": [
+    "The account this is imported against must be credit_card or loan: \u00a76.4 gives those a positive_out default, and only those.",
+    "Read as negative_out the whole file inverts \u2014 every purchase would post as money coming in."
+  ]
+}

@@ -474,6 +474,9 @@ describe('IMP-FILE-008 — active content', () => {
 describe('the fixture catalogue (§17) agrees with the validator', () => {
   const cases: readonly { readonly name: string; readonly catalogue: number }[] = [
     { name: 'csv-with-preamble', catalogue: 22 },
+    { name: 'bank_out_in_columns', catalogue: 6 },
+    { name: 'bank_signed', catalogue: 6 },
+    { name: 'bank_positive_out', catalogue: 6 },
     { name: 'bank_ambiguous_dates', catalogue: 7 },
     { name: 'bank_1252_semicolon', catalogue: 8 },
     { name: 'injection_descriptions', catalogue: 15 },

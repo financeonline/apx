@@ -16,6 +16,9 @@ export {
   aggregatePeriods,
   aggregateTransferLegs,
   batchCoverage,
+  writeImportRows,
+  setBatchValidation,
+  failImportBatch,
   type ClaimedJobRow,
   type ServerRpcActor,
 } from './server-rpc';

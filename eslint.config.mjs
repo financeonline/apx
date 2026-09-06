@@ -75,7 +75,7 @@ export default tseslint.config(
    * every one of them is still enforced across src/, and the refusal is enforced by the database.
    */
   {
-    files: ['test/**/*.ts', 'scripts/**/*.ts', 'vitest.config.ts'],
+    files: ['test/**/*.ts', 'e2e/**/*.ts', 'scripts/**/*.ts', 'vitest.config.ts', 'playwright.config.ts'],
     rules: {
       'no-console': 'off',
       'motion/no-direct-table-write': 'off',
