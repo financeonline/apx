@@ -56,3 +56,38 @@ export {
   type FieldKind,
   type ToolResult,
 } from './domain/allowed-set';
+
+export {
+  ENTITY_REF_TYPES,
+  EVIDENCE_REF_TYPES,
+  EntityRefSchema,
+  EvidenceRefSchema,
+  NumberRefSchema,
+  RESPONSE_MODES,
+  RecommendedActionSchema,
+  STATEMENT_KINDS,
+  StatementSchema,
+  SubmitAnswerSchema,
+  UNSUPPORTED_REASONS,
+  kindForAssurance,
+  statementsOf,
+  weakestKind,
+  type EntityRef,
+  type EvidenceRef,
+  type NumberRef,
+  type ResponseMode,
+  type Statement,
+  type StatementKind,
+  type SubmitAnswer,
+  type UnsupportedReason,
+} from './domain/contract';
+
+export {
+  ground,
+  modeAdmissible,
+  unsupportedTopicsClean,
+  type GroundingContext,
+  type GroundingResult,
+  type GroundingStatus,
+  type Mismatch,
+} from './domain/grounding';
