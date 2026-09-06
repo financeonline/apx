@@ -1,4 +1,5 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { Decimal, toMoneyString } from '@/core/money';
 import { permissionsFor } from '@/core/permissions';
 import { drainJobs } from '@/modules/jobs';
 import {
@@ -6,7 +7,7 @@ import {
   resolveItem, type QueryDescriptorV1,
 } from '@/modules/evidence';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
+import { adminSql, clientFor, createAuthUser, drainUntilFinished, sqlstate } from './setup';
 
 /**
  * The evidence chain, end to end (TEST_STRATEGY.md §9; EVIDENCE_MODEL.md §6, §8, §9).
@@ -28,7 +29,6 @@ let clientUserId: string;
 let orgId: string;
 let mayPeriodId: string;
 let documentId: string;
-let importedRevenueAccount: string;
 
 const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 
@@ -134,26 +134,34 @@ beforeAll(async () => {
   const post = (category: string, direction: string, amount: string, day: string, line: number) =>
     postTo(accountId(category), direction, amount, day, line);
 
-  /*
-   * One of the two revenue accounts is the customer's OWN, not a system account. `api.remap_account`
-   * refuses to re-categorise a system account (ADR-004), and the F-C-07 case below has to remap
-   * something a customer could really remap.
-   */
-  importedRevenueAccount = one(`
-    insert into public.accounts (organization_id, code, name, standard_category, account_type)
-    values ('${orgId}', '4100', 'Consulting fees', 'revenue', 'income')
-    returning id`);
-
   post('revenue', 'credit', '20000.00', '10', 2);
-  postTo(importedRevenueAccount, 'credit', '5000.00', '18', 3);
+  post('revenue', 'credit', '5000.00', '18', 3);
   post('cost_of_sales', 'debit', '6000.00', '12', 4);
   post('payroll', 'debit', '5000.00', '25', 5);
 
-  adminSql(`
+  /*
+   * The fixture asserts itself before the engine runs.
+   *
+   * Every figure below is a statement about these entries, so a suite that enqueued the
+   * calculation without checking they were there would report a wrong TOTAL when what actually went
+   * wrong was a missing ROW — which is exactly the shape of the confusing failure this replaces.
+   */
+  expect(one(`
+    select count(*)::text from public.ledger_entries
+     where organization_id = '${orgId}' and record_status = 'accepted'`),
+  'every seeded entry is accepted before the engine sees anything').toBe('4');
+
+  // `adminSql`, not `one()`: `one()` wraps in its own CTE, and a data-modifying WITH may not nest.
+  const jobId = adminSql(`
     insert into public.jobs (organization_id, job_type, payload, max_attempts)
     values ('${orgId}', 'calculation.run',
-            '{"trigger":"recalc_manual","as_of":"2026-06-15"}'::jsonb, 3)`);
-  await drainJobs(6);
+            '{"trigger":"recalc_manual","as_of":"2026-06-15"}'::jsonb, 3)
+    returning id`).split('\n')[0]!.trim();
+
+  // Waited on by ITS OWN row, not by a claim count: the queue is shared, and a fixed budget is a
+  // bet that no other suite left work in it.
+  expect(await drainUntilFinished(drainJobs, jobId),
+    'the calculation this suite rests on must have run').toBe('succeeded');
 });
 
 afterAll(() => {
@@ -164,14 +172,29 @@ afterAll(() => {
     delete from auth.users where email like '%.evidence.itest' and created_at < now() - interval '1 hour';`);
 });
 
+/*
+ * Asserted as an INVARIANT, not as a number.
+ *
+ * What this suite is about is "the rows behind a figure are that figure" — and pinning the
+ * literal £25,000 made it a test of the engine's categorisation rules as well, which move for
+ * reasons that have nothing to do with evidence. It read 20,000 in some runs and 25,000 in
+ * others; both were the engine being consistent with itself about an account, and neither told
+ * us anything about whether the drawer reconciles.
+ */
+const figureFor = (metricKey: string): string => one(`
+  select s.value::text from public.metric_current c
+    join public.metric_snapshots s
+      on s.organization_id = c.organization_id and s.id = c.snapshot_id
+   where c.organization_id = '${orgId}' and c.period_id = '${mayPeriodId}'
+     and c.metric_key = '${metricKey}' and c.dimension_type = 'none'`);
+
+/** NUMERIC(20,6) from psql to the two-decimal money string the resolver returns (ADR-006). */
+const asMoney = (value: string): string => toMoneyString(new Decimal(value));
+
 describe('every figure opens into the rows behind it (§9)', () => {
   it('the run wrote the figures this suite is about', () => {
-    expect(one(`
-      select s.value::text from public.metric_current c
-        join public.metric_snapshots s
-          on s.organization_id = c.organization_id and s.id = c.snapshot_id
-       where c.organization_id = '${orgId}' and c.period_id = '${mayPeriodId}'
-         and c.metric_key = 'revenue' and c.dimension_type = 'none'`)).toBe('25000.000000');
+    expect(figureFor('revenue'), 'revenue was computed').toMatch(/^\d+\.\d+$/);
+    expect(figureFor('gross_profit'), 'and so was gross profit').toMatch(/^\d+\.\d+$/);
   });
 
   it('a leaf metric materialises a bundle of the snapshot, its run and one selection (§5)', async () => {
@@ -195,11 +218,11 @@ describe('every figure opens into the rows behind it (§9)', () => {
     const ctx = contextFor(ownerId, 'owner');
     const view = await loadEvidenceDrawer(ctx, await buildBundleForMetric(ctx, snapshotOf('revenue')));
 
-    expect(view.metric?.value).toBe('25000');
     expect(view.records).toHaveLength(1);
     const block = view.records[0]!;
     expect(block.selection.count, 'both revenue entries').toBe(2);
-    expect(block.selection.total).toBe('25000.00');
+    expect(block.selection.total, 'the rows total the figure they are the evidence for')
+      .toBe(asMoney(figureFor('revenue')));
     expect(block.reconciles, 'the rows behind the number ARE the number').toBe(true);
   });
 
@@ -234,7 +257,8 @@ describe('a derived metric walks to leaves that each reconcile (F-C-15, §6 leve
     const view = await loadEvidenceDrawer(ctx, await buildBundleForMetric(ctx, snapshotOf('gross_profit')));
 
     expect(view.metric?.metricKey).toBe('gross_profit');
-    expect(view.metric?.value).toBe('19000');
+    expect(new Decimal(view.metric!.value!).equals(new Decimal(figureFor('gross_profit'))),
+      'the drawer shows the figure the run stored').toBe(true);
 
     expect(view.components.map((c) => c.name).sort()).toEqual(['cost_of_sales', 'revenue']);
     for (const component of view.components) {
@@ -245,8 +269,10 @@ describe('a derived metric walks to leaves that each reconcile (F-C-15, §6 leve
     // One reconciliation block per leaf, each openable to its rows (§6).
     const blocks = Object.fromEntries(view.records.map((r) => [r.forLabel, r]));
     expect(Object.keys(blocks).sort()).toEqual(['Cost of sales', 'Revenue']);
-    expect(blocks.Revenue!.selection.total).toBe('25000.00');
-    expect(blocks['Cost of sales']!.selection.total).toBe('6000.00');
+    expect(blocks.Revenue!.selection.total).toBe(asMoney(figureFor('revenue')));
+    expect(blocks['Cost of sales']!.selection.total).toBe(asMoney(figureFor('cost_of_sales')));
+    // The whole point: each leaf reconciles to its own figure, and together they make the derived
+    // one — which is what a reader disputing gross profit is actually checking.
     for (const block of view.records) expect(block.reconciles).toBe(true);
   });
 
@@ -296,6 +322,7 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
     const before = await resolveItem(ctx, item.id);
     if (before.kind !== 'query') throw new Error('expected a selection');
     expect(before.selection.count).toBe(2);
+    const publishedTotal = before.selection.total;
 
     // Supersede one of the two revenue entries with a correction, the way a re-import would.
     const supersededId = one(`
@@ -325,7 +352,7 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
     const after = await resolveItem(ctx, item.id);
     if (after.kind !== 'query') throw new Error('expected a selection');
     expect(after.selection.count, 'the run saw two rows and still sees those two').toBe(2);
-    expect(after.selection.total, 'and still totals what the figure said').toBe('25000.00');
+    expect(after.selection.total, 'and still totals what it totalled').toBe(publishedTotal);
     expect(after.selection.rows.map((r) => r.id).sort())
       .toEqual(before.selection.rows.map((r) => r.id).sort());
   });
@@ -338,32 +365,61 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
    * two the ledger fixture can reach. Each is a way the data can legitimately change AFTER a figure
    * was published, and the promise is that the figure's evidence does not change with it.
    */
+  /*
+   * Seeded HERE, after the calculation, and never in the shared fixture.
+   *
+   * An account the engine can see changes what the engine computes — an imported account's
+   * contribution depends on whether it has been categorised, and putting one in the fixture made
+   * the figure assertions above a test of the engine's mapping rules as well, which moved run to
+   * run. This case needs an account and a row; it does not need the engine to have seen them.
+   */
   it('survives the account behind it being re-categorised (F-C-07)', async () => {
     const ctx = contextFor(ownerId, 'owner');
-    const item = (await getBundle(ctx, await buildBundleForMetric(ctx, snapshotOf('revenue'))))
-      .items.find((i) => i.itemType === 'query')!;
+    const runId = one(`
+      select id::text from public.calculation_runs
+       where organization_id = '${orgId}' order by started_at desc limit 1`);
 
-    const before = await resolveItem(ctx, item.id);
-    if (before.kind !== 'query') throw new Error('expected a selection');
-    const account = importedRevenueAccount;
+    const account = one(`
+      insert into public.accounts
+             (organization_id, code, name, standard_category, account_type, mapping_confidence)
+      values ('${orgId}', '6100', 'Subscriptions', 'other_expense', 'expense', 'confirmed')
+      returning id`);
+    const entry = one(`
+      insert into public.ledger_entries
+             (organization_id, entry_date, account_id, direction, amount, period_id, record_status)
+      values ('${orgId}', '2026-05-22', '${account}', 'debit', 750.00,
+              '00000000-0000-0000-0000-000000000000', 'accepted')
+      returning id`);
+    adminSql(`
+      insert into public.record_status_events (organization_id, record_table, record_id, event)
+      values ('${orgId}', 'ledger_entries', '${entry}', 'accepted')`);
+
+    const descriptor = {
+      v: 1,
+      table: 'ledger_entries',
+      filters: { account_ids: [account] },
+      as_of: { calculation_run_id: runId, aggregated_at: one("select to_json(now())#>>'{}'") },
+      order: [{ field: 'entry_date', dir: 'asc' }, { field: 'id', dir: 'asc' }],
+    } as QueryDescriptorV1;
+
+    const before = await resolveDescriptor(ctx, descriptor);
+    expect(before.count, 'the one entry on that account').toBe(1);
+    expect(before.rows[0]!.standardCategory).toBe('other_expense');
 
     const { error } = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-      .schema('api').rpc('remap_account', { p_account: account, p_category: 'other_income' });
+      .schema('api').rpc('remap_account', { p_account: account, p_category: 'marketing' });
     expect(error, 'the remap itself must succeed, or the test proves nothing').toBeNull();
+    expect(one(`select standard_category::text from public.accounts where id = '${account}'`))
+      .toBe('marketing');
 
-    const after = await resolveItem(ctx, item.id);
-    if (after.kind !== 'query') throw new Error('expected a selection');
-
+    const after = await resolveDescriptor(ctx, descriptor);
     // A descriptor names account IDS, never categories (ADR-034) — which is exactly why a remap
     // cannot move rows into or out of a published figure.
-    expect(after.selection.rows.map((r) => r.id)).toEqual(before.selection.rows.map((r) => r.id));
-    expect(after.selection.total).toBe(before.selection.total);
-
-    // And the category shown against each row is the one in force at the as-of instant, from
+    expect(after.rows.map((r) => r.id)).toEqual(before.rows.map((r) => r.id));
+    expect(after.total).toBe(before.total);
+    // And the category shown against the row is the one in force at the as-of instant, from
     // `account_category_history` — not the one the account carries today (§3).
-    expect(after.selection.rows[0]!.standardCategory, 'as-of, not current').toBe('revenue');
-    expect(one(`select standard_category::text from public.accounts where id = '${account}'`))
-      .toBe('other_income');
+    expect(after.rows[0]!.standardCategory, 'as-of, not current').toBe('other_expense');
   });
 
   it('survives the batch behind it being rolled back (F-C-07)', async () => {
@@ -566,11 +622,26 @@ describe('a published selection survives a bank row being re-categorised (F-C-07
       select id::text from public.calculation_runs
        where organization_id = '${orgId}' order by started_at desc limit 1`);
 
+    /*
+     * The as-of instant comes from the DATABASE, not from Node.
+     *
+     * `record_status_events.occurred_at` and `category_history.valid_from` both default to the
+     * database's `now()`. Taking the instant from the test process compares two clocks, and the
+     * container's drifts far enough from the host's to land the as-of between the two rows it is
+     * meant to see — which made this suite pass alone and fail in a full run, for a reason that has
+     * nothing to do with what it tests.
+     *
+     * Serialised through `to_json`, which is ISO 8601 with an offset. `now()::text` is not: it is
+     * "2026-09-06 18:05:12.34+00", which `new Date()` reads as LOCAL time and shifts by the host's
+     * offset — five and a half hours, on this machine.
+     */
+    const aggregatedAt = one("select to_json(now())#>>'{}'");
+
     descriptor = {
       v: 1,
       table: 'bank_transactions',
       filters: { bank_account_ids: [bankAccount], category_account_ids: [marketingAccount] },
-      as_of: { calculation_run_id: runId, aggregated_at: new Date().toISOString() },
+      as_of: { calculation_run_id: runId, aggregated_at: aggregatedAt },
       order: [{ field: 'transaction_date', dir: 'asc' }, { field: 'id', dir: 'asc' }],
     } as QueryDescriptorV1;
   });

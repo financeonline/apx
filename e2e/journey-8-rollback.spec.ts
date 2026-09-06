@@ -25,8 +25,7 @@ test('an owner rolls back an import and the figures go with it', async ({ page }
   await signIn(page, owner);
   const slug = await onboard(page, orgName);
   await importLedger(page, slug, GL_CSV, 'gl-may.csv');
-  await drainQueue(page);
-  await drainQueue(page);
+  await drainQueue(page, slug);
 
   // ---- The figures exist ----------------------------------------------------------------------
   const before = sql(`
@@ -78,8 +77,7 @@ test('an owner rolls back an import and the figures go with it', async ({ page }
   expect(Number(audited)).toBeGreaterThan(0);
 
   // ---- And the dashboard goes back to asking for data ------------------------------------------
-  await drainQueue(page);
-  await drainQueue(page);
+  await drainQueue(page, slug);
   await page.goto(`/app/${slug}/home`);
   await expect(
     page.getByText(/let’s get your first numbers on screen|add your first/i),

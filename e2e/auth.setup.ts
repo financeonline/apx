@@ -22,8 +22,7 @@ setup('sign in and seed an organisation with figures', async ({ page }) => {
 
   const slug = await onboard(page, uniqueName('Accessible Ltd'));
   await importLedger(page, slug, GL_CSV, 'gl-may.csv');
-  await drainQueue(page);
-  await drainQueue(page);
+  await drainQueue(page, slug);
 
   // The figures must actually be there, or every check downstream is vacuous.
   await page.goto(`/app/${slug}/home`);

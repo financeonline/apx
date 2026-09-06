@@ -236,6 +236,8 @@ export interface AlertListRow {
   readonly lastEvaluatedAt: string;
   readonly statusReasonCode: string;
   readonly evidenceBundleId: string | null;
+  /** The action somebody already made from this alert, if any (§8 convert row). */
+  readonly actionId: string | null;
 }
 
 interface ListRow {
@@ -254,13 +256,14 @@ interface ListRow {
   first_seen_at: string;
   last_evaluated_at: string;
   status_reason_code: string;
+  action_id: string | null;
   alert_revisions: { evidence_bundle_id: string | null } | null;
 }
 
 const LIST_SELECT = `
   id, rule_key, severity, status, title, explanation, recommended_next_step, threshold_summary,
   metric_key, period_id, subject_type, subject_id, first_seen_at, last_evaluated_at,
-  status_reason_code,
+  status_reason_code, action_id,
   alert_revisions!alerts_current_revision_fk (evidence_bundle_id)`;
 
 function toListRow(row: ListRow): AlertListRow {
@@ -281,6 +284,9 @@ function toListRow(row: ListRow): AlertListRow {
     lastEvaluatedAt: row.last_evaluated_at,
     statusReasonCode: row.status_reason_code,
     evidenceBundleId: row.alert_revisions?.evidence_bundle_id ?? null,
+    // §8's convert row: an alert names the action somebody already made from it, so the interface
+    // offers the button once rather than inviting two people to do the same work.
+    actionId: row.action_id ?? null,
   };
 }
 

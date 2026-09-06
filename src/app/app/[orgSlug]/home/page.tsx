@@ -1,6 +1,8 @@
 import Link from 'next/link';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
+import { systemClock, todayInTimeZone } from '@/core/periods';
+import { getActionsSummary, type ActionsSummary } from '@/modules/actions';
 import {
   loadHome, loadTopRisks, loadTrend, type AlertView, type HomeView, type MetricCardView,
 } from '@/modules/dashboard';
@@ -214,9 +216,13 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
   }
 
   const { view } = state;
-  const [trend, topRisks] = await Promise.all([
+  // Passed down rather than read inside each widget, so every "overdue" on the page agrees.
+  const today = todayInTimeZone(systemClock, 'UTC');
+
+  const [trend, topRisks, actionsSummary] = await Promise.all([
     loadTrend(ctx.db, ctx.orgId!, view.periods, ctx.requestId, view.period.id),
     loadTopRisks(ctx.db, ctx.orgId!, orgSlug, 3, ctx.requestId),
+    getActionsSummary(ctx, today, 3),
   ]);
 
   return (
@@ -287,6 +293,13 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
         */}
         <TopRisks orgSlug={orgSlug} risks={topRisks} />
 
+        {/*
+          Level 3 (§4): what this business has decided to do about any of it. Beneath the risks
+          deliberately — the risks are what the product found, and the actions are what people chose
+          in response, which is the order the conversation happens in.
+        */}
+        <OutstandingActions orgSlug={orgSlug} summary={actionsSummary} today={today} />
+
         <Card>
           <CardBody className="p-4">
             <h2 className="font-serif text-lg text-ink">What is moving</h2>
@@ -327,6 +340,70 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
         </Card>
       </div>
     </>
+  );
+}
+
+/**
+ * Level 3's outstanding actions (§4; SOW §17).
+ *
+ * Counts first, then the few a person would pick up next. A widget that listed everything would be
+ * a second Action Centre on Home; what somebody needs here is whether anything is late and whether
+ * any of it is theirs.
+ */
+function OutstandingActions({
+  orgSlug,
+  summary,
+  today,
+}: {
+  orgSlug: string;
+  summary: ActionsSummary;
+  today: string;
+}) {
+  return (
+    <section aria-labelledby="actions-heading">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 id="actions-heading" className="font-serif text-lg text-ink">What we are doing about it</h2>
+        <Link href={`/app/${orgSlug}/actions`} className="text-sm text-accent underline underline-offset-2">
+          Open the Action Centre
+        </Link>
+      </div>
+
+      {summary.open === 0 ? (
+        <Card className="mt-3">
+          <CardBody className="p-4">
+            <p className="text-ink">Nothing outstanding.</p>
+            <p className="mt-1 text-sm text-ink-muted">
+              When you decide to act on something, it will show here until it is done.
+            </p>
+          </CardBody>
+        </Card>
+      ) : (
+        <Card className="mt-3">
+          <CardBody className="p-4">
+            <p className="text-sm text-ink">
+              {summary.open} outstanding
+              {summary.overdue > 0 ? <span className="text-danger">, {summary.overdue} overdue</span> : null}
+              {summary.mine > 0 ? `, ${summary.mine} yours` : ''}
+            </p>
+            <ul className="mt-3 flex flex-col gap-2">
+              {summary.top.map((action) => (
+                <li key={action.id} className="flex flex-wrap items-baseline justify-between gap-2 text-sm">
+                  <Link
+                    href={`/app/${orgSlug}/actions/${action.id}`}
+                    className="text-ink underline-offset-2 hover:underline"
+                  >
+                    {action.title}
+                  </Link>
+                  <span className={action.dueDate !== null && action.dueDate < today ? 'text-danger' : 'text-ink-muted'}>
+                    {action.dueDate ?? 'No date'}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      )}
+    </section>
   );
 }
 

@@ -24,10 +24,10 @@ test('a client reaches the records behind a figure, and stops at the document', 
   await signIn(page, owner);
   const slug = await onboard(page, ORG_NAME);
   await importLedger(page, slug, GL_CSV, 'gl-may.csv');
-  await drainQueue(page);
-  await drainQueue(page);
+  await drainQueue(page, slug);
 
   await page.goto(`/app/${slug}/home`);
+  
   await expect(page.getByText('£40,000').first()).toBeVisible({ timeout: 30_000 });
 
   // The owner adds the client. Done in SQL because inviting and accepting is journey 4's subject,
@@ -67,4 +67,43 @@ test('a client reaches the records behind a figure, and stops at the document', 
     page.getByRole('button', { name: /open the source file/i }),
     'there is no button to press, not a button that fails',
   ).toHaveCount(0);
+
+  /*
+   * ---- The action assigned to them (journey 9's last step; SOW §17) --------------------------
+   *
+   * A client may move their own action along and say what came of it, and nothing else. The
+   * Action Centre is the one place in the product where a client WRITES, so this is the step that
+   * proves the read-only story has a deliberate exception rather than a hole.
+   */
+  /*
+   * Wrapped in a CTE: `sql()` returns psql's whole stdout, and a bare `INSERT … RETURNING` prints
+   * the row AND the "INSERT 0 1" command tag, so the id comes back with the tag glued to it. The
+   * integration harness's `one()` wraps for the same reason.
+   */
+  const actionId = sql(`
+    with q as (
+    insert into public.actions
+           (organization_id, title, issue, priority, owner_user_id, status, source_type, created_by)
+    values ('${orgId}', 'Send the signed engagement letter back',
+            'We cannot start the year-end until it is in.', 'high',
+            '${client.userId}', 'open', 'user', '${owner.userId}')
+    returning id) select * from q`);
+
+  await page.goto(`/app/${slug}/actions`);
+  await expect(page.getByRole('heading', { name: /what we have decided to do/i })).toBeVisible();
+  await expect(page.getByText(/send the signed engagement letter back/i)).toBeVisible();
+
+  // No creating, for a client — the button is absent, not disabled.
+  await expect(page.getByRole('button', { name: /add something to do/i })).toHaveCount(0);
+
+  await page.goto(`/app/${slug}/actions/${actionId}`);
+  await page.getByRole('button', { name: /^start$/i }).click();
+  await expect(page.getByText(/marked as in progress/i)).toBeVisible({ timeout: 30_000 });
+  expect(
+    sql(`select status from public.actions where id = '${actionId}'`),
+    'the status moved in the database, not just on the screen',
+  ).toBe('in_progress');
+
+  // And they cannot be handed the controls that are not theirs.
+  await expect(page.getByRole('heading', { name: /who is doing it/i })).toHaveCount(0);
 });

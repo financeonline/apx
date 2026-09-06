@@ -105,14 +105,39 @@ export function seedOrganization(name: string, ownerId: string): { id: string; s
  * `GET`, with the bearer token the route checks — and it answers 404, not 401, to a caller without
  * one, so a wrong secret shows up here as "not found" rather than as a hang.
  */
-export async function drainQueue(page: Page): Promise<void> {
+/**
+ * Runs the queue until an organisation has no work left in it.
+ *
+ * One drain claims a fixed batch from a queue every journey shares, so calling it a set number of
+ * times is a bet that nobody else left work in it — and when the bet loses the journey fails on a
+ * missing figure, which looks like a broken dashboard and is a broken fixture. Waiting on the
+ * organisation's own jobs is what each caller actually means.
+ *
+ * `orgSlug` is optional so the callers that only need "run whatever is there" keep working.
+ */
+export async function drainQueue(page: Page, orgSlug?: string): Promise<void> {
   const secret = process.env.CRON_SECRET;
   expect(secret, 'CRON_SECRET must be set for the journeys to drain the queue').toBeTruthy();
 
-  const response = await page.request.get('/api/jobs/run', {
-    headers: { authorization: `Bearer ${secret}` },
-  });
-  expect(response.status(), 'the drain endpoint must accept the cron secret').toBe(200);
+  const outstanding = (): number => {
+    if (orgSlug === undefined) return 0;
+    return Number(sql(`
+      select count(*) from public.jobs j
+       join public.organizations o on o.id = j.organization_id
+      where o.slug = '${orgSlug}' and j.status in ('queued', 'running')`).trim() || '0');
+  };
+
+  for (let round = 0; round < 12; round += 1) {
+    const response = await page.request.get('/api/jobs/run', {
+      headers: { authorization: `Bearer ${secret}` },
+    });
+    expect(response.status(), 'the drain endpoint must accept the cron secret').toBe(200);
+
+    if (orgSlug === undefined) return;
+    // A calculation enqueues an alert pass, so "nothing left" is checked after each round rather
+    // than assumed after the first.
+    if (outstanding() === 0) return;
+  }
 }
 
 /**

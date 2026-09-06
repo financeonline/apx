@@ -101,8 +101,7 @@ test('a new owner uploads a ledger and sees their own figures', async ({ page })
 
   // ---- The figures ---------------------------------------------------------------------------
   // The calculation runs on the queue; the cron would pick it up within a minute.
-  await drainQueue(page);
-  await drainQueue(page);
+  await drainQueue(page, slug);
 
   await page.goto(`/app/${slug}/home`);
 

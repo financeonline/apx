@@ -35,6 +35,8 @@ export interface AlertView {
   /** True when the alert has been standing since before this period — a state rule (ADR-036). */
   readonly recurring: boolean;
   readonly evidenceHref: string | null;
+  /** The action somebody already created from this alert, if any (§8 convert row). */
+  readonly actionId: string | null;
   readonly detailHref: string;
 }
 
@@ -71,6 +73,7 @@ function toView(
     recurring: period !== undefined && row.firstSeenAt < period.periodStart,
     evidenceHref: row.evidenceBundleId === null
       ? null : `/app/${orgSlug}/evidence/${row.evidenceBundleId}`,
+    actionId: row.actionId ?? null,
     detailHref: `/app/${orgSlug}/insights/alerts/${row.id}`,
   };
 }

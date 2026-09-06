@@ -127,3 +127,28 @@ export function serviceStorage(): SupabaseClient {
     auth: { persistSession: false, autoRefreshToken: false },
   });
 }
+
+/**
+ * Drains the queue until ONE named job reaches a terminal state.
+ *
+ * `drainJobs(n)` claims at most n jobs from a queue every suite shares, so a fixed count is a bet
+ * that nobody else left work in it — and when the bet loses, the suite fails on an empty
+ * `metric_current` for a reason that has nothing to do with what it tests. Waiting on the job's own
+ * row is the thing each suite actually means.
+ *
+ * Returns the job's terminal status, so a caller can assert it succeeded rather than assume it.
+ */
+export async function drainUntilFinished(
+  drain: (max: number) => Promise<unknown>,
+  jobId: string,
+  rounds = 12,
+): Promise<string> {
+  for (let round = 0; round < rounds; round += 1) {
+    const status = adminSql(`select status from public.jobs where id = '${jobId}'`).trim();
+    if (status === 'succeeded' || status === 'failed' || status === 'dead' || status === '') {
+      return status;
+    }
+    await drain(3);
+  }
+  return adminSql(`select status from public.jobs where id = '${jobId}'`).trim();
+}

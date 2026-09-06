@@ -56,7 +56,7 @@ const PRIMARY: readonly NavItem[] = [
   {
     label: 'Actions', path: 'actions', permission: 'actions.view',
     hint: 'Tasks assigned to people, with due dates and outcomes',
-    built: false,
+    built: true,
   },
   {
     label: 'Reports', path: 'reports', permission: 'reports.view',

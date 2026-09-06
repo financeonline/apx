@@ -8,6 +8,12 @@
 
 export { MetricCard, type MetricCardVariant } from './metric-card';
 export { AlertCard, type AlertCardVariant } from './alert-card';
+export {
+  ActionCard,
+  SOURCE_LABELS as ACTION_SOURCE_LABELS,
+  STATUS_LABELS as ACTION_STATUS_LABELS,
+  priorityLabel,
+} from './action-card';
 export { Disclaimer, HealthScoreCard, HealthScoreInline } from './health-score-card';
 export { HealthExplainPanel } from './health-explain';
 export { HealthHistoryChart } from './health-history-chart';

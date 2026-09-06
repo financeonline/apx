@@ -1,6 +1,6 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { drainJobs } from '@/modules/jobs';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
 
 /**
  * The whole chain, driven by the QUEUE (ADR-013, ADR-057.1).
@@ -95,8 +95,9 @@ describe('a queued calculation actually runs (ADR-057.1)', () => {
   it('succeeds rather than failing for want of a handler', async () => {
     const jobId = enqueue('calculation.run', { trigger: 'recalc_manual', as_of: '2026-06-15' });
 
-    const result = await drainJobs(5);
-    expect(result.claimed).toBeGreaterThan(0);
+    // Waited on by its own row: `drainJobs(n)` shares a queue with every other suite, so a fixed
+    // count can spend its claims on somebody else's work and leave this one queued.
+    expect(await drainUntilFinished(drainJobs, jobId)).toBe('succeeded');
 
     const row = one(`
       select status || '|' || coalesce(last_error, '-') from public.jobs where id = '${jobId}'`);

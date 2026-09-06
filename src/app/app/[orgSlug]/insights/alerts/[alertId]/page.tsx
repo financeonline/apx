@@ -6,6 +6,7 @@ import { loadAlertDetail } from '@/modules/dashboard';
 import { PageHeader, Card, CardBody, Badge } from '@/components/ui/surfaces';
 import { AlertCard, severityLabel, severityTone } from '@/components/dashboard';
 import { AlertActions } from '../alert-actions';
+import { ConvertControl } from './convert-control';
 
 export const dynamic = 'force-dynamic';
 
@@ -51,6 +52,25 @@ export default async function AlertPage({
             />
           ) : undefined}
         />
+
+        {can(ctx, 'actions.create') ? (
+          <Card>
+            <CardBody>
+              <h2 className="font-serif text-lg text-ink">Do something about it</h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                The action keeps the figures behind this alert exactly as they are now, even after
+                the alert is looked at again.
+              </p>
+              <div className="mt-3">
+                <ConvertControl
+                  orgSlug={orgSlug}
+                  alertId={detail.alert.id}
+                  actionId={detail.alert.actionId ?? null}
+                />
+              </div>
+            </CardBody>
+          </Card>
+        ) : null}
 
         <Card>
           <CardBody>
