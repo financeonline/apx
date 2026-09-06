@@ -115,9 +115,15 @@ jobs:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
       - run: npm ci
+      # SECURITY_MODEL.md §5. What this must catch is one IDENTIFIER of the form
+      # `NEXT_PUBLIC_…SERVICE_ROLE…`, so the wildcard is bounded to identifier characters. `.*`
+      # crossed whitespace and matched a line naming two SEPARATE variables — the error message
+      # "requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY" — and failed this job on
+      # every push since Phase 7 for a string that exposes nothing. A check that cries wolf is a
+      # check people learn to ignore, which is worse than not having it.
       - name: no secret may be exposed to the browser
         run: |
-          if grep -rn "NEXT_PUBLIC_.*SERVICE_ROLE\|NEXT_PUBLIC_.*ANTHROPIC\|NEXT_PUBLIC_.*JWT_SECRET" --include='*.ts' --include='*.tsx' --include='*.mjs' src/ 2>/dev/null; then
+          if grep -rnE "NEXT_PUBLIC_[A-Za-z0-9_]*(SERVICE_ROLE|ANTHROPIC|JWT_SECRET)" --include='*.ts' --include='*.tsx' --include='*.mjs' src/ 2>/dev/null; then
             echo "A secret is exposed with a NEXT_PUBLIC_ prefix (SECURITY_MODEL.md §5)."; exit 1
           fi
       - name: the service-role key is read in at most three files
