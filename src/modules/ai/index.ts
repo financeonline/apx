@@ -36,3 +36,23 @@ export {
   type ClaimKind,
   type ExtractionResult,
 } from './domain/claims';
+
+export {
+  NUMERIC_UNITS,
+  NullableNumericSchema,
+  NumericValueSchema,
+  displayPrecision,
+  isNumericValue,
+  numeric,
+  toDecimal,
+  type NumericUnit,
+  type NumericValue,
+} from './domain/values';
+
+export {
+  allowedSet,
+  entryAt,
+  type AllowedEntry,
+  type FieldKind,
+  type ToolResult,
+} from './domain/allowed-set';
