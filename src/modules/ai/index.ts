@@ -91,3 +91,12 @@ export {
   type GroundingStatus,
   type Mismatch,
 } from './domain/grounding';
+
+export {
+  acceptableLabels,
+  resolvePeriodContext,
+  type PeriodContext,
+  type PeriodRef,
+  type PeriodRow,
+  type ResolveInput,
+} from './domain/periods';
