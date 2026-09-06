@@ -110,6 +110,7 @@ export {
   loadEvidenceDrawer,
   type DrawerComponent,
   type DrawerMetric,
+  type DrawerPinned,
   type DrawerRecords,
   type EvidenceDrawerView,
 } from './services/drawer';

@@ -9,7 +9,8 @@ import { parseQueryDescriptor } from '../domain/descriptor';
 import { compileDescriptor } from '../data/descriptor-compiler';
 import { fetchMetricSnapshot } from '../data/bundles';
 import type { Row } from '../data/rows';
-import { getBundle, type EvidenceBundleView, type EvidenceItemView } from './bundle';
+import { getBundle, type EvidenceBundleView } from './bundle';
+import { itemCanReachDocument } from './document';
 import { requireOrgId, resolveCompiled, type Cursor, type ResolvedSelection } from './resolve';
 
 /**
@@ -62,6 +63,30 @@ export interface DrawerRecords {
   readonly reconciliation: string;
 }
 
+/**
+ * A record, entity or alert the bundle PINS (§4, §8.3).
+ *
+ * "The reader must see *that* row even if data later changes" — a duplicate pair, an unusual
+ * payment, the overdue invoice a rule fired on, the alert revision an answer rests on. A pinned item
+ * is deliberately NOT filtered by status: a superseded or rejected row is still fetched and shown
+ * with its badge, because hiding it would erase the reason the claim was made.
+ */
+export interface DrawerPinned {
+  readonly itemId: string;
+  readonly itemType: string;
+  readonly label: string;
+  /** The sentence this item supports, when the producer recorded one (§2.2). */
+  readonly claim: string | null;
+  readonly table: string | null;
+  readonly recordId: string | null;
+  readonly superseded: boolean;
+  readonly rejected: boolean;
+  /** §2.2: an `alert` item pins the revision that was cited, not the alert's current text. */
+  readonly revisionNo: number | null;
+  /** Only the four record tables have a source document behind them (§5.1). */
+  readonly canReachDocument: boolean;
+}
+
 export interface DrawerMetric {
   readonly snapshotId: string;
   readonly metricKey: string;
@@ -87,10 +112,18 @@ export interface EvidenceDrawerView {
   readonly metric: DrawerMetric | null;
   /** Level 2. Empty for a leaf metric, which descends straight to records. */
   readonly components: readonly DrawerComponent[];
+  /**
+   * Figures the bundle cites that are NOT parts of the calculation.
+   *
+   * An alert pins the figure it fired on and the one it compared against; the comparison is not a
+   * component of anything, and rendering it under "how it was worked out" would tell a reader that
+   * last month's revenue is part of this month's arithmetic.
+   */
+  readonly relatedFigures: readonly DrawerComponent[];
   /** Level 3, one block per `query` item. */
   readonly records: readonly DrawerRecords[];
-  /** Pinned records, which level 3 shows alongside the selections (§4). */
-  readonly pinned: readonly EvidenceItemView[];
+  /** The specific rows and entities the bundle pins (§4), shown alongside the selections. */
+  readonly pinned: readonly DrawerPinned[];
 }
 
 function str(row: Row, key: string): string | null {
@@ -242,8 +275,28 @@ export async function loadEvidenceDrawer(
     };
   }
 
-  // Level 2: the components the root snapshot names, each with its own snapshot to descend into.
+  /*
+   * Level 2 is the root's DECLARED components, and nothing else.
+   *
+   * Taking "every other `metric_snapshot` item in the bundle" is wrong the moment the bundle was not
+   * built by `buildBundleForMetric`: an alert pins the figure it fired on AND the one it compared
+   * against, and the comparison is not part of any arithmetic. `evidence_query.components` is the
+   * only thing that knows which snapshots a figure was worked out from (ADR-034), so it decides —
+   * and everything else the bundle cites is a related figure, named as such.
+   */
+  const declared = new Set<string>();
+  if (rootSnapshot !== null) {
+    const rootQuery = rootSnapshot.evidence_query as
+      { kind?: string; components?: { snapshot_id?: string }[] } | null;
+    if (rootQuery?.kind === 'derived') {
+      for (const component of rootQuery.components ?? []) {
+        if (component.snapshot_id) declared.add(component.snapshot_id);
+      }
+    }
+  }
+
   const components: DrawerComponent[] = [];
+  const relatedFigures: DrawerComponent[] = [];
   const snapshotById = new Map<string, Row>();
   for (const item of snapshotItems.slice(1)) {
     if (item.ref === undefined) continue;
@@ -251,7 +304,7 @@ export async function loadEvidenceDrawer(
     if (row === null) throw new NotFound();
     snapshotById.set(String(row.id), row);
     const key = String(row.metric_key);
-    components.push({
+    const view: DrawerComponent = {
       name: key,
       label: metricLabelOf(key).label,
       snapshotId: String(row.id),
@@ -259,7 +312,8 @@ export async function loadEvidenceDrawer(
       unit: str(row, 'unit') as MetricUnit | null,
       currency: str(row, 'currency'),
       leaf: (row.evidence_query as { kind?: string } | null)?.kind === 'leaf',
-    });
+    };
+    (declared.has(String(row.id)) ? components : relatedFigures).push(view);
   }
   if (rootSnapshot !== null) snapshotById.set(String(rootSnapshot.id), rootSnapshot);
 
@@ -306,13 +360,24 @@ export async function loadEvidenceDrawer(
     first = false;
   }
 
-  const pinned = bundle.items.filter(
-    (item) => item.itemType !== 'query'
+  const pinned: DrawerPinned[] = bundle.items
+    .filter((item) => item.itemType !== 'query'
       && item.itemType !== 'metric_snapshot'
-      && item.itemType !== 'calculation_run',
-  );
+      && item.itemType !== 'calculation_run')
+    .map((item) => ({
+      itemId: item.id,
+      itemType: item.itemType,
+      label: item.label,
+      claim: item.claim,
+      table: item.ref?.table ?? null,
+      recordId: item.ref?.id ?? null,
+      superseded: item.ref?.superseded === true,
+      rejected: item.ref?.recordStatus === 'rejected',
+      revisionNo: item.ref?.revisionNo ?? null,
+      canReachDocument: itemCanReachDocument(item.itemType),
+    }));
 
-  return { bundle, metric, components, records, pinned };
+  return { bundle, metric, components, relatedFigures, records, pinned };
 }
 
 /**

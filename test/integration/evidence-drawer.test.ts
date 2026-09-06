@@ -278,6 +278,75 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
   });
 });
 
+/**
+ * A bundle the METRIC builder did not write (EVIDENCE_MODEL.md §4, §5 alert row, §8.3).
+ *
+ * The drawer is one reader for every producer — alerts today, AI answers at Phase 11 — and every
+ * suite here had exercised only the bundles `buildBundleForMetric` writes. Two defects lived in
+ * that gap: an alert's comparison snapshot was rendered as a component of the arithmetic, and the
+ * pinned records — the duplicate pair, the unusual payment, the overdue invoice a rule fired on —
+ * were computed and then dropped. Pinned records are the whole reason §4 separates them from
+ * descriptors: "the reader must see *that* row even if data later changes".
+ */
+describe('a bundle that pins specific rows (§4)', () => {
+  let bundleId: string;
+  let supersededEntry: string;
+
+  beforeAll(() => {
+    const trigger = snapshotOf('revenue');
+    const comparison = snapshotOf('cost_of_sales');
+    const runId = one(`
+      select calculation_run_id::text from public.metric_snapshots where id = '${trigger}'`);
+
+    // A row that has since been REPLACED, so §8.3's "still fetched, shown with its badge" is under
+    // test rather than assumed. The as-of suite above superseded the larger revenue entry.
+    supersededEntry = one(`
+      select e.id::text from public.ledger_entries e
+       where e.organization_id = '${orgId}' and e.superseded_by is not null limit 1`);
+
+    // Exactly the shape `app.build_alert_bundle` writes: the figure it fired on, the figure it
+    // compared against, the rows it pinned, and the aggregate behind them.
+    bundleId = one(`
+      insert into public.evidence_bundles
+             (organization_id, kind, origin_table, calculation_run_id, created_by_type)
+      values ('${orgId}', 'alert', 'alerts', '${runId}', 'system')
+      returning id`);
+
+    const item = (sort: number, type: string, ref: string | null, label: string) => adminSql(`
+      insert into public.evidence_items
+             (organization_id, bundle_id, sort_order, item_type, ref_id, label, assurance_level)
+      values ('${orgId}', '${bundleId}', ${sort}, '${type}',
+              ${ref === null ? 'null' : `'${ref}'`}, '${label}', 'verified')`);
+
+    item(0, 'metric_snapshot', trigger, 'Revenue, May 2026');
+    item(1, 'metric_snapshot', comparison, 'Cost of sales, May 2026');
+    item(2, 'ledger_entry', supersededEntry, 'The entry this fired on');
+  });
+
+  it('does not present a cited figure as part of an arithmetic it was no part of', async () => {
+    const view = await loadEvidenceDrawer(contextFor(ownerId, 'owner'), bundleId);
+
+    expect(view.metric?.metricKey, 'the first snapshot is what the claim is about').toBe('revenue');
+    /*
+     * `revenue` is a LEAF: it declares no components at all. Anything under "how it was worked out"
+     * would therefore be invented, and before this test the comparison snapshot went there.
+     */
+    expect(view.components, 'a leaf metric has no components').toEqual([]);
+    expect(view.relatedFigures.map((f) => f.name)).toEqual(['cost_of_sales']);
+  });
+
+  it('shows the row the claim pins, and says it has been replaced since (§8.3)', async () => {
+    const view = await loadEvidenceDrawer(contextFor(ownerId, 'owner'), bundleId);
+
+    expect(view.pinned).toHaveLength(1);
+    const record = view.pinned[0]!;
+    expect(record.itemType).toBe('ledger_entry');
+    expect(record.recordId).toBe(supersededEntry);
+    expect(record.superseded, 'a pinned row is never filtered by status — it is badged').toBe(true);
+    expect(record.canReachDocument, 'a ledger entry descends to the file it came from').toBe(true);
+  });
+});
+
 describe('the permission stop at the document level (§9, §10, CD-17)', () => {
   it('a client reads statement, metric, calculation and records', async () => {
     const ctx = contextFor(clientUserId, 'client');

@@ -157,6 +157,87 @@ export default async function EvidenceBundlePage({
           </Card>
         )}
 
+        {/*
+          * Figures the bundle cites that are not parts of the calculation — an alert's comparison
+          * month, say. Under their own heading, because putting them under "how it was worked out"
+          * would tell a reader that last month's revenue is part of this month's arithmetic.
+          */}
+        {view.relatedFigures.length === 0 ? null : (
+          <Card>
+            <CardBody>
+              <h2 className="font-serif text-lg text-ink">The other figures this rests on</h2>
+              <ul className="mt-4 space-y-3">
+                {view.relatedFigures.map((figure) => (
+                  <li key={figure.snapshotId ?? figure.name} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-3 last:border-0">
+                    <span className="text-sm text-ink">{figure.label}</span>
+                    <span className="flex items-baseline gap-3">
+                      <span className="font-serif text-base text-ink">
+                        {formatValue(
+                          { value: figure.value, unit: figure.unit ?? 'money', currency: figure.currency },
+                          { showMinorUnits: true },
+                        )}
+                      </span>
+                      {figure.snapshotId === null ? null : (
+                        <Link
+                          href={`/app/${orgSlug}/evidence?snapshot=${figure.snapshotId}`}
+                          className="text-sm text-accent underline underline-offset-2"
+                        >
+                          Open
+                          <span className="sr-only"> the evidence behind {figure.label}</span>
+                        </Link>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </CardBody>
+          </Card>
+        )}
+
+        {/*
+          * The rows this claim pins (§4, §8.3).
+          *
+          * An alert about a duplicate pair or an unusual payment IS about those rows; a selection
+          * cannot stand in for them. Shown with their status, and never filtered by it — a row that
+          * has since been replaced or rejected is why the claim was made, and hiding it would erase
+          * the reason.
+          */}
+        {view.pinned.length === 0 ? null : (
+          <Card>
+            <CardBody>
+              <h2 className="font-serif text-lg text-ink">The specific records behind this</h2>
+              <ul className="mt-4 space-y-3">
+                {view.pinned.map((item) => (
+                  <li key={item.itemId} className="border-b border-line pb-3 last:border-0">
+                    <div className="flex flex-wrap items-baseline gap-2">
+                      <span className="text-sm text-ink">{item.label}</span>
+                      {item.superseded ? <Badge tone="warn">Replaced since</Badge> : null}
+                      {item.rejected ? <Badge tone="danger">Rejected since</Badge> : null}
+                      {item.revisionNo === null ? null : (
+                        <Badge tone="neutral">As it read at revision {item.revisionNo}</Badge>
+                      )}
+                    </div>
+                    {item.claim === null ? null : (
+                      <p className="mt-1 text-sm text-ink-muted">{item.claim}</p>
+                    )}
+                    {item.canReachDocument && item.table !== null && item.recordId !== null ? (
+                      <p className="mt-1 text-sm">
+                        <Link
+                          href={`/app/${orgSlug}/evidence/${bundleId}?row=${item.table}:${item.recordId}`}
+                          className="text-accent underline underline-offset-2"
+                        >
+                          Source
+                          <span className="sr-only"> document for {item.label}</span>
+                        </Link>
+                      </p>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </CardBody>
+          </Card>
+        )}
+
         {/* Level 3 — Records: the rows themselves, with the reconciliation that proves the figure. */}
         {view.records.map((block) => (
           <Card key={block.itemId}>
