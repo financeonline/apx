@@ -1,6 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { toMotionError } from '@/core/errors';
+import { aggregatePeriods, aggregateTransferLegs, batchCoverage } from '@/core/db';
 import type {
   AccountRef, AggregateCell, BankAccountRef, CounterpartyRef, OrganizationSettings, PeriodRef,
 } from '../domain/types';
@@ -31,11 +32,17 @@ export async function loadAggregates(
   to: string,
   aggregatedAt: string,
 ): Promise<AggregateCell[]> {
-  const { data, error } = await scoped.rpc('aggregate_periods', {
-    p_org: orgId, p_from: from, p_to: to, p_aggregated_at: aggregatedAt,
-  });
+  /*
+   * Through `api_server`, not through an unqualified `rpc()`.
+   *
+   * `app.aggregate_periods` is not on PostgREST's exposed schema list, so the unqualified call
+   * resolved against `public` and returned PGRST202 for every calculation ever attempted
+   * (ADR-057.2). The wrapper is service-role only, which is what the calculation worker holds.
+   */
+  const rows = await aggregatePeriods(orgId, from, to, aggregatedAt);
+  void scoped;
 
-  return unwrap(data as Record<string, unknown>[] | null, error).map((r) => ({
+  return rows.map((r: Record<string, unknown>) => ({
     periodId: r.period_id as string,
     source: r.source as AggregateCell['source'],
     standardCategory: r.standard_category as AggregateCell['standardCategory'],
@@ -67,11 +74,10 @@ export interface TransferLeg {
 export async function loadTransferLegs(
   scoped: SupabaseClient, orgId: string, from: string, to: string, aggregatedAt: string,
 ): Promise<TransferLeg[]> {
-  const { data, error } = await scoped.rpc('aggregate_transfer_legs', {
-    p_org: orgId, p_from: from, p_to: to, p_aggregated_at: aggregatedAt,
-  });
+  const rows = await aggregateTransferLegs(orgId, from, to, aggregatedAt);
+  void scoped;
 
-  return unwrap(data as Record<string, unknown>[] | null, error).map((r) => ({
+  return rows.map((r: Record<string, unknown>) => ({
     periodId: r.period_id as string,
     bankAccountId: r.bank_account_id as string,
     transferKind: r.transfer_kind as string,
@@ -84,11 +90,10 @@ export async function loadTransferLegs(
 export async function loadCoverageBatches(
   scoped: SupabaseClient, orgId: string, from: string, to: string,
 ): Promise<CoverageBatch[]> {
-  const { data, error } = await scoped.rpc('batch_coverage', {
-    p_org: orgId, p_from: from, p_to: to,
-  });
+  const rows = await batchCoverage(orgId, from, to);
+  void scoped;
 
-  return unwrap(data as Record<string, unknown>[] | null, error).map((r) => ({
+  return rows.map((r: Record<string, unknown>) => ({
     id: r.batch_id as string,
     targetTable: r.target_table as CoverageBatch['targetTable'],
     balanceKind: r.balance_kind as CoverageBatch['balanceKind'],

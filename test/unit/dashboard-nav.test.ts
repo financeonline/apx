@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 
-import { showsDataMenu, visibleNavItems } from '@/components/dashboard/nav';
+import {
+  builtNavItems, permittedNavItems, showsDataMenu, visibleNavItems,
+} from '@/components/dashboard/nav';
 import { permissionsFor } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
 import type { EffectiveRole } from '@/core/permissions';
@@ -27,14 +29,43 @@ const contextFor = (role: EffectiveRole): AccessContext => ({
   organizationStatus: 'active',
 });
 
-describe('what each role sees in the navigation', () => {
-  it('shows an owner every section', () => {
-    expect(visibleNavItems(contextFor('owner')))
+describe('the §4 section contract, as a permission question', () => {
+  it('permits an owner every section', () => {
+    expect(permittedNavItems(contextFor('owner')))
       .toEqual(['Home', 'Insights', 'Money', 'Customers', 'Actions', 'Reports', 'Analyst']);
   });
 
-  it('shows an admin every section too', () => {
-    expect(visibleNavItems(contextFor('admin'))).toHaveLength(7);
+  it('permits an admin every section too', () => {
+    expect(permittedNavItems(contextFor('admin'))).toHaveLength(7);
+  });
+});
+
+describe('what each role sees in the navigation', () => {
+  /*
+   * A section whose phase has not landed is not linked (ADR-057.4). The permission contract above
+   * is unchanged and still asserted in full; this is about not offering a customer a link to a 404.
+   */
+  it('links an owner only to sections that exist', () => {
+    expect(visibleNavItems(contextFor('owner')))
+      .toEqual(['Home', 'Insights', 'Money', 'Customers']);
+  });
+
+  it('never links a section that is not built', () => {
+    const built = builtNavItems();
+    for (const role of ['owner', 'admin', 'client', 'employee'] as const) {
+      for (const item of visibleNavItems(contextFor(role))) {
+        expect(built, `${role} was offered ${item}`).toContain(item);
+      }
+    }
+  });
+
+  it('never links a section the role lacks, even once it is built', () => {
+    for (const role of ['owner', 'admin', 'client', 'employee'] as const) {
+      const permitted = permittedNavItems(contextFor(role));
+      for (const item of visibleNavItems(contextFor(role))) {
+        expect(permitted, `${role} was offered ${item}`).toContain(item);
+      }
+    }
   });
 
   it('shows a client the sections they can actually use', () => {

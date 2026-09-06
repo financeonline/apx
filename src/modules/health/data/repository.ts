@@ -141,42 +141,84 @@ export async function loadBankRecords(
 
 interface GroupRow {
   id: string;
-  group_key: string;
+  counterparty_key: string;
   direction: 'inflow' | 'outflow';
-  signature: string;
   status: 'active' | 'changed' | 'stopped';
-  occurrences: number;
+  occurrence_count: number;
   expected_amount: string;
-  last_amount: string;
   amount_tolerance_ratio: string;
   last_seen: string;
   cadence: string;
   next_expected: string | null;
 }
 
+/**
+ * The detected recurring groups (DATABASE_ARCHITECTURE.md §5).
+ *
+ * Two mappings worth stating, because the rules speak a different vocabulary from the table.
+ *
+ * `counterparty_key` IS the signature — the doc calls it "normalised description signature" — so it
+ * serves as both the group's stable key and the name a sentence renders.
+ *
+ * `last_amount` does not exist as a column, and inventing one would be a schema change made to suit
+ * a sentence. The last amount is a fact already recorded: it is the amount of the group's most
+ * recent accepted transaction, read here in one further query rather than stored twice and allowed
+ * to drift (ADR-057.3).
+ */
 export async function loadRecurringGroups(
   db: SupabaseClient, orgId: string, requestId?: string,
 ): Promise<RecurringGroupObservation[]> {
   const { data, error } = await db
     .from('recurring_payment_groups')
-    .select(`id, group_key, direction, signature, status, occurrences, expected_amount,
-             last_amount, amount_tolerance_ratio, last_seen, cadence, next_expected`)
+    .select(`id, counterparty_key, direction, status, occurrence_count, expected_amount,
+             amount_tolerance_ratio, last_seen, cadence, next_expected`)
     .eq('organization_id', orgId);
 
-  return unwrap(data as unknown as GroupRow[] | null, error, requestId).map((row) => ({
+  const rows = unwrap(data as unknown as GroupRow[] | null, error, requestId);
+  if (rows.length === 0) return [];
+
+  const lastAmounts = await loadLastAmounts(db, orgId, rows.map((row) => row.id), requestId);
+
+  return rows.map((row) => ({
     id: row.id,
-    groupKey: row.group_key,
+    groupKey: row.counterparty_key,
     direction: row.direction,
-    signature: row.signature,
+    signature: row.counterparty_key,
     status: row.status,
-    occurrences: row.occurrences,
+    occurrences: row.occurrence_count,
     expectedAmount: String(row.expected_amount),
-    lastAmount: String(row.last_amount),
+    // Falls back to the expected amount rather than to zero: a group with no readable transaction
+    // has not "changed by its whole value", it simply has nothing newer to compare.
+    lastAmount: lastAmounts.get(row.id) ?? String(row.expected_amount),
     amountToleranceRatio: String(row.amount_tolerance_ratio),
     lastSeen: row.last_seen,
     cadence: row.cadence,
     nextExpected: row.next_expected,
   }));
+}
+
+/** The most recent accepted transaction amount per group. */
+async function loadLastAmounts(
+  db: SupabaseClient, orgId: string, groupIds: readonly string[], requestId?: string,
+): Promise<Map<string, string>> {
+  const { data, error } = await db
+    .from('bank_transactions')
+    .select('recurring_group_id, amount, transaction_date')
+    .eq('organization_id', orgId)
+    .in('recurring_group_id', [...groupIds])
+    .eq('record_status', 'accepted')
+    .is('superseded_by', null)
+    .order('transaction_date', { ascending: false });
+
+  const out = new Map<string, string>();
+  for (const row of unwrap(data as unknown as Array<{
+    recurring_group_id: string | null; amount: string;
+  }> | null, error, requestId)) {
+    if (row.recurring_group_id === null) continue;
+    // Ordered newest first, so the first one seen for a group is the latest.
+    if (!out.has(row.recurring_group_id)) out.set(row.recurring_group_id, String(row.amount));
+  }
+  return out;
 }
 
 // ---------------------------------------------------------------------------------------------

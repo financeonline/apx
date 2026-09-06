@@ -36,7 +36,13 @@ beforeAll(async () => {
   if (other.error) throw new Error(`second org failed: ${other.error.message}`);
   otherOrgId = other.data as unknown as string;
 
-  // A no-op handler standing in for the real `calculation.run`, which arrives in Phase 6.
+  /*
+   * A no-op handler REPLACING the real `calculation.run` for this suite.
+   *
+   * What is under test here is the worker loop — scoping, retries, reclaiming — not the engine. The
+   * real handler is exercised through the queue in `pipeline-end-to-end.test.ts`; running it here
+   * would make these tests depend on a month of fixture data they do not need.
+   */
   registerJobHandler('calculation.run', async (job: ClaimedJob, scope) => {
     const scopedTo = (scope as { organizationId?: string }).organizationId ?? null;
     seen.push({ jobId: job.jobId, scopedTo, payload: job.payload });

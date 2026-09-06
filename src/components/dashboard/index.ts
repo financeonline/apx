@@ -15,6 +15,7 @@ export { TrendChart } from './trend-chart';
 export { PeriodPicker } from './period-picker';
 export { DataQualityBadge, StatusBadgeView } from './data-quality-badge';
 export { PermissionGate } from './permission-gate';
+export { builtNavItems, permittedNavItems } from './nav';
 
 export {
   ActionsNoneEmpty,

@@ -1,6 +1,10 @@
 import { timingSafeEqual } from 'node:crypto';
 import { NextResponse, type NextRequest } from 'next/server';
-import { drainJobs } from '@/modules/jobs';
+import { drainJobs, registerJobHandlers } from '@/modules/jobs';
+
+// The import above is what registers the handlers; this call makes that dependency explicit rather
+// than relying on a side effect a bundler could tree-shake (ADR-057.1).
+registerJobHandlers();
 import { log } from '@/core/logging';
 
 /**

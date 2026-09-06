@@ -121,6 +121,12 @@ export type {
 // ---------------------------------------------------------------------------------------------
 
 export {
+  loadBankRecords,
+  loadObservations,
+  loadRecurringGroups,
+} from './data/repository';
+
+export {
   isNotEnoughData,
   loadHealthCard,
   loadHealthHistory,

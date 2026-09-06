@@ -224,3 +224,103 @@ export async function finalizeUpload(
 
   if (error) throw toMotionError(error, actor.requestId);
 }
+
+// ---------------------------------------------------------------------------
+// The calculation run, the health score and the alert engine (FINANCIAL_ENGINE.md §2.4, §7, §8.3).
+//
+// These are the server's own assertions about a computation it performed — "this run started",
+// "these are its snapshots", "this is the score", "these alerts changed". None of them is a user
+// intent, and none may be reachable from a browser, so they live here behind the service role like
+// every other `api_server.*` call (ADR-043).
+// ---------------------------------------------------------------------------
+
+async function serverRpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
+  const { data, error } = await serverClient().schema('api_server').rpc(fn, args);
+  if (error) throw toMotionError(error);
+  return data as T;
+}
+
+export async function startCalculationRun(
+  input: Record<string, unknown>,
+): Promise<{ runId: string; noChange: boolean }> {
+  const raw = await serverRpc<{ runId?: string; run_id?: string; noChange?: boolean; no_change?: boolean }>(
+    'start_calculation_run', input,
+  );
+  return {
+    runId: (raw.runId ?? raw.run_id) as string,
+    noChange: (raw.noChange ?? raw.no_change) === true,
+  };
+}
+
+export async function finishChunk(input: Record<string, unknown>): Promise<{ written: number }> {
+  const written = await serverRpc<number>('finish_chunk', input);
+  return { written: Number(written ?? 0) };
+}
+
+export async function finishCalculationRun(
+  runId: string,
+  organizationId: string,
+  status: 'succeeded' | 'failed',
+  stats: Record<string, unknown>,
+  error?: unknown,
+): Promise<void> {
+  await serverRpc('finish_calculation_run', {
+    p_org: organizationId,
+    p_run: runId,
+    p_status: status,
+    p_stats: stats,
+    p_error: error === undefined ? null : error,
+  });
+}
+
+export async function setPeriodCompleteness(
+  organizationId: string, periods: string[], complete: boolean[],
+): Promise<void> {
+  if (periods.length === 0) return;
+  await serverRpc('set_period_completeness', {
+    p_org: organizationId, p_periods: periods, p_complete: complete,
+  });
+}
+
+export async function finishHealth(input: Record<string, unknown>): Promise<{ written: number }> {
+  const written = await serverRpc<number>('finish_health', input);
+  return { written: Number(written ?? 0) };
+}
+
+export async function persistAlerts(
+  input: Record<string, unknown>,
+): Promise<Record<string, number>> {
+  const counts = await serverRpc<Record<string, number>>('persist_alerts', input);
+  return counts ?? {};
+}
+
+/**
+ * The engine's three aggregation reads (§2.2, §2.4 step 4).
+ *
+ * They live in `app`, which is deliberately not exposed to PostgREST, so the engine reaches them
+ * through `api_server` wrappers. The repository used to call them unqualified, which resolved to
+ * `public` and returned PGRST202 on every calculation — the defect ADR-057.2 records.
+ */
+export async function aggregatePeriods(
+  orgId: string, from: string, to: string, aggregatedAt: string,
+): Promise<Record<string, unknown>[]> {
+  return serverRpc<Record<string, unknown>[]>('aggregate_periods', {
+    p_org: orgId, p_from: from, p_to: to, p_aggregated_at: aggregatedAt,
+  }).then((rows) => rows ?? []);
+}
+
+export async function aggregateTransferLegs(
+  orgId: string, from: string, to: string, aggregatedAt: string,
+): Promise<Record<string, unknown>[]> {
+  return serverRpc<Record<string, unknown>[]>('aggregate_transfer_legs', {
+    p_org: orgId, p_from: from, p_to: to, p_aggregated_at: aggregatedAt,
+  }).then((rows) => rows ?? []);
+}
+
+export async function batchCoverage(
+  orgId: string, from: string, to: string,
+): Promise<Record<string, unknown>[]> {
+  return serverRpc<Record<string, unknown>[]>('batch_coverage', {
+    p_org: orgId, p_from: from, p_to: to,
+  }).then((rows) => rows ?? []);
+}

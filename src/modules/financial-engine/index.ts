@@ -94,3 +94,18 @@ export * from './domain/receivables';
 export * from './domain/concentration';
 
 export { composePeriod, type ComposeInput, type TransferLegCell } from './domain/compose';
+
+/**
+ * The calculation run itself (§2.4).
+ *
+ * Server-only. It was never exported: the run loop existed, was correct and was unreachable, which
+ * is how the job queue came to have no handler for `calculation.run` (ADR-057.1).
+ */
+export {
+  runCalculation,
+  type HealthChunkInput,
+  type PeriodComputer,
+  type RunDeps,
+  type RunOutcome,
+  type RunRequest,
+} from './services/run';
