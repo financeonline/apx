@@ -54,6 +54,21 @@ export function HealthExplainPanel({
             )}
           </div>
           {note ? <p className="mt-2 text-xs text-ink-faint">{note}</p> : null}
+          {/*
+            * "Show evidence" on the score itself (EVIDENCE_MODEL.md §5, §6). The panel below prints
+            * the arithmetic, which answers "how"; the bundle answers "which figures", which is what
+            * somebody disputing a score actually asks.
+            */}
+          {orgSlug !== undefined && view.evidenceBundleId !== null ? (
+            <p className="mt-2 text-sm">
+              <Link
+                href={`/app/${orgSlug}/evidence/${view.evidenceBundleId}`}
+                className="text-accent underline underline-offset-2"
+              >
+                The figures behind this score
+              </Link>
+            </p>
+          ) : null}
           <BandLegend />
           <Disclaimer />
         </CardBody>

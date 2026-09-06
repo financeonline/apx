@@ -249,6 +249,42 @@ describe('a derived metric walks to leaves that each reconcile (F-C-15, §6 leve
     expect(blocks['Cost of sales']!.selection.total).toBe('6000.00');
     for (const block of view.records) expect(block.reconciles).toBe(true);
   });
+
+  /*
+   * §6 level 3: "500 of 1,238 rows shown". Each block pages on its own, because a derived metric has
+   * one selection per leaf and a single cursor applied to all of them would silently skip rows in
+   * the ones it was not meant for. Asserted with an offset of one over a two-row selection rather
+   * than by seeding five hundred rows: the property is that the cursor reaches exactly one block.
+   */
+  it('pages one component’s rows without moving another’s', async () => {
+    const ctx = contextFor(ownerId, 'owner');
+    const bundleId = await buildBundleForMetric(ctx, snapshotOf('gross_profit'));
+
+    const whole = await loadEvidenceDrawer(ctx, bundleId);
+    const revenue = whole.records.find((r) => r.forLabel === 'Revenue')!;
+    const costs = whole.records.find((r) => r.forLabel === 'Cost of sales')!;
+    expect(revenue.selection.count).toBe(2);
+
+    const paged = await loadEvidenceDrawer(ctx, bundleId, {
+      itemId: revenue.itemId, cursor: { offset: 1 },
+    });
+    const pagedRevenue = paged.records.find((r) => r.forLabel === 'Revenue')!;
+    const pagedCosts = paged.records.find((r) => r.forLabel === 'Cost of sales')!;
+
+    expect(pagedRevenue.selection.rows).toHaveLength(1);
+    expect(pagedRevenue.selection.rows[0]!.id, 'the second row, not the first')
+      .toBe(revenue.selection.rows[1]!.id);
+    expect(pagedRevenue.offset).toBe(1);
+
+    // The count and the total stay whole-selection, which is what lets a truncated list reconcile.
+    expect(pagedRevenue.selection.count).toBe(2);
+    expect(pagedRevenue.selection.total).toBe(revenue.selection.total);
+
+    // And the other block has not moved.
+    expect(pagedCosts.offset).toBe(0);
+    expect(pagedCosts.selection.rows.map((r) => r.id))
+      .toEqual(costs.selection.rows.map((r) => r.id));
+  });
 });
 
 describe('as-of semantics survive what happens to the data afterwards (§8.7)', () => {
@@ -375,6 +411,55 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
  * were computed and then dropped. Pinned records are the whole reason §4 separates them from
  * descriptors: "the reader must see *that* row even if data later changes".
  */
+/**
+ * The health score's own bundle (EVIDENCE_MODEL.md §5, health-dimension row).
+ *
+ * The score is the most prominent number in the product and was the only figure with nothing behind
+ * it: Phase 8 built the score and the explainability panel and never built the bundle §5 asks for.
+ * A panel that prints its own arithmetic answers "how was this worked out"; a bundle answers "and
+ * which figures were those", which is the question somebody disputing a score actually asks.
+ */
+describe('a health score carries the figures it was worked out from (§5)', () => {
+  it('writes one bundle per score, holding the run and every snapshot a dimension used', async () => {
+    const bundleId = one(`
+      select b.id::text from public.evidence_bundles b
+       join public.health_scores h
+         on h.organization_id = b.organization_id and h.id = b.origin_id
+      where b.organization_id = '${orgId}' and b.kind = 'health_score'
+        and h.period_id = '${mayPeriodId}' limit 1`);
+    expect(bundleId, 'the run wrote a health bundle').toMatch(/^[0-9a-f-]{36}$/);
+
+    const view = await loadEvidenceDrawer(contextFor(ownerId, 'owner'), bundleId);
+    expect(view.bundle.kind).toBe('health_score');
+    expect(view.bundle.origin.table).toBe('health_scores');
+
+    const types = view.bundle.items.map((i) => i.itemType);
+    expect(types[0], 'the run is the as-of context every item is read under').toBe('calculation_run');
+    expect(types.filter((t) => t === 'metric_snapshot').length,
+      'every figure a dimension used is named').toBeGreaterThan(0);
+
+    // §2.2: the label is generated from the object, in the accountant's register.
+    const snapshot = view.bundle.items.find((i) => i.itemType === 'metric_snapshot')!;
+    expect(snapshot.label).toMatch(/, May 2026/);
+  });
+
+  it('names each snapshot exactly once, however many dimensions used it', async () => {
+    const bundleId = one(`
+      select b.id::text from public.evidence_bundles b
+       join public.health_scores h
+         on h.organization_id = b.organization_id and h.id = b.origin_id
+      where b.organization_id = '${orgId}' and b.kind = 'health_score'
+        and h.period_id = '${mayPeriodId}' limit 1`);
+
+    const view = await loadEvidenceDrawer(contextFor(ownerId, 'owner'), bundleId);
+    const refs = view.bundle.items
+      .filter((i) => i.itemType === 'metric_snapshot')
+      .map((i) => i.ref!.id);
+    expect(new Set(refs).size, 'a figure two dimensions share is one item, not two')
+      .toBe(refs.length);
+  });
+});
+
 describe('a bundle that pins specific rows (§4)', () => {
   let bundleId: string;
   let supersededEntry: string;

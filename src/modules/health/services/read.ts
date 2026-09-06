@@ -26,6 +26,8 @@ export interface HealthCardView {
   readonly configVersion: string;
   readonly breakdown: readonly DimensionBreakdown[];
   readonly updatedAt: string;
+  /** The bundle behind the score (§5); NULL for a score written before bundles existed. */
+  readonly evidenceBundleId: string | null;
 }
 
 /** True when the score is absent because the engine could not include three dimensions (§7.2). */
@@ -50,6 +52,7 @@ export async function loadHealthCard(
   if (current === null) return null;
 
   return {
+    evidenceBundleId: await repo.loadHealthBundleId(db, orgId, current.scoreId),
     periodId: current.periodId,
     score: current.score,
     band: current.band,

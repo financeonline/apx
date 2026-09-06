@@ -1,7 +1,9 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { log } from '@/core/logging';
-import type { AccountObservation, RuleContext } from '@/modules/alerts';
+import type { AccountObservation, MetricObservation, RuleContext } from '@/modules/alerts';
+import { calculationRunLabel, metricSnapshotLabel } from '@/modules/evidence';
+import { ENGINE_VERSION } from '@/modules/financial-engine';
 import { computeHealthScore } from '../domain/score';
 import type { HealthInput, HealthScore } from '../domain/types';
 import * as repo from '../data/repository';
@@ -142,6 +144,12 @@ export async function scoreChunk(
 
   if (scores.length === 0) return { written: 0, scores: [] };
 
+  // Only for the labels (§2.2): an item is named from the object it points at, and a period is part
+  // of that name.
+  const periodLabels = await repo.loadPeriodLabels(
+    scoped, orgId, scores.map((score) => score.periodId),
+  );
+
   const result = await finishHealth({
     p_org: orgId,
     p_run: request.calculationRunId,
@@ -152,6 +160,9 @@ export async function scoreChunk(
       dimensions_total: score.dimensionsTotal,
       breakdown: score.breakdown,
       config_version: score.configVersion,
+      evidence: evidenceFor(
+        score, snapshots, periodLabels.get(score.periodId) ?? null, request.calculationRunId,
+      ),
     })),
     p_period_ids: scores.map((score) => score.periodId),
   });
@@ -163,6 +174,57 @@ export async function scoreChunk(
   });
 
   return { written: result.written, scores };
+}
+
+/**
+ * The evidence a health score rests on (EVIDENCE_MODEL.md §5, health-dimension row).
+ *
+ * §7.4 already pins the exact `metric_snapshots.id` behind every figure a dimension used, so the
+ * bundle is a matter of naming them rather than of finding them. The run comes first — it is the
+ * "as of" context every item is read under — then one item per distinct snapshot, in the order the
+ * dimensions used them, so a reader works down the score the way it was built.
+ *
+ * A snapshot with no id is skipped rather than cited as null: `snapshotId` is null only while a
+ * figure is still in flight inside the chunk that computed it, and an item pointing at nothing is
+ * an item nobody can open.
+ */
+function evidenceFor(
+  score: HealthScore,
+  observations: readonly MetricObservation[],
+  periodLabel: string | null,
+  calculationRunId: string,
+): Array<Record<string, unknown>> {
+  const byId = new Map(
+    observations.filter((o) => o.snapshotId !== null).map((o) => [o.snapshotId!, o]),
+  );
+
+  const items: Array<Record<string, unknown>> = [{
+    item_type: 'calculation_run',
+    ref_id: calculationRunId,
+    label: calculationRunLabel({ engineVersion: ENGINE_VERSION, finishedAt: null }),
+    assurance_level: 'verified',
+  }];
+
+  const seen = new Set<string>();
+  for (const dimension of score.breakdown) {
+    for (const metric of dimension.metrics) {
+      const id = metric.snapshot_id;
+      if (id === null || seen.has(id)) continue;
+      seen.add(id);
+      const observation = byId.get(id);
+      items.push({
+        item_type: 'metric_snapshot',
+        ref_id: id,
+        label: metricSnapshotLabel({
+          metricKey: metric.metric_key,
+          periodLabel,
+          basis: observation?.basis ?? 'none',
+        }),
+        assurance_level: observation?.assurance ?? 'calculated',
+      });
+    }
+  }
+  return items;
 }
 
 /**

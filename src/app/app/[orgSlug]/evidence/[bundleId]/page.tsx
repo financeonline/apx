@@ -3,7 +3,9 @@ import { notFound } from 'next/navigation';
 import { can } from '@/core/permissions';
 import { formatValue, missingReasonText, statusFor, BASIS_TEXT } from '@/modules/dashboard';
 import type { AssuranceLevel, DataQuality } from '@/modules/financial-engine';
-import { getDocumentReference, loadEvidenceDrawer, type DocumentReference } from '@/modules/evidence';
+import {
+  DEFAULT_DESCRIPTOR_LIMIT, getDocumentReference, loadEvidenceDrawer, type DocumentReference,
+} from '@/modules/evidence';
 import { getAccessContext } from '@/modules/tenancy';
 import { StatusBadgeView } from '@/components/dashboard';
 import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
@@ -11,6 +13,14 @@ import { TBody, TD, THead, TR, TableWrap } from '@/components/ui/table';
 import { DocumentPanel } from './document-panel';
 
 export const dynamic = 'force-dynamic';
+
+/**
+ * How far "Previous rows" steps back.
+ *
+ * The resolver's own page size decides how far forward a cursor goes; going back the same distance
+ * is the only step that lands a reader where they came from.
+ */
+const PAGE_STEP = DEFAULT_DESCRIPTOR_LIMIT;
 
 /**
  * The Evidence Drawer, as a page (EVIDENCE_MODEL.md §6; ROUTE_ARCHITECTURE.md §122).
@@ -29,16 +39,25 @@ export default async function EvidenceBundlePage({
   searchParams,
 }: {
   params: Promise<{ orgSlug: string; bundleId: string }>;
-  searchParams: Promise<{ row?: string }>;
+  searchParams: Promise<{ row?: string; block?: string; from?: string }>;
 }) {
   const { orgSlug, bundleId } = await params;
-  const { row } = await searchParams;
+  const { row, block, from } = await searchParams;
 
   const ctx = await getAccessContext(orgSlug);
   if (!can(ctx, 'financials.view')) notFound();
 
   // Cross-organisation or invented: NOT FOUND, never FORBIDDEN (§8.4, isolation case 3).
-  const view = await loadEvidenceDrawer(ctx, bundleId).catch(() => null);
+  /*
+   * A cursor names the BLOCK it belongs to. A derived metric has one selection per leaf, and paging
+   * one of them must not move the others (§6 level 3).
+   */
+  const offset = from === undefined ? Number.NaN : Number.parseInt(from, 10);
+  const page = block !== undefined && Number.isFinite(offset) && offset >= 0
+    ? { itemId: block, cursor: { offset } }
+    : undefined;
+
+  const view = await loadEvidenceDrawer(ctx, bundleId, page).catch(() => null);
   if (view === null) notFound();
 
   const document = await documentFor(ctx, row);
@@ -281,6 +300,33 @@ export default async function EvidenceBundlePage({
                   </table>
                 </TableWrap>
               </div>
+
+              {/*
+                * §6: "500 of 1,238 rows shown". A truncated list still reconciles, because `count`
+                * and `total` are over the whole selection — but a reader who wants the rest has to
+                * be able to reach them, and each block pages on its own so moving one does not move
+                * the others.
+                */}
+              {block.selection.nextCursor === undefined && block.offset === 0 ? null : (
+                <p className="mt-3 flex gap-4 text-sm">
+                  {block.offset === 0 ? null : (
+                    <Link
+                      href={`/app/${orgSlug}/evidence/${bundleId}?block=${block.itemId}&from=${Math.max(0, block.offset - PAGE_STEP)}`}
+                      className="text-accent underline underline-offset-2"
+                    >
+                      Previous rows
+                    </Link>
+                  )}
+                  {block.selection.nextCursor === undefined ? null : (
+                    <Link
+                      href={`/app/${orgSlug}/evidence/${bundleId}?block=${block.itemId}&from=${block.selection.nextCursor.offset}`}
+                      className="text-accent underline underline-offset-2"
+                    >
+                      Next rows
+                    </Link>
+                  )}
+                </p>
+              )}
             </CardBody>
           </Card>
         ))}

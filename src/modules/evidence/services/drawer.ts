@@ -61,6 +61,8 @@ export interface DrawerRecords {
    * components do not do money (SERVICE_ARCHITECTURE.md §8).
    */
   readonly reconciliation: string;
+  /** The row this page of the block starts at, so "back" is expressible as well as "next". */
+  readonly offset: number;
 }
 
 /**
@@ -233,14 +235,14 @@ function reconciliationSentence(input: {
 /**
  * §9 / §6: everything the drawer renders for one bundle.
  *
- * `page` applies to the FIRST records block; the others render their first page. A reader paging
- * through one component's rows is not also paging through another's, and one cursor for several
- * selections would silently skip rows in the ones it was not meant for.
+ * `page` names the block it belongs to. A derived metric has one selection per leaf, and a reader
+ * paging through one component's rows is not also paging through another's — a single cursor
+ * applied to every block would silently skip rows in the ones it was not meant for.
  */
 export async function loadEvidenceDrawer(
   ctx: AccessContext,
   bundleId: string,
-  page?: Cursor,
+  page?: { readonly itemId: string; readonly cursor: Cursor },
 ): Promise<EvidenceDrawerView> {
   assertCan(ctx, 'financials.view');
   const orgId = requireOrgId(ctx);
@@ -324,7 +326,6 @@ export async function loadEvidenceDrawer(
    */
   const records: DrawerRecords[] = [];
   let lastSnapshotId: string | null = null;
-  let first = true;
   for (const item of bundle.items) {
     if (item.itemType === 'metric_snapshot' && item.ref !== undefined) {
       lastSnapshotId = item.ref.id;
@@ -333,7 +334,11 @@ export async function loadEvidenceDrawer(
     if (item.itemType !== 'query' || item.query === undefined) continue;
 
     const descriptor = parseQueryDescriptor(item.query);
-    const selection = await resolveCompiled(ctx, compileDescriptor(descriptor), first ? page : undefined);
+    const selection = await resolveCompiled(
+      ctx,
+      compileDescriptor(descriptor),
+      page?.itemId === item.id ? page.cursor : undefined,
+    );
     const forSnapshot = lastSnapshotId === null ? null : snapshotById.get(lastSnapshotId) ?? null;
     const forValue = forSnapshot === null ? null : str(forSnapshot, 'value');
     const forUnit = forSnapshot === null ? null : String(forSnapshot.unit);
@@ -345,6 +350,7 @@ export async function loadEvidenceDrawer(
       forLabel: forSnapshot === null ? null : metricLabelOf(String(forSnapshot.metric_key)).label,
       forValue,
       selection,
+      offset: page?.itemId === item.id ? page.cursor.offset : 0,
       // Only money reconciles by addition. A ratio, a count or a number of days is not the sum of
       // the rows behind it, and printing "does not reconcile" against one would be a false alarm.
       reconciles: forUnit === 'money' ? sameMoney(selection.total, forValue) : null,
@@ -357,7 +363,6 @@ export async function loadEvidenceDrawer(
         currency: forSnapshot === null ? null : str(forSnapshot, 'currency'),
       }),
     });
-    first = false;
   }
 
   const pinned: DrawerPinned[] = bundle.items

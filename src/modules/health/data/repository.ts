@@ -234,12 +234,15 @@ export interface StoredHealthScore {
   readonly configVersion: string;
   readonly breakdown: readonly DimensionBreakdown[];
   readonly updatedAt: string;
+  /** `health_scores.id` — the origin of this score's evidence bundle (EVIDENCE_MODEL.md §5). */
+  readonly scoreId: string;
 }
 
 interface HealthCurrentRow {
   period_id: string;
   updated_at: string;
   health_scores: {
+    id: string;
     score: number | null;
     dimensions_used: number;
     dimensions_total: number;
@@ -251,13 +254,14 @@ interface HealthCurrentRow {
 const HEALTH_SELECT = `
   period_id, updated_at,
   health_scores!health_current_score_fk!inner (
-    score, dimensions_used, dimensions_total, config_version, breakdown
+    id, score, dimensions_used, dimensions_total, config_version, breakdown
   )`;
 
 function toStored(row: HealthCurrentRow, band: (score: number | null) => HealthBand | null): StoredHealthScore | null {
   const stored = row.health_scores;
   if (!stored) return null;
   return {
+    scoreId: stored.id,
     periodId: row.period_id,
     score: stored.score,
     band: band(stored.score),
@@ -373,4 +377,52 @@ export async function loadPortfolioScores(
   }
 
   return [...latest.values()];
+}
+
+/**
+ * The label of each period a score was written for.
+ *
+ * Only ever used to NAME an evidence item (`EVIDENCE_MODEL.md` §2.2) — a label is generated from the
+ * object it points at, and "Revenue, Mar 2026" needs the month. Nothing scores on it.
+ */
+export async function loadPeriodLabels(
+  db: SupabaseClient,
+  orgId: string,
+  periodIds: readonly string[],
+): Promise<Map<string, string>> {
+  if (periodIds.length === 0) return new Map();
+  const { data, error } = await db
+    .from('fiscal_periods')
+    .select('id, label')
+    .eq('organization_id', orgId)
+    .in('id', [...periodIds]);
+  if (error) throw toMotionError(error);
+  return new Map(
+    ((data ?? []) as Array<{ id: string; label: string | null }>)
+      .filter((row): row is { id: string; label: string } => row.label !== null)
+      .map((row) => [row.id, row.label]),
+  );
+}
+
+/**
+ * The bundle a score's evidence lives in (EVIDENCE_MODEL.md §5).
+ *
+ * Reached through the bundle's `origin_id`, not through a column on `health_scores`: §2.1 is where
+ * a bundle records what it is about, and a second pointer back would be a second thing to keep in
+ * step. NULL when the score predates the bundle being written, which the panel renders as no link
+ * rather than a link to nothing.
+ */
+export async function loadHealthBundleId(
+  db: SupabaseClient, orgId: string, scoreId: string,
+): Promise<string | null> {
+  const { data, error } = await db
+    .from('evidence_bundles')
+    .select('id')
+    .eq('organization_id', orgId)
+    .eq('kind', 'health_score')
+    .eq('origin_table', 'health_scores')
+    .eq('origin_id', scoreId)
+    .maybeSingle();
+  if (error) throw toMotionError(error);
+  return (data as { id?: string } | null)?.id ?? null;
 }
