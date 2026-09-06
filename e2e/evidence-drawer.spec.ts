@@ -91,11 +91,9 @@ test.describe('from a figure to the rows behind it', () => {
    * Isolation case 3 (TEST_STRATEGY.md §4): a bundle id that is not yours is indistinguishable from
    * one that never existed. Both render the one uniform not-found page (SECURITY_MODEL.md §14).
    *
-   * The STATUS is 200 rather than 404, and that is worth being precise about: `[orgSlug]/loading.tsx`
-   * wraps every page in this family in a Suspense boundary, so the response has already been
-   * committed by the time a page calls `notFound()` — it can swap the body and not the status. It
-   * is true of every page under `/app/[orgSlug]` and not of this one, and the property that carries
-   * the security — that the two answers are identical — is asserted here directly.
+   * The status is asserted separately, in `evidence-not-found.spec.ts`. This is the other half, and
+   * the half that carries the security: the two answers have to be the same answer, or a stranger
+   * can enumerate what exists by reading the difference between them.
    */
   test('a bundle that is not yours is indistinguishable from one that never existed', async ({ page }) => {
     const slug = seededOrgSlug();
@@ -109,11 +107,11 @@ test.describe('from a figure to the rows behind it', () => {
     const invented = '00000000-0000-4000-8000-000000000000';
     const answers: string[] = [];
     for (const bundleId of [invented, other]) {
-      await page.goto(`/app/${slug}/evidence/${bundleId}`);
-      answers.push((await page.getByRole('heading').first().textContent()) ?? '');
+      const response = await page.goto(`/app/${slug}/evidence/${bundleId}`);
+      answers.push(`${response?.status()} ${(await page.getByRole('heading').first().textContent()) ?? ''}`);
     }
 
-    expect(answers[0]).toMatch(/could not find that page/i);
+    expect(answers[0]).toMatch(/^404 .*could not find that page/i);
     expect(answers[1], 'someone else’s bundle reads exactly as an invented one').toBe(answers[0]);
   });
 
