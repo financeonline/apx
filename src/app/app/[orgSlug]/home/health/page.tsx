@@ -56,7 +56,7 @@ export default async function HealthPage({ params }: { params: Promise<{ orgSlug
         </Card>
       ) : (
         <div className="space-y-6">
-          <HealthExplainPanel view={view.health} periodLabel={view.period.label} />
+          <HealthExplainPanel view={view.health} periodLabel={view.period.label} orgSlug={orgSlug} />
 
           <Card>
             <CardBody>

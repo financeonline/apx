@@ -108,16 +108,5 @@ export function missingReasonText(missing: readonly string[]): string {
   return 'We do not have enough data to show this yet.';
 }
 
-/**
- * The plain-English source line (§8.1, "Basis: …").
- *
- * Rendered as tooltip text and at drawer level 1, never as a badge on a card.
- */
-export const BASIS_TEXT: Readonly<Record<string, string>> = {
-  bank: 'From bank statements',
-  ledger: 'From your accounts',
-  invoices: 'From invoices',
-  period_balances: 'From your reports',
-  mixed: 'From more than one source',
-  none: 'No source covers this month',
-};
+/** Re-exported, not restated: the canonical §8.1 table lives in `modules/financials` (ADR-037). */
+export { BASIS_TEXT } from '@/modules/financials';

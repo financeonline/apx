@@ -51,6 +51,17 @@ export default defineConfig({
       testMatch: /journey-.*\.spec\.ts/,
       use: { ...devices['Desktop Chrome'] },
     },
+    /*
+     * The evidence drawer reads an organisation that already has figures, so it reuses the setup
+     * project's — journey 3's evidence steps begin at a number on the screen, and re-importing a
+     * ledger to reach one would be testing journey 1 again.
+     */
+    {
+      name: 'evidence',
+      testMatch: /evidence-.*\.spec\.ts/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/owner.json' },
+    },
     {
       name: 'sweep',
       testMatch: /accessibility\.spec\.ts/,

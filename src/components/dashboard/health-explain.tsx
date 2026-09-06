@@ -1,4 +1,6 @@
+import Link from 'next/link';
 import { Badge, Card, CardBody } from '@/components/ui/surfaces';
+import { METRIC_LABELS } from '@/modules/financials';
 import type { DimensionBreakdown, HealthCardView } from '@/modules/health';
 import { Disclaimer } from './health-score-card';
 import {
@@ -23,9 +25,12 @@ import {
 export function HealthExplainPanel({
   view,
   periodLabel,
+  orgSlug,
 }: {
   view: HealthCardView;
   periodLabel: string;
+  /** Present when the figures behind a dimension can be opened (`EVIDENCE_MODEL.md` §6). */
+  orgSlug?: string;
 }) {
   const dimensions = orderedDimensions(view.breakdown);
   const note = dimensionsNote(view.dimensionsUsed, view.dimensionsTotal);
@@ -55,7 +60,7 @@ export function HealthExplainPanel({
       </Card>
 
       {dimensions.map((dimension) => (
-        <DimensionPanel key={dimension.key} dimension={dimension} />
+        <DimensionPanel key={dimension.key} dimension={dimension} orgSlug={orgSlug} />
       ))}
     </section>
   );
@@ -77,7 +82,13 @@ function BandLegend() {
   );
 }
 
-function DimensionPanel({ dimension }: { dimension: DimensionBreakdown }) {
+function DimensionPanel({
+  dimension,
+  orgSlug,
+}: {
+  dimension: DimensionBreakdown;
+  orgSlug?: string;
+}) {
   const label = DIMENSION_LABELS[dimension.key];
 
   if (!dimension.included) {
@@ -129,8 +140,47 @@ function DimensionPanel({ dimension }: { dimension: DimensionBreakdown }) {
         {dimension.negatives.length > 0 ? (
           <FactorList title="What needs a look" items={dimension.negatives} tone="text-ink" />
         ) : null}
+
+        <MetricLinks dimension={dimension} orgSlug={orgSlug} />
       </CardBody>
     </Card>
+  );
+}
+
+/**
+ * "Show evidence" on a health factor (`EVIDENCE_MODEL.md` §6).
+ *
+ * §7.4 pins the exact `metric_snapshots.id` behind every figure a dimension rested on, so each of
+ * these opens the evidence for THAT figure — the one this score was worked out from — rather than
+ * whatever the metric says now. A score that cannot be traced to its inputs is an opinion.
+ */
+function MetricLinks({
+  dimension,
+  orgSlug,
+}: {
+  dimension: DimensionBreakdown;
+  orgSlug?: string;
+}) {
+  if (orgSlug === undefined) return null;
+  const pinned = dimension.metrics.filter((metric) => metric.snapshot_id !== null);
+  if (pinned.length === 0) return null;
+
+  return (
+    <div className="mt-3 border-t border-line pt-3">
+      <p className="text-xs text-ink-faint">The figures this used</p>
+      <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
+        {pinned.map((metric) => (
+          <li key={metric.snapshot_id}>
+            <Link
+              href={`/app/${orgSlug}/evidence?snapshot=${metric.snapshot_id}`}
+              className="text-accent underline underline-offset-2"
+            >
+              {METRIC_LABELS[metric.metric_key]?.technical ?? metric.metric_key}
+            </Link>
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

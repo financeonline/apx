@@ -64,3 +64,5 @@ export {
   supersedeRecord,
   updateCounterparty,
 } from './services';
+
+export { BASIS_TEXT, METRIC_LABELS, labelFor } from './domain/vocabulary';

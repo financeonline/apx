@@ -70,6 +70,28 @@ export async function recordAccessEvent(
   return data as number;
 }
 
+/**
+ * The shared rate-limit counter, for routes (`ROUTE_ARCHITECTURE.md` §5).
+ *
+ * Every `api.*` function throttles through `app.throttle`, whose counter is `api_rate_limits`. A
+ * route cannot reach `app` — it is not an exposed schema — and an in-process counter would reset on
+ * every deploy and would not be shared between instances, which is exactly what a download limit
+ * has to survive. Raises `RATE_LIMITED` when the bucket is spent.
+ */
+export async function throttle(
+  actor: ServerRpcActor,
+  bucket: string,
+  limit: number,
+  window: string,
+): Promise<void> {
+  const { error } = await serverClient()
+    .schema('api_server')
+    .rpc('throttle', {
+      p_actor: actor.userId, p_bucket: bucket, p_limit: limit, p_window: window,
+    });
+  if (error) throw toMotionError(error, actor.requestId);
+}
+
 /** Server-originated job enqueue (ADR-043.3). User-intent jobs go through api.enqueue_job. */
 export async function enqueueServerJob(
   actor: ServerRpcActor | null,

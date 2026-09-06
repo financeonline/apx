@@ -1,4 +1,5 @@
 import 'server-only';
+import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
   enqueueServerJob, finishCalculationRun, finishChunk, finishHealth, setPeriodCompleteness,
@@ -6,8 +7,8 @@ import {
 } from '@/core/db';
 import {
   composePeriod, runCalculation,
-  type AggregateCell, type CalculationTrigger, type EngineContext, type PeriodCoverage,
-  type PeriodRef,
+  type AggregateCell, type CalculationTrigger, type EngineContext, type MetricResult,
+  type PeriodCoverage, type PeriodRef,
 } from '@/modules/financial-engine';
 import { healthStep } from '@/modules/health';
 import type { ClaimedJob, JobOutcome } from '../domain/types';
@@ -24,6 +25,42 @@ import type { ClaimedJob, JobOutcome } from '../domain/types';
  * before this function was called, and `job.organizationId` is what is passed on. A payload naming
  * another organisation achieves nothing (§4 case 14/19).
  */
+/** The identity of a snapshot within one period: its key and, when it has one, its dimension row. */
+function snapshotKey(key: string, dimensionId: string | null, dimensionKey: string | null): string {
+  return `${key}::${dimensionId ?? ''}::${dimensionKey ?? ''}`;
+}
+
+/**
+ * Composes a period twice, so a derived metric can name the snapshots it was worked out from
+ * (ADR-059; EVIDENCE_MODEL.md §2.3).
+ *
+ * `evidence_query` for a derived metric is `{name, snapshot_id}[]`, and it is built during
+ * composition — before any row exists. With the database generating ids there was nothing to put
+ * there, so every derived metric was written with nulls and the whole of drawer levels 2 and 3 was
+ * unreadable. The ids are therefore minted here and sent with the insert.
+ *
+ * Twice rather than once because the set of snapshots a period produces is not known until it has
+ * been composed: the P&L emits a metric per category present, concentration a metric per customer.
+ * Composition is pure and deterministic — the same inputs give the same results, which the engine's
+ * own idempotence tests assert — so the first pass is a description of the shape and the second is
+ * the answer. It costs arithmetic over an aggregate already in memory; the alternative is a schema
+ * that cannot express what it was designed to express.
+ */
+function composeWithIds(input: Parameters<typeof composePeriod>[0]): readonly MetricResult[] {
+  const ids = new Map<string, string>();
+  for (const result of composePeriod(input)) {
+    ids.set(snapshotKey(result.key, result.dimensionId, result.dimensionKey ?? null), randomUUID());
+  }
+
+  return composePeriod({
+    ...input,
+    resolveSnapshotId: (key, dimensionId) => ids.get(snapshotKey(key, dimensionId, null)) ?? null,
+  }).map((result) => {
+    const id = ids.get(snapshotKey(result.key, result.dimensionId, result.dimensionKey ?? null));
+    return id === undefined ? result : { ...result, id };
+  });
+}
+
 export async function runCalculationJob(
   job: ClaimedJob,
   scope: { db: unknown },
@@ -72,7 +109,7 @@ export async function runCalculationJob(
         transferLegs: readonly { periodId: string; bankAccountId: string; transferKind: string; inflow: string; outflow: string }[];
         coverage: PeriodCoverage;
       };
-      return composePeriod({
+      return composeWithIds({
         period: input.period as PeriodRef,
         coverage: aggregates.coverage,
         cells: aggregates.aggregates,

@@ -1,0 +1,349 @@
+import 'server-only';
+import { NotFound, toMotionError } from '@/core/errors';
+import { formatMoney, parseDecimalOrNull } from '@/core/money';
+import { assertCan } from '@/core/permissions';
+import type { AccessContext } from '@/modules/tenancy';
+import { metricDefinition, isMetricKey, type MetricUnit } from '@/modules/financial-engine';
+import type { AssuranceLevel } from '../domain/assurance';
+import { parseQueryDescriptor } from '../domain/descriptor';
+import { compileDescriptor } from '../data/descriptor-compiler';
+import { fetchMetricSnapshot } from '../data/bundles';
+import type { Row } from '../data/rows';
+import { getBundle, type EvidenceBundleView, type EvidenceItemView } from './bundle';
+import { requireOrgId, resolveCompiled, type Cursor, type ResolvedSelection } from './resolve';
+
+/**
+ * The Evidence Drawer's five levels, assembled in one read (EVIDENCE_MODEL.md §6).
+ *
+ * §6 is explicit that the levels are "levels the user can descend, never all at once" — that is a
+ * rendering rule, not a fetching one. Assembling them together is what makes the reconciliation at
+ * level 3 possible: "500 of 1,238 rows shown; all rows total £120,000.00 = metric" is a statement
+ * about the metric AND the selection, and a drawer that fetched them separately could show a total
+ * next to a value from a different run without ever noticing.
+ *
+ * Level 4 is deliberately not here. A document reference is per-record and is fetched when a reader
+ * picks a row (`getDocumentReference`), because level 3 can be a thousand rows from a dozen files.
+ */
+
+export interface DrawerComponent {
+  readonly name: string;
+  /** The component's own label, from the canonical §8.1 table. */
+  readonly label: string;
+  readonly snapshotId: string | null;
+  /** NUMERIC as a string, never a number (ADR-006). `null` means "not computable", not zero. */
+  readonly value: string | null;
+  readonly unit: MetricUnit | null;
+  readonly currency: string | null;
+  readonly leaf: boolean;
+}
+
+export interface DrawerRecords {
+  /** The `evidence_items.id` of the `query` item this block resolves. */
+  readonly itemId: string;
+  readonly label: string;
+  /** The snapshot this selection is the evidence for — a derived metric has one block per leaf. */
+  readonly forSnapshotId: string | null;
+  readonly forLabel: string | null;
+  readonly forValue: string | null;
+  readonly selection: ResolvedSelection;
+  /**
+   * §6: "the block totals must reproduce the derived value". `null` when there is nothing to
+   * compare — a ratio, a count, or a snapshot whose value was not computable.
+   */
+  readonly reconciles: boolean | null;
+  /**
+   * The reconciliation sentence §6 requires, written here rather than in the page.
+   *
+   * "500 of 1,238 rows shown; all rows total £120,000.00, which is the figure." The count and the
+   * total are over the WHOLE selection, not the page, which is what lets a truncated list still
+   * reconcile (§3). It is composed in the service because it is a statement ABOUT money and the
+   * components do not do money (SERVICE_ARCHITECTURE.md §8).
+   */
+  readonly reconciliation: string;
+}
+
+export interface DrawerMetric {
+  readonly snapshotId: string;
+  readonly metricKey: string;
+  readonly label: string;
+  readonly description: string | null;
+  readonly value: string | null;
+  readonly unit: MetricUnit;
+  readonly currency: string | null;
+  readonly basis: string;
+  readonly periodId: string;
+  readonly periodLabel: string | null;
+  readonly assurance: AssuranceLevel;
+  readonly dataQuality: Record<string, unknown>;
+  /** §8.2: false when a later run has replaced this figure. */
+  readonly isCurrent: boolean;
+  /** The value the current snapshot holds, when this one is no longer it (§8.2). */
+  readonly currentValue: string | null;
+}
+
+export interface EvidenceDrawerView {
+  readonly bundle: EvidenceBundleView;
+  /** Level 1. `null` for a bundle with no metric in it — an alert pinning only records, say. */
+  readonly metric: DrawerMetric | null;
+  /** Level 2. Empty for a leaf metric, which descends straight to records. */
+  readonly components: readonly DrawerComponent[];
+  /** Level 3, one block per `query` item. */
+  readonly records: readonly DrawerRecords[];
+  /** Pinned records, which level 3 shows alongside the selections (§4). */
+  readonly pinned: readonly EvidenceItemView[];
+}
+
+function str(row: Row, key: string): string | null {
+  const value = row[key];
+  return value === null || value === undefined ? null : String(value);
+}
+
+function metricLabelOf(metricKey: string): { label: string; description: string | null } {
+  if (!isMetricKey(metricKey)) {
+    // A variance key ("revenue.variance.prev_period") is composed, not declared. Naming it by its
+    // key is honest; throwing would take down a drawer over a caption.
+    return { label: metricKey, description: null };
+  }
+  const definition = metricDefinition(metricKey);
+  return { label: definition.label, description: definition.description };
+}
+
+async function periodLabelOf(ctx: AccessContext, orgId: string, periodId: string): Promise<string | null> {
+  const { data, error } = await ctx.db
+    .from('fiscal_periods').select('label').eq('organization_id', orgId).eq('id', periodId).maybeSingle();
+  if (error) throw toMotionError(error);
+  return (data as { label?: string } | null)?.label ?? null;
+}
+
+/**
+ * §8.2: "The drawer shows 'This figure has since been recalculated — current value £X' when the
+ * referenced snapshot is not current."
+ *
+ * The comparison is against `metric_current`, which recalculation repoints; the old snapshot is
+ * never rewritten, so an old bundle keeps resolving to the exact numbers that were shown.
+ */
+async function currency(
+  ctx: AccessContext, orgId: string, snapshot: Row,
+): Promise<{ isCurrent: boolean; currentValue: string | null }> {
+  let q = ctx.db
+    .from('metric_current')
+    .select('snapshot_id')
+    .eq('organization_id', orgId)
+    .eq('period_id', String(snapshot.period_id))
+    .eq('metric_key', String(snapshot.metric_key))
+    .eq('dimension_type', String(snapshot.dimension_type));
+
+  const dimensionId = str(snapshot, 'dimension_id');
+  q = dimensionId === null ? q.is('dimension_id', null) : q.eq('dimension_id', dimensionId);
+
+  const { data, error } = await q.maybeSingle();
+  if (error) throw toMotionError(error);
+
+  const currentId = (data as { snapshot_id?: string } | null)?.snapshot_id ?? null;
+  if (currentId === null || currentId === String(snapshot.id)) {
+    return { isCurrent: true, currentValue: null };
+  }
+  const current = await fetchMetricSnapshot(ctx.db, orgId, currentId);
+  return { isCurrent: false, currentValue: current === null ? null : str(current, 'value') };
+}
+
+/**
+ * Whether the selection's total is the figure, to the cent (§9: "the totals equal the snapshot value
+ * it supports").
+ *
+ * Compared as decimals, never as floats or as raw strings: "120000.00" and "120000.000000" are the
+ * same money and different text, and the snapshot column is NUMERIC(20,6) while the total is a
+ * two-decimal money string (ADR-006).
+ */
+function sameMoney(a: string | null, b: string | null): boolean | null {
+  const left = parseDecimalOrNull(a);
+  const right = parseDecimalOrNull(b);
+  if (left === null || right === null) return null;
+  return left.minus(right).abs().lessThan('0.005');
+}
+
+/**
+ * §6's reconciliation line, in the reader's own words.
+ *
+ * A mismatch is stated, never hidden. A reconciliation that quietly fails is worse than none at
+ * all: it looks like a reconciliation.
+ */
+function reconciliationSentence(input: {
+  readonly shown: number;
+  readonly count: number;
+  readonly total: string | null;
+  readonly figure: string | null;
+  readonly reconciles: boolean | null;
+  readonly currency: string | null;
+}): string {
+  const rows = input.shown < input.count
+    ? `${input.shown} of ${input.count} rows shown`
+    : `${input.count} ${input.count === 1 ? 'row' : 'rows'}`;
+  if (input.total === null) return `${rows}.`;
+
+  const money = (value: string | null): string => (
+    value === null
+      ? '—'
+      : formatMoney(value, { currency: input.currency ?? 'GBP', showMinorUnits: true })
+  );
+
+  if (input.reconciles === true) {
+    return `${rows}; they total ${money(input.total)}, which is the figure.`;
+  }
+  if (input.reconciles === false) {
+    return `${rows}; they total ${money(input.total)}, which does not match the figure of `
+      + `${money(input.figure)}. Please tell us — a figure that does not reconcile is a fault.`;
+  }
+  return `${rows}; they total ${money(input.total)}.`;
+}
+
+/**
+ * §9 / §6: everything the drawer renders for one bundle.
+ *
+ * `page` applies to the FIRST records block; the others render their first page. A reader paging
+ * through one component's rows is not also paging through another's, and one cursor for several
+ * selections would silently skip rows in the ones it was not meant for.
+ */
+export async function loadEvidenceDrawer(
+  ctx: AccessContext,
+  bundleId: string,
+  page?: Cursor,
+): Promise<EvidenceDrawerView> {
+  assertCan(ctx, 'financials.view');
+  const orgId = requireOrgId(ctx);
+
+  const bundle = await getBundle(ctx, bundleId);
+
+  const snapshotItems = bundle.items.filter((item) => item.itemType === 'metric_snapshot');
+  const rootItem = snapshotItems[0] ?? null;
+
+  let metric: DrawerMetric | null = null;
+  let rootSnapshot: Row | null = null;
+  if (rootItem?.ref !== undefined) {
+    rootSnapshot = await fetchMetricSnapshot(ctx.db, orgId, rootItem.ref.id);
+    if (rootSnapshot === null) throw new NotFound();
+    const metricKey = String(rootSnapshot.metric_key);
+    const naming = metricLabelOf(metricKey);
+    const state = await currency(ctx, orgId, rootSnapshot);
+    metric = {
+      snapshotId: String(rootSnapshot.id),
+      metricKey,
+      label: naming.label,
+      description: naming.description,
+      value: str(rootSnapshot, 'value'),
+      unit: String(rootSnapshot.unit) as MetricUnit,
+      currency: str(rootSnapshot, 'currency'),
+      basis: String(rootSnapshot.basis),
+      periodId: String(rootSnapshot.period_id),
+      periodLabel: await periodLabelOf(ctx, orgId, String(rootSnapshot.period_id)),
+      assurance: rootItem.assurance,
+      dataQuality: (rootSnapshot.data_quality ?? {}) as Record<string, unknown>,
+      ...state,
+    };
+  }
+
+  // Level 2: the components the root snapshot names, each with its own snapshot to descend into.
+  const components: DrawerComponent[] = [];
+  const snapshotById = new Map<string, Row>();
+  for (const item of snapshotItems.slice(1)) {
+    if (item.ref === undefined) continue;
+    const row = await fetchMetricSnapshot(ctx.db, orgId, item.ref.id);
+    if (row === null) throw new NotFound();
+    snapshotById.set(String(row.id), row);
+    const key = String(row.metric_key);
+    components.push({
+      name: key,
+      label: metricLabelOf(key).label,
+      snapshotId: String(row.id),
+      value: str(row, 'value'),
+      unit: str(row, 'unit') as MetricUnit | null,
+      currency: str(row, 'currency'),
+      leaf: (row.evidence_query as { kind?: string } | null)?.kind === 'leaf',
+    });
+  }
+  if (rootSnapshot !== null) snapshotById.set(String(rootSnapshot.id), rootSnapshot);
+
+  /*
+   * Level 3. The builder writes each `query` item immediately after the snapshot it belongs to, so
+   * walking the bundle in order and remembering the last snapshot pairs a selection with the figure
+   * it has to reconcile against — which is the whole content of the block (§6).
+   */
+  const records: DrawerRecords[] = [];
+  let lastSnapshotId: string | null = null;
+  let first = true;
+  for (const item of bundle.items) {
+    if (item.itemType === 'metric_snapshot' && item.ref !== undefined) {
+      lastSnapshotId = item.ref.id;
+      continue;
+    }
+    if (item.itemType !== 'query' || item.query === undefined) continue;
+
+    const descriptor = parseQueryDescriptor(item.query);
+    const selection = await resolveCompiled(ctx, compileDescriptor(descriptor), first ? page : undefined);
+    const forSnapshot = lastSnapshotId === null ? null : snapshotById.get(lastSnapshotId) ?? null;
+    const forValue = forSnapshot === null ? null : str(forSnapshot, 'value');
+    const forUnit = forSnapshot === null ? null : String(forSnapshot.unit);
+
+    records.push({
+      itemId: item.id,
+      label: item.label,
+      forSnapshotId: lastSnapshotId,
+      forLabel: forSnapshot === null ? null : metricLabelOf(String(forSnapshot.metric_key)).label,
+      forValue,
+      selection,
+      // Only money reconciles by addition. A ratio, a count or a number of days is not the sum of
+      // the rows behind it, and printing "does not reconcile" against one would be a false alarm.
+      reconciles: forUnit === 'money' ? sameMoney(selection.total, forValue) : null,
+      reconciliation: reconciliationSentence({
+        shown: selection.rows.length,
+        count: selection.count,
+        total: selection.total,
+        figure: forValue,
+        reconciles: forUnit === 'money' ? sameMoney(selection.total, forValue) : null,
+        currency: forSnapshot === null ? null : str(forSnapshot, 'currency'),
+      }),
+    });
+    first = false;
+  }
+
+  const pinned = bundle.items.filter(
+    (item) => item.itemType !== 'query'
+      && item.itemType !== 'metric_snapshot'
+      && item.itemType !== 'calculation_run',
+  );
+
+  return { bundle, metric, components, records, pinned };
+}
+
+/**
+ * The snapshot a "Why?" link means (`UX_ARCHITECTURE.md` §4).
+ *
+ * Every figure on every screen links with the metric key and the period it was shown for, not with
+ * a snapshot id — because the card was rendered from `metric_current`, and pinning the id into a
+ * href would hand out a link that goes stale the next time the figures are recalculated. The
+ * indirection is deliberate: the link means "the evidence for this figure, this month", and it is
+ * resolved against the current pointer at the moment it is followed.
+ */
+export async function currentSnapshotId(
+  ctx: AccessContext,
+  input: {
+    readonly metricKey: string;
+    readonly periodId: string;
+    readonly dimensionType?: string;
+    readonly dimensionId?: string | null;
+  },
+): Promise<string | null> {
+  const orgId = requireOrgId(ctx);
+  let q = ctx.db
+    .from('metric_current')
+    .select('snapshot_id')
+    .eq('organization_id', orgId)
+    .eq('period_id', input.periodId)
+    .eq('metric_key', input.metricKey)
+    .eq('dimension_type', input.dimensionType ?? 'none');
+  q = input.dimensionId ? q.eq('dimension_id', input.dimensionId) : q.is('dimension_id', null);
+
+  const { data, error } = await q.maybeSingle();
+  if (error) throw toMotionError(error);
+  return (data as { snapshot_id?: string } | null)?.snapshot_id ?? null;
+}

@@ -118,6 +118,15 @@ export type EvidenceQuery =
  * the two is how a dashboard tells somebody their revenue was nil when in truth nobody uploaded it.
  */
 export interface MetricResult {
+  /**
+   * The id this snapshot will be written with, minted by the run BEFORE composition (ADR-059).
+   *
+   * A derived metric's `evidenceQuery` names its inputs by snapshot id, and it is composed while the
+   * figures are being worked out — before any row exists. Letting the database generate the ids
+   * meant every derived metric was written saying "I came from revenue and cost of sales" and
+   * unable to say which ones, which is the entire content of drawer levels 2 and 3.
+   */
+  readonly id?: string;
   readonly key: string;
   readonly value: string | null;
   readonly unit: MetricUnit;

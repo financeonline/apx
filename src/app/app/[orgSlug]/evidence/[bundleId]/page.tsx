@@ -1,0 +1,286 @@
+import Link from 'next/link';
+import { notFound } from 'next/navigation';
+import { can } from '@/core/permissions';
+import { formatValue, missingReasonText, statusFor, BASIS_TEXT } from '@/modules/dashboard';
+import type { AssuranceLevel, DataQuality } from '@/modules/financial-engine';
+import { getDocumentReference, loadEvidenceDrawer, type DocumentReference } from '@/modules/evidence';
+import { getAccessContext } from '@/modules/tenancy';
+import { StatusBadgeView } from '@/components/dashboard';
+import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
+import { TBody, TD, THead, TR, TableWrap } from '@/components/ui/table';
+import { DocumentPanel } from './document-panel';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * The Evidence Drawer, as a page (EVIDENCE_MODEL.md §6; ROUTE_ARCHITECTURE.md §122).
+ *
+ * §6's five levels — Statement, Metric, Calculation, Records, Document — rendered as sections a
+ * reader descends. As a PAGE rather than an overlay because the route contract calls it
+ * "deep-linkable": a bundle id is the one thing in this product that never changes, so a link to it
+ * is still the same evidence in six months, which is the entire point of the model. On a phone
+ * §6/§402 makes it a full-screen sheet, which this already is.
+ *
+ * Nothing here calculates. Every figure is read from the snapshot that was written when the run
+ * happened, and every row is re-resolved from the descriptor under the reader's own RLS.
+ */
+export default async function EvidenceBundlePage({
+  params,
+  searchParams,
+}: {
+  params: Promise<{ orgSlug: string; bundleId: string }>;
+  searchParams: Promise<{ row?: string }>;
+}) {
+  const { orgSlug, bundleId } = await params;
+  const { row } = await searchParams;
+
+  const ctx = await getAccessContext(orgSlug);
+  if (!can(ctx, 'financials.view')) notFound();
+
+  // Cross-organisation or invented: NOT FOUND, never FORBIDDEN (§8.4, isolation case 3).
+  const view = await loadEvidenceDrawer(ctx, bundleId).catch(() => null);
+  if (view === null) notFound();
+
+  const document = await documentFor(ctx, row);
+  const metric = view.metric;
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Evidence"
+        title={metric ? metric.label : 'Where this came from'}
+      />
+
+      <div className="mt-8 flex flex-col gap-6">
+        {/* Level 0 — Statement: the claim, its assurance, and the run it was true as of. */}
+        <Card>
+          <CardBody>
+            <div className="flex flex-wrap items-center gap-2">
+              <h2 className="font-serif text-lg text-ink">What this figure rests on</h2>
+              {view.bundle.assurance === null ? null : (
+                <Badge tone="neutral">{assuranceLabel(view.bundle.assurance)}</Badge>
+              )}
+            </div>
+            <p className="mt-2 text-sm text-ink-muted">
+              {view.bundle.asOf === null
+                ? 'Worked out from your records.'
+                : `Worked out on ${formatInstant(view.bundle.asOf.finishedAt)} by version ${view.bundle.asOf.engineVersion} of the calculation engine. Everything below is what it read at that moment.`}
+            </p>
+          </CardBody>
+        </Card>
+
+        {/* Level 1 — Metric: the figure itself, its month, where it came from, what is missing. */}
+        {metric === null ? null : (
+          <Card>
+            <CardBody>
+              <h2 className="font-serif text-lg text-ink">The figure</h2>
+              <div className="mt-3 flex flex-wrap items-baseline gap-3">
+                <p className="font-serif text-3xl text-ink">
+                  {formatValue(
+                    { value: metric.value, unit: metric.unit, currency: metric.currency },
+                    { showMinorUnits: true },
+                  )}
+                </p>
+                <StatusBadgeView
+                  status={statusFor({
+                    value: metric.value,
+                    assurance: metric.assurance as AssuranceLevel,
+                    dataQuality: quality(metric.dataQuality),
+                  })}
+                />
+              </div>
+              <p className="mt-1 text-sm text-ink-muted">
+                {metric.label}
+                {metric.periodLabel ? `, ${metric.periodLabel}` : ''}
+                {BASIS_TEXT[metric.basis] ? ` — ${BASIS_TEXT[metric.basis]!.toLowerCase()}` : ''}
+              </p>
+              {metric.description ? (
+                <p className="mt-2 text-sm text-ink-muted">{metric.description}</p>
+              ) : null}
+
+              {/* §8.2: an old bundle keeps its own numbers, and says so rather than looking wrong. */}
+              {metric.isCurrent ? null : (
+                <p className="mt-3 rounded-md bg-warn-soft px-3 py-2 text-sm text-ink">
+                  This figure has since been recalculated — the current value is{' '}
+                  {formatValue(
+                    { value: metric.currentValue, unit: metric.unit, currency: metric.currency },
+                    { showMinorUnits: true },
+                  )}
+                  . What you see here is what was shown at the time.
+                </p>
+              )}
+
+              {warningsOf(metric.dataQuality).length === 0 ? null : (
+                <ul className="mt-3 list-disc space-y-1 pl-5 text-sm text-ink-muted">
+                  {warningsOf(metric.dataQuality).map((warning) => (
+                    <li key={warning}>{missingReasonText([warning])}</li>
+                  ))}
+                </ul>
+              )}
+            </CardBody>
+          </Card>
+        )}
+
+        {/* Level 2 — Calculation: the parts this figure was worked out from, each openable. */}
+        {view.components.length === 0 ? null : (
+          <Card>
+            <CardBody>
+              <h2 className="font-serif text-lg text-ink">How it was worked out</h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                {metric?.description ?? 'This figure is worked out from the figures below.'}
+              </p>
+              <ul className="mt-4 space-y-3">
+                {view.components.map((component) => (
+                  <li key={component.snapshotId ?? component.name} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-3 last:border-0">
+                    <span className="text-sm text-ink">{component.label}</span>
+                    <span className="flex items-baseline gap-3">
+                      <span className="font-serif text-base text-ink">
+                        {formatValue(
+                          { value: component.value, unit: component.unit ?? 'money', currency: component.currency },
+                          { showMinorUnits: true },
+                        )}
+                      </span>
+                      {component.snapshotId === null ? null : (
+                        <Link
+                          href={`/app/${orgSlug}/evidence?snapshot=${component.snapshotId}`}
+                          className="text-sm text-accent underline underline-offset-2"
+                        >
+                          Open
+                          <span className="sr-only"> the evidence behind {component.label}</span>
+                        </Link>
+                      )}
+                    </span>
+                  </li>
+                ))}
+              </ul>
+            </CardBody>
+          </Card>
+        )}
+
+        {/* Level 3 — Records: the rows themselves, with the reconciliation that proves the figure. */}
+        {view.records.map((block) => (
+          <Card key={block.itemId}>
+            <CardBody>
+              <h2 className="font-serif text-lg text-ink">{block.label}</h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                {block.reconciliation}
+              </p>
+
+              <div className="mt-4">
+                <TableWrap>
+                  <table className="w-full text-sm">
+                    <THead columns={['Date', 'Description', 'Amount', 'Status', 'Source']} />
+                    <TBody>
+                      {block.selection.rows.map((record) => (
+                        <TR key={record.id}>
+                          <TD>{record.date ?? '—'}</TD>
+                          <TD>{record.description ?? '—'}</TD>
+                          <TD className="tabular-nums">{record.amount ?? '—'}</TD>
+                          <TD>
+                            {record.superseded ? (
+                              <Badge tone="warn">Replaced</Badge>
+                            ) : record.recordStatus === 'rejected' ? (
+                              <Badge tone="danger">Rejected</Badge>
+                            ) : (
+                              <span className="text-ink-faint">—</span>
+                            )}
+                          </TD>
+                          <TD>
+                            <Link
+                              href={`/app/${orgSlug}/evidence/${bundleId}?row=${record.table}:${record.id}`}
+                              className="text-accent underline underline-offset-2"
+                            >
+                              Source
+                              <span className="sr-only"> document for this row</span>
+                            </Link>
+                          </TD>
+                        </TR>
+                      ))}
+                    </TBody>
+                  </table>
+                </TableWrap>
+              </div>
+            </CardBody>
+          </Card>
+        ))}
+
+        {/* Level 4 — Document: only once a reader has picked a row to descend from. */}
+        <Card>
+          <CardBody>
+            <h2 className="font-serif text-lg text-ink">The source document</h2>
+            {document === null ? (
+              <p className="mt-1 text-sm text-ink-muted">
+                Choose <span className="text-ink">Source</span> on any row above to see the file it
+                was read from.
+              </p>
+            ) : (
+              <div className="mt-3">
+                <DocumentPanel
+                  orgSlug={orgSlug}
+                  documentId={document.documentId}
+                  filename={document.filename}
+                  where={whereInFile(document)}
+                  locked={document.locked}
+                />
+              </div>
+            )}
+          </CardBody>
+        </Card>
+      </div>
+    </>
+  );
+}
+
+/** The row a reader descended from, as `<table>:<id>`; absent until they pick one. */
+async function documentFor(
+  ctx: Awaited<ReturnType<typeof getAccessContext>>,
+  row: string | undefined,
+): Promise<DocumentReference | null> {
+  if (!row) return null;
+  const separator = row.indexOf(':');
+  if (separator <= 0) return null;
+  const table = row.slice(0, separator);
+  const id = row.slice(separator + 1);
+  // A row with no document behind it is a real state (§5.1) — a restored or merged record — and
+  // reads as "no source document", not as an error page.
+  return getDocumentReference(ctx, { table, id }).catch(() => null);
+}
+
+function whereInFile(reference: DocumentReference): string | null {
+  const parts: string[] = [];
+  if (reference.sheet !== null) parts.push(`sheet ${reference.sheet}`);
+  if (reference.page !== null) parts.push(`page ${reference.page}`);
+  if (reference.row !== null) parts.push(`line ${reference.row}`);
+  return parts.length === 0 ? null : parts.join(', ');
+}
+
+function quality(raw: Record<string, unknown>): DataQuality {
+  return {
+    completeness: typeof raw.completeness === 'number' ? raw.completeness : 1,
+    proxy: raw.proxy === true,
+    warnings: warningsOf(raw),
+    missing: Array.isArray(raw.missing) ? (raw.missing as string[]) : [],
+  } as DataQuality;
+}
+
+function warningsOf(raw: Record<string, unknown>): string[] {
+  return Array.isArray(raw.warnings) ? (raw.warnings as string[]) : [];
+}
+
+/** The §8.1 assurance word, for the statement level's badge. */
+function assuranceLabel(assurance: string): string {
+  switch (assurance) {
+    case 'verified': return 'From your records';
+    case 'calculated': return 'Calculated';
+    case 'estimated': return 'Estimate';
+    default: return 'Please check';
+  }
+}
+
+function formatInstant(iso: string | null): string {
+  if (iso === null) return 'an earlier run';
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime())
+    ? 'an earlier run'
+    : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+}

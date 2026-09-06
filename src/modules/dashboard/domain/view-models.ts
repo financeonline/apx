@@ -11,7 +11,8 @@
 
 import { Decimal, formatChange, formatMoney, formatPercent, isPositive, parseDecimalOrNull } from '@/core/money';
 import type { AssuranceLevel, DataQuality, MetricBasis } from '@/modules/financial-engine';
-import { BASIS_TEXT, statusFor, type StatusBadge } from './status';
+import { BASIS_TEXT, labelFor } from '@/modules/financials';
+import { statusFor, type StatusBadge } from './status';
 
 /** One metric as read from `metric_current` joined to its snapshot. */
 export interface SnapshotRow {
@@ -106,38 +107,6 @@ const FAVOURABLE_WHEN_RISING: Readonly<Record<string, boolean>> = {
   expense_by_account: false,
 };
 
-/** The plain and technical labels for the metrics Home shows (§8.1). */
-export const METRIC_LABELS: Readonly<Record<string, { plain: string; technical: string }>> = {
-  revenue: { plain: 'Sales', technical: 'Revenue' },
-  gross_profit: { plain: 'Profit after direct costs', technical: 'Gross profit' },
-  gross_margin: { plain: 'Margin after direct costs', technical: 'Gross margin' },
-  operating_profit: { plain: 'Profit', technical: 'Operating profit — before interest and tax' },
-  net_profit: { plain: 'Profit after interest and tax', technical: 'Net profit' },
-  operating_margin: { plain: 'Profit margin', technical: 'Operating margin' },
-  net_margin: { plain: 'Margin after interest and tax', technical: 'Net margin' },
-  closing_cash: { plain: 'Cash', technical: 'Cash in the bank at the end of the month' },
-  opening_cash: { plain: 'Cash at the start', technical: 'Opening cash' },
-  cash_inflows: { plain: 'Money in', technical: 'Cash inflows' },
-  cash_outflows: { plain: 'Money out', technical: 'Cash outflows' },
-  net_cash_movement: { plain: 'Change in cash', technical: 'Net cash movement' },
-  cash_runway_months: { plain: 'Cash runway', technical: 'Months of cash at the current burn rate' },
-  receivables: { plain: 'Owed to you', technical: 'Receivables' },
-  receivables_overdue: { plain: 'Overdue to you', technical: 'Overdue receivables' },
-  receivables_days: { plain: 'Days to get paid', technical: 'Debtor days' },
-  payables: { plain: 'You owe', technical: 'Payables' },
-  payables_overdue: { plain: 'Overdue by you', technical: 'Overdue payables' },
-  payables_days: { plain: 'Days you take to pay', technical: 'Creditor days' },
-  working_capital: { plain: 'Working capital', technical: 'Current assets less current liabilities' },
-  operating_expenses: { plain: 'Running costs', technical: 'Operating expenses' },
-  cost_of_sales: { plain: 'Direct costs', technical: 'Cost of sales' },
-  customer_concentration_top1: {
-    plain: 'How much you rely on your biggest customer', technical: 'Customer concentration',
-  },
-};
-
-export function labelFor(metricKey: string): { plain: string; technical: string } {
-  return METRIC_LABELS[metricKey] ?? { plain: metricKey, technical: metricKey };
-}
 
 /**
  * Formats a value for display, by unit. Never returns "0" for an absent figure (§4).
@@ -146,6 +115,9 @@ export function labelFor(metricKey: string): { plain: string; technical: string 
  * where an accountant may be reconciling to the penny, and are rounded away on headline cards,
  * where 50p next to twelve thousand pounds is noise.
  */
+/** Re-exported, not restated: the canonical §8.1 table lives in `modules/financials` (ADR-037). */
+export { BASIS_TEXT, METRIC_LABELS, labelFor } from '@/modules/financials';
+
 export function formatValue(
   row: Pick<SnapshotRow, 'value' | 'unit' | 'currency'>,
   options: { readonly showMinorUnits?: boolean } = {},

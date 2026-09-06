@@ -125,7 +125,7 @@ export function fetchMetricSnapshot(
   return one(
     db,
     'metric_snapshots',
-    'id,organization_id,calculation_run_id,period_id,metric_key,dimension_type,dimension_id,value,unit,currency,basis,assurance_level,components,evidence_query',
+    'id,organization_id,calculation_run_id,period_id,metric_key,dimension_type,dimension_id,value,unit,currency,basis,assurance_level,data_quality,components,evidence_query',
     orgId,
     snapshotId,
   );

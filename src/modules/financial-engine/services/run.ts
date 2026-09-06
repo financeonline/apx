@@ -65,6 +65,8 @@ export type PeriodComputer = (input: {
 
 function serialiseSnapshot(periodId: string, result: MetricResult): Record<string, unknown> {
   return {
+    // Null when the computer did not mint one; `finish_chunk` then falls back to gen_random_uuid().
+    id: result.id ?? null,
     period_id: periodId,
     metric_key: result.key,
     dimension_type: result.dimensionType,
