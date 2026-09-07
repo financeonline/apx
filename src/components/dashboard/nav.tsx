@@ -61,7 +61,7 @@ const PRIMARY: readonly NavItem[] = [
   {
     label: 'Reports', path: 'reports', permission: 'reports.view',
     hint: 'The Monthly Management Report',
-    built: false,
+    built: true,
   },
   {
     label: 'Analyst', path: 'analyst', permission: 'ai.use',

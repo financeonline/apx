@@ -36,6 +36,7 @@ export {
   getAction,
   getActionsSummary,
   listActions,
+  listOpenActionsForJob,
   ownerLabel,
   setStatus,
   updateAction,

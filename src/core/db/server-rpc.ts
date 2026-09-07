@@ -92,6 +92,40 @@ export async function throttle(
   if (error) throw toMotionError(error, actor.requestId);
 }
 
+/**
+ * Records a rendered report (SERVICE_ARCHITECTURE.md §4.14, ADR-038.7).
+ *
+ * The object is written to `{org}/{period}/{file}.pdf` BEFORE this is called (ADR-043.4), so a row
+ * never names an object that is not there; a crash between the two leaves an orphan object, which
+ * `storage.cleanup_orphans` removes, rather than a download the product believes in and Storage
+ * 404s.
+ */
+export async function recordReportFile(
+  actor: ServerRpcActor | null,
+  input: {
+    organizationId: string;
+    periodId: string;
+    jobId: string | null;
+    fileId: string;
+    sha256: Uint8Array;
+    byteSize: number;
+  },
+): Promise<string> {
+  const { data, error } = await serverClient()
+    .schema('api_server')
+    .rpc('record_report_file', {
+      p_actor: actor?.userId ?? null,
+      p_org: input.organizationId,
+      p_period: input.periodId,
+      p_job: input.jobId,
+      p_file: input.fileId,
+      p_sha256: `\\x${Buffer.from(input.sha256).toString('hex')}`,
+      p_bytes: input.byteSize,
+    });
+  if (error) throw toMotionError(error, actor?.requestId);
+  return data as string;
+}
+
 /** Server-originated job enqueue (ADR-043.3). User-intent jobs go through api.enqueue_job. */
 export async function enqueueServerJob(
   actor: ServerRpcActor | null,

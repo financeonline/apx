@@ -112,8 +112,75 @@ function formatDate(iso: string | null): string | null {
   return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }
 
-/** The basis and freshness line (§4 level 1). */
-function basisLine(cards: readonly MetricCardView[], lastData: string | null, period: PeriodLabel): string {
+/**
+ * The headline cards §4 fixes, for one month.
+ *
+ * Extracted so Home and the Monthly Management Report build them from the SAME code rather than
+ * from two readings of the same rule. `ARCHITECTURE.md` names metric drift — "the same metric
+ * computed differently in two places (UI, report, AI)" — as a top risk, and a report that decided
+ * for itself whether to show gross profit, or which month to compare against, would be that risk
+ * arriving by the back door. Neither caller computes anything; both read `metric_current`.
+ */
+export function buildHeadlineCards(input: {
+  readonly snapshots: readonly SnapshotRow[];
+  readonly period: PeriodLabel;
+  readonly previousLabel: string | null;
+  readonly orgSlug: string;
+}): {
+  cards: MetricCardView[];
+  hidesGrossProfit: boolean;
+  bankOnly: boolean;
+  /** Distinct from `bankOnly`: an organisation can lack a P&L source and have no cash data either. */
+  noPnlSource: boolean;
+} {
+  const byKey = index(input.snapshots);
+  const period = input.period;
+  const previous = input.previousLabel === null ? null : { label: input.previousLabel };
+  const orgSlug = input.orgSlug;
+
+  // CD-05: an organisation with no direct-cost accounts never sees a gross-profit card, because
+  // "profit after direct costs" equal to sales would read as a 100% margin.
+  const grossProfit = byKey.get('gross_profit');
+  const hidesGrossProfit = !grossProfit
+    || grossProfit.dataQuality.missing.includes('no_cost_of_sales_accounts');
+
+  // The bank-only variant (ADR-035): the organisation has bank data and NO P&L source at all.
+  //
+  // The test is deliberately about the organisation rather than the month: a business whose March
+  // ledger simply has not been uploaded yet should still see its ordinary Home with the missing
+  // figures dashed, not be told it is a bank-only business. So the variant needs cash figures
+  // present AND revenue either absent or explicitly uncovered.
+  const revenue = byKey.get('revenue');
+  const hasCash = byKey.has('cash_inflows') || byKey.has('cash_outflows');
+  const noPnlSource = !revenue || (revenue.value === null && revenue.basis === 'none');
+  const bankOnly = hasCash && noPnlSource;
+
+  const order = bankOnly
+    ? BANK_ONLY_ORDER
+    : HEADLINE_ORDER.filter((key) => key !== 'gross_profit' || !hidesGrossProfit);
+
+  const cards: MetricCardView[] = [];
+  for (const key of order) {
+    const row = byKey.get(key);
+    if (!row) continue;
+
+    const variance = byKey.get(varianceKey(key, 'prev_period')) ?? null;
+
+    cards.push(toMetricCard(row, period, variance, {
+      orgSlug,
+      comparisonLabel: previous?.label ?? 'the previous month',
+      // §4: operating profit carries net profit on a visible second line, never a tooltip.
+      secondary: key === 'operating_profit'
+        ? { label: labelFor('net_profit').plain, row: byKey.get('net_profit') ?? null }
+        : undefined,
+    }));
+  }
+
+  return { cards, hidesGrossProfit, bankOnly, noPnlSource };
+}
+
+/** The basis and freshness line (§4 level 1). Shared with the report, which prints it too. */
+export function basisLine(cards: readonly MetricCardView[], lastData: string | null, period: PeriodLabel): string {
   const sources = [...new Set(cards.map((c) => c.basisText).filter(Boolean))];
   const parts: string[] = [];
   if (sources.length > 0) parts.push(`Based on ${sources.join(' and ').toLowerCase()}`);
@@ -175,43 +242,9 @@ export async function loadHome(
   const snapshots = await repo.loadPeriodSnapshots(db, orgId, period.id, requestId);
   const byKey = index(snapshots);
 
-  // CD-05: an organisation with no direct-cost accounts never sees a gross-profit card, because
-  // "profit after direct costs" equal to sales would read as a 100% margin.
-  const grossProfit = byKey.get('gross_profit');
-  const hidesGrossProfit = !grossProfit
-    || grossProfit.dataQuality.missing.includes('no_cost_of_sales_accounts');
-
-  // The bank-only variant (ADR-035): the organisation has bank data and NO P&L source at all.
-  //
-  // The test is deliberately about the organisation rather than the month: a business whose March
-  // ledger simply has not been uploaded yet should still see its ordinary Home with the missing
-  // figures dashed, not be told it is a bank-only business. So the variant needs cash figures
-  // present AND revenue either absent or explicitly uncovered.
-  const revenue = byKey.get('revenue');
-  const hasCash = byKey.has('cash_inflows') || byKey.has('cash_outflows');
-  const noPnlSource = !revenue || (revenue.value === null && revenue.basis === 'none');
-  const bankOnly = hasCash && noPnlSource;
-
-  const order = bankOnly
-    ? BANK_ONLY_ORDER
-    : HEADLINE_ORDER.filter((key) => key !== 'gross_profit' || !hidesGrossProfit);
-
-  const cards: MetricCardView[] = [];
-  for (const key of order) {
-    const row = byKey.get(key);
-    if (!row) continue;
-
-    const variance = byKey.get(varianceKey(key, 'prev_period')) ?? null;
-
-    cards.push(toMetricCard(row, period, variance, {
-      orgSlug,
-      comparisonLabel: previous?.label ?? 'the previous month',
-      // §4: operating profit carries net profit on a visible second line, never a tooltip.
-      secondary: key === 'operating_profit'
-        ? { label: labelFor('net_profit').plain, row: byKey.get('net_profit') ?? null }
-        : undefined,
-    }));
-  }
+  const { cards, hidesGrossProfit, bankOnly, noPnlSource } = buildHeadlineCards({
+    snapshots, period, previousLabel: previous?.label ?? null, orgSlug,
+  });
 
   const partial = partialPeriod(periods, withData);
   let partialLine: PartialMonthLine | null = null;

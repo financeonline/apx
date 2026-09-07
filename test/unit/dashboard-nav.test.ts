@@ -46,10 +46,10 @@ describe('what each role sees in the navigation', () => {
    * is unchanged and still asserted in full; this is about not offering a customer a link to a 404.
    */
   it('links an owner only to sections that exist', () => {
-    // Actions joined the list when the Action Centre was built (plan Phase 12); Reports and
-    // Analyst are still `built: false` and so are still absent for everybody.
+    // Actions and Reports joined the list as their phases landed (plan Phases 12 and 13); Analyst
+    // is still `built: false` and so is still absent for everybody.
     expect(visibleNavItems(contextFor('owner')))
-      .toEqual(['Home', 'Insights', 'Money', 'Customers', 'Actions']);
+      .toEqual(['Home', 'Insights', 'Money', 'Customers', 'Actions', 'Reports']);
   });
 
   it('never links a section that is not built', () => {

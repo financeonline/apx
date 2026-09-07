@@ -42,6 +42,8 @@ export {
 } from './data/repository';
 
 export {
+  basisLine,
+  buildHeadlineCards,
   latestCompletePeriod,
   loadHealthTrend,
   loadHome,

@@ -223,3 +223,18 @@ export function ownerLabel(action: Action, viewerUserId: string): string {
   if (action.ownerUserId === viewerUserId) return 'You';
   return action.ownerName ?? 'Someone here';
 }
+
+/**
+ * The open actions of an organisation, for a caller that holds a scoped client rather than a user
+ * context — the `report.render` job (SERVICE_ARCHITECTURE.md §4.14 "Depends: … actions").
+ *
+ * No `assertCan`, deliberately and narrowly: the job runs work a user already asked for and that
+ * `api.enqueue_job` authorised with `reports.generate` at the moment they asked. It is not reachable
+ * from a request path — nothing exports a scoped client to one.
+ */
+export async function listOpenActionsForJob(
+  db: Parameters<typeof repo.listActions>[0], orgId: string,
+): Promise<Action[]> {
+  const actions = await repo.listActions(db, orgId, { status: ['open', 'in_progress'] }, false);
+  return [...actions].sort(byUrgency);
+}

@@ -34,6 +34,7 @@ const ROUTES = [
   { name: 'Profit and loss', path: () => `/app/${slug()}/money/profit-and-loss` },
   { name: 'Customers', path: () => `/app/${slug()}/customers` },
   { name: 'Action Centre', path: () => `/app/${slug()}/actions` },
+  { name: 'Reports', path: () => `/app/${slug()}/reports` },
   { name: 'Accounts', path: () => `/app/${slug()}/data/accounts` },
   { name: 'Imports', path: () => `/app/${slug()}/data/imports` },
   { name: 'Add data', path: () => `/app/${slug()}/data/imports/new` },

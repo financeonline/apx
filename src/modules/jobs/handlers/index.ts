@@ -9,6 +9,7 @@ import type { ClaimedJob, JobOutcome } from '../domain/types';
 import { runCalculationJob } from './calculation-run';
 import { evaluateAlertsJob } from './alerts-evaluate';
 import { commitLargeBatchJob } from './import-commit-large';
+import { runReportRenderJob } from './report-render';
 
 /**
  * Wiring the queue (ADR-013, IMPLEMENTATION_PLAN.md — "handlers arrive with the phases that own
@@ -29,6 +30,7 @@ const HANDLERS: ReadonlyArray<readonly [ClaimedJob['jobType'], (job: ClaimedJob,
   ['calculation.run', runCalculationJob],
   ['alerts.evaluate', evaluateAlertsJob],
   ['import.commit_large', commitLargeBatchJob],
+  ['report.render', runReportRenderJob],
 ];
 
 let registered = false;
@@ -54,5 +56,6 @@ export const serverCalls = {
 };
 
 export { runCalculationJob } from './calculation-run';
+export { runReportRenderJob } from './report-render';
 export { evaluateAlertsJob } from './alerts-evaluate';
 export { commitLargeBatchJob } from './import-commit-large';

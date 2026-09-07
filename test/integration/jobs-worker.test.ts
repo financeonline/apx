@@ -132,9 +132,15 @@ describe('the worker drains the queue', () => {
   });
 
   it('fails rather than silently succeeding a job type with no handler', async () => {
-    // A job type whose handler arrives in a later phase must not disappear: a quietly-succeeded
-    // calculation would leave the dashboard stale with nothing to show for it.
-    const jobId = enqueue(orgId, 'report.render');
+    /*
+     * A job type whose handler arrives in a later phase must not disappear: a quietly-succeeded
+     * calculation would leave the dashboard stale with nothing to show for it.
+     *
+     * `ai.eval` because it is genuinely unbuilt (Phase 11's harness). This case used to name
+     * `report.render`, which stopped being an example the day Phase 13 registered it — a test whose
+     * premise a later phase can delete without failing is a test that quietly stops checking.
+     */
+    const jobId = enqueue(orgId, 'ai.eval');
 
     await drainJobs(5);
 
