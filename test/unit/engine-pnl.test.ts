@@ -66,6 +66,7 @@ const CONTEXT: EngineContext = {
     taxableCategories: ['revenue', 'cost_of_sales', 'operating_expense', 'marketing'],
   },
   accounts: [],
+  costOfSalesEverUsed: true,
   counterparties: [],
   bankAccounts: [],
   periods: [PERIOD],
@@ -116,6 +117,10 @@ function scenario(
     basis: LEDGER_BASIS,
     currency: 'GBP',
     accounts,
+    // Derived from the scenario: an organisation that posts cost of sales in the month plainly
+    // tracks it. The cases that matter — a chart with the system account only, and a month that is
+    // simply quiet — set this explicitly (§3.1, ADR-063).
+    costOfSalesEverUsed: amounts.cost_of_sales !== undefined,
     accountAmounts,
     uncategorised: { absoluteAmount: '0.00', totalAbsoluteAmount: totalAbs(accountAmounts) },
     ...over,
@@ -391,21 +396,46 @@ describe('an organization with no cost-of-sales account at all (CD-05, §3.1)', 
     expect(cm.dataQuality.warnings).toContain('no_cost_of_sales');
   });
 
-  it('counts a seeded system account only once it has actually been used', () => {
+  it('counts a seeded system account only once the organisation has ever used it', () => {
     const withSystemOnly: PnlInput = {
       ...base,
       accounts: [...base.accounts, accountRef('acc-cos-system', 'cost_of_sales', true)],
+      costOfSalesEverUsed: false,
     };
     expect(pick(run(withSystemOnly), 'cost_of_sales').value).toBeNull();
 
     const systemUsed: PnlInput = {
       ...withSystemOnly,
+      costOfSalesEverUsed: true,
       accountAmounts: [...base.accountAmounts, {
         accountId: 'acc-cos-system', category: 'cost_of_sales', amount: '1200.00', rowCount: 3,
       }],
     };
     expect(pick(run(systemUsed), 'cost_of_sales').value).toBe('1200.00');
     expect(pick(run(systemUsed), 'gross_margin').value).toBe('0.880000');
+  });
+
+  /*
+   * The regression this rule was rewritten for (ADR-063).
+   *
+   * A shop that bought no stock in August has not stopped tracking cost of sales — it had a quiet
+   * month. Asking the question of the period made the engine say the opposite: cost of sales
+   * unknown, gross profit silently equal to revenue with a warning, and gross margin "n/a" for a
+   * month it could state exactly. CD-05's exception describes a chart, not a month.
+   */
+  it('reports a quiet month as zero, not as an organisation that does not track cost of sales', () => {
+    const quietMonth: PnlInput = {
+      ...base,
+      accounts: [...base.accounts, accountRef('acc-cos-system', 'cost_of_sales', true)],
+      costOfSalesEverUsed: true,
+    };
+    const results = run(quietMonth);
+
+    expect(pick(results, 'cost_of_sales').value, 'a known zero, not unknown').toBe('0.00');
+    expect(pick(results, 'cost_of_sales').dataQuality.missing).not.toContain('no_cost_of_sales_accounts');
+    expect(pick(results, 'gross_profit').value).toBe('10000.00');
+    expect(pick(results, 'gross_profit').dataQuality.warnings).not.toContain('no_cost_of_sales');
+    expect(pick(results, 'gross_margin').value, 'and a margin it can state exactly').toBe('1.000000');
   });
 });
 
@@ -786,6 +816,7 @@ function generateCase(seed: number): GeneratedCase {
       basis: LEDGER_BASIS,
       currency: 'GBP',
       accounts,
+      costOfSalesEverUsed: true,
       accountAmounts,
       uncategorised: { absoluteAmount: '0.00', totalAbsoluteAmount: totalAbs(accountAmounts) },
     },

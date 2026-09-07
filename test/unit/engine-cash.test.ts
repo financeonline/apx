@@ -95,6 +95,7 @@ function context(overrides: Partial<EngineContext> = {}): EngineContext {
       taxableCategories: [],
     },
     accounts: [],
+    costOfSalesEverUsed: true,
     counterparties: [],
     bankAccounts: [bankAccount(CURRENT, 'current'), bankAccount(SAVINGS, 'savings')],
     periods: [],

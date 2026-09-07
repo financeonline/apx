@@ -150,6 +150,10 @@ export async function runCalculation(
   // The first-period gate (§8.1) needs this once per run, not once per chunk.
   const firstPeriodWithDataId = await repo.loadFirstPeriodWithData(scoped, orgId, allPeriods);
 
+  // §3.1's "never used" is a fact about the ORGANISATION, so it is resolved once here rather than
+  // re-derived per period from that period's rows (ADR-063).
+  const costOfSalesEverUsed = await repo.loadCostOfSalesEverUsed(scoped, orgId);
+
   const currentPeriod = allPeriods.find(
     (p) => p.periodStart <= request.asOf && p.periodEnd >= request.asOf,
   );
@@ -263,6 +267,7 @@ export async function runCalculation(
         engineVersion: VERSION,
         settings,
         accounts,
+        costOfSalesEverUsed,
         counterparties,
         bankAccounts,
         periods: window,

@@ -275,6 +275,13 @@ export interface EngineContext {
   readonly engineVersion: string;
   readonly settings: OrganizationSettings;
   readonly accounts: readonly AccountRef[];
+  /**
+   * Whether the organisation has EVER posted to a cost-of-sales account (§3.1's "never used").
+   *
+   * An organisation-level fact, deliberately: asking it of the period being computed made a quiet
+   * month say the business does not track cost of sales at all (ADR-063).
+   */
+  readonly costOfSalesEverUsed: boolean;
   readonly counterparties: readonly CounterpartyRef[];
   readonly bankAccounts: readonly BankAccountRef[];
   readonly periods: readonly PeriodRef[];

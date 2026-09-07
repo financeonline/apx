@@ -203,6 +203,7 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
     basis: pnlBasis,
     currency: context.settings.baseCurrency,
     accounts: context.accounts,
+    costOfSalesEverUsed: context.costOfSalesEverUsed,
     accountAmounts: pnlSource
       ? accountAmounts(cells, period.id, pnlSource, context.accounts)
       : [],

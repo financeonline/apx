@@ -59,7 +59,7 @@ export async function evaluateAlertsJob(
     calculationRunId: runId,
     periods,
     windowPeriodIds: window.map((p) => p.id),
-    aggregatedAt: run.finishedAt ?? run.startedAt,
+    aggregatedAt: run.aggregatedAt,
     currency: settings.currency,
     firstPeriodWithDataId,
     // The ONE clock read in the alert engine, and it exists only for the ninety-day dismissal
@@ -75,24 +75,49 @@ interface RunRow {
   period_to: string;
   started_at: string;
   finished_at: string | null;
+  chunks: Array<{ aggregated_at?: string | null }> | null;
 }
 
 async function loadRun(
   db: SupabaseClient, orgId: string, runId: string,
-): Promise<{ periodFrom: string; periodTo: string; startedAt: string; finishedAt: string | null } | null> {
+): Promise<{ periodFrom: string; periodTo: string; aggregatedAt: string } | null> {
   const { data } = await db
     .from('calculation_runs')
-    .select('period_from, period_to, started_at, finished_at')
+    .select('period_from, period_to, started_at, finished_at, chunks')
     .eq('organization_id', orgId)
     .eq('id', runId)
     .maybeSingle();
 
   const row = data as RunRow | null;
-  return row === null ? null : {
+  if (row === null) return null;
+
+  /*
+   * The instant the alert pass reads records at: the EARLIEST `aggregated_at` of this run's chunks
+   * (§8.3, ADR-063).
+   *
+   * It used to be `finished_at ?? started_at`, and `finished_at` is strictly after every chunk
+   * aggregated — so a row committed while the run was in flight was invisible to every snapshot the
+   * run wrote and visible to the rules judging them. An alert would then fire on a transaction the
+   * figure it cites does not contain, which is the one thing an alert must never do: §8.3 evaluates
+   * the rules against the run's own view of the data.
+   *
+   * The earliest chunk instant is the only single value that cannot admit such a row, because
+   * anything visible then was visible to every later chunk as well. Where a run spans several chunks
+   * this is conservative for the later ones — a rule may miss a row a later chunk did see — and
+   * that asymmetry is deliberate: a missed alert is a smaller failure than one that cites a figure
+   * contradicting it.
+   */
+  const instants = (row.chunks ?? [])
+    .map((chunk) => chunk.aggregated_at)
+    .filter((instant): instant is string => typeof instant === 'string' && instant !== '')
+    .sort();
+
+  return {
     periodFrom: row.period_from,
     periodTo: row.period_to,
-    startedAt: row.started_at,
-    finishedAt: row.finished_at,
+    // A run with no recorded chunk aggregated nothing; `started_at` is then the only honest answer,
+    // and it is the same clock (ADR-063).
+    aggregatedAt: instants[0] ?? row.started_at,
   };
 }
 

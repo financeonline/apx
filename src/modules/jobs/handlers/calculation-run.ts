@@ -59,7 +59,8 @@ export function composeWithIds(input: Parameters<typeof composePeriod>[0]): read
 
   return composePeriod({
     ...input,
-    resolveSnapshotId: (key, dimensionId) => ids.get(snapshotKey(key, dimensionId, null)) ?? null,
+    resolveSnapshotId: (key, dimensionId, dimensionKey) =>
+      ids.get(snapshotKey(key, dimensionId, dimensionKey ?? null)) ?? null,
   }).map((result) => {
     const id = ids.get(snapshotKey(result.key, result.dimensionId, result.dimensionKey ?? null));
     return id === undefined ? result : { ...result, id };

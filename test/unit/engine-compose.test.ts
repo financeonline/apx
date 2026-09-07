@@ -51,6 +51,7 @@ const context = (over: Partial<EngineContext> = {}): EngineContext => ({
     vatRegistered: false, defaultVatRate: null,
     taxableCategories: ['revenue', 'cost_of_sales', 'operating_expense', 'marketing'],
   },
+  costOfSalesEverUsed: true,
   accounts: ACCOUNTS,
   counterparties: [],
   bankAccounts: [],

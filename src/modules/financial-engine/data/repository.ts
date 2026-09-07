@@ -252,6 +252,49 @@ export interface FingerprintSources {
 }
 
 /**
+ * Whether this organisation has EVER posted to a cost-of-sales account (§3.1, CD-05).
+ *
+ * §3.1 words the test as "system account only, never used", and *never* is the operative word. The
+ * engine used to answer it from the period being computed, which turns a quiet month into a
+ * statement about the business: a shop that bought no stock in August was told it does not track
+ * cost of sales at all, so `cost_of_sales` went NULL, `gross_profit` silently became revenue with a
+ * `no_cost_of_sales` warning, and `gross_margin` showed "n/a" for a month it could have shown
+ * (ADR-063). CD-05's exception is a property of the CHART, not of the month.
+ *
+ * Asked once per run, over the two sources a P&L is ever computed from.
+ */
+export async function loadCostOfSalesEverUsed(
+  scoped: SupabaseClient, orgId: string,
+): Promise<boolean> {
+  const { data: accounts, error: accountsError } = await scoped
+    .from('accounts')
+    .select('id, is_system')
+    .eq('organization_id', orgId)
+    .eq('standard_category', 'cost_of_sales');
+  if (accountsError) throw toMotionError(accountsError);
+
+  const rows = (accounts ?? []) as Array<{ id: string; is_system: boolean }>;
+  // An account the customer created is the answer on its own: they made it deliberately.
+  if (rows.some((account) => !account.is_system)) return true;
+  if (rows.length === 0) return false;
+
+  const ids = rows.map((account) => account.id);
+  for (const table of ['ledger_entries', 'period_balances'] as const) {
+    const { data, error } = await scoped
+      .from(table)
+      .select('id')
+      .eq('organization_id', orgId)
+      .eq('record_status', 'accepted')
+      .is('superseded_by', null)
+      .in('account_id', ids)
+      .limit(1);
+    if (error) throw toMotionError(error);
+    if ((data ?? []).length > 0) return true;
+  }
+  return false;
+}
+
+/**
  * The organisation's earliest period that carries any accepted record.
  *
  * The first-period gate (§8.1) silences variance-based rules there: the earliest month has nothing

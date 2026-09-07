@@ -66,6 +66,7 @@ const context = (over: Partial<EngineContext> = {}): EngineContext => ({
     vatRegistered: false, defaultVatRate: null,
     taxableCategories: ['revenue', 'cost_of_sales', 'operating_expense', 'marketing'],
   },
+  costOfSalesEverUsed: true,
   accounts: ACCOUNTS,
   counterparties: [],
   bankAccounts: [],
@@ -136,20 +137,36 @@ describe('a metric’s evidence shape follows the chart of accounts, not the run
     expect(find(compose(WHOLE_MONTH), 'cost_of_sales').value).toBe('6000.00');
   });
 
-  it('gives cost of sales no descriptor at all when no cost-of-sales account carried anything', () => {
+  it('gives cost of sales no descriptor at all when the organisation has never used one', () => {
     /*
-     * CD-05, and the reason the intermittent failure was invisible: a seeded SYSTEM account exists
-     * for every category, so "has the organization a cost-of-sales account" is answered by whether
-     * one has ever carried a figure. Lose the row and the figure is not zero, it is unknown — and an
-     * unknown figure has no rows to descend to, so `evidence_query` is null and the drawer's
-     * `component.leaf` is false. Identical seeded data must therefore never lose a row, which is
-     * what the run's aggregation instant decides.
+     * CD-05. A seeded SYSTEM account exists for every category, so "has this organisation a cost of
+     * sales account" cannot be answered from the chart alone — it is answered by whether a
+     * cost-of-sales account has ever carried a figure, which `costOfSalesEverUsed` reports for the
+     * ORGANISATION (ADR-063). An organisation that has never used one has no cost of sales figure at
+     * all: not zero, unknown. An unknown figure has no rows to descend to, so `evidence_query` is
+     * null and the drawer's `component.leaf` is false.
      */
-    const truncated = compose(TRUNCATED_MONTH);
-    expect(find(truncated, 'revenue').value).toBe('20000.00');
-    expect(find(truncated, 'cost_of_sales').value).toBeNull();
-    expect(find(truncated, 'cost_of_sales').dataQuality.missing).toContain('no_cost_of_sales_accounts');
-    expect(evidenceKind(truncated, 'cost_of_sales')).toBe('none');
+    const never = compose(TRUNCATED_MONTH, { costOfSalesEverUsed: false });
+    expect(find(never, 'revenue').value).toBe('20000.00');
+    expect(find(never, 'cost_of_sales').value).toBeNull();
+    expect(find(never, 'cost_of_sales').dataQuality.missing).toContain('no_cost_of_sales_accounts');
+    expect(evidenceKind(never, 'cost_of_sales')).toBe('none');
+  });
+
+  it('still reports a period with no cost-of-sales rows as zero once the organisation has used one', () => {
+    /*
+     * The other half of the same rule, and the reason the intermittent `evidence-drawer` failure was
+     * invisible: this fixture is the WHOLE_MONTH organisation seen through a cutoff that fell
+     * between its first entry and its second, so the cost-of-sales row is simply absent from the
+     * cells. Before ADR-063 the shape was derived per period from that period's rows, so losing the
+     * row turned a quiet month into "does not track cost of sales" — a claim about the business,
+     * published off an accident of timing. The organisation-level flag makes the shape a function of
+     * the chart, as §3.1 promises, and leaves the missing month as what it is: zero.
+     */
+    const quiet = compose(TRUNCATED_MONTH);
+    expect(find(quiet, 'cost_of_sales').value).toBe('0.00');
+    expect(find(quiet, 'cost_of_sales').dataQuality.missing)
+      .not.toContain('no_cost_of_sales_accounts');
   });
 
   it('keeps that shape when the customer adds an account it has not categorised yet', () => {
@@ -227,6 +244,7 @@ const repository = vi.hoisted(() => ({
   loadSettings: vi.fn(),
   loadFingerprintSources: vi.fn(),
   loadFirstPeriodWithData: vi.fn(),
+  loadCostOfSalesEverUsed: vi.fn(),
   loadAggregates: vi.fn(),
   loadTransferLegs: vi.fn(),
   loadCoverageBatches: vi.fn(),
@@ -263,20 +281,29 @@ describe('a run reads the ledger at one instant, and that instant is the databas
       counterpartyMerges: {}, categoryHistoryHeads: {},
     });
     repository.loadFirstPeriodWithData.mockResolvedValue(null);
+    repository.loadCostOfSalesEverUsed.mockResolvedValue(true);
     repository.loadAggregates.mockResolvedValue([]);
     repository.loadTransferLegs.mockResolvedValue([]);
     repository.loadCoverageBatches.mockResolvedValue([]);
   });
 
-  const run = async () => {
+  /**
+   * `instants` is what the DATABASE answers, in order, each time a chunk asks for its pin. The
+   * default hands every chunk the same answer, which is what a quiet ledger looks like; a test that
+   * cares which chunk got which passes distinct ones.
+   */
+  const run = async (instants: readonly string[] = [DB_STARTED_AT]) => {
     const { runCalculation } = await import('@/modules/financial-engine');
     const finishChunk = vi.fn().mockResolvedValue({ written: 0 });
     const scoreHealth = vi.fn().mockResolvedValue({ written: 0 });
+    let asked = 0;
+    const aggregationInstant = vi.fn(async () =>
+      instants[Math.min(asked++, instants.length - 1)]!);
 
     const outcome = await runCalculation({
       scoped: {} as never,
       computePeriod: () => [],
-      aggregationInstant: vi.fn(async () => DB_STARTED_AT),
+      aggregationInstant,
       startRun: vi.fn().mockResolvedValue({ runId: 'run-1', noChange: false }),
       finishChunk,
       finishRun: vi.fn().mockResolvedValue(undefined),
@@ -291,7 +318,7 @@ describe('a run reads the ledger at one instant, and that instant is the databas
       changedPeriodIds: THIRTEEN_MONTHS.map((p) => p.id),
     });
 
-    return { outcome, finishChunk, scoreHealth };
+    return { outcome, finishChunk, scoreHealth, aggregationInstant };
   };
 
   it('aggregates as of the instant the database stamped on the run, never the worker’s own clock', async () => {
@@ -313,19 +340,39 @@ describe('a run reads the ledger at one instant, and that instant is the databas
     }
   });
 
-  it('gives every chunk of one run the same instant, so a row committed mid-run cannot reach one period and not another', async () => {
-    const { finishChunk, scoreHealth } = await run();
+  it('pins each chunk to its own instant, asked for when that chunk starts (ADR-047.7)', async () => {
+    /*
+     * PER CHUNK, not per run. A chunk is its own transaction (§2.4), and ADR-047.7 makes the pin a
+     * property of the chunk precisely so that a long run stays restartable: a run that failed on its
+     * ninth chunk resumes without having to re-read the first eight at an instant that has since
+     * gone stale. EVIDENCE_MODEL.md §11 tests the consequence directly — "a run of three chunks
+     * whose middle chunk aggregated after a supersession resolves chunk-1 descriptors to the
+     * pre-supersession rows and chunk-2 descriptors to the post-supersession rows" — which is only
+     * possible if the chunks hold different instants.
+     *
+     * What ADR-063 fixed is WHERE each instant comes from, not how many there are: the database, so
+     * the cutoff and the `created_at` it is compared against are stamped by one clock.
+     */
+    const CHUNK_1 = '2020-01-01T00:00:00.000Z';
+    const CHUNK_2 = '2020-01-01T00:05:00.000Z';
+    const { finishChunk, scoreHealth, aggregationInstant } = await run([CHUNK_1, CHUNK_2]);
 
     // Thirteen months is two chunks; without both, the assertion would prove nothing.
-    expect(repository.loadAggregates.mock.calls.length).toBeGreaterThan(1);
-    const instants = new Set(repository.loadAggregates.mock.calls.map((call) => call[4]));
-    expect(instants.size, 'one run, one view of the ledger').toBe(1);
+    expect(repository.loadAggregates.mock.calls.length).toBe(2);
+    expect(aggregationInstant, 'the database is asked once per chunk').toHaveBeenCalledTimes(2);
 
-    // The health step scores against the rows the chunk read, so it is pinned to the same instant.
+    expect(repository.loadAggregates.mock.calls.map((call) => call[4]))
+      .toEqual([CHUNK_1, CHUNK_2]);
+    expect(repository.loadTransferLegs.mock.calls.map((call) => call[4]))
+      .toEqual([CHUNK_1, CHUNK_2]);
+    expect(finishChunk.mock.calls
+      .map((call) => (call[0] as { p_aggregated_at: string }).p_aggregated_at))
+      .toEqual([CHUNK_1, CHUNK_2]);
+
+    // The health step scores against the rows its own chunk read, so it carries that chunk's pin.
     for (const call of scoreHealth.mock.calls) {
-      expect((call[0] as { aggregatedAt: string }).aggregatedAt).toBe(DB_STARTED_AT);
+      expect([CHUNK_1, CHUNK_2]).toContain((call[0] as { aggregatedAt: string }).aggregatedAt);
     }
-    expect(finishChunk).toHaveBeenCalled();
   });
 
   it('never asks the database for an instant when the fingerprint says there is nothing to do', async () => {

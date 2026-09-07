@@ -96,6 +96,8 @@ export interface PnlInput {
    * make last March's evidence follow a remap made in September.
    */
   readonly accounts: readonly AccountRef[];
+  /** §3.1's "never used", asked of the organisation rather than of this month (ADR-063). */
+  readonly costOfSalesEverUsed: boolean;
   readonly accountAmounts: readonly AccountAmount[];
   readonly uncategorised: UncategorisedExposure;
   readonly invoiceVat?: InvoiceVatExposure | null;
@@ -108,7 +110,19 @@ export interface PnlInput {
  * does not exist resolves to `null` and the reader simply cannot descend into it — which is
  * honest, and better than a dangling id.
  */
-export type SnapshotIdResolver = (key: string, dimensionId: string | null) => string | null;
+/**
+ * Resolves a component metric to the snapshot id the run will write for it (ADR-059).
+ *
+ * `dimensionKey` is part of the identity, not decoration: a category-dimensioned metric
+ * (`expense_by_category`) carries `dimension_id = NULL` and names its subject in `dimension_key`
+ * instead, because a category has no row to point at (ADR-053). A resolver keyed on
+ * `(key, dimensionId)` alone therefore cannot tell one category's snapshot from another's — every
+ * one of them looks like `expense_by_category::null` — so a derived metric naming a category
+ * component would resolve to the wrong snapshot or to none (ADR-063).
+ */
+export type SnapshotIdResolver = (
+  key: string, dimensionId: string | null, dimensionKey?: string | null,
+) => string | null;
 
 // ---------------------------------------------------------------------------------------------
 // Thresholds (§3.1)
@@ -258,13 +272,15 @@ function leafEvidence(
 
 function derivedEvidence(
   resolve: SnapshotIdResolver,
-  components: ReadonlyArray<{ name: string; key: string; dimensionId?: string | null }>,
+  components: ReadonlyArray<{
+    name: string; key: string; dimensionId?: string | null; dimensionKey?: string | null;
+  }>,
 ): EvidenceQuery {
   return {
     kind: 'derived',
     components: components.map((c) => ({
       name: c.name,
-      snapshot_id: resolve(c.key, c.dimensionId ?? null),
+      snapshot_id: resolve(c.key, c.dimensionId ?? null, c.dimensionKey ?? null),
     })),
   };
 }
@@ -565,17 +581,21 @@ function noSourceResults(input: PnlInput, _ctx: EngineContext): readonly MetricR
 /**
  * Does the organization actually have a cost-of-sales account? (CD-05.)
  *
- * A seeded SYSTEM account exists for every category, so "is there a row" is the wrong question: the
- * distinction is between an organization that tracks cost of sales and one that does not. A system
- * account that has never carried a figure does not count; one that has, does.
+ * A seeded SYSTEM account exists for every category, so "is there an account" is the wrong
+ * question: the distinction is between an organisation that tracks cost of sales and one that does
+ * not. An account the customer created counts on its own; a system account counts once it has ever
+ * carried a figure.
+ *
+ * "Ever" is the whole point, and it is a fact about the ORGANISATION, resolved once per run
+ * (`loadCostOfSalesEverUsed`). This used to be answered from the period being computed, which meant
+ * a shop that bought no stock in August was told it does not track cost of sales: `cost_of_sales`
+ * went NULL, `gross_profit` silently became revenue with a `no_cost_of_sales` warning, and
+ * `gross_margin` showed "n/a" for a month it could have shown. CD-05's exception describes a chart,
+ * not a month (ADR-063).
  */
 function hasUsableCostOfSalesAccount(input: PnlInput): boolean {
-  const used = new Set(
-    input.accountAmounts.filter((a) => a.rowCount > 0).map((a) => a.accountId),
-  );
-  return input.accounts.some(
-    (a) => a.standardCategory === 'cost_of_sales' && (!a.isSystem || used.has(a.id)),
-  );
+  return input.costOfSalesEverUsed
+    || input.accounts.some((a) => a.standardCategory === 'cost_of_sales' && !a.isSystem);
 }
 
 function buildRevenue(b: Builder, uncategorisedAbs: Decimal): Figure {
