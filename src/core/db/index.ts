@@ -1,8 +1,10 @@
 export { createUserClient } from './user-client';
 export { createServiceClient, withOrgScope, type OrgScope } from './service-client';
 export {
+  aggregationInstant,
   recordAccessEvent,
   recordReportFile,
+  recordStorageCleanup,
   throttle,
   enqueueServerJob,
   claimJob,

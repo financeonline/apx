@@ -28,7 +28,10 @@ import * as repo from '../data/repository';
  *      replaced rather than leaving a range mixed between two runs.
  *
  *   3. **Determinism.** Nothing here reads a clock. `asOf` is supplied by the caller from the
- *      organization's timezone and enters the fingerprint only when the current period is in range.
+ *      organization's timezone and enters the fingerprint only when the current period is in range,
+ *      and the instant the run aggregates as of comes from the database row, not from `new Date()` —
+ *      the aggregate compares it against database-stamped `created_at`, so a second clock in that
+ *      comparison decides which rows a run can see.
  */
 
 export interface RunRequest {
@@ -88,6 +91,13 @@ export interface RunDeps {
   readonly computePeriod: PeriodComputer;
   /** `api_server` calls, injected so the lint boundary holds and the loop stays testable. */
   readonly startRun: (input: Record<string, unknown>) => Promise<{ runId: string; noChange: boolean }>;
+  /**
+   * The instant this chunk aggregates as of, read from the DATABASE (§2.4 step 4).
+   *
+   * Injected like every other `api_server` call, so the loop stays testable and the lint boundary
+   * holds — and so a test can pin the instant instead of racing a clock.
+   */
+  readonly aggregationInstant: () => Promise<string>;
   readonly finishChunk: (input: Record<string, unknown>) => Promise<{ written: number }>;
   readonly finishRun: (
     runId: string, status: 'succeeded' | 'failed', stats: Record<string, unknown>, error?: unknown,
@@ -211,15 +221,30 @@ export async function runCalculation(
   }
 
   const runId = started.runId;
+
   let snapshotsWritten = 0;
   let periodsWritten = 0;
   let healthScoresWritten = 0;
 
   try {
     for (const chunk of chunkPeriods(toWrite)) {
-      // Each chunk pins its own instant. The descriptors of this chunk's snapshots carry it, so the
-      // evidence resolver can reproduce exactly this selection later (ADR-046.2, ADR-047.7).
-      const aggregatedAt = new Date().toISOString();
+      /*
+       * Each chunk pins its own instant, and reads it from the DATABASE (§2.4 step 4:
+       * `aggregated_at = transaction_timestamp()`).
+       *
+       * The clock matters because `app.aggregate_periods` filters `created_at <= aggregated_at` and
+       * `created_at` is stamped by Postgres. Pinning it with the worker's `new Date()` compared two
+       * clocks: whenever the database's ran ahead — it does, by tens of milliseconds, on any host
+       * running Postgres in a container — rows committed BEFORE the run was queued fell the wrong
+       * side of the cutoff and the run computed without them, silently, reporting the shortfall as a
+       * figure (ADR-063).
+       *
+       * PER CHUNK, not per run, because ADR-047.7 says so and EVIDENCE_MODEL.md §11 tests it: a run
+       * whose middle chunk aggregates after a supersession must resolve chunk-1 descriptors to the
+       * pre-supersession rows and chunk-2's to the post-supersession rows, each reconciling to its
+       * own snapshot. One instant for the whole run would make that case unrepresentable.
+       */
+      const aggregatedAt = await deps.aggregationInstant();
       const window = chunkWindow(allPeriods, chunk);
       const windowFrom = window[0]?.periodStart ?? chunk[0]!.periodStart;
       const windowTo = chunk[chunk.length - 1]!.periodEnd;

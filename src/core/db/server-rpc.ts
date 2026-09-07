@@ -126,6 +126,47 @@ export async function recordReportFile(
   return data as string;
 }
 
+/**
+ * Records one organization's share of a `storage.cleanup_orphans` sweep (SERVICE_ARCHITECTURE.md §7).
+ *
+ * The sweep is the only job that destroys customer data, and the row whose absence condemned each
+ * object is by definition not there to show what happened. Counts only — object paths carry the
+ * uploader's original filename, which audit metadata does not hold (ADR-038.9); the keys themselves
+ * go to the job's log line, where an operator looking at a specific sweep will find them.
+ */
+export async function recordStorageCleanup(input: {
+  organizationId: string;
+  jobId: string;
+  bucket: string;
+  examined: number;
+  removed: number;
+  failed: number;
+}): Promise<void> {
+  await serverRpc('record_storage_cleanup', {
+    p_org: input.organizationId,
+    p_job: input.jobId,
+    p_bucket: input.bucket,
+    p_examined: input.examined,
+    p_removed: input.removed,
+    p_failed: input.failed,
+  });
+}
+
+/**
+ * The instant a calculation chunk aggregates as of (FINANCIAL_ENGINE.md §2.4 step 4).
+ *
+ * Read from the DATABASE, because `app.aggregate_periods` compares it against `created_at`, which
+ * Postgres stamps. A worker clock in that comparison decides which rows a run can see, and gets it
+ * wrong silently (ADR-063).
+ */
+export async function aggregationInstant(actor: ServerRpcActor | null): Promise<string> {
+  const { data, error } = await serverClient()
+    .schema('api_server')
+    .rpc('aggregation_instant');
+  if (error) throw toMotionError(error, actor?.requestId);
+  return data as string;
+}
+
 /** Server-originated job enqueue (ADR-043.3). User-intent jobs go through api.enqueue_job. */
 export async function enqueueServerJob(
   actor: ServerRpcActor | null,

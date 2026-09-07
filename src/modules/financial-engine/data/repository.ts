@@ -205,6 +205,43 @@ export async function loadSettings(
   };
 }
 
+/**
+ * The instant the DATABASE stamped on this run, which is the instant it aggregates as of.
+ *
+ * `app.aggregate_periods` selects rows with `created_at <= p_aggregated_at`, and `created_at` is
+ * written by Postgres. Pinning that cutoff from the worker's own `new Date()` therefore compares two
+ * clocks, and whenever the database's is the further ahead — it is, by tens of milliseconds, on any
+ * host running Postgres in a VM — rows committed BEFORE the run began fall the wrong side of the
+ * cutoff and the run computes without them. Nothing raises: the figures are simply a period short of
+ * some of its entries, and a metric whose shape depends on whether an account carried rows (§3.1's
+ * `no_cost_of_sales_accounts`) silently changes shape from one run to the next.
+ *
+ * `calculation_runs.started_at` is `now()` from the same clock as `created_at`, so a row committed
+ * before the run was started is on the inside of the cutoff by construction rather than by luck.
+ * `alerts.evaluate` already takes its instant from this row (§8.3); the run loop now does too.
+ */
+export async function loadRunStartedAt(
+  scoped: SupabaseClient, orgId: string, runId: string,
+): Promise<string> {
+  const { data, error } = await scoped
+    .from('calculation_runs')
+    .select('started_at')
+    .eq('organization_id', orgId)
+    .eq('id', runId)
+    .maybeSingle();
+
+  if (error) throw toMotionError(error);
+  const startedAt = (data as { started_at?: string | null } | null)?.started_at ?? null;
+  if (startedAt === null) {
+    // Falling back to the process clock is what this function exists to stop, so it refuses instead:
+    // a run that cannot say which instant it read at cannot write a reproducible descriptor (§2.4
+    // step 4, ADR-046.2), and the caller already turns a throw into a failed run with its pointers
+    // restored.
+    throw new Error(`calculation run ${runId} has no started_at to aggregate as of`);
+  }
+  return startedAt;
+}
+
 /** The metadata the fingerprint is computed from, before any write (§2.4 step 2). */
 export interface FingerprintSources {
   readonly maxRecordEventAt: string | null;

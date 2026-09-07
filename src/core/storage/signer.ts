@@ -18,6 +18,10 @@ import { sanitiseFilename } from './filenames';
  *      (ADR-043.5; R2-A-02). A download that is not audited does not happen.
  *   3. Signed URLs live 60 seconds and are returned as attachments.
  *
+ * Rule 2 governs DISCLOSURE and so applies to signing alone; writing, deleting and listing hand
+ * nobody any bytes and have never carried it (`putObject` and `removeObject` predate the sweep
+ * surface below and take no audit id either). Rule 1 governs everything without exception.
+ *
  * This is one of exactly three files permitted to read `SUPABASE_SERVICE_ROLE_KEY`; the ESLint rule
  * `motion/no-service-role-outside-sanctioned-files` fails the build anywhere else.
  */
@@ -184,6 +188,187 @@ export async function removeObject(
 
   const { error } = await storageClient().storage.from(bucket).remove([key]);
   return { removed: !error };
+}
+
+// ---------------------------------------------------------------------------------------------
+// The sweep surface, for `storage.cleanup_orphans` alone
+// (SERVICE_ARCHITECTURE.md §7 job table; ADR-043.4; ADR-062.2).
+//
+// Nothing else in the product ever needs to know what is IN a bucket: every read resolves a path
+// from a row. The orphan sweep is the one job that has to start from the objects, because the
+// object it is looking for is precisely the one no row names. That inversion is why these three
+// functions exist, and why they are written to be dull.
+//
+// The tenant assertion is unchanged. `listObjectsForOrganization` and `removeObjectsForOrganization`
+// take the organization explicitly and run every key through `assertKeyBelongsTo`, so the sweep
+// deletes under one organization's prefix at a time and can no more reach across the boundary than
+// an upload can. `listOrganizationPrefixes` is the single call with no organization — and it returns
+// FOLDER NAMES ONLY, never an object key and never any bytes, and only those that parse as a uuid,
+// because every legitimate top-level entry in these buckets IS an organization id (TENANCY_MODEL.md
+// §8). Anything else is handed back separately so the caller can report it, and can never become a
+// prefix something is deleted under.
+// ---------------------------------------------------------------------------------------------
+
+/** How many entries one `list` page asks for. Storage caps a page well above this. */
+const LIST_PAGE_SIZE = 1000;
+/**
+ * How far below the organization prefix the walk descends. Both buckets are `{org}/{a}/{b}`, so two
+ * levels is the whole shape; the budget exists so a bucket that somehow grew a deeper tree makes the
+ * walk stop and say so rather than recurse for as long as Storage keeps answering.
+ */
+const MAX_PREFIX_DEPTH = 3;
+/** Storage's own marker for a directory that exists with nothing in it. Not an object. */
+const EMPTY_FOLDER_PLACEHOLDER = '.emptyFolderPlaceholder';
+
+const UUID_PATTERN =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export interface StoredObject {
+  readonly key: string;
+  /**
+   * The later of the object's `created_at` and `updated_at`.
+   *
+   * The sweep's grace period asks "could a row for this still be on its way?", and the safest answer
+   * comes from the most recent time Storage wrote these bytes, not the first. Taking the maximum can
+   * only ever spare an object for longer; taking the minimum could delete one that was just written.
+   */
+  readonly lastWrittenAt: Date;
+  readonly byteSize: number | null;
+}
+
+interface ListedEntry {
+  name: string;
+  id: string | null;
+  created_at: string | null;
+  updated_at: string | null;
+  metadata: { size?: number } | null;
+}
+
+/** One page of `list`, or a throw. A listing that half-worked must never look like an empty bucket. */
+async function listPage(bucket: string, prefix: string, offset: number): Promise<ListedEntry[]> {
+  const { data, error } = await storageClient()
+    .storage
+    .from(bucket)
+    .list(prefix, { limit: LIST_PAGE_SIZE, offset, sortBy: { column: 'name', order: 'asc' } });
+
+  if (error || !data) {
+    // Loud, because the caller deletes what it does not find. An error swallowed into `[]` here
+    // would read to a sweep as "this organization owns nothing", which is the one lie that turns
+    // this job into a data-loss incident.
+    throw new InternalError(`The bucket ${bucket} could not be listed: ${error?.message ?? 'no data'}`);
+  }
+  return data as unknown as ListedEntry[];
+}
+
+async function listAll(bucket: string, prefix: string): Promise<ListedEntry[]> {
+  const entries: ListedEntry[] = [];
+  for (let offset = 0; ; offset += LIST_PAGE_SIZE) {
+    const page = await listPage(bucket, prefix, offset);
+    entries.push(...page);
+    if (page.length < LIST_PAGE_SIZE) return entries;
+  }
+}
+
+/**
+ * The organization prefixes present in a bucket, and the top-level entries that are not one.
+ *
+ * The sweep needs the organizations that have objects, not the organizations that have rows: an
+ * organization purged from the database but whose objects survived a failed `org.purge` has no row
+ * left to enumerate, and its leftover objects are exactly what wants collecting.
+ */
+export async function listOrganizationPrefixes(
+  bucket: string,
+): Promise<{ organizationIds: string[]; ignored: string[] }> {
+  const entries = await listAll(bucket, '');
+  const organizationIds: string[] = [];
+  const ignored: string[] = [];
+
+  for (const entry of entries) {
+    // `id === null` marks a folder. A bare object at the bucket root belongs to no organization, so
+    // no row can claim it and no context may legally delete it — it is reported, never swept.
+    if (entry.id !== null || !UUID_PATTERN.test(entry.name)) {
+      if (entry.name !== EMPTY_FOLDER_PLACEHOLDER) ignored.push(entry.name);
+      continue;
+    }
+    organizationIds.push(entry.name);
+  }
+  return { organizationIds, ignored };
+}
+
+/** Every object under `${orgId}/`, walked breadth-first within the depth budget. */
+export async function listObjectsForOrganization(
+  orgId: string,
+  bucket: string,
+): Promise<StoredObject[]> {
+  assertKeyBelongsTo(orgId, `${orgId}/`);
+
+  const objects: StoredObject[] = [];
+  let frontier = [orgId];
+
+  for (let depth = 1; depth <= MAX_PREFIX_DEPTH && frontier.length > 0; depth += 1) {
+    const next: string[] = [];
+    for (const prefix of frontier) {
+      for (const entry of await listAll(bucket, prefix)) {
+        const key = `${prefix}/${entry.name}`;
+        if (entry.id === null) {
+          next.push(key);
+          continue;
+        }
+        if (entry.name === EMPTY_FOLDER_PLACEHOLDER) continue;
+        // Defence in depth: Storage returning a key outside the prefix it was asked for would be a
+        // bug in Storage, and this sweep must not turn a bug in Storage into a deleted file.
+        assertKeyBelongsTo(orgId, key);
+        const created = Date.parse(entry.created_at ?? '');
+        const updated = Date.parse(entry.updated_at ?? '');
+        objects.push({
+          key,
+          // An object with no readable timestamp is treated as written NOW, which puts it inside
+          // every grace period and therefore out of reach of this job.
+          lastWrittenAt: new Date(Math.max(
+            Number.isNaN(created) ? Date.now() : created,
+            Number.isNaN(updated) ? Date.now() : updated,
+          )),
+          byteSize: entry.metadata?.size ?? null,
+        });
+      }
+    }
+    frontier = next;
+  }
+  return objects;
+}
+
+/** How many keys go into one `remove` call. */
+const REMOVE_BATCH_SIZE = 100;
+
+/**
+ * Removes objects under one organization's prefix, and reports exactly which ones went.
+ *
+ * Every key is asserted individually before the batch is sent, so a list that had somehow acquired a
+ * foreign key is refused rather than partially honoured. What came back deleted is what is reported:
+ * Storage answers a `remove` with the objects it actually removed, and a sweep that logged its
+ * intentions rather than its effects would be a record of nothing.
+ */
+export async function removeObjectsForOrganization(
+  orgId: string,
+  bucket: string,
+  keys: readonly string[],
+): Promise<{ removed: string[]; failed: string[] }> {
+  for (const key of keys) assertKeyBelongsTo(orgId, key);
+
+  const removed: string[] = [];
+  const failed: string[] = [];
+
+  for (let start = 0; start < keys.length; start += REMOVE_BATCH_SIZE) {
+    const batch = keys.slice(start, start + REMOVE_BATCH_SIZE);
+    const { data, error } = await storageClient().storage.from(bucket).remove([...batch]);
+    if (error || !data) {
+      failed.push(...batch);
+      continue;
+    }
+    const gone = new Set((data as Array<{ name?: string }>).map((row) => row.name));
+    for (const key of batch) (gone.has(key) ? removed : failed).push(key);
+  }
+  return { removed, failed };
 }
 
 /** The object key for a source document, built only from server-generated parts. */

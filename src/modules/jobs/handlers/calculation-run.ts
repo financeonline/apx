@@ -2,8 +2,8 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  enqueueServerJob, finishCalculationRun, finishChunk, finishHealth, setPeriodCompleteness,
-  startCalculationRun,
+  aggregationInstant, enqueueServerJob, finishCalculationRun, finishChunk, finishHealth,
+  setPeriodCompleteness, startCalculationRun,
 } from '@/core/db';
 import {
   composePeriod, runCalculation,
@@ -45,8 +45,13 @@ function snapshotKey(key: string, dimensionId: string | null, dimensionKey: stri
  * own idempotence tests assert — so the first pass is a description of the shape and the second is
  * the answer. It costs arithmetic over an aggregate already in memory; the alternative is a schema
  * that cannot express what it was designed to express.
+ *
+ * Exported for the test that pins the "same results" half of that claim: the second pass differs
+ * from the first only in the ids it can name, and a regression there would show up as a metric
+ * changing SHAPE between two compositions of one aggregate — which is unfalsifiable from the
+ * outside, because both passes are internal to one run.
  */
-function composeWithIds(input: Parameters<typeof composePeriod>[0]): readonly MetricResult[] {
+export function composeWithIds(input: Parameters<typeof composePeriod>[0]): readonly MetricResult[] {
   const ids = new Map<string, string>();
   for (const result of composePeriod(input)) {
     ids.set(snapshotKey(result.key, result.dimensionId, result.dimensionKey ?? null), randomUUID());
@@ -118,6 +123,8 @@ export async function runCalculationJob(
       });
     },
     startRun: startCalculationRun,
+    // No human actor: the pin is a fact about the transaction, not an intention anybody expressed.
+    aggregationInstant: () => aggregationInstant(null),
     finishChunk,
     finishRun: (runId, status, stats, error) =>
       finishCalculationRun(runId, orgId, status, stats, error),

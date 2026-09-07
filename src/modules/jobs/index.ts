@@ -14,3 +14,12 @@ export type { ClaimedJob, JobOutcome, JobStatus, JobType } from './domain/types'
  * precisely how the queue came to drain into failures for five phases.
  */
 export { registerJobHandlers, serverCalls } from './handlers';
+
+/**
+ * The orphan sweep is exported by name as well as registered, because its two constants ARE its
+ * safety argument: a test that hard-coded "24 hours" would still pass if somebody shortened the
+ * grace period to a minute.
+ */
+export {
+  runStorageCleanupJob, ORPHAN_GRACE_MS, MAX_REMOVALS_PER_RUN,
+} from './handlers';
