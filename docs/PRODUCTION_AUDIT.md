@@ -24,7 +24,7 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 | M3 | Medium | Commit-time duplicate re-check runs pass 2 only; contract §9.3 promises passes 1 and 2. A concurrent invoice commit surfaces as a raw `23505` message. |
 | M4 | Medium | `api_rate_limits` grows without bound (one row per user × bucket × minute, never deleted). |
 | M5 | Medium · *fixed* | `api.cancel_job` lets an owner/admin cancel *any* queued job of their org, including `org.purge`; only a super admin can requeue. → limited to the two user-requestable types and to the requester (ADR-071). |
-| M6 | Medium | Audit log UI shows the latest 100 events with no paging, filter or target — the SQL supports offset/500. |
+| M6 | Medium · *fixed* | Audit log UI shows the latest 100 events with no paging, filter or target — the SQL supports offset/500. → offset paging + target column (ADR-072). |
 | L1–L6 | Low | Fail-open middleware comment, dead-end `fix_import_row`, absent session revocation, silent depth truncation in the signer, stale promise in `revoke_assignment`, missing audit on bundle creation. |
 
 ---
@@ -228,6 +228,8 @@ Everything else in §2 is present and, where I tested it, behaves as specified. 
 **Fix.** Restrict to the two user-requestable types `api.enqueue_job` already enumerates (`calculation.run`, `report.render`) and to `requested_by = app.uid()`.
 
 ### M6 · Audit log UI is a fixed window of 100
+
+**Status: fixed** — the page pages 50 at a time (fetching one extra to know if an older page exists) and shows the target table; ADR-072.
 **Location.** `src/app/app/[orgSlug]/settings/audit/page.tsx:14` (`limit: 100`, no offset, no filter, no target column). `api.org_audit_events` accepts `p_offset` and up to 500.
 **Why.** MVP §2.14 "Audit log UI for owners/admins"; CD-13 promises the owner can see every super-admin view. After 100 events (a busy import day) older staff-access rows are unreachable from the product.
 **Fix.** Page by offset, filter by action family, show `target_table`/`target_id`.
