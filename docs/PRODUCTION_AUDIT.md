@@ -23,7 +23,7 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 | M2 | Medium · *fixed* | Errors swallowed: evidence drawer turns every failure (500, 429) into 404; three platform pages discard query errors and render "empty". → only NOT_FOUND is a 404; query errors throw (ADR-070). |
 | M3 | Medium | Commit-time duplicate re-check runs pass 2 only; contract §9.3 promises passes 1 and 2. A concurrent invoice commit surfaces as a raw `23505` message. |
 | M4 | Medium | `api_rate_limits` grows without bound (one row per user × bucket × minute, never deleted). |
-| M5 | Medium | `api.cancel_job` lets an owner/admin cancel *any* queued job of their org, including `org.purge`; only a super admin can requeue. |
+| M5 | Medium · *fixed* | `api.cancel_job` lets an owner/admin cancel *any* queued job of their org, including `org.purge`; only a super admin can requeue. → limited to the two user-requestable types and to the requester (ADR-071). |
 | M6 | Medium | Audit log UI shows the latest 100 events with no paging, filter or target — the SQL supports offset/500. |
 | L1–L6 | Low | Fail-open middleware comment, dead-end `fix_import_row`, absent session revocation, silent depth truncation in the signer, stale promise in `revoke_assignment`, missing audit on bundle creation. |
 
@@ -221,6 +221,8 @@ Everything else in §2 is present and, where I tested it, behaves as specified. 
 **Fix.** `delete from api_rate_limits where window_start < now() − interval '2 days'` in the nightly sweep (which also needs an enqueuer — ADR-064's "Still missing").
 
 ### M5 · Any owner/admin can cancel any queued job of their organisation
+
+**Status: fixed** — `api.cancel_job` refuses any type outside `calculation.run`/`report.render` and any job the caller did not request; ADR-071.
 **Location.** `api.cancel_job` — permission `intelligence.recompute`, no job-type check; `api.requeue_job` — super admin only.
 **Why.** Cancelling `org.purge` leaves the organisation `pending_deletion` with no purge (moot today, see C3, but the invariant is wrong). Cancelling `alerts.evaluate` or `storage.cleanup_orphans` silently removes background behaviour the platform relies on. `jobs_select` is super-admin only, so the user cancels a job they cannot even see — the id has to come from elsewhere.
 **Fix.** Restrict to the two user-requestable types `api.enqueue_job` already enumerates (`calculation.run`, `report.render`) and to `requested_by = app.uid()`.

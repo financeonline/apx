@@ -11,7 +11,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(72);
+select plan(76);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -573,6 +573,31 @@ select throws_ok(
                                           '00000000-0000-0000-0000-000000000000') $$,
   '23514', null, 'the purge refuses an organisation scheduled less than thirty days ago');
 call pg_temp.act_as_postgres();
+
+-- ---------------------------------------------------------------------------
+-- 11. ADR-071: a member cancels only the jobs a member can request, and only their own.
+-- ---------------------------------------------------------------------------
+-- A purge and a member's own recalculation, both queued in org A.
+insert into public.jobs (id, organization_id, job_type, payload, status, requested_by, idempotency_key)
+values ('f7c00000-0000-0000-0000-0000000000c1','f7a00000-0000-0000-0000-00000000000a','org.purge','{}','queued',null,'p-c1'),
+       ('f7c00000-0000-0000-0000-0000000000c2','f7a00000-0000-0000-0000-00000000000a','calculation.run','{}','queued','f7000000-0000-0000-0000-000000000001','p-c2'),
+       ('f7c00000-0000-0000-0000-0000000000c3','f7a00000-0000-0000-0000-00000000000a','calculation.run','{}','queued','f7000000-0000-0000-0000-000000000002','p-c3');
+
+call pg_temp.act_as('f7000000-0000-0000-0000-000000000001');
+select throws_ok(
+  $$ select api.cancel_job('f7c00000-0000-0000-0000-0000000000c1') $$,
+  '42501', null, 'an owner cannot cancel an org.purge (ADR-071)');
+select throws_ok(
+  $$ select api.cancel_job('f7c00000-0000-0000-0000-0000000000c3') $$,
+  '42501', null, 'an owner cannot cancel a job someone else requested (ADR-071)');
+select lives_ok(
+  $$ select api.cancel_job('f7c00000-0000-0000-0000-0000000000c2') $$,
+  'an owner cancels their own calculation.run');
+call pg_temp.act_as_postgres();
+-- Verified as postgres: jobs_select is super-admin only, so the owner cannot read the row back.
+select is(
+  (select status::text from public.jobs where id = 'f7c00000-0000-0000-0000-0000000000c2'),
+  'cancelled', 'the cancelled job is marked cancelled');
 
 select * from finish();
 rollback;
