@@ -1,6 +1,6 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { recordStorageCleanup } from '@/core/db';
+import { pruneRateLimits, recordStorageCleanup } from '@/core/db';
 import { log } from '@/core/logging';
 import {
   listObjectsForOrganization, listOrganizationPrefixes, removeObjectsForOrganization,
@@ -274,6 +274,14 @@ export async function runStorageCleanupJob(
   const removed = buckets.reduce((total, b) => total + b.removed, 0);
   const capped = budget <= 0;
 
+  /*
+   * Retention rides with the platform-wide sweep, whose job DATABASE_ARCHITECTURE.md §7 always said
+   * it was (ADR-074): `app.throttle` upserts one `api_rate_limits` row per user, per bucket, per
+   * minute and deletes none of them. Two days keeps every live window. A per-organisation sweep
+   * leaves the counter alone — it is a platform table, and the platform run is the one that owns it.
+   */
+  const rateLimitRowsPruned = job.organizationId === null ? await pruneRateLimits() : null;
+
   log.info('storage sweep complete', {
     jobId: job.jobId,
     scope: job.organizationId ?? 'platform',
@@ -292,6 +300,7 @@ export async function runStorageCleanupJob(
       capped,
       graceHours: ORPHAN_GRACE_MS / 3_600_000,
       buckets: buckets.map((b) => ({ ...b, ignoredPrefixes: [...b.ignoredPrefixes] })),
+      rateLimitRowsPruned,
     },
   };
 }

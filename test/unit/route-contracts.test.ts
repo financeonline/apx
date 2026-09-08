@@ -75,3 +75,16 @@ describe('every consumer of a `next` target judges it with the one rule (ROUTE_A
     }
   });
 });
+
+describe('the nightly sweep is scheduled (SERVICE_ARCHITECTURE.md §7, ADR-074)', () => {
+  it('vercel.json names both cron routes, and both exist', () => {
+    const crons = (JSON.parse(readFileSync('vercel.json', 'utf8')) as { crons: Array<{ path: string; schedule: string }> }).crons;
+    const paths = crons.map((c) => c.path);
+    expect(paths).toContain('/api/jobs/run');
+    expect(paths).toContain('/api/jobs/nightly');
+    expect(crons.find((c) => c.path === '/api/jobs/nightly')?.schedule, 'once a day, not once a minute').toMatch(/^\d+ \d+ \* \* \*$/);
+    for (const path of paths) {
+      expect(statSync(join('src/app', path, 'route.ts')).isFile(), `${path} has a handler`).toBe(true);
+    }
+  });
+});

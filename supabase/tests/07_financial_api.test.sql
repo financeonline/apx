@@ -11,7 +11,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(76);
+select plan(78);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -598,6 +598,16 @@ call pg_temp.act_as_postgres();
 select is(
   (select status::text from public.jobs where id = 'f7c00000-0000-0000-0000-0000000000c2'),
   'cancelled', 'the cancelled job is marked cancelled');
+
+-- ---------------------------------------------------------------------------
+-- 12. ADR-074: the nightly enqueue and the throttle-counter retention are server-only.
+-- ---------------------------------------------------------------------------
+call pg_temp.act_as('f7000000-0000-0000-0000-000000000001');
+select throws_ok($$ select api_server.prune_rate_limits() $$, '42501', null,
+  'api_server.prune_rate_limits is refused to a user (authenticated)');
+select throws_ok($$ select api_server.enqueue_nightly_sweep() $$, '42501', null,
+  'api_server.enqueue_nightly_sweep is refused to a user (authenticated)');
+call pg_temp.act_as_postgres();
 
 select * from finish();
 rollback;

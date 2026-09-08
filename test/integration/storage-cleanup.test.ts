@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
-import { createServiceClient } from '@/core/db';
+import { createServiceClient, enqueueNightlySweep, pruneRateLimits } from '@/core/db';
 import {
   drainJobs, runStorageCleanupJob, ORPHAN_GRACE_MS, type ClaimedJob, type JobOutcome,
 } from '@/modules/jobs';
@@ -296,5 +296,57 @@ describe('a platform-wide sweep through the queue', () => {
   it('records the grace period it applied on the job row', () => {
     const grace = one(`select result ->> 'graceHours' from public.jobs where id = '${jobId}'`);
     expect(Number(grace)).toBe(ORPHAN_GRACE_MS / 3_600_000);
+  });
+});
+
+describe('the platform sweep is scheduled, and it prunes the throttle counter (ADR-074)', () => {
+  it('queues exactly one sweep per calendar date, whoever asks and however often', async () => {
+    const date = '2031-01-15';
+    const first = await enqueueNightlySweep(date);
+    const second = await enqueueNightlySweep(date);
+    expect(second, 'the same date returns the same job').toBe(first);
+    expect(adminSql(`
+      select job_type || '|' || coalesce(organization_id::text, 'platform') || '|' || idempotency_key
+        from public.jobs where id = '${first}'`)).toBe(`storage.cleanup_orphans|platform|storage.cleanup_orphans:${date}`);
+    const other = await enqueueNightlySweep('2031-01-16');
+    expect(other).not.toBe(first);
+    adminSql(`delete from public.jobs where id in ('${first}', '${other}')`);
+  });
+
+  it('prunes rate-limit rows older than two days and keeps every live window', async () => {
+    const actor = one(`select gen_random_uuid()`);
+    adminSql(`
+      insert into public.api_rate_limits (actor_user_id, bucket, window_start, count) values
+        ('${actor}', 'rpc', date_trunc('minute', now()) - interval '3 days', 5),
+        ('${actor}', 'rpc', date_trunc('minute', now()) - interval '25 hours', 5),
+        ('${actor}', 'upload:org', date_trunc('day', now()) - interval '1 day', 5),
+        ('${actor}', 'rpc', date_trunc('minute', now()), 5)`);
+
+    const pruned = await pruneRateLimits();
+    expect(pruned).toBeGreaterThanOrEqual(1);
+
+    // The three-day-old row is gone; the 25-hour, one-day and current rows all stay (two-day keep).
+    expect(adminSql(`select count(*) from public.api_rate_limits where actor_user_id = '${actor}'`)).toBe('3');
+    expect(adminSql(`
+      select count(*) from public.api_rate_limits
+       where actor_user_id = '${actor}' and window_start < now() - interval '2 days'`)).toBe('0');
+    adminSql(`delete from public.api_rate_limits where actor_user_id = '${actor}'`);
+  });
+
+  it('the platform-wide run reports what it pruned; a per-organisation run leaves the counter alone', async () => {
+    const platformJob = one(`
+      insert into public.jobs (organization_id, job_type, payload, status, locked_at, locked_by, attempts)
+      values (null, 'storage.cleanup_orphans', '{}'::jsonb, 'running', now(), 'itest-${RUN}', 1)
+      returning id`);
+    const platform = await runStorageCleanupJob(
+      { jobId: platformJob, organizationId: null, jobType: 'storage.cleanup_orphans', payload: {}, requestedBy: null, attempts: 1, maxAttempts: 3 },
+      { db: createServiceClient() },
+    );
+    expect(platform.status).toBe('succeeded');
+    expect(typeof (platform.result as { rateLimitRowsPruned: unknown }).rateLimitRowsPruned).toBe('number');
+
+    expect((scopedOutcome.result as { rateLimitRowsPruned: unknown }).rateLimitRowsPruned,
+      'a per-organisation sweep does not touch a platform table').toBeNull();
+    adminSql(`delete from public.jobs where id = '${platformJob}'`);
   });
 });

@@ -22,7 +22,7 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 | M1 | Medium · *fixed* | Upload route buffers the whole multipart body before the 25 MB check; the comment claims the opposite. No throttle on upload. → header-first limit, 20/h + 100/day throttles (ADR-070). |
 | M2 | Medium · *fixed* | Errors swallowed: evidence drawer turns every failure (500, 429) into 404; three platform pages discard query errors and render "empty". → only NOT_FOUND is a 404; query errors throw (ADR-070). |
 | M3 | Medium · *fixed* (was worse) | Commit-time duplicate re-check runs pass 2 only; contract §9.3 promises passes 1 and 2. A concurrent invoice commit surfaces as a raw `23505` message. → every invoice update collided at commit; insert-pending→supersede→accept + pass 1 at commit (ADR-073). |
-| M4 | Medium | `api_rate_limits` grows without bound (one row per user × bucket × minute, never deleted). |
+| M4 | Medium · *fixed* | `api_rate_limits` grows without bound (one row per user × bucket × minute, never deleted). → pruned nightly by the platform sweep, which is now actually scheduled (ADR-074). |
 | M5 | Medium · *fixed* | `api.cancel_job` lets an owner/admin cancel *any* queued job of their org, including `org.purge`; only a super admin can requeue. → limited to the two user-requestable types and to the requester (ADR-071). |
 | M6 | Medium · *fixed* | Audit log UI shows the latest 100 events with no paging, filter or target — the SQL supports offset/500. → offset paging + target column (ADR-072). |
 | L1–L6 | Low | Fail-open middleware comment, dead-end `fix_import_row`, absent session revocation, silent depth truncation in the signer, stale promise in `revoke_assignment`, missing audit on bundle creation. |
@@ -218,6 +218,8 @@ Everything else in §2 is present and, where I tested it, behaves as specified. 
 **Fix.** Extend `rerun_dedupe` for `invoices` with the identity join; set `duplicate_of_id` and `IMP-INV-010` so the commit path supersedes rather than collides.
 
 ### M4 · `api_rate_limits` has no retention
+
+**Status: fixed** — `api_server.prune_rate_limits` (2-day keep) runs in the platform-wide sweep, and the sweep is finally scheduled: `/api/jobs/nightly` + `api_server.enqueue_nightly_sweep`, idempotent per date, cron at 02:00 UTC; ADR-074.
 **Location.** `app.throttle` upserts `(actor_user_id, bucket, window_start)`; 1-minute windows for `rpc`, per user, per bucket. `DATABASE_ARCHITECTURE.md` §247 assigns retention to `storage.cleanup_orphans`; ADR-064 records it as unbuilt.
 **Why.** One active user ≈ 1,440 `rpc` rows/day plus one per other bucket; 200 users ≈ 300k rows/day into a table with a unique index that every `api.*` call upserts into. It will not fall over this month; it will get slower every month.
 **Fix.** `delete from api_rate_limits where window_start < now() − interval '2 days'` in the nightly sweep (which also needs an enqueuer — ADR-064's "Still missing").

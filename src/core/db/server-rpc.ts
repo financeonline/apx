@@ -388,6 +388,23 @@ async function serverRpc<T>(fn: string, args: Record<string, unknown>): Promise<
   return data as T;
 }
 
+/**
+ * Deletes throttle-counter rows older than two days (DATABASE_ARCHITECTURE.md §7 `api_rate_limits`;
+ * ADR-074). Run by the platform-wide nightly sweep, whose job the retention always was. Returns the
+ * number of rows removed.
+ */
+export async function pruneRateLimits(): Promise<number> {
+  return serverRpc<number>('prune_rate_limits', {});
+}
+
+/**
+ * Queues the one platform-wide `storage.cleanup_orphans` for a calendar date, keyed on the date
+ * (SERVICE_ARCHITECTURE.md §7; ADR-074). Idempotent: the same date returns the same job.
+ */
+export async function enqueueNightlySweep(date?: string): Promise<string> {
+  return serverRpc<string>('enqueue_nightly_sweep', date === undefined ? {} : { p_date: date });
+}
+
 export async function startCalculationRun(
   input: Record<string, unknown>,
 ): Promise<{ runId: string; noChange: boolean }> {

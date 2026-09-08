@@ -70,6 +70,7 @@ Next.js App Router. Three route families, each with its own root layout and shel
 /platform/settings
 
 /api/jobs/run                         (POST, cron secret)
+/api/jobs/nightly                     (GET, cron secret)
 /api/imports/upload                   (POST, multipart)
 /api/ai/chat                          (POST, streaming)
 /api/documents/[documentId]/url       (GET)
@@ -159,6 +160,7 @@ All routes: `platform_super_admin` only with `aal2` (TOTP verified, ADR-038.8); 
 | Handler | Method | Auth | Permission | Rate limit | Notes |
 |---|---|---|---|---|---|
 | `/api/jobs/run` | POST | `CRON_SECRET` header (constant-time compare) | — | Vercel Cron only | Drains up to N jobs per call; returns counts |
+| `/api/jobs/nightly` | GET | `CRON_SECRET` header (same `cronAuthorised`) | — | Vercel Cron only, daily | Queues the platform-wide `storage.cleanup_orphans` for today's date; idempotent per date (ADR-074) |
 | `/api/imports/upload` | POST multipart | session | `imports.create` for slug in form field resolved server-side | 20/h user, 100/day org | Runs `SECURITY_MODEL.md §8`; returns `source_document_id`, `batch_id` |
 | `/api/ai/chat` | POST (SSE stream) | session | `ai.use` | 10/min user; org quota | Body `{conversationId?, message, orgSlug}`; org resolved from slug |
 | `/api/documents/[documentId]/url` | GET | session | `documents.view` | 60/min | Calls `api_server.record_access_event('document.downloaded')` and passes the returned audit id to the signer, which verifies it before minting the 60-second URL (ADR-043.2/5); 404 cross-org |

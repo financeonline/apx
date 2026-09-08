@@ -4,6 +4,10 @@
     {
       "path": "/api/jobs/run",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/jobs/nightly",
+      "schedule": "0 2 * * *"
     }
   ]
 }
