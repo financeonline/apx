@@ -17,7 +17,7 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 | C2 | **Critical** · *fixed* | Any member with `financials.view` — a **client** included — can write a fabricated, immutable evidence bundle for any metric via `api.build_metric_bundle`; owners then see it as the system's evidence. No audit event. → function dropped; server-side builder verifies every item against the figure's own tree (ADR-066). |
 | C3 | **Critical** · *fixed* | `org.purge` has no job handler. "Delete this organisation" schedules a job that will die. Customer data is never deleted, and nothing surfaces the dead job. → handler + `api_server.purge_organization` + `/platform/jobs` (ADR-067). |
 | H1 | High · *fixed* | A suspended organisation's "frozen Home" (promised by four documents) cannot render: the rows it needs are denied to `suspended_member`. Members see "add your first file" under the suspension banner. → periods and the current snapshots admit the role; Home skips the record test while suspended (ADR-068). |
-| H2 | High | Open redirect in `/auth/callback?next=/\evil.com`. |
+| H2 | High · *fixed* | Open redirect in `/auth/callback?next=/\evil.com`. → one parse-then-compare rule in `core/routing`, used by all three `next` consumers (ADR-069). |
 | H3 | High | MVP scope gaps: no AI Analyst at all (acceptance criteria 9–12 unmeetable), PDF import refused, no CSV export, no Documents page (uploaded files cannot be deleted from the UI), no platform jobs/audit/feedback/settings pages. |
 | M1 | Medium | Upload route buffers the whole multipart body before the 25 MB check; the comment claims the opposite. No throttle on upload. |
 | M2 | Medium | Errors swallowed: evidence drawer turns every failure (500, 429) into 404; three platform pages discard query errors and render "empty". |
@@ -157,6 +157,8 @@ The drawer will resolve the payroll descriptor, show payroll rows as the evidenc
 **Recommended fix.** Decide which half of the contract is wrong. Either (a) admit `suspended_member` on `fiscal_periods` and on `metric_snapshots` **only for rows currently pointed to by `metric_current`** (`exists (select 1 from metric_current c where c.snapshot_id = metric_snapshots.id)`), and make `loadHome` skip `hasAcceptedRecords` when `organizationStatus = 'suspended'`; or (b) rewrite the four documents to say a suspended organisation sees the banner and nothing else, and render a dedicated suspended state instead of `first_run`. Add an integration test that suspends an organisation and asserts the Home view model still carries the last figures.
 
 ### H2 · Open redirect in the PKCE callback
+
+**Status: fixed** — `src/core/routing/safe-next.ts` (`safeNextPath`), applied in the callback, the sign-in form and the middleware; ADR-069. Unit-tested against every listed form and re-checked so the result can never resolve off-origin when parsed again.
 
 **Location.** `src/app/auth/callback/route.ts:15`: `nextParam.startsWith('/') && !nextParam.startsWith('//')`, then `NextResponse.redirect(new URL(next, url.origin))`. Same check client-side at `src/components/auth-form.tsx:30` feeding `router.push(safeNext)`.
 

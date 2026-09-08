@@ -1,4 +1,4 @@
-import { readdirSync, statSync } from 'node:fs';
+import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
@@ -50,5 +50,28 @@ describe('the tenant shell answers 404 with a 404 (ROUTE_ARCHITECTURE.md §230)'
     const files = walk(TENANT_SHELL);
     expect(files).toContain(join(TENANT_SHELL, 'not-found.tsx'));
     expect(files).toContain(join(TENANT_SHELL, 'error.tsx'));
+  });
+});
+
+describe('every consumer of a `next` target judges it with the one rule (ROUTE_ARCHITECTURE.md §10, ADR-069)', () => {
+  /*
+   * Three call sites each wrote their own "is this a relative path?" test, and all three accepted
+   * `/\evil.com`, which the URL parser reads as `https://evil.com/` (PRODUCTION_AUDIT.md H2). The
+   * rule now lives in `core/routing`; this asserts that nothing reads a `next` parameter without
+   * going through it — a fourth call site written the old way would fail here, not in production.
+   */
+  it('imports safeNextPath wherever a next parameter is read', () => {
+    const readers = walk('src')
+      .filter((path) => /\.(ts|tsx)$/.test(path))
+      .filter((path) => /\.get\('next'\)|searchParams\.next\b/.test(readFileSync(path, 'utf8')));
+
+    // Two READ a next target (the callback and the sign-in form); the middleware only PRODUCES one,
+    // and it builds that from the request path through the same function.
+    expect(readers.length, 'the callback and the sign-in form read next').toBeGreaterThanOrEqual(2);
+    expect(readFileSync('src/middleware.ts', 'utf8')).toMatch(/safeNextPath\(/);
+    for (const path of readers) {
+      expect(readFileSync(path, 'utf8'), `${path} reads a next target without safeNextPath`)
+        .toMatch(/from '@\/core\/routing'/);
+    }
   });
 });

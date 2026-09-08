@@ -2,6 +2,7 @@
 
 import { useState, type FormEvent } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { safeNextPath } from '@/core/routing';
 import { supabaseBrowser } from '@/components/supabase-browser';
 import { Button } from '@/components/ui/button';
 import { Field, Input } from '@/components/ui/field';
@@ -26,8 +27,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const [error, setError] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
 
-  const next = params.get('next');
-  const safeNext = next && next.startsWith('/') && !next.startsWith('//') ? next : '/';
+  // The same rule the callback applies (ADR-069): `router.push` is not trusted to keep an
+  // off-origin target internal, so it is never handed one.
+  const safeNext = safeNextPath(params.get('next'), window.location.origin);
 
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();

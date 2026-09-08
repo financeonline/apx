@@ -174,7 +174,7 @@ Server actions (in `actions.ts` files colocated with pages) handle all other mut
 
 1. Refresh the Supabase session cookie (`@supabase/ssr`).
 2. Classify the path: `public`, `auth-noorg`, `app`, `portfolio`, `platform`, `api`.
-3. No session: `public` and `api/health` pass; everything else redirects to `/sign-in?next=<path>` (only relative paths accepted for `next`).
+3. No session: `public` and `api/health` pass; everything else redirects to `/sign-in?next=<path>` (`next` is judged by `core/routing.safeNextPath` — parsed as the browser parses it and kept only on our origin, ADR-069).
 4. Session present, `profiles.disabled_at` set → sign out and redirect to `/sign-in?error=disabled`.
 4a. Session present and the user has a `platform_users` row: if the session's `aal` is not `aal2`, redirect every request except `/account/mfa`, `/account` and sign-out to `/account/mfa` (ADR-038.8). `/auth/callback` refuses a magic-link exchange for platform users and shows "Platform accounts must sign in with a password and authenticator code".
 5. Load the platform role (single cached query per request):
@@ -213,7 +213,7 @@ Per-route files: `loading.tsx` (skeleton matching the page's layout, `UX_ARCHITE
 - Period parameter: `YYYY-MM` only (monthly granularity in MVP, ADR-030.6); ranges as `?from=YYYY-MM&to=YYYY-MM`; default period is the **latest complete month** (`fiscal_periods.is_complete`), the same rule the AI Analyst uses (`core/periods`).
 - Filters live in search params (`?status=open&severity=high`) so views are shareable; never in cookies.
 - Deep links to evidence (`/evidence/[bundleId]`), documents, batches, actions and conversations are org-scoped by URL; a bundle id from another organization returns 404 even for a user who is a member of both (the URL's slug must own the resource).
-- Redirect targets after auth (`next`) must be same-origin relative paths.
+- Redirect targets after auth (`next`) must be same-origin relative paths, decided by ONE function, `core/routing.safeNextPath`, in the callback, the sign-in form and the middleware alike (ADR-069): a `startsWith('/')` test is not a rule, because `/\evil.com` starts with a slash and resolves to `https://evil.com/`.
 
 ## 11. Route → RBAC test matrix (stub for `TEST_STRATEGY.md`)
 

@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createCallbackClient } from '@/core/db/user-client';
+import { safeNextPath } from '@/core/routing';
 
 /**
  * PKCE code exchange (SECURITY_MODEL.md §3).
@@ -11,8 +12,9 @@ import { createCallbackClient } from '@/core/db/user-client';
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
   const code = url.searchParams.get('code');
-  const nextParam = url.searchParams.get('next');
-  const next = nextParam && nextParam.startsWith('/') && !nextParam.startsWith('//') ? nextParam : '/';
+  // Judged by the one rule (ADR-069): parsed as the browser will parse it, kept only on our origin.
+  // `startsWith('/') && !startsWith('//')` let `/\evil.com` through (PRODUCTION_AUDIT.md H2).
+  const next = safeNextPath(url.searchParams.get('next'), url.origin);
 
   if (!code) {
     return NextResponse.redirect(new URL('/sign-in?error=missing_code', url.origin));

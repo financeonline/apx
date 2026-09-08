@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
+import { safeNextPath } from '@/core/routing';
 
 /**
  * Route-family gatekeeper (ROUTE_ARCHITECTURE.md §8).
@@ -51,11 +52,10 @@ function startsWithAny(pathname: string, prefixes: readonly string[]): boolean {
   return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
-/** Only same-origin relative paths survive as a `next` target (§10). */
+/** Only same-origin relative paths survive as a `next` target (§10, ADR-069) — one rule, one place. */
 function relativeTarget(request: NextRequest): string {
-  const { pathname, search } = request.nextUrl;
-  if (!pathname.startsWith('/') || pathname.startsWith('//')) return '/';
-  return `${pathname}${search}`;
+  const { pathname, search, origin } = request.nextUrl;
+  return safeNextPath(`${pathname}${search}`, origin);
 }
 
 interface PlatformRoleRow {
