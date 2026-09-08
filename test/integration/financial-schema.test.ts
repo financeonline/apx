@@ -258,9 +258,13 @@ describe('RLS on the new tables', () => {
 });
 
 describe('suspension freezes the financial tables (ADR-044.4; R2-A-07)', () => {
-  const FROZEN_HOME = ['organizations', 'metric_current', 'health_current', 'health_scores', 'alerts'] as const;
+  // ADR-068: the frozen Home needs its month as well as its pointers, so fiscal_periods is among
+  // the tables a suspended member may still read. (The snapshots metric_current points at are the
+  // other half; home-figures.test.ts and pgTAP 06 assert those, including that history stays out.)
+  const FROZEN_HOME = ['organizations', 'metric_current', 'health_current', 'health_scores', 'alerts',
+    'fiscal_periods'] as const;
   const TENANT_DATA = ['ledger_entries', 'invoices', 'bank_transactions', 'accounts',
-    'counterparties', 'fiscal_periods'] as const;
+    'counterparties', 'import_batches', 'source_documents'] as const;
 
   beforeAll(() => {
     adminSql(`update public.organizations set status = 'suspended' where id = '${orgId}'`);
@@ -275,7 +279,7 @@ describe('suspension freezes the financial tables (ADR-044.4; R2-A-07)', () => {
     expect((data as { role: string }[])[0]?.role).toBe('suspended_member');
   });
 
-  it('still admits the five frozen-Home tables', async () => {
+  it('still admits the frozen-Home tables', async () => {
     for (const table of FROZEN_HOME) {
       const column = table === 'organizations' ? 'id' : 'organization_id';
       const { error } = await clientFor(ownerId).from(table).select('*').eq(column, orgId);
@@ -283,6 +287,8 @@ describe('suspension freezes the financial tables (ADR-044.4; R2-A-07)', () => {
     }
     const { data } = await clientFor(ownerId).from('organizations').select('id').eq('id', orgId);
     expect(data, 'the frozen Home still resolves the organization').toHaveLength(1);
+    const periods = await clientFor(ownerId).from('fiscal_periods').select('id').eq('organization_id', orgId);
+    expect(periods.data?.length ?? 0, 'the frozen Home has a month to show (ADR-068)').toBeGreaterThan(0);
   });
 
   it('and hides every other tenant table', async () => {

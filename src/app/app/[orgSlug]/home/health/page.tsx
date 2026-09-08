@@ -23,7 +23,9 @@ export default async function HealthPage({ params }: { params: Promise<{ orgSlug
   const ctx = await getAccessContext(orgSlug);
   assertCan(ctx, 'dashboard.view');
 
-  const state = await loadHome(ctx.db, ctx.orgId!, orgSlug, ctx.requestId);
+  const state = await loadHome(ctx.db, ctx.orgId!, orgSlug, ctx.requestId, {
+    suspended: ctx.organizationStatus === 'suspended',
+  });
 
   if (state.kind !== 'ready' && state.kind !== 'bank_only') {
     return (

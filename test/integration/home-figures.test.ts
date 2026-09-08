@@ -403,3 +403,46 @@ describe('the period helpers', () => {
     expect(partialPeriod(periods, new Set(['m']))).toBeNull();
   });
 });
+
+describe('a suspended organisation keeps its frozen Home (ADR-044.4, ADR-068)', () => {
+  /*
+   * PRODUCTION_AUDIT.md H1, executed: the five tables that admitted `suspended_member` were two
+   * pointer tables and three others, and neither the month nor the figures Home shows were among
+   * them. Under suspension Home rendered "add your first file" beneath the suspension banner.
+   */
+  it('shows the figures it showed before suspension, and nothing written since', async () => {
+    markComplete(march, true);
+    writeMetric(march, 'revenue', '20000.00');
+    writeMetric(march, 'closing_cash', '25000.00');
+    const before = await loadHome(clientFor(ownerId), orgId, orgSlug);
+    if (before.kind !== 'ready' && before.kind !== 'bank_only') {
+      throw new Error(`expected figures before suspension, got ${before.kind}`);
+    }
+
+    adminSql(`update public.organizations set status = 'suspended' where id = '${orgId}'`);
+    try {
+      // A later run's figure for the same cell that nothing points at: history, which a suspended
+      // member must not see. `metric_current` keeps its first pointer (`on conflict do nothing`).
+      writeMetric(march, 'revenue', '99999.00');
+
+      const db = clientFor(ownerId);
+      const role = await db.schema('api').rpc('my_context', { p_slug: orgSlug });
+      expect((role.data as Array<{ role: string }>)[0]?.role).toBe('suspended_member');
+
+      const frozen = await loadHome(db, orgId, orgSlug, undefined, { suspended: true });
+      expect(frozen.kind).toBe(before.kind);
+      if (frozen.kind !== 'ready' && frozen.kind !== 'bank_only') return;
+      expect(frozen.view.period.id).toBe(march);
+      expect(frozen.view.cards.map((c) => [c.metricKey, c.rawValue]))
+        .toEqual(before.view.cards.map((c) => [c.metricKey, c.rawValue]));
+
+      // The policy, directly: exactly the pointed-at snapshot, not the newer one beside it.
+      const visible = await db.from('metric_snapshots').select('value')
+        .eq('organization_id', orgId).eq('metric_key', 'revenue');
+      expect(visible.error).toBeNull();
+      expect((visible.data ?? []).map((r) => String(r.value))).toEqual(['20000']);
+    } finally {
+      adminSql(`update public.organizations set status = 'active' where id = '${orgId}'`);
+    }
+  });
+});

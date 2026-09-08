@@ -190,18 +190,35 @@ export function basisLine(cards: readonly MetricCardView[], lastData: string | n
   return parts.join(' · ');
 }
 
+export interface LoadHomeOptions {
+  /**
+   * The organisation is suspended (ADR-044.4). Its member resolves to `suspended_member`, who reads
+   * the frozen figures and periods but no records — so the record-level first-run test below cannot
+   * be asked, and is not.
+   */
+  readonly suspended?: boolean;
+}
+
 export async function loadHome(
   db: SupabaseClient,
   orgId: string,
   orgSlug: string,
   requestId?: string,
+  options: LoadHomeOptions = {},
 ): Promise<HomeState> {
+  const suspended = options.suspended === true;
   const [periods, withData, recalculating, lastData, hasRecords] = await Promise.all([
     repo.loadPeriods(db, orgId, requestId),
     repo.loadPeriodsWithData(db, orgId, requestId),
     repo.isRecalculating(db, orgId, requestId),
     repo.loadLastDataDate(db, orgId, requestId),
-    repo.hasAcceptedRecords(db, orgId, requestId),
+    /*
+     * The frozen Home (ADR-068): a suspended member cannot read a single record, so the question
+     * "does any accepted record exist?" would always answer no and Home would ask a suspended
+     * organisation for its first file. The figures it CAN read are the ones that were on Home when
+     * it was suspended, and whether they exist is the whole test.
+     */
+    suspended ? Promise.resolve(true) : repo.hasAcceptedRecords(db, orgId, requestId),
   ]);
 
   /*
@@ -214,8 +231,9 @@ export async function loadHome(
    */
   if (!hasRecords || withData.size === 0) {
     // Nothing computed yet — but "you have not added anything" and "you added something and it is
-    // waiting for you" need completely different sentences (§6).
-    const pending = await repo.loadPendingBatch(db, orgId, requestId);
+    // waiting for you" need completely different sentences (§6). A suspended member cannot read
+    // batches, and the frozen Home has no "waiting for you" — nothing can be committed.
+    const pending = suspended ? null : await repo.loadPendingBatch(db, orgId, requestId);
     if (pending) {
       return {
         kind: 'awaiting_review',

@@ -13,7 +13,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(129);
+select plan(130);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -295,12 +295,31 @@ select is(pg_temp.rows_of('f6000000-0000-0000-0000-000000000004', t.relname,
                           'f6500000-0000-0000-0000-000000000005'),
           0, format('a suspended_member reads ZERO rows of public.%s', t.relname))
   from (values ('ledger_entries'), ('invoices'), ('bank_transactions'), ('accounts'),
-               ('counterparties'), ('period_balances'), ('fiscal_periods'),
+               ('counterparties'), ('period_balances'),
                ('account_category_history'), ('category_history'), ('bank_accounts'),
-               ('recurring_payment_groups'), ('calculation_runs'), ('metric_snapshots'),
+               ('recurring_payment_groups'), ('calculation_runs'),
                ('alert_revisions'), ('record_status_events'), ('actions'),
                ('source_documents'), ('import_mappings'), ('import_batches'), ('import_rows'),
                ('evidence_bundles')) as t(relname);
+
+-- ADR-068: the frozen Home needs its ROWS, not only its pointers. A suspended member reads the
+-- organisation's periods, and the snapshots `metric_current` points at — and no other snapshot.
+select cmp_ok(pg_temp.rows_of('f6000000-0000-0000-0000-000000000004', 'fiscal_periods',
+                              'f6500000-0000-0000-0000-000000000005'),
+              '>=', 1, 'a suspended_member reads the organisation''s fiscal_periods (ADR-068)');
+select is(pg_temp.rows_of('f6000000-0000-0000-0000-000000000004', 'metric_snapshots',
+                          'f6500000-0000-0000-0000-000000000005'),
+          1, 'a suspended_member reads the snapshot metric_current points at (ADR-068)');
+-- A second run's figure for the same cell, NOT pointed at: history stays out of reach.
+insert into public.metric_snapshots
+  (organization_id, calculation_run_id, period_id, metric_key, unit, basis, assurance_level, value)
+select s.organization_id, s.calculation_run_id, s.period_id, 'pgt.rls.superseded', 'money', 'ledger',
+       'verified', 41
+  from public.metric_snapshots s
+ where s.organization_id = 'f6500000-0000-0000-0000-000000000005' limit 1;
+select is(pg_temp.rows_of('f6000000-0000-0000-0000-000000000004', 'metric_snapshots',
+                          'f6500000-0000-0000-0000-000000000005'),
+          1, 'a suspended_member reads ZERO snapshots that metric_current does not point at (ADR-068)');
 
 -- ===========================================================================
 -- 5. Column privileges (ADR-044.2; R2-A-04)

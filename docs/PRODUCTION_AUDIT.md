@@ -16,7 +16,7 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 | C1 | **Critical** · *fixed* | Every tenant-data RLS policy evaluates `app.org_role(organization_id)` **per row**. A member's `count(*)` over 50,000 ledger rows takes **22.7 s**. → 12 ms after ADR-065. |
 | C2 | **Critical** · *fixed* | Any member with `financials.view` — a **client** included — can write a fabricated, immutable evidence bundle for any metric via `api.build_metric_bundle`; owners then see it as the system's evidence. No audit event. → function dropped; server-side builder verifies every item against the figure's own tree (ADR-066). |
 | C3 | **Critical** · *fixed* | `org.purge` has no job handler. "Delete this organisation" schedules a job that will die. Customer data is never deleted, and nothing surfaces the dead job. → handler + `api_server.purge_organization` + `/platform/jobs` (ADR-067). |
-| H1 | High | A suspended organisation's "frozen Home" (promised by four documents) cannot render: the rows it needs are denied to `suspended_member`. Members see "add your first file" under the suspension banner. |
+| H1 | High · *fixed* | A suspended organisation's "frozen Home" (promised by four documents) cannot render: the rows it needs are denied to `suspended_member`. Members see "add your first file" under the suspension banner. → periods and the current snapshots admit the role; Home skips the record test while suspended (ADR-068). |
 | H2 | High | Open redirect in `/auth/callback?next=/\evil.com`. |
 | H3 | High | MVP scope gaps: no AI Analyst at all (acceptance criteria 9–12 unmeetable), PDF import refused, no CSV export, no Documents page (uploaded files cannot be deleted from the UI), no platform jobs/audit/feedback/settings pages. |
 | M1 | Medium | Upload route buffers the whole multipart body before the 25 MB check; the comment claims the opposite. No throttle on upload. |
@@ -130,6 +130,8 @@ The drawer will resolve the payroll descriptor, show payroll rows as the evidenc
 ## High
 
 ### H1 · Suspended organisation: the frozen Home cannot render
+
+**Status: fixed** — migration `20260908000004_frozen_home_rows.sql`, ADR-068. `fiscal_periods` and the `metric_snapshots` rows `metric_current` points at admit `suspended_member`; `loadHome` no longer asks the record-level first-run question while suspended. Proven by pgTAP (current snapshots visible, history not) and an integration test that suspends a computed organisation and reads the same figures back.
 
 **Location.** RLS policies on `fiscal_periods`, `metric_snapshots`, `ledger_entries`/`bank_transactions`/`invoices`/`period_balances` (allow-list of the five real roles, correctly excluding `suspended_member`). Consumers: `src/modules/dashboard/data/repository.ts:14` (comment claiming the frozen Home renders), `:140` (`loadPeriods` → `fiscal_periods`), `:45` (`metric_snapshots!inner`), `:192` (`hasAcceptedRecords` → record tables); `src/modules/dashboard/services/home.ts:215` (`!hasRecords → first_run`).
 

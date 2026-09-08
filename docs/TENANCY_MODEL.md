@@ -60,7 +60,7 @@ language sql stable security definer set search_path = '' as $$
     from public.organization_memberships m
     join public.organizations o on o.id = m.organization_id
    where m.user_id = auth.uid() and m.status = 'active'
-     and o.status in ('active', 'suspended', 'pending_deletion')      -- suspended: only the five frozen-Home tables are readable (ADR-044.4)
+     and o.status in ('active', 'suspended', 'pending_deletion')      -- suspended: only the frozen-Home tables are readable (ADR-044.4, ADR-068)
   union
   select a.organization_id
     from public.organization_assignments a
@@ -112,7 +112,7 @@ language sql stable security definer set search_path = '' as $$
 $$;
 ```
 
-RLS policies use the two SET-FORM helpers `app.org_ids_with_role(variadic roles)` and `app.org_ids_with_permission(perm)` — "the organisations in which my effective role is one of these / holds this permission" — so a policy is one hashed membership test evaluated once per statement, never `app.org_role(organization_id)` per row (ADR-065). All six helpers plus the actor-parameterised twins `app.org_role_of(actor, org)` / `app.has_permission_of(actor, org, perm)` (used by `api_server.*`, ADR-043) are owned by `motion_definer` (`NOLOGIN`, `NOBYPASSRLS`), the role that owns every `public` table (ADR-044.3). Suspension semantic (ADR-044.4; R2-A-07): a suspended organization remains in the accessible set, but only `organizations`, `metric_current`, `health_current`, `health_scores` and `alerts` have policies that admit `suspended_member`; every other tenant-data policy is an allow-list of the five real roles, so the member sees the frozen Home and nothing else, and a suspended *client* cannot fall through a `<> 'client'` branch into `source_documents`.
+RLS policies use the two SET-FORM helpers `app.org_ids_with_role(variadic roles)` and `app.org_ids_with_permission(perm)` — "the organisations in which my effective role is one of these / holds this permission" — so a policy is one hashed membership test evaluated once per statement, never `app.org_role(organization_id)` per row (ADR-065). All six helpers plus the actor-parameterised twins `app.org_role_of(actor, org)` / `app.has_permission_of(actor, org, perm)` (used by `api_server.*`, ADR-043) are owned by `motion_definer` (`NOLOGIN`, `NOBYPASSRLS`), the role that owns every `public` table (ADR-044.3). Suspension semantic (ADR-044.4; R2-A-07): a suspended organization remains in the accessible set, but only the frozen-Home tables admit `suspended_member` — `organizations`, `metric_current`, `health_current`, `health_scores`, `alerts`, plus (ADR-068) `fiscal_periods` and the `metric_snapshots` rows `metric_current` points at, because the two pointer tables hold no figures and no month; every other tenant-data policy is an allow-list of the five real roles, so the member sees the frozen Home and nothing else, and a suspended *client* cannot fall through a `<> 'client'` branch into `source_documents`.
 
 The TypeScript twin `resolveAccess(userId, orgId): AccessContext` implements the identical order (RBAC §1), including organization status, membership status and the `aal2` requirement for platform users, and is tested against `app.accessible_org_ids()` **and** `app.org_role()` with the same 40-scenario fixture (membership × assignment × status × dates × organization status) so the two can never disagree silently.
 

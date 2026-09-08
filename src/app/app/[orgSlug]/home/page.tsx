@@ -178,7 +178,9 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
   const ctx = await getAccessContext(orgSlug);
   const canImport = can(ctx, 'imports.create');
 
-  const state = await loadHome(ctx.db, ctx.orgId!, orgSlug, ctx.requestId);
+  const state = await loadHome(ctx.db, ctx.orgId!, orgSlug, ctx.requestId, {
+    suspended: ctx.organizationStatus === 'suspended',
+  });
 
   if (state.kind === 'first_run') {
     return (
