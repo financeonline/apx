@@ -25,7 +25,7 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 | M4 | Medium · *fixed* | `api_rate_limits` grows without bound (one row per user × bucket × minute, never deleted). → pruned nightly by the platform sweep, which is now actually scheduled (ADR-074). |
 | M5 | Medium · *fixed* | `api.cancel_job` lets an owner/admin cancel *any* queued job of their org, including `org.purge`; only a super admin can requeue. → limited to the two user-requestable types and to the requester (ADR-071). |
 | M6 | Medium · *fixed* | Audit log UI shows the latest 100 events with no paging, filter or target — the SQL supports offset/500. → offset paging + target column (ADR-072). |
-| L1–L6 | Low | Fail-open middleware comment, dead-end `fix_import_row`, absent session revocation, silent depth truncation in the signer, stale promise in `revoke_assignment`, missing audit on bundle creation. |
+| L1–L6 | Low · *all fixed* | Fail-open middleware comment, dead-end `fix_import_row`, absent session revocation, silent depth truncation in the signer, stale promise in `revoke_assignment`, missing audit on bundle creation. → ADR-075 (L1–L5), ADR-066 (L6). |
 
 ---
 
@@ -241,6 +241,8 @@ Everything else in §2 is present and, where I tested it, behaves as specified. 
 ---
 
 ## Low
+
+**Status: all six fixed** — ADR-075 (L1 middleware 503; L2 `fix_import_row` dropped until re-validation exists; L3 `api_server.revoke_user_sessions` wired into member removal by an owner and platform-role revocation; L4 signer logs unvisited prefixes; L5 `revoke_assignment` archives the employee's conversations) and ADR-066 (L6 `evidence.bundle_built`).
 
 - **L1 · Middleware "fail closed" fails open.** `src/middleware.ts:81`: with `NEXT_PUBLIC_SUPABASE_URL`/anon key unset the request passes through with no family check. Server layouts (`platform/layout.tsx`, `app/[orgSlug]/layout.tsx`) still guard, so this is a wrong comment plus a lost defence layer, not a hole. Return 503.
 - **L2 · `api.fix_import_row` is a dead end.** No UI calls it; nothing re-validates a `pending` row; `assert_batch_committable` refuses `pending` rows. A direct call parks the batch until rejected or replaced. Either build the re-validate step or revoke the function.

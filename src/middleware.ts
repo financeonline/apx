@@ -78,9 +78,13 @@ export async function middleware(request: NextRequest) {
   const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
   if (!supabaseUrl || !supabaseAnonKey) {
-    // Without Supabase configured nothing can be authorised; fail closed rather than open.
-    response.headers.set('x-request-id', requestId);
-    return response;
+    // Without Supabase configured nothing can be authorised, so nothing is served: the comment here
+    // used to say "fail closed" above a `return response` that let every request through to the
+    // layouts (PRODUCTION_AUDIT.md L1; ADR-075). 503, and the request id, and nothing else.
+    return new NextResponse('Service unavailable', {
+      status: 503,
+      headers: { 'x-request-id': requestId, 'retry-after': '60' },
+    });
   }
 
   const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {

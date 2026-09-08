@@ -7,6 +7,7 @@ export {
   pruneRateLimits,
   purgeOrganization,
   recordAccessEvent,
+  revokeUserSessions,
   recordReportFile,
   recordStorageCleanup,
   throttle,

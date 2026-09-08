@@ -11,7 +11,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(78);
+select plan(82);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -608,6 +608,38 @@ select throws_ok($$ select api_server.prune_rate_limits() $$, '42501', null,
 select throws_ok($$ select api_server.enqueue_nightly_sweep() $$, '42501', null,
   'api_server.enqueue_nightly_sweep is refused to a user (authenticated)');
 call pg_temp.act_as_postgres();
+
+-- ---------------------------------------------------------------------------
+-- 13. ADR-075: stated controls exist. Session revocation is server-only; fix_import_row is withheld;
+--     revoking an assignment archives the employee's conversations.
+-- ---------------------------------------------------------------------------
+call pg_temp.act_as('f7000000-0000-0000-0000-000000000001');
+select throws_ok($$ select api_server.revoke_user_sessions('f7000000-0000-0000-0000-000000000002') $$,
+  '42501', null, 'api_server.revoke_user_sessions is refused to a user (authenticated)');
+select hasnt_function('api', 'fix_import_row', array['uuid', 'uuid', 'jsonb', 'uuid'],
+  'api.fix_import_row is dropped until the review UI can re-validate a fixed row (ADR-075)');
+call pg_temp.act_as_postgres();
+
+-- An employee assigned to org A with an open conversation; a super admin at aal2 revokes.
+-- A fresh platform employee (a platform user may not also be a member, RBAC §3.5, and the existing
+-- users are owners their organisations cannot lose).
+insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
+values ('f7000000-0000-0000-0000-000000000005','00000000-0000-0000-0000-000000000000','authenticated','authenticated','api-employee@test.motion','x',now(),now(),now());
+insert into public.platform_users (user_id, platform_role, status)
+values ('f7000000-0000-0000-0000-000000000005', 'employee', 'active');
+insert into public.organization_assignments (id, organization_id, employee_user_id, assigned_by, status)
+values ('f7d00000-0000-0000-0000-0000000000d1', 'f7a00000-0000-0000-0000-00000000000a',
+        'f7000000-0000-0000-0000-000000000005', 'f7000000-0000-0000-0000-000000000001', 'active');
+insert into public.ai_conversations (organization_id, user_id, title, status)
+values ('f7a00000-0000-0000-0000-00000000000a', 'f7000000-0000-0000-0000-000000000005', 'open thread', 'active');
+call pg_temp.act_as('f7000000-0000-0000-0000-000000000001');
+select lives_ok($$ select api.revoke_assignment('f7d00000-0000-0000-0000-0000000000d1', 'done') $$,
+  'an owner revokes an adviser assignment');
+call pg_temp.act_as_postgres();
+select is((select status::text from public.ai_conversations
+            where user_id = 'f7000000-0000-0000-0000-000000000005'
+              and organization_id = 'f7a00000-0000-0000-0000-00000000000a'),
+  'archived', 'revoking the assignment archived the employee''s conversation (SECURITY_MODEL.md §4, ADR-075)');
 
 select * from finish();
 rollback;

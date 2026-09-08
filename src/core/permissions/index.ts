@@ -7,6 +7,7 @@ export {
   canSetAlertStatus,
   canChangeRole,
   canRevokeAssignment,
+  endsSessionsOnRemoval,
   isSelfElevation,
   roleRank,
   type MembershipRole,

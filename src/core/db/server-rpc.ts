@@ -389,6 +389,18 @@ async function serverRpc<T>(fn: string, args: Record<string, unknown>): Promise<
 }
 
 /**
+ * Ends every session of one user (SECURITY_MODEL.md §4; ADR-075).
+ *
+ * GoTrue has no admin endpoint that does this for another user, so it is done where a session
+ * actually lives — `auth.sessions` and `auth.refresh_tokens` — by a service-only function. Access
+ * never depended on it (RLS re-resolves per request); it is the defence against a long-lived tab.
+ * Returns the number of sessions ended.
+ */
+export async function revokeUserSessions(userId: string): Promise<number> {
+  return serverRpc<number>('revoke_user_sessions', { p_user: userId });
+}
+
+/**
  * Deletes throttle-counter rows older than two days (DATABASE_ARCHITECTURE.md §7 `api_rate_limits`;
  * ADR-074). Run by the platform-wide nightly sweep, whose job the retention always was. Returns the
  * number of rows removed.

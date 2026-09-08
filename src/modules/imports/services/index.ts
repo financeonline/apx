@@ -179,16 +179,6 @@ export async function recordBatchConfirmation(
   }, requestId);
 }
 
-/** A reviewer edit. `raw_data` is never touched, and the row must be re-validated before it commits. */
-export async function fixImportRow(
-  db: SupabaseClient, batchId: string, rowId: string, patch: Record<string, unknown>,
-  reviewToken?: string, requestId?: string,
-): Promise<string> {
-  return callApi<string>(db, 'fix_import_row', {
-    p_batch: batchId, p_row: rowId, p_patch: patch, p_review_token: reviewToken ?? null,
-  }, requestId);
-}
-
 export async function confirmPdfPage(
   db: SupabaseClient, batchId: string, page: number, requestId?: string,
 ): Promise<string> {

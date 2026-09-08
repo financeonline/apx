@@ -63,6 +63,15 @@ export function canRevokeAssignment(actorRole: EffectiveRole): boolean {
 }
 
 /**
+ * Removing a member ends their access on the next request regardless; when the remover is an
+ * owner (or a super admin), their sessions are ended as well — the defence against a long-lived
+ * tab (SECURITY_MODEL.md §4; ADR-075). An admin removing a client does not reach into sessions.
+ */
+export function endsSessionsOnRemoval(actorRole: EffectiveRole): boolean {
+  return actorRole === 'super_admin' || actorRole === 'owner';
+}
+
+/**
  * `alerts.manage` is `◐` for a client: acknowledge only (RBAC_MATRIX.md §2.1).
  *
  * The bit says "may manage alerts", and it cannot say "may say I have seen this, but not decide it

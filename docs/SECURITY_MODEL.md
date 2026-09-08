@@ -92,9 +92,9 @@ Test principle (`TEST_STRATEGY.md §2`): for each layer there is an adversarial 
 Invitation lifecycle: token is 32 random bytes, stored as SHA-256 in `invitations.token_hash`, expires after 7 days, single-use, bound to the invited email (acceptance with a different signed-in email is refused); at most one pending invitation per `(organization, email)`; inviting an existing member or a platform user fails with a friendly error inside `api.invite_member`. Accepting runs entirely inside `api.accept_invitation`, which re-validates the inviter's current role and ceiling, creates the membership and writes `member.invited_accepted`.
 
 ## 4. Session revocation semantics
-- Removal from an organization: context is resolved per request, so access ends on the next request; no session invalidation needed, but the app also calls Supabase `signOut({scope: 'others'})` for the removed user when the remover is an owner (defence against long-lived tabs).
+- Removal from an organization: context is resolved per request, so access ends on the next request; no session invalidation needed, but when the remover is an owner the app also ends the removed user's sessions through `api_server.revoke_user_sessions` (defence against long-lived tabs; ADR-075).
 - Employee assignment revoked: same; additionally the employee's open AI conversations for that org are archived.
-- Platform role revoked: all sessions of that user are invalidated via the Auth admin API.
+- Platform role revoked: all sessions of that user are invalidated. GoTrue (v2.196) exposes no admin endpoint that ends another user's sessions, so `api_server.revoke_user_sessions` deletes the user's `auth.sessions` and `auth.refresh_tokens` rows — every refresh ends at once and the next `getUser()` fails because the session id in the JWT no longer resolves (ADR-075).
 - Organization suspended: every member resolves to `dashboard.view` only; a banner explains.
 
 ## 5. Secrets and configuration

@@ -145,8 +145,13 @@ select is(
   (select count(*)::int from pg_catalog.pg_proc p
      join pg_catalog.pg_namespace n on n.oid = p.pronamespace
     where n.nspname in ('app', 'api', 'api_server')
-      and pg_catalog.pg_get_userbyid(p.proowner) <> 'motion_definer'),
-  0, 'every app/api/api_server function is owned by motion_definer (NOBYPASSRLS)');
+      and pg_catalog.pg_get_userbyid(p.proowner) <> 'motion_definer'
+      -- The one exception, by name (ADR-075): revoking sessions deletes from auth.sessions and
+      -- auth.refresh_tokens, and Supabase's postgres role holds grant option on SELECT only for the
+      -- auth tables, so motion_definer can never be granted DELETE there. postgres owns that one
+      -- function; it carries the service-role guard and touches nothing in public.
+      and not (n.nspname = 'api_server' and p.proname = 'revoke_user_sessions')),
+  0, 'every app/api/api_server function is owned by motion_definer (NOBYPASSRLS), bar the named exception');
 
 select is(
   (select count(*)::int from pg_catalog.pg_proc p

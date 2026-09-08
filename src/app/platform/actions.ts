@@ -1,6 +1,7 @@
 'use server';
 
 import { revalidatePath } from 'next/cache';
+import { revokeUserSessions } from '@/core/db';
 import { getPlatformContext } from '@/modules/tenancy';
 import { assertCan } from '@/core/permissions';
 import { toMotionError } from '@/core/errors';
@@ -43,10 +44,12 @@ export async function revokePlatformRoleAction(
     const ctx = await getPlatformContext();
     requestId = ctx.requestId;
     assertCan(ctx, 'platform.users.manage');
-    const { error } = await ctx.db.schema('api').rpc('revoke_platform_role', {
-      p_user: text(form, 'user_id'),
-    });
+    const userId = text(form, 'user_id');
+    const { error } = await ctx.db.schema('api').rpc('revoke_platform_role', { p_user: userId });
     if (error) throw toMotionError(error, requestId);
+    // SECURITY_MODEL.md §4: a revoked platform role invalidates every session of that user, at the
+    // database (ADR-075). After the revocation committed, so a failure here cannot undo it.
+    await revokeUserSessions(userId);
     revalidatePath('/platform/users');
     return done('Platform role removed.');
   } catch (error) {

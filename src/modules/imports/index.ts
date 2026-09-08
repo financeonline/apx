@@ -34,7 +34,6 @@ export {
   confirmPdfPage,
   decideImportRows,
   deleteDocument,
-  fixImportRow,
   recordBatchConfirmation,
   rejectImportBatch,
   replaceImportBatch,

@@ -691,36 +691,24 @@ describe('an AI-read document needs every page confirmed (§5.4)', () => {
   });
 });
 
-describe('a reviewer edit keeps the original', () => {
-  it('changes mapped_data, leaves raw_data untouched, and forces re-validation', async () => {
+describe('a reviewer edit is absent until it can be re-validated (ADR-075)', () => {
+  /*
+   * `api.fix_import_row` set a row `pending`, and nothing re-validated it; the commit gate rightly
+   * refuses a pending row (asserted above), so a fix parked the batch until it was rejected or
+   * replaced (PRODUCTION_AUDIT.md L2). The function is dropped until the review UI's in-place edit
+   * (IMPORT_ENGINE.md §10) exists and re-validates the row.
+   */
+  it('has no fix_import_row to call, rather than one that parks the batch', async () => {
     const batch = makeBatch([
       { rowNumber: 2, mapped: txn('2026-05-04', 'not-a-number', 'A'), status: 'error', hash: 'ba01' },
     ]);
     const rowId = adminSql(`select id from public.import_rows where batch_id = '${batch}'`);
-
     const { error } = await rpc(ownerId, 'fix_import_row', {
       p_batch: batch, p_row: rowId, p_patch: { amount: '-42.00' },
     });
-    expect(error, error?.message).toBeNull();
-
-    const after = adminSql(`
-      select (mapped_data ->> 'amount') || '|' || (raw_data ->> 'source') || '|' || status::text
-        from public.import_rows where id = '${rowId}'`);
-    // The fix applies, the file as it arrived is untouched, and the row must be checked again.
-    expect(after).toBe('-42.00|line|pending');
-  });
-
-  it('refuses an edit made against a stale view of the batch (§16)', async () => {
-    const batch = makeBatch([
-      { rowNumber: 2, mapped: txn('2026-05-04', '-1.00', 'A'), status: 'error', hash: 'bb01' },
-    ]);
-    const rowId = adminSql(`select id from public.import_rows where batch_id = '${batch}'`);
-
-    const { error } = await rpc(ownerId, 'fix_import_row', {
-      p_batch: batch, p_row: rowId, p_patch: { amount: '-2.00' },
-      p_review_token: '00000000-0000-4000-8000-000000000000',
-    });
-    expect(sqlstate(error)).toBe(CONFLICT);
-    expect(error?.message).toContain('reload');
+    // Dropped, not merely revoked: ADR-026 says every api.* function is executable by authenticated,
+    // so a function nobody may call has no place in the schema. PostgREST: no such function.
+    expect(error?.code).toBe('PGRST202');
+    expect(adminSql(`select status from public.import_rows where id = '${rowId}'`)).toBe('error');
   });
 });

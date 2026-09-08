@@ -1,6 +1,7 @@
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { InternalError, NotFound, PermissionDenied, ValidationError } from '@/core/errors';
+import { log } from '@/core/logging';
 import { sanitiseFilename } from './filenames';
 
 /**
@@ -214,7 +215,8 @@ const LIST_PAGE_SIZE = 1000;
 /**
  * How far below the organization prefix the walk descends. Both buckets are `{org}/{a}/{b}`, so two
  * levels is the whole shape; the budget exists so a bucket that somehow grew a deeper tree makes the
- * walk stop and say so rather than recurse for as long as Storage keeps answering.
+ * walk stop — and say so, in the log, naming the prefixes it did not descend into (ADR-075) —
+ * rather than recurse for as long as Storage keeps answering.
  */
 const MAX_PREFIX_DEPTH = 3;
 /** Storage's own marker for a directory that exists with nothing in it. Not an object. */
@@ -333,6 +335,13 @@ export async function listObjectsForOrganization(
       }
     }
     frontier = next;
+  }
+  if (frontier.length > 0) {
+    // Not an error — nothing under an unvisited prefix can be deleted by this walk, which is the
+    // safe direction — but a silence here would let a bucket grow a tree the sweep never sees.
+    log.warn('storage walk stopped at its depth budget with prefixes unvisited', {
+      bucket, orgId, depth: MAX_PREFIX_DEPTH, unvisited: frontier,
+    });
   }
   return objects;
 }
