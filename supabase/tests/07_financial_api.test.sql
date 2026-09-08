@@ -11,7 +11,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(67);
+select plan(69);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -525,6 +525,19 @@ select is(
     where n.nspname = 'api_server'
       and p.prosrc not like '%api_server is callable only by the server%'),
   0, 'EVERY api_server.* function carries the service-role guard in its body (ADR-043)');
+
+-- ---------------------------------------------------------------------------
+-- 9. ADR-066: a metric bundle is built by the server from the figure's own tree. The api.* twin that
+--    trusted its caller (PRODUCTION_AUDIT.md C2) is gone, not revoked.
+-- ---------------------------------------------------------------------------
+select hasnt_function('api', 'build_metric_bundle', array['uuid', 'jsonb'],
+  'api.build_metric_bundle no longer exists: a user token has no bundle-writing surface (ADR-066)');
+call pg_temp.act_as('f7000000-0000-0000-0000-000000000001');
+select throws_ok(
+  $$ select api_server.build_metric_bundle_as('f7000000-0000-0000-0000-000000000001',
+                                             '00000000-0000-0000-0000-000000000000', '[]'::jsonb) $$,
+  '42501', null, 'api_server.build_metric_bundle_as is refused to a user (authenticated)');
+call pg_temp.act_as_postgres();
 
 select * from finish();
 rollback;

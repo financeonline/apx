@@ -1,4 +1,6 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { buildMetricBundle, type MetricBundleItem } from '@/core/db';
+import { NotFound, ValidationError } from '@/core/errors';
 import { Decimal, toMoneyString } from '@/core/money';
 import { permissionsFor } from '@/core/permissions';
 import { drainJobs } from '@/modules/jobs';
@@ -788,23 +790,104 @@ describe('bundles cannot be rewritten after the fact (§8.8)', () => {
   });
 });
 
-describe('an authenticated caller cannot forge evidence (§8.5)', () => {
-  it('build_metric_bundle refuses an item type a metric bundle may not carry', async () => {
-    const db = clientFor(ownerId, { email: `owner@${DOMAIN}` });
+describe('nobody can forge evidence (§8.5, ADR-066)', () => {
+  /*
+   * PRODUCTION_AUDIT.md C2, executed: with `api.build_metric_bundle` granted to `authenticated`, a
+   * CLIENT attached a `query` item labelled "FABRICATED BY CLIENT", hostile claim text and a payroll
+   * descriptor to the owner's revenue figure. It became THE bundle for that figure — system-attributed,
+   * immutable, returned to the owner's next click, unaudited.
+   *
+   * The function is gone. What remains is `api_server.build_metric_bundle_as`, reachable only with
+   * the service role, which re-derives the figure's evidence tree in SQL and refuses anything outside
+   * it. These tests drive that function the way the server does — so they prove that even the
+   * server-side list cannot carry what the snapshot does not itself say.
+   */
+  const asServer = (userId: string) => ({ userId, requestId: `itest-${RUN}` });
+  const draft = (over: Partial<MetricBundleItem> & Pick<MetricBundleItem, 'item_type' | 'label'>): MetricBundleItem => ({
+    ref_id: null, query_descriptor: null, descriptor_hash: null, assurance_level: 'verified', ...over,
+  });
+  const root = (key: string) => draft({ item_type: 'metric_snapshot', ref_id: snapshotOf(key), label: key });
+
+  it('a user token has no bundle-writing function to call at all', async () => {
+    const db = clientFor(clientUserId, { email: `client@${DOMAIN}` });
     const { error } = await db.schema('api').rpc('build_metric_bundle', {
-      p_snapshot: snapshotOf('operating_profit'),
-      p_items: [{ item_type: 'alert', ref_id: null, label: 'forged', assurance_level: 'verified' }],
+      p_snapshot: snapshotOf('revenue'), p_items: [],
     });
     expect(error).not.toBeNull();
-    expect(sqlstate(error)).toBe('22023');
+    // PostgREST: no such function in an exposed schema. Not 42501 — there is nothing to be denied.
+    expect(error!.code).toBe('PGRST202');
   });
 
-  it('and refuses to create an empty bundle (§8.6)', async () => {
-    const db = clientFor(ownerId, { email: `owner@${DOMAIN}` });
-    const { error } = await db.schema('api').rpc('build_metric_bundle', {
-      p_snapshot: snapshotOf('operating_profit'), p_items: [],
-    });
-    expect(sqlstate(error)).toBe('22023');
+  /*
+   * Each refusal targets a figure NOTHING ELSE in this file opens. The function returns an existing
+   * bundle before it looks at the items — nothing is written, so there is nothing to validate — and
+   * a refusal test aimed at a figure that already has a bundle would pass for the wrong reason.
+   */
+  it('refuses the audit’s poison: a descriptor that is not a leaf of the figure’s own tree', async () => {
+    await expect(buildMetricBundle(asServer(clientUserId), {
+      snapshotId: snapshotOf('cost_of_sales'),
+      items: [
+        root('cost_of_sales'),
+        draft({
+          item_type: 'query',
+          label: 'FABRICATED BY CLIENT',
+          query_descriptor: { v: 1, table: 'ledger_entries', filters: { category_account_ids: [accountId('payroll')] } },
+          descriptor_hash: 'ab'.repeat(32),
+        }),
+      ],
+    })).rejects.toThrow(/not a leaf of this figure/);
+  });
+
+  it('refuses claim text on a metric bundle: figures, not sentences', async () => {
+    await expect(buildMetricBundle(asServer(ownerId), {
+      snapshotId: snapshotOf('operating_expenses'),
+      items: [{ ...root('operating_expenses'), claim: 'Revenue was £1 and the owner is lying' } as MetricBundleItem],
+    })).rejects.toThrow(/figures, not claims/);
+  });
+
+  it('refuses a snapshot that is not in the figure’s tree, a foreign run, and a foreign dimension', async () => {
+    // net_profit is derived; closing_cash is a real figure that is no part of its tree.
+    await expect(buildMetricBundle(asServer(ownerId), {
+      snapshotId: snapshotOf('net_profit'),
+      items: [root('net_profit'), root('closing_cash')],
+    })).rejects.toThrow(/not a snapshot in this figure/);
+
+    await expect(buildMetricBundle(asServer(ownerId), {
+      snapshotId: snapshotOf('net_profit'),
+      items: [root('net_profit'), draft({ item_type: 'calculation_run', ref_id: snapshotOf('net_profit'), label: 'run' })],
+    })).rejects.toThrow(/not the run that produced/);
+
+    await expect(buildMetricBundle(asServer(ownerId), {
+      snapshotId: snapshotOf('net_profit'),
+      items: [root('net_profit'), draft({ item_type: 'account', ref_id: accountId('revenue'), label: 'acct' })],
+    })).rejects.toThrow(/not the dimension/);
+  });
+
+  it('refuses an item type a metric bundle may not carry, and an empty bundle (§8.6)', async () => {
+    await expect(buildMetricBundle(asServer(ownerId), {
+      snapshotId: snapshotOf('operating_profit'),
+      items: [{ ...draft({ item_type: 'metric_snapshot', label: 'forged' }), item_type: 'alert' } as unknown as MetricBundleItem],
+    })).rejects.toBeInstanceOf(ValidationError);
+
+    await expect(buildMetricBundle(asServer(ownerId), {
+      snapshotId: snapshotOf('operating_profit'), items: [],
+    })).rejects.toBeInstanceOf(ValidationError);
+  });
+
+  it('answers an actor with no standing in the organisation with NOT_FOUND, not a denial', async () => {
+    const outsiderId = createAuthUser(`outsider@${DOMAIN}`);
+    await expect(buildMetricBundle(asServer(outsiderId), {
+      snapshotId: snapshotOf('revenue'), items: [root('revenue')],
+    })).rejects.toBeInstanceOf(NotFound);
+  });
+
+  it('writes an audit event naming who materialised the bundle', async () => {
+    const bundleId = await buildBundleForMetric(contextFor(ownerId, 'owner'), snapshotOf('gross_profit'));
+    const actor = one(`
+      select actor_user_id::text from public.audit_events
+       where organization_id = '${orgId}' and action = 'evidence.bundle_built'
+         and target_id = '${bundleId}'`);
+    expect(actor).toBe(ownerId);
   });
 
   it('and no authenticated role can write the evidence tables directly (ADR-026)', async () => {

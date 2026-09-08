@@ -126,6 +126,40 @@ export async function recordReportFile(
   return data as string;
 }
 
+/** One item of a metric bundle, as `api_server.build_metric_bundle_as` takes it. */
+export interface MetricBundleItem {
+  readonly item_type: 'metric_snapshot' | 'calculation_run' | 'query' | 'counterparty' | 'account';
+  readonly ref_id: string | null;
+  readonly query_descriptor: unknown | null;
+  readonly descriptor_hash: string | null;
+  readonly label: string;
+  readonly assurance_level: string;
+}
+
+/**
+ * Materialises a metric's evidence bundle (EVIDENCE_MODEL.md §9; ADR-066).
+ *
+ * The items are derived on the server from the snapshot's own `evidence_query`
+ * (`evidence/services/build-metric.ts`); the function re-derives the snapshot's tree in SQL and
+ * refuses any item that is not part of it, re-checks the actor's `financials.view`, and returns the
+ * existing bundle if one exists. No user token can reach this: a browser has no bundle-writing
+ * surface at all, which is what closes PRODUCTION_AUDIT.md C2.
+ */
+export async function buildMetricBundle(
+  actor: ServerRpcActor,
+  input: { snapshotId: string; items: readonly MetricBundleItem[] },
+): Promise<string> {
+  const { data, error } = await serverClient()
+    .schema('api_server')
+    .rpc('build_metric_bundle_as', {
+      p_actor: actor.userId,
+      p_snapshot: input.snapshotId,
+      p_items: input.items,
+    });
+  if (error) throw toMotionError(error, actor.requestId);
+  return data as string;
+}
+
 /**
  * Records one organization's share of a `storage.cleanup_orphans` sweep (SERVICE_ARCHITECTURE.md §7).
  *

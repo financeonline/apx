@@ -1,8 +1,9 @@
 import 'server-only';
-import { NotFound, ValidationError } from '@/core/errors';
+import { InternalError, NotFound, ValidationError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
 import { isAssuranceLevel, minAssurance, type AssuranceLevel } from '../domain/assurance';
+import { descriptorHash } from '../domain/canonical';
 import {
   EvidenceQuerySchema,
   parseQueryDescriptor,
@@ -123,6 +124,15 @@ async function toItemView(ctx: AccessContext, orgId: string, row: Row): Promise<
   if (itemTypeRaw === 'query') {
     const descriptor = parseQueryDescriptor(row.query_descriptor);
     const hash = hashHex(row.descriptor_hash);
+    /*
+     * The stored hash is COMPARED, never replaced (ADR-046.2, ADR-066). A descriptor whose JSON
+     * and hash disagree is an item somebody or something altered after it was written — the one
+     * thing an append-only evidence table exists to make impossible — and it is refused loudly
+     * rather than resolved as though it were the engine's.
+     */
+    if (hash !== undefined && descriptorHash(descriptor) !== hash) {
+      throw new InternalError('An evidence item’s descriptor does not match its recorded hash.');
+    }
     return {
       id,
       itemType: 'query',

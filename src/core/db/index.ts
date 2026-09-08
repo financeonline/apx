@@ -2,6 +2,7 @@ export { createUserClient } from './user-client';
 export { createServiceClient, withOrgScope, type OrgScope } from './service-client';
 export {
   aggregationInstant,
+  buildMetricBundle,
   recordAccessEvent,
   recordReportFile,
   recordStorageCleanup,
@@ -24,6 +25,7 @@ export {
   setBatchValidation,
   failImportBatch,
   type ClaimedJobRow,
+  type MetricBundleItem,
   type ServerRpcActor,
 } from './server-rpc';
 export { callApi } from './api-rpc';

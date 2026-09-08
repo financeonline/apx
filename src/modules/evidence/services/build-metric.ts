@@ -1,5 +1,6 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { buildMetricBundle } from '@/core/db';
 import { NotFound, toMotionError, ValidationError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
@@ -18,8 +19,9 @@ import { requireOrgId, resolveCompiled } from './resolve';
  * A metric snapshot IS its own evidence root — `metric_snapshots.evidence_query` is either a `leaf`
  * descriptor or a `derived` list of component snapshot ids (ADR-034) — so nothing is written when a
  * run finishes. This materialises the bundle the first time somebody clicks "Why?" on that figure,
- * and `api.build_metric_bundle` returns the same bundle for every later click: bundles are immutable
- * (§8.1), and a second bundle for one snapshot would be a second answer to a question with one.
+ * and `api_server.build_metric_bundle_as` returns the same bundle for every later click: bundles are
+ * immutable (§8.1), and a second bundle for one snapshot would be a second answer to a question with
+ * one — which is an index, not a comment (ADR-066).
  *
  * A derived metric is walked all the way down. §5: "one `metric_snapshot` item per component,
  * recursively expanded to leaves so the drawer can reconcile each" — which is what makes level 3's
@@ -189,9 +191,9 @@ async function walk(state: WalkState, snapshot: Row): Promise<void> {
 /**
  * §9: `buildBundleForMetric(ctx, snapshotId) → BundleId`, cached by snapshot.
  *
- * The cache is the `api.*` function's, not this one's: it returns the existing bundle for the
- * snapshot before inserting anything, so two readers opening the same figure at the same instant
- * both get the same id.
+ * The cache is the server function's, not this one's: it returns the existing bundle for the
+ * snapshot before inserting anything, under a per-snapshot lock, so two readers opening the same
+ * figure at the same instant both get the same id.
  */
 export async function buildBundleForMetric(
   ctx: AccessContext,
@@ -236,17 +238,24 @@ export async function buildBundleForMetric(
     ...state.items,
   ];
 
-  const { data, error } = await ctx.db.schema('api').rpc('build_metric_bundle', {
-    p_snapshot: snapshotId,
-    p_items: ordered.map((item) => ({
-      item_type: item.item_type,
-      ref_id: item.ref_id ?? null,
-      query_descriptor: item.query_descriptor ?? null,
-      descriptor_hash: item.descriptor_hash ?? null,
-      label: item.label,
-      assurance_level: item.assurance_level,
-    })),
-  });
-  if (error) throw toMotionError(error);
-  return String(data);
+  /*
+   * Written through `api_server`, never `api` (ADR-066). The walk above ran under the caller's own
+   * client, so every snapshot it cited is one the caller may read; the function re-derives the tree
+   * in SQL and refuses any item outside it, so even this server-side list cannot carry anything the
+   * snapshot does not itself say. There is no bundle-writing function a browser token can call.
+   */
+  return buildMetricBundle(
+    { userId: ctx.userId, requestId: ctx.requestId },
+    {
+      snapshotId,
+      items: ordered.map((item) => ({
+        item_type: item.item_type,
+        ref_id: item.ref_id ?? null,
+        query_descriptor: item.query_descriptor ?? null,
+        descriptor_hash: item.descriptor_hash ?? null,
+        label: item.label,
+        assurance_level: item.assurance_level,
+      })),
+    },
+  );
 }

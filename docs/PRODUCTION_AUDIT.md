@@ -13,8 +13,8 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 
 | # | Severity | Finding |
 |---|---|---|
-| C1 | **Critical** | Every tenant-data RLS policy evaluates `app.org_role(organization_id)` **per row**. A member's `count(*)` over 50,000 ledger rows takes **22.7 s**. |
-| C2 | **Critical** | Any member with `financials.view` — a **client** included — can write a fabricated, immutable evidence bundle for any metric via `api.build_metric_bundle`; owners then see it as the system's evidence. No audit event. |
+| C1 | **Critical** · *fixed* | Every tenant-data RLS policy evaluates `app.org_role(organization_id)` **per row**. A member's `count(*)` over 50,000 ledger rows takes **22.7 s**. → 12 ms after ADR-065. |
+| C2 | **Critical** · *fixed* | Any member with `financials.view` — a **client** included — can write a fabricated, immutable evidence bundle for any metric via `api.build_metric_bundle`; owners then see it as the system's evidence. No audit event. → function dropped; server-side builder verifies every item against the figure's own tree (ADR-066). |
 | C3 | **Critical** | `org.purge` has no job handler. "Delete this organisation" schedules a job that will die. Customer data is never deleted, and nothing surfaces the dead job. |
 | H1 | High | A suspended organisation's "frozen Home" (promised by four documents) cannot render: the rows it needs are denied to `suspended_member`. Members see "add your first file" under the suspension banner. |
 | H2 | High | Open redirect in `/auth/callback?next=/\evil.com`. |
@@ -84,6 +84,8 @@ The planner hashes the subquery (as it already does for `accessible_org_ids()`),
 ---
 
 ### C2 · A client can author the evidence the owner sees
+
+**Status: fixed** — migration `20260908000002_metric_bundle_server_side.sql`, ADR-066. `api.build_metric_bundle` is dropped; `api_server.build_metric_bundle_as` re-derives the snapshot's tree and refuses any item outside it; unique index per snapshot; audited; the drawer verifies every stored descriptor hash on read.
 
 **Location.** `api.build_metric_bundle(p_snapshot, p_items jsonb)` — `SECURITY DEFINER`, granted to `authenticated`, permission `financials.view` (which the `client` role holds). Consumer: `src/modules/evidence/services/build-metric.ts:239`. Renderer: `src/app/app/[orgSlug]/evidence/[bundleId]/page.tsx:264` (`block.label`), `src/modules/evidence/services/drawer.ts:335–360` (resolves `query_descriptor` and prints a reconciliation sentence against it).
 
