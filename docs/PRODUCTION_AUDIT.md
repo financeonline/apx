@@ -15,7 +15,7 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 |---|---|---|
 | C1 | **Critical** · *fixed* | Every tenant-data RLS policy evaluates `app.org_role(organization_id)` **per row**. A member's `count(*)` over 50,000 ledger rows takes **22.7 s**. → 12 ms after ADR-065. |
 | C2 | **Critical** · *fixed* | Any member with `financials.view` — a **client** included — can write a fabricated, immutable evidence bundle for any metric via `api.build_metric_bundle`; owners then see it as the system's evidence. No audit event. → function dropped; server-side builder verifies every item against the figure's own tree (ADR-066). |
-| C3 | **Critical** | `org.purge` has no job handler. "Delete this organisation" schedules a job that will die. Customer data is never deleted, and nothing surfaces the dead job. |
+| C3 | **Critical** · *fixed* | `org.purge` has no job handler. "Delete this organisation" schedules a job that will die. Customer data is never deleted, and nothing surfaces the dead job. → handler + `api_server.purge_organization` + `/platform/jobs` (ADR-067). |
 | H1 | High | A suspended organisation's "frozen Home" (promised by four documents) cannot render: the rows it needs are denied to `suspended_member`. Members see "add your first file" under the suspension banner. |
 | H2 | High | Open redirect in `/auth/callback?next=/\evil.com`. |
 | H3 | High | MVP scope gaps: no AI Analyst at all (acceptance criteria 9–12 unmeetable), PDF import refused, no CSV export, no Documents page (uploaded files cannot be deleted from the UI), no platform jobs/audit/feedback/settings pages. |
@@ -112,6 +112,8 @@ The drawer will resolve the payroll descriptor, show payroll rows as the evidenc
 ---
 
 ### C3 · Organisation deletion never happens
+
+**Status: fixed** — migration `20260908000003_org_purge.sql`, handler `src/modules/jobs/handlers/org-purge.ts`, `/platform/jobs`, ADR-067. Integration-tested end to end: rows, objects, audit redaction, refusals, idempotence, and the queue path.
 
 **Location.** Trigger `app.enqueue_purge_on_deletion` (`20260905000007_triggers.sql:200`) enqueues `org.purge` with `run_after = now() + 30 days`. Registered handlers (`src/modules/jobs/handlers/index.ts`): `calculation.run`, `alerts.evaluate`, `import.commit_large`, `report.render`, `storage.cleanup_orphans`. `src/modules/jobs/services/worker.ts:53` fails any other type with "No handler is registered for …". `api_server.claim_job` explicitly lets `org.purge` through for non-active organisations, so it *will* be claimed.
 

@@ -23,3 +23,6 @@ export { registerJobHandlers, serverCalls } from './handlers';
 export {
   runStorageCleanupJob, ORPHAN_GRACE_MS, MAX_REMOVALS_PER_RUN,
 } from './handlers';
+
+/** The purge is exported by name so a test can drive it with a claimed job, as the worker does. */
+export { runOrgPurgeJob } from './handlers';

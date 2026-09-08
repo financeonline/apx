@@ -9,6 +9,7 @@ import type { ClaimedJob, JobOutcome } from '../domain/types';
 import { runCalculationJob } from './calculation-run';
 import { evaluateAlertsJob } from './alerts-evaluate';
 import { commitLargeBatchJob } from './import-commit-large';
+import { runOrgPurgeJob } from './org-purge';
 import { runReportRenderJob } from './report-render';
 import { runStorageCleanupJob } from './storage-cleanup';
 
@@ -33,6 +34,7 @@ const HANDLERS: ReadonlyArray<readonly [ClaimedJob['jobType'], (job: ClaimedJob,
   ['import.commit_large', commitLargeBatchJob],
   ['report.render', runReportRenderJob],
   ['storage.cleanup_orphans', runStorageCleanupJob],
+  ['org.purge', runOrgPurgeJob],
 ];
 
 let registered = false;
@@ -60,5 +62,6 @@ export const serverCalls = {
 export { runCalculationJob } from './calculation-run';
 export { runReportRenderJob } from './report-render';
 export { runStorageCleanupJob, ORPHAN_GRACE_MS, MAX_REMOVALS_PER_RUN } from './storage-cleanup';
+export { runOrgPurgeJob } from './org-purge';
 export { evaluateAlertsJob } from './alerts-evaluate';
 export { commitLargeBatchJob } from './import-commit-large';

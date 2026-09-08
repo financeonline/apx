@@ -11,7 +11,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(69);
+select plan(72);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -537,6 +537,41 @@ select throws_ok(
   $$ select api_server.build_metric_bundle_as('f7000000-0000-0000-0000-000000000001',
                                              '00000000-0000-0000-0000-000000000000', '[]'::jsonb) $$,
   '42501', null, 'api_server.build_metric_bundle_as is refused to a user (authenticated)');
+call pg_temp.act_as_postgres();
+
+-- ---------------------------------------------------------------------------
+-- 10. ADR-067: the purge. Service role only, and it re-verifies the two facts the trigger relied on
+--     thirty days earlier before it deletes a single row.
+-- ---------------------------------------------------------------------------
+create procedure pg_temp.act_as_service()
+language plpgsql as $$
+begin
+  perform set_config('role', 'service_role', true);
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+end $$;
+
+call pg_temp.act_as('f7000000-0000-0000-0000-000000000001');
+select throws_ok(
+  $$ select api_server.purge_organization('f7a00000-0000-0000-0000-00000000000a',
+                                          '00000000-0000-0000-0000-000000000000') $$,
+  '42501', null, 'api_server.purge_organization is refused to a user (authenticated)');
+call pg_temp.act_as_postgres();
+
+call pg_temp.act_as_service();
+select throws_ok(
+  $$ select api_server.purge_organization('f7a00000-0000-0000-0000-00000000000a',
+                                          '00000000-0000-0000-0000-000000000000') $$,
+  '23514', null, 'the purge refuses an organisation that is not scheduled for deletion');
+call pg_temp.act_as_postgres();
+
+update public.organizations
+   set status = 'pending_deletion', deletion_requested_at = now() - interval '1 day'
+ where id = 'f7a00000-0000-0000-0000-00000000000a';
+call pg_temp.act_as_service();
+select throws_ok(
+  $$ select api_server.purge_organization('f7a00000-0000-0000-0000-00000000000a',
+                                          '00000000-0000-0000-0000-000000000000') $$,
+  '23514', null, 'the purge refuses an organisation scheduled less than thirty days ago');
 call pg_temp.act_as_postgres();
 
 select * from finish();

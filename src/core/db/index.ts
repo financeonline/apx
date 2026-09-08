@@ -3,6 +3,7 @@ export { createServiceClient, withOrgScope, type OrgScope } from './service-clie
 export {
   aggregationInstant,
   buildMetricBundle,
+  purgeOrganization,
   recordAccessEvent,
   recordReportFile,
   recordStorageCleanup,

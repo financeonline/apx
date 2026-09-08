@@ -161,6 +161,23 @@ export async function buildMetricBundle(
 }
 
 /**
+ * The row half of `org.purge` (TENANCY_MODEL.md §2; ADR-067): re-verifies the organisation is still
+ * scheduled and thirty days old, waits for its other jobs, deletes every tenant row, redacts the
+ * audit trail and marks the organisation `deleted` — one transaction. No human actor: the purge is
+ * the system honouring a request the owner made thirty days earlier and could have cancelled since.
+ */
+export async function purgeOrganization(
+  organizationId: string,
+  jobId: string,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await serverClient()
+    .schema('api_server')
+    .rpc('purge_organization', { p_org: organizationId, p_job: jobId });
+  if (error) throw toMotionError(error);
+  return data as Record<string, unknown>;
+}
+
+/**
  * Records one organization's share of a `storage.cleanup_orphans` sweep (SERVICE_ARCHITECTURE.md §7).
  *
  * The sweep is the only job that destroys customer data, and the row whose absence condemned each
