@@ -22,6 +22,7 @@ let ownerId: string;
 let clientUserId: string;
 let orgId: string;
 let bankAccountId: string;
+let counterpartyId: string;
 let documentSeq = 0;
 
 const rpc = (userId: string, fn: string, args: Record<string, unknown> = {}) =>
@@ -85,6 +86,48 @@ function makeBatch(rows: readonly RowSpec[], opts: {
   return batchId;
 }
 
+/** An invoice batch: the same shape as `makeBatch`, aimed at `invoices` (ADR-029.1, ADR-073). */
+function makeInvoiceBatch(rows: readonly {
+  rowNumber: number; number: string; total: string; hash: string; duplicateOf?: string;
+}[]): string {
+  const doc = makeDocument();
+  const batchId = one(`
+    insert into public.import_batches
+           (organization_id, source_document_id, import_type, target_table, status,
+            extraction_method, required_confirmations, period_start, period_end, batch_issues)
+    values ('${orgId}', '${doc}', 'sales_invoices', 'invoices', 'awaiting_review', 'csv',
+            array[]::text[], '2026-05-01', '2026-05-31', '[]'::jsonb)
+    returning id`);
+  for (const row of rows) {
+    adminSql(`
+      insert into public.import_rows
+             (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status,
+              dedupe_hash, reviewer_decision, duplicate_of_table, duplicate_of_id)
+      values ('${orgId}', '${batchId}', ${row.rowNumber}, 'csv:row:${row.rowNumber}',
+              '{"source":"line"}'::jsonb,
+              '${JSON.stringify({
+                invoice_type: 'sales', counterparty_id: counterpartyId, invoice_number: row.number,
+                issue_date: '2026-05-05', due_date: '2026-06-04',
+                subtotal: row.total, tax_amount: '0', total_amount: row.total,
+              })}'::jsonb,
+              'valid', decode('${row.hash}', 'hex'), 'none',
+              ${row.duplicateOf ? `'invoices'` : 'null'},
+              ${row.duplicateOf ? `'${row.duplicateOf}'` : 'null'})`);
+  }
+  return batchId;
+}
+
+/** The one current (accepted, not superseded) invoice with this number, and its total. */
+const currentInvoice = (number: string): { id: string; total: string } | null => {
+  const row = adminSql(`
+    select id::text || '|' || total_amount::text from public.invoices
+     where organization_id = '${orgId}' and invoice_number = '${number}'
+       and record_status = 'accepted' and superseded_by is null`);
+  if (!row) return null;
+  const [id, total] = row.split('|') as [string, string];
+  return { id, total };
+};
+
 const txn = (date: string, amount: string, description: string) => ({
   transaction_date: date, amount, description,
 });
@@ -106,6 +149,9 @@ beforeAll(async () => {
   bankAccountId = one(`
     insert into public.bank_accounts (organization_id, name, bank_name, account_type)
     values ('${orgId}', 'Current', 'Barclays', 'current') returning id`);
+  counterpartyId = one(`
+    insert into public.counterparties (organization_id, name, normalized_name)
+    values ('${orgId}', 'Acme Customer', 'acme customer') returning id`);
 });
 
 afterAll(() => resetFixtures());
@@ -122,6 +168,7 @@ beforeEach(() => {
     set local app.purge = 'on';
     delete from public.record_status_events where organization_id = '${orgId}';
     delete from public.bank_transactions where organization_id = '${orgId}';
+    delete from public.invoices where organization_id = '${orgId}';
     delete from public.import_rows where organization_id = '${orgId}';
     delete from public.import_batches where organization_id = '${orgId}';
     delete from public.source_documents where organization_id = '${orgId}';
@@ -336,6 +383,95 @@ describe('the commit-time duplicate re-check (§9.3, F-D-13)', () => {
       select count(*) from public.bank_transactions
        where organization_id = '${orgId}' and record_status = 'accepted'`);
     expect(Number(acceptedRows), 'nothing was written twice').toBe(1);
+  });
+});
+
+describe('an invoice re-export updates by supersession, at commit (ADR-029.1, ADR-073)', () => {
+  /*
+   * PRODUCTION_AUDIT.md M3, and what it turned out to be. The commit loop inserted the new invoice
+   * as `accepted` and then superseded the old one; `invoices_identity_unique` is partial on exactly
+   * that state, so the insert collided with the row it was replacing — on EVERY re-exported invoice,
+   * not only the concurrent case. Executed with the real function before the fix: "duplicate key
+   * value violates unique constraint invoices_identity_unique". Nothing tested the path.
+   */
+  it('commits a validated update candidate: the new row is current, the old one superseded', async () => {
+    const first = makeInvoiceBatch([{ rowNumber: 2, number: 'INV-100', total: '1000.00', hash: 'a1' }]);
+    expect((await rpc(ownerId, 'commit_import_batch', { p_batch: first })).error).toBeNull();
+    const before = currentInvoice('INV-100');
+    expect(before?.total).toBe('1000.00');
+
+    // The re-export, with payment applied: same identity, different figures, flagged at validation.
+    const second = makeInvoiceBatch([
+      { rowNumber: 2, number: 'INV-100', total: '1200.00', hash: 'a2', duplicateOf: before!.id },
+    ]);
+    const result = await rpc(ownerId, 'commit_import_batch', { p_batch: second });
+    expect(result.error, result.error?.message).toBeNull();
+    expect((result.data as { status: string; superseded: number }).status).toBe('committed');
+    expect((result.data as { superseded: number }).superseded).toBe(1);
+
+    const after = currentInvoice('INV-100');
+    expect(after?.total).toBe('1200.00');
+    expect(adminSql(`select superseded_by::text from public.invoices where id = '${before!.id}'`))
+      .toBe(after!.id);
+    // Never two current rows for one identity, and never a row left `pending`.
+    expect(adminSql(`
+      select count(*) from public.invoices where organization_id = '${orgId}'
+         and invoice_number = 'INV-100' and record_status = 'accepted' and superseded_by is null`)).toBe('1');
+    expect(adminSql(`
+      select count(*) from public.invoices where organization_id = '${orgId}' and record_status = 'pending'`)).toBe('0');
+    expect(adminSql(`
+      select string_agg(event::text, ',' order by event::text) from public.record_status_events
+       where organization_id = '${orgId}' and record_id = '${before!.id}'`)).toBe('accepted,superseded');
+  });
+
+  it('turns a re-export committed by somebody else since validation into an update, not a crash (§9.3 pass 1)', async () => {
+    // Two batches validated against the same empty month: neither knows about the other.
+    const batchA = makeInvoiceBatch([{ rowNumber: 2, number: 'INV-200', total: '100.00', hash: 'b1' }]);
+    const batchB = makeInvoiceBatch([{ rowNumber: 2, number: 'INV-200', total: '120.00', hash: 'b2' }]);
+
+    expect((await rpc(ownerId, 'commit_import_batch', { p_batch: batchA })).error).toBeNull();
+    const result = await rpc(ownerId, 'commit_import_batch', { p_batch: batchB });
+    expect(result.error, result.error?.message).toBeNull();
+    expect((result.data as { status: string }).status).toBe('committed');
+    expect((result.data as { superseded: number }).superseded).toBe(1);
+
+    expect(currentInvoice('INV-200')?.total).toBe('120.00');
+    const issues = adminSql(`
+      select string_agg(i ->> 'code', ',') from public.import_rows r, jsonb_array_elements(r.issues) i
+       where r.batch_id = '${batchB}' and r.row_number = 2`);
+    expect(issues).toContain('IMP-INV-010');
+  });
+
+  it('still sends the byte-identical invoice back to review rather than updating it (pass 2 before pass 1)', async () => {
+    const batchA = makeInvoiceBatch([{ rowNumber: 2, number: 'INV-300', total: '50.00', hash: 'c1' }]);
+    const batchB = makeInvoiceBatch([{ rowNumber: 2, number: 'INV-300', total: '50.00', hash: 'c1' }]);
+    expect((await rpc(ownerId, 'commit_import_batch', { p_batch: batchA })).error).toBeNull();
+    const result = await rpc(ownerId, 'commit_import_batch', { p_batch: batchB });
+    expect(result.error).toBeNull();
+    expect((result.data as { status: string }).status).toBe('conflict');
+    expect(adminSql(`select status from public.import_rows where batch_id = '${batchB}' and row_number = 2`))
+      .toBe('duplicate');
+    expect(adminSql(`
+      select count(*) from public.invoices where organization_id = '${orgId}' and invoice_number = 'INV-300'`)).toBe('1');
+  });
+
+  it('follows the chain when the row it meant to update was itself updated meanwhile', async () => {
+    const v1 = makeInvoiceBatch([{ rowNumber: 2, number: 'INV-400', total: '10.00', hash: 'd1' }]);
+    expect((await rpc(ownerId, 'commit_import_batch', { p_batch: v1 })).error).toBeNull();
+    const first = currentInvoice('INV-400')!;
+
+    // Two re-exports both validated against v1; the first to commit supersedes it.
+    const v2 = makeInvoiceBatch([{ rowNumber: 2, number: 'INV-400', total: '20.00', hash: 'd2', duplicateOf: first.id }]);
+    const v3 = makeInvoiceBatch([{ rowNumber: 2, number: 'INV-400', total: '30.00', hash: 'd3', duplicateOf: first.id }]);
+    expect((await rpc(ownerId, 'commit_import_batch', { p_batch: v2 })).error).toBeNull();
+    const result = await rpc(ownerId, 'commit_import_batch', { p_batch: v3 });
+    expect(result.error, result.error?.message).toBeNull();
+    expect((result.data as { status: string }).status).toBe('committed');
+    expect(currentInvoice('INV-400')?.total).toBe('30.00');
+    // v1 → v2 → v3: one current row, two superseded, a chain and not a fork.
+    expect(adminSql(`
+      select count(*) from public.invoices where organization_id = '${orgId}'
+         and invoice_number = 'INV-400' and superseded_by is not null`)).toBe('2');
   });
 });
 
