@@ -28,6 +28,13 @@ export {
 
 export { decodeCsvBytes, type CsvEncoding, type DecodeResult } from './domain/text-encoding';
 
+export {
+  checkDeclaredLength,
+  MAX_UPLOAD_BODY_BYTES,
+  MULTIPART_OVERHEAD_BYTES,
+  type DeclaredLengthVerdict,
+} from './domain/upload-limits';
+
 export { MAX_PDF_PAGES, probePdf, type PdfProbeResult } from './domain/pdf-probe';
 
 export { readZipDirectory, type ZipEntry, type ZipReadResult } from './domain/zip';

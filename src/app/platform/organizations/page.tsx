@@ -1,3 +1,4 @@
+import { toMotionError } from '@/core/errors';
 import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardBody, EmptyState, Badge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
@@ -11,12 +12,15 @@ export const dynamic = 'force-dynamic';
  */
 export default async function PlatformOrganizationsPage() {
   const ctx = await getPlatformContext();
-  const { data } = await ctx.db
+  const { data, error } = await ctx.db
     .from('organizations')
     .select('id, slug, name, status, plan, created_at')
     .order('created_at', { ascending: false })
     .limit(100);
 
+  // Never `data ?? []` on its own: a failing query rendered as an empty list is the one thing a
+  // platform page must not show (PRODUCTION_AUDIT.md M2; ADR-070).
+  if (error) throw toMotionError(error, ctx.requestId);
   const organizations = data ?? [];
 
   return (

@@ -19,8 +19,8 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 | H1 | High · *fixed* | A suspended organisation's "frozen Home" (promised by four documents) cannot render: the rows it needs are denied to `suspended_member`. Members see "add your first file" under the suspension banner. → periods and the current snapshots admit the role; Home skips the record test while suspended (ADR-068). |
 | H2 | High · *fixed* | Open redirect in `/auth/callback?next=/\evil.com`. → one parse-then-compare rule in `core/routing`, used by all three `next` consumers (ADR-069). |
 | H3 | High | MVP scope gaps: no AI Analyst at all (acceptance criteria 9–12 unmeetable), PDF import refused, no CSV export, no Documents page (uploaded files cannot be deleted from the UI), no platform jobs/audit/feedback/settings pages. |
-| M1 | Medium | Upload route buffers the whole multipart body before the 25 MB check; the comment claims the opposite. No throttle on upload. |
-| M2 | Medium | Errors swallowed: evidence drawer turns every failure (500, 429) into 404; three platform pages discard query errors and render "empty". |
+| M1 | Medium · *fixed* | Upload route buffers the whole multipart body before the 25 MB check; the comment claims the opposite. No throttle on upload. → header-first limit, 20/h + 100/day throttles (ADR-070). |
+| M2 | Medium · *fixed* | Errors swallowed: evidence drawer turns every failure (500, 429) into 404; three platform pages discard query errors and render "empty". → only NOT_FOUND is a 404; query errors throw (ADR-070). |
 | M3 | Medium | Commit-time duplicate re-check runs pass 2 only; contract §9.3 promises passes 1 and 2. A concurrent invoice commit surfaces as a raw `23505` message. |
 | M4 | Medium | `api_rate_limits` grows without bound (one row per user × bucket × minute, never deleted). |
 | M5 | Medium | `api.cancel_job` lets an owner/admin cancel *any* queued job of their org, including `org.purge`; only a super admin can requeue. |
@@ -197,11 +197,15 @@ Everything else in §2 is present and, where I tested it, behaves as specified. 
 ## Medium
 
 ### M1 · Upload size check runs after the whole body is in memory; no throttle
+
+**Status: fixed** — `checkDeclaredLength` judges `Content-Length` before `request.formData()`; the route throttles 20/h per user and 100/day per organisation as ROUTE_ARCHITECTURE §5 specifies; ADR-070. Unit-tested; Playwright posts an oversized body and an over-quota series through the real route.
 **Location.** `src/app/api/imports/upload/route.ts:38–49`. `await request.formData()` materialises every part in memory; `file.size` is read afterwards. The comment ("Checked before the body is read into memory") is false. There is no `throttle()` call on this route (the document and report routes have 60/min and 30/h); `api_server.register_document` throttles nothing either.
 **Why.** Any `imports.create` holder can post multi-GB bodies to a Node function; the first thing that fails is the function's memory, not the guard. With no rate limit, a single member can fill the `source-documents` bucket at 25 MB per request.
 **Fix.** Check `content-length` before parsing (reject > 26 MB up front), stream to a temp file or reject on the first oversized chunk, and `throttle(ctx, 'upload', 30, '1 hour')` — ROUTE_ARCHITECTURE §164-style — before reading the body.
 
 ### M2 · Errors swallowed into "not found" and "empty"
+
+**Status: fixed** — the evidence page rethrows everything but `NOT_FOUND`; the three platform pages throw on a query error instead of rendering an empty list; ADR-070.
 **Location.** `src/app/app/[orgSlug]/evidence/[bundleId]/page.tsx:60`: `loadEvidenceDrawer(...).catch(() => null); if (view === null) notFound();` — a throttled (`QUOTA`), a database error, a descriptor-compile bug, all become 404. `src/app/platform/organizations/page.tsx:14`, `assignments/page.tsx:18`, `users/page.tsx:16`: `const { data } = …; data ?? []` — the `error` is never read; a failing query renders "No organisations".
 **Why.** "Do not silently swallow errors" is a standing constraint. A super admin looking at an empty organisations list during an outage will act on it. An owner told a bundle "could not be found" after a 500 has no path forward and nothing is logged.
 **Fix.** Catch `NotFound` only (`isMotionError(e) && e.code === 'NOT_FOUND'`), rethrow everything else; `unwrap(data, error)` on the platform pages as every module repository already does.

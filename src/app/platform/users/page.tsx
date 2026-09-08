@@ -1,3 +1,4 @@
+import { toMotionError } from '@/core/errors';
 import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody } from '@/components/ui/table';
@@ -13,11 +14,14 @@ interface PlatformUserRecord {
 
 export default async function PlatformUsersPage() {
   const ctx = await getPlatformContext();
-  const { data } = await ctx.db
+  const { data, error } = await ctx.db
     .from('platform_users')
     .select('user_id, platform_role, status')
     .order('platform_role');
 
+  // Never `data ?? []` on its own: a failing query rendered as an empty list is the one thing a
+  // platform page must not show (PRODUCTION_AUDIT.md M2; ADR-070).
+  if (error) throw toMotionError(error, ctx.requestId);
   const users = (data ?? []) as PlatformUserRecord[];
 
   return (

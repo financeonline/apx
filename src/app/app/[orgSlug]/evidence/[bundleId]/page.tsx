@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import { isMotionError } from '@/core/errors';
 import { can } from '@/core/permissions';
 import { formatValue, missingReasonText, statusFor, BASIS_TEXT } from '@/modules/dashboard';
 import type { AssuranceLevel, DataQuality } from '@/modules/financial-engine';
@@ -57,7 +58,16 @@ export default async function EvidenceBundlePage({
     ? { itemId: block, cursor: { offset } }
     : undefined;
 
-  const view = await loadEvidenceDrawer(ctx, bundleId, page).catch(() => null);
+  /*
+   * Only NOT FOUND becomes the not-found page. Every other failure — a throttle, a database error,
+   * an evidence item whose hash no longer matches its descriptor — is thrown to the error boundary,
+   * where it is logged and seen. `.catch(() => null)` here turned all of them into 404
+   * (PRODUCTION_AUDIT.md M2; ADR-070).
+   */
+  const view = await loadEvidenceDrawer(ctx, bundleId, page).catch((error: unknown) => {
+    if (isMotionError(error) && error.code === 'NOT_FOUND') return null;
+    throw error;
+  });
   if (view === null) notFound();
 
   const document = await documentFor(ctx, row);
@@ -369,8 +379,12 @@ async function documentFor(
   const table = row.slice(0, separator);
   const id = row.slice(separator + 1);
   // A row with no document behind it is a real state (§5.1) — a restored or merged record — and
-  // reads as "no source document", not as an error page.
-  return getDocumentReference(ctx, { table, id }).catch(() => null);
+  // reads as "no source document", not as an error page. Anything other than NOT FOUND is not that
+  // state and is not hidden behind it (ADR-070).
+  return getDocumentReference(ctx, { table, id }).catch((error: unknown) => {
+    if (isMotionError(error) && error.code === 'NOT_FOUND') return null;
+    throw error;
+  });
 }
 
 function whereInFile(reference: DocumentReference): string | null {
