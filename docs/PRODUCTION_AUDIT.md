@@ -33,6 +33,8 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 
 ### C1 · RLS cost is linear in rows × a SECURITY DEFINER function call
 
+**Status: fixed** — migration `20260908000001_rls_set_membership.sql`, ADR-065. Same read after: 12 ms (from 22,724 ms). Guarded by the migration's own check and by pgTAP `06_financial_rls` (plan shape asserted).
+
 **Location.** 21 policies of the form `app.org_role(organization_id) = ANY(...)` and 4 of the form `app.has_permission(organization_id, ...)` — `ledger_entries`, `bank_transactions`, `invoices`, `period_balances`, `metric_snapshots`, `import_rows`, `evidence_bundles`, `counterparties`, … (`select relname from pg_policy … where polqual like '%app.org_role(organization_id)%'`). Helpers: `app.org_role()` → `app.accessible_org_roles()` (three-way UNION with joins), both `SECURITY DEFINER`.
 
 **Problem.** `organization_id IN (select app.accessible_org_ids())` is a hashed subplan and costs nothing. The second predicate, `app.org_role(organization_id)`, takes a column argument and is therefore re-executed for every candidate row. Each execution runs `accessible_org_roles()` — three unions over `organizations`, `organization_assignments`, `platform_users`, `organization_memberships` — inside the RLS filter.

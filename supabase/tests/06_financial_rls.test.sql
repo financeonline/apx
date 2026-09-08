@@ -13,7 +13,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(122);
+select plan(129);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -424,6 +424,64 @@ select throws_ok(
   'delete from public.bank_transactions', '42501', null,
   'an owner cannot DELETE a bank transaction directly');
 call pg_temp.act_as_postgres();
+
+-- ---------------------------------------------------------------------------
+-- ADR-065: a role check is a fact about the organisation, evaluated once per statement.
+--
+-- The allow-lists above are the semantics; this section is the SHAPE. A policy that calls
+-- app.org_role(organization_id) is re-executed per candidate row — 22.7 s over 50,000 ledger rows
+-- for the organisation's own owner (PRODUCTION_AUDIT.md C1) — and nothing in the suite above would
+-- notice, because every assertion there is about which rows come back, not how.
+-- ---------------------------------------------------------------------------
+select has_function('app', 'org_ids_with_role', array['text[]'],
+  'app.org_ids_with_role(variadic text[]) exists');
+select has_function('app', 'org_ids_with_permission', array['text'],
+  'app.org_ids_with_permission(text) exists');
+select is(
+  (select r.rolname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     join pg_roles r on r.oid = p.proowner
+    where n.nspname = 'app' and p.proname = 'org_ids_with_role'),
+  'motion_definer', 'org_ids_with_role is owned by motion_definer');
+select is(
+  (select r.rolname from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+     join pg_roles r on r.oid = p.proowner
+    where n.nspname = 'app' and p.proname = 'org_ids_with_permission'),
+  'motion_definer', 'org_ids_with_permission is owned by motion_definer');
+
+select is(
+  (select count(*)::int
+     from pg_policy p
+     join pg_class c on c.oid = p.polrelid
+     join pg_namespace n on n.oid = c.relnamespace
+    where n.nspname = 'public'
+      and (pg_get_expr(p.polqual, p.polrelid) ~ 'app\.(org_role|has_permission)\(organization_id'
+           or pg_get_expr(p.polwithcheck, p.polrelid) ~ 'app\.(org_role|has_permission)\(organization_id')),
+  0, 'no policy on a public table evaluates a role helper against a column (ADR-065)');
+
+-- The plan an owner's ledger read actually gets. `explain` output is captured through the same
+-- impersonation the row-count helpers use, so it is the plan the policy gives a real member.
+create function pg_temp.plan_of(p_user uuid, p_sql text)
+returns text language plpgsql as $$
+declare r record; v text := '';
+begin
+  call pg_temp.act_as(p_user);
+  for r in execute 'explain (format text) ' || p_sql loop
+    v := v || r."QUERY PLAN" || E'\n';
+  end loop;
+  call pg_temp.act_as_postgres();
+  return v;
+end $$;
+
+select ok(
+  pg_temp.plan_of('f6000000-0000-0000-0000-000000000001',
+    'select count(*) from public.ledger_entries where organization_id = ''f6a00000-0000-0000-0000-00000000000a''')
+  !~ 'org_role\(organization_id',
+  'an owner''s ledger read never calls org_role per row');
+select ok(
+  pg_temp.plan_of('f6000000-0000-0000-0000-000000000001',
+    'select count(*) from public.ledger_entries where organization_id = ''f6a00000-0000-0000-0000-00000000000a''')
+  ~ 'hashed SubPlan',
+  'the role test on ledger_entries is a hashed subplan, evaluated once per statement');
 
 select * from finish();
 rollback;

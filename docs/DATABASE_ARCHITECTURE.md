@@ -309,13 +309,18 @@ create policy sel on public.ledger_entries for select to authenticated
 -- Suspension semantic (ADR-044.4; R2-A-07): a suspended organization stays in accessible_org_ids() only for the
 -- five "frozen Home" tables (organizations, metric_current, health_current, health_scores, alerts); every other
 -- tenant-data policy adds the suspended_member exclusion. Role checks are ALLOW-LISTS, never `<> 'client'`.
+--
+-- SHAPE (ADR-065): the allow-list is expressed as SET MEMBERSHIP over organisation ids computed once per
+-- statement, never as a helper called with a column. `app.org_role(organization_id) in (...)` is re-executed
+-- for every candidate row — 22.7 s over a 50,000-row ledger for its own owner — and is refused by the
+-- migration that removed it and by pgTAP (06_financial_rls). The planner hashes the subquery below and runs
+-- accessible_org_roles() exactly once.
 create policy sel on public.ledger_entries for select to authenticated
-  using (organization_id in (select app.accessible_org_ids())
-     and app.org_role(organization_id) in ('owner','admin','employee','super_admin','client'));
+  using (organization_id in (select app.org_ids_with_role('owner','admin','employee','super_admin','client')));
 
 -- Narrower SELECT rules where the doc says so, e.g.
 create policy sel on public.import_rows for select to authenticated
-  using (app.has_permission(organization_id, 'imports.review'));           -- app.has_permission is granted to authenticated (4th helper)
+  using (organization_id in (select app.org_ids_with_permission('imports.review')));   -- the set form of has_permission
 create policy sel on public.source_documents for select to authenticated
   using (organization_id in (select app.accessible_org_ids())
      and app.org_role(organization_id) in ('owner','admin','employee','super_admin'));
