@@ -7,7 +7,7 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 
 **Method.** Read the tenancy/permission core, middleware, every route handler, the signer, and all 95 `api.*` / 21 `api_server.*` function bodies as installed (not as written in migrations). Dumped every RLS policy and grant. Ran live probes with real JWTs through PostgREST for the suspension, evidence-poisoning and RLS-cost cases; probe fixtures were removed afterwards (0 rows left). Nothing in the repository was changed.
 
-**Remediation (2026-09-08, ADR-065 to ADR-075).** Every finding below except H3 is fixed on `main`, one commit per phase, each gated by the full suite. Rows in the summary carry `· fixed`; each section opens with a **Status** line naming the migration/ADR. H3 is a scope decision — build the missing MVP surfaces or amend `MVP_SCOPE.md` — and is left for the owner.
+**Remediation (2026-09-08, ADR-065 to ADR-075).** Every finding below except H3 is fixed on `main`, one commit per phase, each gated by the full suite. Rows in the summary carry `· fixed`; each section opens with a **Status** line naming the migration/ADR. H3 is being built phase by phase (ADR-076–078: the analyst's persistence, tools, loop and route); the remaining surfaces follow. N1 below was found after the audit by that work.
 
 ---
 
@@ -27,6 +27,7 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 | M4 | Medium · *fixed* | `api_rate_limits` grows without bound (one row per user × bucket × minute, never deleted). → pruned nightly by the platform sweep, which is now actually scheduled (ADR-074). |
 | M5 | Medium · *fixed* | `api.cancel_job` lets an owner/admin cancel *any* queued job of their org, including `org.purge`; only a super admin can requeue. → limited to the two user-requestable types and to the requester (ADR-071). |
 | M6 | Medium · *fixed* | Audit log UI shows the latest 100 events with no paging, filter or target — the SQL supports offset/500. → offset paging + target column (ADR-072). |
+| N1 | High · *fixed* | Found after the audit, by ADR-078's route test: the middleware redirected every anonymous `/api/*` call to `/sign-in`, so `/api/jobs/run` and `/api/jobs/nightly` — called by Vercel Cron with no session — would never have run in production; the e2e helper called them from a signed-in page. Cron routes are now public to the middleware (they authenticate themselves, ADR-074) and anonymous `/api/*` answers 401 JSON per ROUTE_ARCHITECTURE §237. → ADR-078. |
 | L1–L6 | Low · *all fixed* | Fail-open middleware comment, dead-end `fix_import_row`, absent session revocation, silent depth truncation in the signer, stale promise in `revoke_assignment`, missing audit on bundle creation. → ADR-075 (L1–L5), ADR-066 (L6). |
 
 ---

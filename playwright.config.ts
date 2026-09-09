@@ -62,6 +62,17 @@ export default defineConfig({
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/owner.json' },
     },
+    /*
+     * The API routes are exercised with the setup project's session and organisation: what is
+     * under test is the status code and the shape of the response, which need a signed-in caller
+     * and an organisation with figures, not a fresh journey.
+     */
+    {
+      name: 'api',
+      testMatch: /api-.*\.spec\.ts/,
+      dependencies: ['setup'],
+      use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/owner.json' },
+    },
     {
       name: 'sweep',
       testMatch: /accessibility\.spec\.ts/,

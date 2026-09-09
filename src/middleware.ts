@@ -24,6 +24,13 @@ const PUBLIC_PREFIXES = [
   '/legal',
   '/auth/callback',
   '/api/health',
+  /*
+   * The cron routes authenticate themselves — a constant-time compare of `CRON_SECRET`, 404
+   * otherwise — and their caller is Vercel Cron, which has no session. Requiring one here sent
+   * every scheduled drain to the sign-in page instead: the queue would never have run in
+   * production (ADR-078).
+   */
+  '/api/jobs',
 ] as const;
 
 /** A platform account without a verified authenticator may only reach these (§8.4a). */
@@ -130,6 +137,21 @@ export async function middleware(request: NextRequest) {
   // 2. No session: public passes, everything else goes to sign-in with a relative `next`.
   if (!user) {
     if (family === 'public') return finish();
+    /*
+     * An API route answers 401, never a redirect (ROUTE_ARCHITECTURE.md §237): its caller is a
+     * fetch, not a person, and a redirect to the sign-in page would be followed into a 405 from a
+     * page that has no POST. The cron routes keep their own 404 — they are matched as public and
+     * decide for themselves.
+     */
+    if (url.pathname.startsWith('/api/')) {
+      const denied = NextResponse.json(
+        { error: { code: 'NOT_FOUND', message: 'Sign in to continue.', requestId } },
+        { status: 401 },
+      );
+      for (const cookie of response.cookies.getAll()) denied.cookies.set(cookie);
+      denied.headers.set('x-request-id', requestId);
+      return denied;
+    }
     const signIn = new URL('/sign-in', url.origin);
     signIn.searchParams.set('next', relativeTarget(request));
     return finish(signIn);

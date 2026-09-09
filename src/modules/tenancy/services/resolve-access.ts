@@ -39,6 +39,41 @@ interface MyContextRow {
   actor_type: ActorType;
 }
 
+/**
+ * Resolves the caller's access to an organisation, uncached.
+ *
+ * `getAccessContext` below memoises this per request, which is right for a page: the layout, the
+ * page and its server actions share one resolution. It is WRONG for the one caller that must see a
+ * change mid-request — the analyst's tool loop re-resolves before every tool call so that a
+ * demotion during a 45 s turn aborts it (AI_ARCHITECTURE.md §4, F-C-17), and a memoised answer
+ * would defeat that silently. That caller uses this function.
+ */
+export async function resolveAccessFresh(orgSlug: string): Promise<AccessContext> {
+  const requestId = newRequestId();
+  const user = await loadSessionUser();
+  if (!user) throw new NotFound();
+
+  const db = await createUserClient();
+  const { data, error } = await db.schema('api').rpc('my_context', { p_slug: orgSlug });
+  if (error) throw toMotionError(error, requestId);
+
+  const row = (data as MyContextRow[] | null)?.[0];
+  if (!row || !row.role) throw new NotFound();
+
+  return {
+    userId: user.id,
+    orgId: row.organization_id,
+    orgSlug: row.slug,
+    effectiveRole: row.role,
+    permissions: permissionsFor(row.role),
+    actorType: row.actor_type,
+    organizationStatus: row.status,
+    db,
+    requestId,
+    now: () => new Date(),
+  };
+}
+
 /** Per-request memoisation: layout, page and server actions share one resolution. */
 export const getAccessContext = cache(async (orgSlug: string): Promise<AccessContext> => {
   const requestId = newRequestId();

@@ -1,7 +1,7 @@
 export type { AccessContext } from './context';
 export type { ActorType, OrgStatus, MembershipRole } from './domain/types';
 export { resolveEffectiveRole, type ResolutionInput } from './domain/resolve';
-export { getAccessContext, getPlatformContext } from './services/resolve-access';
+export { getAccessContext, getPlatformContext, resolveAccessFresh } from './services/resolve-access';
 export {
   createOrganization,
   updateOrganization,
