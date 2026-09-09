@@ -187,3 +187,7 @@ export {
   runRecordedCase, runLiveSuite, LIVE_QUESTIONS, summarise, shortfalls, THRESHOLDS, MIN_CASES, type LiveQuestion, type LiveRunInput,
   type CaseResult, type EvalCase, type EvalExpectation, type EvalMetrics, type EvalReport, type EvalSet, type RecordedToolCall,
 } from './eval';
+export {
+  listFeedback, loadFeedback, reviewFeedback, countOpenFeedback, REVIEW_STATUSES,
+  type FeedbackDetail, type FeedbackListItem, type FeedbackStatus, type ReviewStatus,
+} from './services/feedback-review';

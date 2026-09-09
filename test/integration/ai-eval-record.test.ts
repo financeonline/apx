@@ -135,6 +135,14 @@ beforeAll(async () => {
       values ('${orgId}', 'calculation.run', '{"trigger":"recalc_manual","as_of":"2026-06-15"}'::jsonb, 3) returning id`).split('\n')[0]!.trim();
     expect(await drainUntilFinished(drainJobs, jobId), `calculation pass ${pass} must succeed`).toBe('succeeded');
   }
+  // The alerts the corpus records come from `alerts.evaluate`, queued by the run. In the full
+  // suite the queue is shared, so drain until THIS organisation has nothing left in it.
+  for (let round = 0; round < 20; round += 1) {
+    const pending = adminSql(`select count(*) from public.jobs where organization_id = '${orgId}' and status in ('queued', 'running')`);
+    if (pending === '0') break;
+    await drainJobs(5);
+  }
+  expect(adminSql(`select count(*) from public.jobs where organization_id = '${orgId}' and status in ('queued', 'running')`), "the organisation's queue is empty before recording").toBe('0');
 
   const withData = new Set(adminSql(`select distinct period_id::text from public.ledger_entries where organization_id = '${orgId}'`).split('\n').map((l) => l.trim()));
   periods = adminSql(`select id || '|' || label || '|' || period_start || '|' || is_complete from public.fiscal_periods where organization_id = '${orgId}' order by period_start`)

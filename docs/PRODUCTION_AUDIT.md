@@ -7,7 +7,7 @@ Against: `PRODUCT_REQUIREMENTS.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `SECUR
 
 **Method.** Read the tenancy/permission core, middleware, every route handler, the signer, and all 95 `api.*` / 21 `api_server.*` function bodies as installed (not as written in migrations). Dumped every RLS policy and grant. Ran live probes with real JWTs through PostgREST for the suspension, evidence-poisoning and RLS-cost cases; probe fixtures were removed afterwards (0 rows left). Nothing in the repository was changed.
 
-**Remediation (2026-09-08, ADR-065 to ADR-075).** Every finding below except H3 is fixed on `main`, one commit per phase, each gated by the full suite. Rows in the summary carry `· fixed`; each section opens with a **Status** line naming the migration/ADR. H3 is being built phase by phase (ADR-076–081: the analyst's persistence, tools, loop, route, page and evaluation harness; ADR-080 fixed the engine's missing variances on the way); the remaining surfaces follow. N1 below was found after the audit by that work.
+**Remediation (2026-09-08, ADR-065 to ADR-075).** Every finding below except H3 is fixed on `main`, one commit per phase, each gated by the full suite. Rows in the summary carry `· fixed`; each section opens with a **Status** line naming the migration/ADR. H3 is being built phase by phase (ADR-076–082: the AI analyst is complete — persistence, tools, loop, route, page, evaluation harness and review queue; ADR-080 fixed the engine's missing variances on the way); PDF import, CSV export, the Documents page and the remaining platform pages follow. N1 below was found after the audit by that work.
 
 ---
 
