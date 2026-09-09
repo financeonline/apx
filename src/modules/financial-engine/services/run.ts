@@ -1,4 +1,5 @@
 import 'server-only';
+import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { toMotionError } from '@/core/errors';
 import { log } from '@/core/logging';
@@ -6,6 +7,8 @@ import { affectedRange, chunkPeriods, chunkWindow, type CalculationTrigger } fro
 import { computeCoverage, isPeriodComplete } from '../domain/coverage';
 import { computeFingerprint } from '../domain/fingerprint';
 import { AS_OF_DEPENDENT_KEYS } from '../domain/registry';
+import { VARIANCE_BASE_METRICS } from '../domain/variance';
+import { comparisonPeriodIds, variancesForPeriod } from '../domain/variance-pass';
 import { ENGINE_VERSION as VERSION } from '../domain/version';
 import type { MetricResult, PeriodRef } from '../domain/types';
 import * as repo from '../data/repository';
@@ -231,6 +234,8 @@ export async function runCalculation(
   let healthScoresWritten = 0;
 
   try {
+    /** ADR-080: every period this run has computed, levels and variances, for later chunks to compare against. */
+    const computedThisRun = new Map<string, readonly MetricResult[]>();
     for (const chunk of chunkPeriods(toWrite)) {
       /*
        * Each chunk pins its own instant, and reads it from the DATABASE (§2.4 step 4:
@@ -277,6 +282,15 @@ export async function runCalculation(
       };
 
       const snapshots: Record<string, unknown>[] = [];
+      /*
+       * §3.2, ADR-080: the comparison figures this chunk's variances read. A period this run already
+       * computed is compared in memory; any other comparison period comes from what the last run
+       * left in `metric_current`. Loaded once per chunk, for every period the chunk will ask about.
+       */
+      const wanted = new Set(chunk.flatMap((p) => comparisonPeriodIds(p, allPeriods)).filter((id) => !computedThisRun.has(id)));
+      const storedComparisons = range.asOfDependentOnly ? [] : await repo.loadCurrentObservations(
+        scoped, orgId, [...wanted].filter((id) => !chunk.some((p) => p.id === id)), VARIANCE_BASE_METRICS,
+      );
       const completePeriods: string[] = [];
       const completeFlags: boolean[] = [];
       const bankCoverage = new Map<string, number>();
@@ -301,7 +315,13 @@ export async function runCalculation(
           context,
         });
 
-        for (const result of results) snapshots.push(serialiseSnapshot(period.id, result));
+        // ADR-047.8: an as-of-only run rewrites aging and runway and leaves every comparison as it was.
+        const variances = range.asOfDependentOnly ? [] : variancesForPeriod({
+          period, allPeriods, results, computed: computedThisRun, stored: storedComparisons,
+          currency: settings.baseCurrency ?? null, mint: randomUUID,
+        });
+        computedThisRun.set(period.id, [...results, ...variances]);
+        for (const result of [...results, ...variances]) snapshots.push(serialiseSnapshot(period.id, result));
 
         completePeriods.push(period.id);
         completeFlags.push(isPeriodComplete(coverage, period, bankAccounts));

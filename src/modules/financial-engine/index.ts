@@ -109,3 +109,5 @@ export {
   type RunOutcome,
   type RunRequest,
 } from './services/run';
+
+export { comparisonPeriodIds, monthsBefore, variancesForPeriod, type StoredFigure, type VariancePassInput } from './domain/variance-pass';

@@ -383,3 +383,49 @@ export async function loadFingerprintSources(
     ),
   };
 }
+
+/**
+ * One stored figure of a comparison period, as `metric_current` points at it — what the variance
+ * pass reads for a period this run did not recompute (FINANCIAL_ENGINE.md §3.2; ADR-080).
+ */
+export interface StoredObservation {
+  readonly periodId: string;
+  readonly metricKey: string;
+  readonly dimensionType: string;
+  readonly dimensionId: string | null;
+  readonly dimensionKey: string | null;
+  readonly snapshotId: string;
+  readonly value: string | null;
+  readonly basis: string;
+  readonly assurance: string;
+  readonly dataQuality: { completeness?: number; warnings?: string[]; missing?: string[] };
+}
+
+export async function loadCurrentObservations(
+  scoped: SupabaseClient, orgId: string, periodIds: readonly string[], metricKeys: readonly string[],
+): Promise<StoredObservation[]> {
+  if (periodIds.length === 0 || metricKeys.length === 0) return [];
+  const { data, error } = await scoped
+    .from('metric_current')
+    .select('period_id, metric_key, dimension_type, dimension_id, dimension_key, snapshot_id, metric_snapshots!inner(value, basis, assurance_level, data_quality)')
+    .eq('organization_id', orgId)
+    .in('period_id', [...periodIds])
+    .in('metric_key', [...metricKeys]);
+
+  return unwrap(data, error).flatMap((r) => {
+    const s = r.metric_snapshots as unknown as { value: unknown; basis: string; assurance_level: string; data_quality: StoredObservation['dataQuality'] } | null;
+    if (!s) return [];
+    return [{
+      periodId: r.period_id as string,
+      metricKey: r.metric_key as string,
+      dimensionType: r.dimension_type as string,
+      dimensionId: (r.dimension_id as string | null) ?? null,
+      dimensionKey: (r.dimension_key as string | null) ?? null,
+      snapshotId: r.snapshot_id as string,
+      value: s.value === null || s.value === undefined ? null : String(s.value),
+      basis: s.basis,
+      assurance: s.assurance_level,
+      dataQuality: s.data_quality ?? {},
+    }];
+  });
+}
