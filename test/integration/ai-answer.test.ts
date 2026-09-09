@@ -224,7 +224,11 @@ describe('grounding failure degrades by removal, never by caveat (§7.8, F-C-14,
     expect(rendered).not.toContain('9,999');
     expect(out.answer?.direct_answer.statement).toBe('I could not verify some figures for this question. Here is what the data shows:');
     expect(out.answer?.unsupported.every((u) => !/\d/.test(u.topic))).toBe(true);
-    expect(out.answer?.unsupported.some((u) => /marketing/i.test(u.topic))).toBe(true);
+    // R2-C-04 (ADR-081): the topic is built from what the server knows. "marketing" was the MODEL's
+    // metric_key on a path no tool returned — model text — so it is not echoed; the period is.
+    expect(out.answer?.unsupported.length).toBeGreaterThan(0);
+    expect(out.answer?.unsupported.some((u) => /marketing/i.test(u.topic))).toBe(false);
+    expect(out.answer?.unsupported.some((u) => /May/.test(u.topic))).toBe(true);
     // The recommendation rested on a removed statement's evidence alone... but its refs cite the
     // revenue snapshot, which no surviving statement cites either — so it goes.
     expect(out.answer?.recommended_actions).toEqual([]);

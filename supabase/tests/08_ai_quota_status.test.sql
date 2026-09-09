@@ -1,11 +1,12 @@
--- MOTION — pgTAP · api.ai_quota_status (Phase 11 Slice 4, ADR-079).
+-- MOTION — pgTAP · api.ai_quota_status (Phase 11 Slice 4, ADR-079) and
+--                   api_server.ai_create_conversation (Phase 11 Slice 5, ADR-081).
 -- Contract: the function counts exactly what api_server.ai_persist_turn counts, is NOT_FOUND for
 -- an organisation the caller cannot reach (SECURITY_MODEL.md §14), and needs `ai.use`.
 
 begin;
 create extension if not exists pgtap;
 
-select plan(8);
+select plan(11);
 
 insert into auth.users (id, instance_id, aud, role, email, encrypted_password, email_confirmed_at, created_at, updated_at)
 values
@@ -30,6 +31,13 @@ begin
   perform set_config('request.jwt.claims', '', true);
 end $$;
 
+create procedure pg_temp.act_as_service()
+language plpgsql as $$
+begin
+  perform set_config('role', 'service_role', true);
+  perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+end $$;
+
 call pg_temp.act_as('f8000000-0000-0000-0000-000000000001');
 select lives_ok($$ select api.create_organization('PGT-Quota Co') $$, 'fixture organisation');
 call pg_temp.act_as_postgres();
@@ -40,7 +48,7 @@ insert into pg_temp.fx (org)
 -- The expected limit is read as postgres: platform_settings is hidden from a member by RLS, and
 -- the function reads it through a definer. The two sides of each assertion must not differ by role.
 update pg_temp.fx set daily = (select (ps.value #>> '{}')::int from public.platform_settings ps where ps.key = 'ai_quota_daily');
-grant select on pg_temp.fx to authenticated;
+grant select on pg_temp.fx to authenticated, service_role;
 
 -- ---------------------------------------------------------------------------
 -- 1. Shape and the unused state
@@ -85,6 +93,25 @@ select is((select (api.ai_quota_status((select org from pg_temp.fx)) ->> 'remain
 call pg_temp.act_as('f8000000-0000-0000-0000-000000000002');
 select throws_ok($$ select api.ai_quota_status((select org from pg_temp.fx)) $$, 'P0002', null,
                  'an organisation the caller cannot reach is NOT_FOUND');
+call pg_temp.act_as_postgres();
+
+-- ---------------------------------------------------------------------------
+-- 4. api_server.ai_create_conversation: the server opens a conversation AS a member (ADR-081)
+-- ---------------------------------------------------------------------------
+call pg_temp.act_as('f8000000-0000-0000-0000-000000000001');
+select throws_ok($$ select api_server.ai_create_conversation('f8000000-0000-0000-0000-000000000001', (select org from pg_temp.fx)) $$,
+                 '42501', null, 'a user token cannot open a conversation through api_server (ADR-043)');
+call pg_temp.act_as_postgres();
+
+call pg_temp.act_as_service();
+select throws_ok($$ select api_server.ai_create_conversation('f8000000-0000-0000-0000-000000000002', (select org from pg_temp.fx)) $$,
+                 '42501', null, 'the actor must hold ai.use in the organisation');
+-- Opened ONCE, into a table: `where id = fn()` would call the volatile opener per candidate row.
+create table pg_temp.opened as
+  select api_server.ai_create_conversation('f8000000-0000-0000-0000-000000000001', (select org from pg_temp.fx)) as id;
+select is((select c.user_id from public.ai_conversations c join pg_temp.opened o on o.id = c.id),
+          'f8000000-0000-0000-0000-000000000001'::uuid,
+          'the conversation belongs to the actor, in the organisation, like every turn after it (F-C-11)');
 call pg_temp.act_as_postgres();
 
 select * from finish();

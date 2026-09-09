@@ -12,6 +12,7 @@ import { commitLargeBatchJob } from './import-commit-large';
 import { runOrgPurgeJob } from './org-purge';
 import { runReportRenderJob } from './report-render';
 import { runStorageCleanupJob } from './storage-cleanup';
+import { runAiEvalJob } from './ai-eval';
 
 /**
  * Wiring the queue (ADR-013, IMPLEMENTATION_PLAN.md — "handlers arrive with the phases that own
@@ -35,6 +36,7 @@ const HANDLERS: ReadonlyArray<readonly [ClaimedJob['jobType'], (job: ClaimedJob,
   ['report.render', runReportRenderJob],
   ['storage.cleanup_orphans', runStorageCleanupJob],
   ['org.purge', runOrgPurgeJob],
+  ['ai.eval', runAiEvalJob],
 ];
 
 let registered = false;
@@ -65,3 +67,4 @@ export { runStorageCleanupJob, ORPHAN_GRACE_MS, MAX_REMOVALS_PER_RUN } from './s
 export { runOrgPurgeJob } from './org-purge';
 export { evaluateAlertsJob } from './alerts-evaluate';
 export { commitLargeBatchJob } from './import-commit-large';
+export { runAiEvalJob, evalDeps } from './ai-eval';

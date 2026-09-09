@@ -8,12 +8,13 @@ import { loadPeriods, loadPeriodsWithData } from '@/modules/dashboard';
 import type { AccessContext } from '@/modules/tenancy';
 import { callModel, PROMPT_VERSION, type ModelResponse, type ModelTransport } from '../data/claude-client';
 import type { ToolResult } from '../domain/allowed-set';
-import { SubmitAnswerSchema, type EvidenceRef, type SubmitAnswer } from '../domain/contract';
-import { ground, modeAdmissible, unsupportedTopicsClean, type GroundingContext, type GroundingStatus, type Mismatch } from '../domain/grounding';
+import type { EvidenceRef, SubmitAnswer } from '../domain/contract';
+import { ground, type GroundingContext, type GroundingStatus, type Mismatch } from '../domain/grounding';
 import { resolvePeriodContext, type PeriodContext, type PeriodRow as PeriodRowInput } from '../domain/periods';
 import { replayHistory, SUBMIT_ANSWER_TOOL, submitAnswerTool, systemPrompt, toSdkTool } from '../domain/prompt';
 import { MAX_TOOL_CALLS, REGENERATION_EXTRA_CALLS, TOOLS } from '../domain/tools/registry';
 import { applyKinds, buildGroundingContext, degrade } from '../domain/turn-context';
+import { judge, validate, type Verdict } from '../domain/verdict';
 import { untrusted, userQuestion } from '../domain/untrusted';
 import { findConversation, loadHistory } from './conversations';
 import { ContextChanged, runTool, snapshotAccess } from './run-tool';
@@ -294,31 +295,8 @@ async function runLoop(
 }
 
 // -----------------------------------------------------------------------------------------------
-// Validation and judgement (§5, §7.7)
+// Regeneration (§7.8)
 // -----------------------------------------------------------------------------------------------
-
-type Candidate = { ok: true; answer: SubmitAnswer } | { ok: false; kind: 'schema'; reasons: string[] };
-
-function validate(submission: unknown): Candidate {
-  const parsed = SubmitAnswerSchema.safeParse(submission);
-  if (!parsed.success) {
-    return { ok: false, kind: 'schema', reasons: parsed.error.issues.slice(0, 8).map((i) => `${i.path.join('.') || 'answer'}: ${i.message}`) };
-  }
-  const digits = unsupportedTopicsClean(parsed.data);
-  if (digits) return { ok: false, kind: 'schema', reasons: [`unsupported: ${digits}`] };
-  return { ok: true, answer: parsed.data };
-}
-
-type Verdict = { ok: true } | { ok: false; kind: 'mode' | 'grounding' | 'schema'; reasons: string[] };
-
-function judge(candidate: SubmitAnswer, context: GroundingContext): Verdict {
-  const inadmissible = modeAdmissible(candidate, context);
-  if (inadmissible) return { ok: false, kind: 'mode', reasons: [`mode: ${inadmissible}`] };
-  if (candidate.mode !== 'answer') return { ok: true };
-  const result = ground(candidate, context);
-  if (result.status === 'passed') return { ok: true };
-  return { ok: false, kind: 'grounding', reasons: result.mismatches.map((m) => `"${m.statement}": ${m.reason}`) };
-}
 
 function regenerationMessage(reasons: readonly string[]): string {
   return [

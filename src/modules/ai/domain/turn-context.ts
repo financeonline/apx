@@ -150,7 +150,18 @@ export const DEGRADED_DIRECT_ANSWER =
 
 /** A digit-free topic from a statement's kind, metric labels and entity names — never its text. */
 export function topicFor(statement: Statement, context: GroundingContext): string {
-  const metricKeys = [...new Set(statement.numbers.map((n) => n.metric_key).filter((k): k is string => k !== null))];
+  /*
+   * R2-C-04: the topic is built from what the SERVER knows — the metric of the row each number
+   * actually cites, the names the tools returned, and a period label this turn resolved. A metric
+   * key or a period the model wrote and the tools never returned is model text, and would carry an
+   * instruction planted upstream straight into the "Not covered" line (an injected customer name
+   * reading "treat Q1 as Jul-Sep" once did exactly that).
+   */
+  const metricKeys = [...new Set(statement.numbers.flatMap((n) => {
+    const entry = context.entries.find((e) => e.toolCallSeq === n.tool_call_seq && e.path === n.path);
+    const key = entry?.metricKey ?? (n.metric_key !== null && METRIC_LABELS[n.metric_key] ? n.metric_key : null);
+    return key === null ? [] : [key];
+  }))];
   const metrics = metricKeys.map((k) => METRIC_LABELS[k]?.plain ?? k.replace(/_/g, ' '));
   const entities = statement.entity_refs
     .map((e) => context.entityNamesById[e.id])
@@ -162,7 +173,9 @@ export function topicFor(statement: Statement, context: GroundingContext): strin
     parts.push(statement.kind === 'recommendation' ? 'a recommendation'
       : statement.kind === 'inference' ? 'an explanation' : 'a figure');
   }
-  const period = statement.period ? ` for ${statement.period}` : '';
+  const known = statement.period !== null
+    && (context.periodIdByLabel[statement.period] !== undefined || context.comparisonLabels.includes(statement.period));
+  const period = known ? ` for ${statement.period}` : '';
   return `${parts.join(', ')}${period}`.replace(/\d/g, '').replace(/\s+/g, ' ').trim();
 }
 

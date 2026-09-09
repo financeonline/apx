@@ -1,0 +1,3087 @@
+{
+  "promptVersion": "analyst-v3.0",
+  "recordedAt": "2026-09-09T04:10:41.367Z",
+  "fiscalYearStartMonth": 1,
+  "periods": [
+    {
+      "id": "63de579e-f3d9-4770-bd88-c8e5e619e561",
+      "label": "Sep 2025",
+      "periodStart": "2025-09-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "90d42bcb-360c-486c-b6d9-fa46a6f6e301",
+      "label": "Oct 2025",
+      "periodStart": "2025-10-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "aa76ee2b-d87e-473b-abc9-844991713ac1",
+      "label": "Nov 2025",
+      "periodStart": "2025-11-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "683db569-c4c6-4f24-a062-b99b637ac178",
+      "label": "Dec 2025",
+      "periodStart": "2025-12-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "06512a16-b81a-4e4d-a845-a8c3eb007197",
+      "label": "Jan 2026",
+      "periodStart": "2026-01-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "3cab4cb7-1a42-4940-8beb-d0f5f5701659",
+      "label": "Feb 2026",
+      "periodStart": "2026-02-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "83062c23-2a55-4ed5-b5a2-207edc418918",
+      "label": "Mar 2026",
+      "periodStart": "2026-03-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+      "label": "Apr 2026",
+      "periodStart": "2026-04-01",
+      "isComplete": true,
+      "hasData": true
+    },
+    {
+      "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+      "label": "May 2026",
+      "periodStart": "2026-05-01",
+      "isComplete": true,
+      "hasData": true
+    },
+    {
+      "id": "3188d941-676b-4670-a68f-c95302536d29",
+      "label": "Jun 2026",
+      "periodStart": "2026-06-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "e7a85a8e-f72f-4628-88c9-c34d6f23943f",
+      "label": "Jul 2026",
+      "periodStart": "2026-07-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "5a0375a0-ac47-4dd7-b4ed-06b10beea02b",
+      "label": "Aug 2026",
+      "periodStart": "2026-08-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "89eecb3f-6fc4-41e2-bae0-10d835426368",
+      "label": "Sep 2026",
+      "periodStart": "2026-09-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "eba9a45a-2e89-4a3b-b871-05916a440ced",
+      "label": "Oct 2026",
+      "periodStart": "2026-10-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "0c5ab25f-4db1-47eb-8f7e-8ac296b1f97b",
+      "label": "Nov 2026",
+      "periodStart": "2026-11-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "76f05308-6c94-4a10-8f22-9968e24d5495",
+      "label": "Dec 2026",
+      "periodStart": "2026-12-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "096b59f6-4670-4a8e-a15c-81ffa08e5e28",
+      "label": "Jan 2027",
+      "periodStart": "2027-01-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "773a1a4c-cc01-4ee9-ab80-a9960b9f19d7",
+      "label": "Feb 2027",
+      "periodStart": "2027-02-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "efc82529-aff1-4394-8ff8-8a893b51c163",
+      "label": "Mar 2027",
+      "periodStart": "2027-03-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "2ef70445-b2d9-44ea-8550-9a9f8ee196d0",
+      "label": "Apr 2027",
+      "periodStart": "2027-04-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "b88675f2-de6c-4cfd-aa82-05342298f539",
+      "label": "May 2027",
+      "periodStart": "2027-05-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "74e5210e-e45a-4c33-b498-6d9da995bbf0",
+      "label": "Jun 2027",
+      "periodStart": "2027-06-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "0c8eeb0a-64de-447b-a832-d066af2d4b80",
+      "label": "Jul 2027",
+      "periodStart": "2027-07-01",
+      "isComplete": false,
+      "hasData": false
+    },
+    {
+      "id": "d211c6a1-c797-4eb7-8b27-4daf0dafc179",
+      "label": "Aug 2027",
+      "periodStart": "2027-08-01",
+      "isComplete": false,
+      "hasData": false
+    }
+  ],
+  "calls": [
+    {
+      "seq": 1,
+      "name": "get_business_summary",
+      "input": {
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 1,
+        "name": "get_business_summary",
+        "ok": true,
+        "data": {
+          "period": {
+            "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+            "label": "May 2026"
+          },
+          "health": {
+            "score": {
+              "value": "50",
+              "display": "50",
+              "unit": "count"
+            },
+            "dimensions_used": {
+              "value": "6",
+              "display": "6",
+              "unit": "count"
+            },
+            "dimensions_total": {
+              "value": "6",
+              "display": "6",
+              "unit": "count"
+            }
+          },
+          "metrics": [
+            {
+              "metric_key": "revenue",
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "value": {
+                "value": "25000",
+                "display": "£25,000",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "e68a2663-4a57-41cc-a07f-a4f0b43df2ac"
+            },
+            {
+              "metric_key": "gross_profit",
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "value": {
+                "value": "19000",
+                "display": "£19,000",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "6fd8659c-d4ca-4b7e-8e3a-f7769d0e9db3"
+            },
+            {
+              "metric_key": "operating_profit",
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "value": {
+                "value": "9700",
+                "display": "£9,700",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "8e742ab5-bba9-4271-a1fe-53c310b03365"
+            },
+            {
+              "metric_key": "net_profit",
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "value": {
+                "value": "9700",
+                "display": "£9,700",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "e4e8728d-a452-4b31-803c-d23758351804"
+            },
+            {
+              "metric_key": "closing_cash",
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "value": {
+                "value": "0",
+                "display": "£0",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "4f8c1208-ffde-4307-829f-69bfacc77d35"
+            }
+          ],
+          "top_alerts": [
+            {
+              "id": "7b5dc6a8-3517-4040-a174-ee561569c361",
+              "revision_no": 0,
+              "rule_key": "expense.spike_category",
+              "severity": "high",
+              "title": "<data name=\"title\">marketing spending jumped</data>",
+              "metric_key": "expense_by_category",
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              }
+            },
+            {
+              "id": "f25e6c17-9de2-4316-9ab8-7b9a1b5ded3d",
+              "revision_no": 0,
+              "rule_key": "concentration.customer",
+              "severity": "high",
+              "title": "<data name=\"title\">Acme Trading Ltd is a large share of revenue</data>",
+              "metric_key": "customer_concentration_top1",
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              }
+            }
+          ],
+          "open_actions": {
+            "value": "0",
+            "display": "0",
+            "unit": "count"
+          },
+          "data_quality": {
+            "completeness": {
+              "value": "1",
+              "display": "1.00",
+              "unit": "count"
+            },
+            "warnings": []
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 2,
+      "name": "get_metric",
+      "input": {
+        "metric_key": "revenue",
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 2,
+        "name": "get_metric",
+        "ok": true,
+        "data": {
+          "metric_key": "revenue",
+          "period": {
+            "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+            "label": "May 2026"
+          },
+          "value": {
+            "value": "25000",
+            "display": "£25,000",
+            "unit": "money"
+          },
+          "basis": "ledger",
+          "assurance_level": "calculated",
+          "data_quality": {
+            "completeness": {
+              "value": "1",
+              "display": "1.00",
+              "unit": "count"
+            },
+            "warnings": [],
+            "missing": []
+          },
+          "snapshot_id": "e68a2663-4a57-41cc-a07f-a4f0b43df2ac",
+          "components": [
+            {
+              "name": "uncategorised_amount",
+              "value": {
+                "value": "0.00",
+                "display": "£0",
+                "unit": "money"
+              },
+              "snapshot_id": "e68a2663-4a57-41cc-a07f-a4f0b43df2ac"
+            }
+          ],
+          "variance": {
+            "prev_period": {
+              "value": {
+                "value": "7000",
+                "display": "£7,000",
+                "unit": "money"
+              },
+              "pct_change": {
+                "value": "0.388889",
+                "display": "38.9%",
+                "unit": "ratio"
+              },
+              "comparison_period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "basis_differs": false,
+              "snapshot_id": "68e9bab0-ab13-4a1f-82d5-785c5d00f6f9"
+            },
+            "same_period_last_year": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "8da92318-060b-4f74-a3d7-0fcb9d708337"
+            },
+            "trailing_3m_avg": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "186ed5d5-f997-46da-9ebe-fd7c6392241e"
+            }
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            },
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 3,
+      "name": "get_metric",
+      "input": {
+        "metric_key": "revenue",
+        "period": "Apr 2026"
+      },
+      "result": {
+        "seq": 3,
+        "name": "get_metric",
+        "ok": true,
+        "data": {
+          "metric_key": "revenue",
+          "period": {
+            "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+            "label": "Apr 2026"
+          },
+          "value": {
+            "value": "18000",
+            "display": "£18,000",
+            "unit": "money"
+          },
+          "basis": "ledger",
+          "assurance_level": "calculated",
+          "data_quality": {
+            "completeness": {
+              "value": "1",
+              "display": "1.00",
+              "unit": "count"
+            },
+            "warnings": [],
+            "missing": []
+          },
+          "snapshot_id": "b7f86fe6-2423-40a2-bade-bb27e1f05778",
+          "components": [
+            {
+              "name": "uncategorised_amount",
+              "value": {
+                "value": "0.00",
+                "display": "£0",
+                "unit": "money"
+              },
+              "snapshot_id": "b7f86fe6-2423-40a2-bade-bb27e1f05778"
+            }
+          ],
+          "variance": {
+            "prev_period": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": {
+                "id": "83062c23-2a55-4ed5-b5a2-207edc418918",
+                "label": "Mar 2026"
+              },
+              "basis_differs": false,
+              "snapshot_id": "2ed5da2e-761c-4286-9493-da7420ad4a56"
+            },
+            "same_period_last_year": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "0d9cf554-fea9-4eb4-a4ee-5b1335be2829"
+            },
+            "trailing_3m_avg": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": {
+                "id": "83062c23-2a55-4ed5-b5a2-207edc418918",
+                "label": "Mar 2026"
+              },
+              "basis_differs": false,
+              "snapshot_id": "5754d30b-e68f-49c7-8ba5-c3438a9d222f"
+            }
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            },
+            {
+              "id": "83062c23-2a55-4ed5-b5a2-207edc418918",
+              "label": "Mar 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 4,
+      "name": "get_metric",
+      "input": {
+        "metric_key": "gross_profit",
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 4,
+        "name": "get_metric",
+        "ok": true,
+        "data": {
+          "metric_key": "gross_profit",
+          "period": {
+            "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+            "label": "May 2026"
+          },
+          "value": {
+            "value": "19000",
+            "display": "£19,000",
+            "unit": "money"
+          },
+          "basis": "ledger",
+          "assurance_level": "calculated",
+          "data_quality": {
+            "completeness": {
+              "value": "1",
+              "display": "1.00",
+              "unit": "count"
+            },
+            "warnings": [],
+            "missing": []
+          },
+          "snapshot_id": "6fd8659c-d4ca-4b7e-8e3a-f7769d0e9db3",
+          "components": [
+            {
+              "name": "revenue",
+              "value": {
+                "value": "25000.00",
+                "display": "£25,000",
+                "unit": "money"
+              },
+              "snapshot_id": "6fd8659c-d4ca-4b7e-8e3a-f7769d0e9db3"
+            },
+            {
+              "name": "cost_of_sales",
+              "value": {
+                "value": "6000.00",
+                "display": "£6,000",
+                "unit": "money"
+              },
+              "snapshot_id": "6fd8659c-d4ca-4b7e-8e3a-f7769d0e9db3"
+            }
+          ],
+          "variance": {
+            "prev_period": {
+              "value": {
+                "value": "6400",
+                "display": "£6,400",
+                "unit": "money"
+              },
+              "pct_change": {
+                "value": "0.507937",
+                "display": "50.8%",
+                "unit": "ratio"
+              },
+              "comparison_period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "basis_differs": false,
+              "snapshot_id": "50502aa6-a060-4b50-872a-c8671fe86002"
+            },
+            "same_period_last_year": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "356cb264-c5c4-4be0-b1f7-e094317f165f"
+            },
+            "trailing_3m_avg": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "8012f80f-8be1-4f42-b715-15d784511272"
+            }
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            },
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 5,
+      "name": "get_metric",
+      "input": {
+        "metric_key": "operating_profit",
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 5,
+        "name": "get_metric",
+        "ok": true,
+        "data": {
+          "metric_key": "operating_profit",
+          "period": {
+            "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+            "label": "May 2026"
+          },
+          "value": {
+            "value": "9700",
+            "display": "£9,700",
+            "unit": "money"
+          },
+          "basis": "ledger",
+          "assurance_level": "calculated",
+          "data_quality": {
+            "completeness": {
+              "value": "1",
+              "display": "1.00",
+              "unit": "count"
+            },
+            "warnings": [],
+            "missing": []
+          },
+          "snapshot_id": "8e742ab5-bba9-4271-a1fe-53c310b03365",
+          "components": [
+            {
+              "name": "gross_profit",
+              "value": {
+                "value": "19000.00",
+                "display": "£19,000",
+                "unit": "money"
+              },
+              "snapshot_id": "8e742ab5-bba9-4271-a1fe-53c310b03365"
+            },
+            {
+              "name": "operating_expenses",
+              "value": {
+                "value": "9300.00",
+                "display": "£9,300",
+                "unit": "money"
+              },
+              "snapshot_id": "8e742ab5-bba9-4271-a1fe-53c310b03365"
+            }
+          ],
+          "variance": {
+            "prev_period": {
+              "value": {
+                "value": "3300",
+                "display": "£3,300",
+                "unit": "money"
+              },
+              "pct_change": {
+                "value": "0.515625",
+                "display": "51.6%",
+                "unit": "ratio"
+              },
+              "comparison_period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "basis_differs": false,
+              "snapshot_id": "80702d8e-00b2-45b2-b33d-a40794c55c7c"
+            },
+            "same_period_last_year": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "c635547a-86b4-4e77-9caa-193d45fa30a4"
+            },
+            "trailing_3m_avg": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "9448f2f2-9a68-4089-96b2-1d9764967ca0"
+            }
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            },
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 6,
+      "name": "get_metric",
+      "input": {
+        "metric_key": "net_profit",
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 6,
+        "name": "get_metric",
+        "ok": true,
+        "data": {
+          "metric_key": "net_profit",
+          "period": {
+            "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+            "label": "May 2026"
+          },
+          "value": {
+            "value": "9700",
+            "display": "£9,700",
+            "unit": "money"
+          },
+          "basis": "ledger",
+          "assurance_level": "calculated",
+          "data_quality": {
+            "completeness": {
+              "value": "1",
+              "display": "1.00",
+              "unit": "count"
+            },
+            "warnings": [],
+            "missing": []
+          },
+          "snapshot_id": "e4e8728d-a452-4b31-803c-d23758351804",
+          "components": [
+            {
+              "name": "tax_expense",
+              "value": {
+                "value": "0.00",
+                "display": "£0",
+                "unit": "money"
+              },
+              "snapshot_id": "e4e8728d-a452-4b31-803c-d23758351804"
+            },
+            {
+              "name": "other_income",
+              "value": {
+                "value": "0.00",
+                "display": "£0",
+                "unit": "money"
+              },
+              "snapshot_id": "e4e8728d-a452-4b31-803c-d23758351804"
+            },
+            {
+              "name": "other_expense",
+              "value": {
+                "value": "0.00",
+                "display": "£0",
+                "unit": "money"
+              },
+              "snapshot_id": "e4e8728d-a452-4b31-803c-d23758351804"
+            },
+            {
+              "name": "interest_expense",
+              "value": {
+                "value": "0.00",
+                "display": "£0",
+                "unit": "money"
+              },
+              "snapshot_id": "e4e8728d-a452-4b31-803c-d23758351804"
+            },
+            {
+              "name": "operating_profit",
+              "value": {
+                "value": "9700.00",
+                "display": "£9,700",
+                "unit": "money"
+              },
+              "snapshot_id": "e4e8728d-a452-4b31-803c-d23758351804"
+            }
+          ],
+          "variance": {
+            "prev_period": {
+              "value": {
+                "value": "3300",
+                "display": "£3,300",
+                "unit": "money"
+              },
+              "pct_change": {
+                "value": "0.515625",
+                "display": "51.6%",
+                "unit": "ratio"
+              },
+              "comparison_period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "basis_differs": false,
+              "snapshot_id": "043e8181-a931-4768-b479-0e4f866208d0"
+            },
+            "same_period_last_year": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "c7fcd5b2-e01c-4201-92e1-e3b6e97303f2"
+            },
+            "trailing_3m_avg": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "a3b43deb-81c8-4db7-9797-5d966880f643"
+            }
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            },
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 7,
+      "name": "get_metric",
+      "input": {
+        "metric_key": "operating_expenses",
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 7,
+        "name": "get_metric",
+        "ok": true,
+        "data": {
+          "metric_key": "operating_expenses",
+          "period": {
+            "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+            "label": "May 2026"
+          },
+          "value": {
+            "value": "9300",
+            "display": "£9,300",
+            "unit": "money"
+          },
+          "basis": "ledger",
+          "assurance_level": "calculated",
+          "data_quality": {
+            "completeness": {
+              "value": "1",
+              "display": "1.00",
+              "unit": "count"
+            },
+            "warnings": [],
+            "missing": []
+          },
+          "snapshot_id": "52d9da4d-8c0a-4d37-8fa6-6302d65d24b9",
+          "components": [
+            {
+              "name": "payroll",
+              "value": {
+                "value": "5000.00",
+                "display": "£5,000",
+                "unit": "money"
+              },
+              "snapshot_id": "52d9da4d-8c0a-4d37-8fa6-6302d65d24b9"
+            },
+            {
+              "name": "marketing",
+              "value": {
+                "value": "3400.00",
+                "display": "£3,400",
+                "unit": "money"
+              },
+              "snapshot_id": "52d9da4d-8c0a-4d37-8fa6-6302d65d24b9"
+            },
+            {
+              "name": "depreciation",
+              "value": {
+                "value": "0.00",
+                "display": "£0",
+                "unit": "money"
+              },
+              "snapshot_id": "52d9da4d-8c0a-4d37-8fa6-6302d65d24b9"
+            },
+            {
+              "name": "operating_expense",
+              "value": {
+                "value": "900.00",
+                "display": "£900",
+                "unit": "money"
+              },
+              "snapshot_id": "52d9da4d-8c0a-4d37-8fa6-6302d65d24b9"
+            }
+          ],
+          "variance": {
+            "prev_period": {
+              "value": {
+                "value": "3100",
+                "display": "£3,100",
+                "unit": "money"
+              },
+              "pct_change": {
+                "value": "0.500000",
+                "display": "50.0%",
+                "unit": "ratio"
+              },
+              "comparison_period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "basis_differs": false,
+              "snapshot_id": "097fe8cb-90b1-4b3d-a403-2f06379bb206"
+            },
+            "same_period_last_year": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "201f5ab6-7e5b-4da0-9657-b09e9cdea26c"
+            },
+            "trailing_3m_avg": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "d77d7de7-b03f-49ef-a399-2e56ef9c8dc2"
+            }
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            },
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 8,
+      "name": "get_metric",
+      "input": {
+        "metric_key": "net_margin",
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 8,
+        "name": "get_metric",
+        "ok": true,
+        "data": {
+          "metric_key": "net_margin",
+          "period": {
+            "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+            "label": "May 2026"
+          },
+          "value": {
+            "value": "0.388",
+            "display": "38.8%",
+            "unit": "ratio"
+          },
+          "basis": "ledger",
+          "assurance_level": "calculated",
+          "data_quality": {
+            "completeness": {
+              "value": "1",
+              "display": "1.00",
+              "unit": "count"
+            },
+            "warnings": [],
+            "missing": []
+          },
+          "snapshot_id": "73c74b3f-8431-4b51-a0c9-725ee87b0aa7",
+          "components": [
+            {
+              "name": "revenue",
+              "value": {
+                "value": "25000.00",
+                "display": "£25,000",
+                "unit": "money"
+              },
+              "snapshot_id": "73c74b3f-8431-4b51-a0c9-725ee87b0aa7"
+            },
+            {
+              "name": "net_profit",
+              "value": {
+                "value": "9700.00",
+                "display": "£9,700",
+                "unit": "money"
+              },
+              "snapshot_id": "73c74b3f-8431-4b51-a0c9-725ee87b0aa7"
+            }
+          ],
+          "variance": {
+            "prev_period": {
+              "value": {
+                "value": "0.032444",
+                "display": "3.2%",
+                "unit": "ratio"
+              },
+              "pct_change": {
+                "value": "0.091249",
+                "display": "9.1%",
+                "unit": "ratio"
+              },
+              "comparison_period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "basis_differs": false,
+              "snapshot_id": "76914ed1-c83a-4e4e-b6b0-5aee0543d90c"
+            },
+            "same_period_last_year": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "fd31cfaa-8dc4-4073-9224-5215c795b895"
+            },
+            "trailing_3m_avg": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "883053b5-d745-4517-9473-7e4deed9f20e"
+            }
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            },
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 9,
+      "name": "get_metric",
+      "input": {
+        "metric_key": "closing_cash",
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 9,
+        "name": "get_metric",
+        "ok": true,
+        "data": {
+          "metric_key": "closing_cash",
+          "period": {
+            "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+            "label": "May 2026"
+          },
+          "value": {
+            "value": "0",
+            "display": "£0",
+            "unit": "money"
+          },
+          "basis": "ledger",
+          "assurance_level": "calculated",
+          "data_quality": {
+            "completeness": {
+              "value": "1",
+              "display": "1.00",
+              "unit": "count"
+            },
+            "warnings": [],
+            "missing": []
+          },
+          "snapshot_id": "4f8c1208-ffde-4307-829f-69bfacc77d35",
+          "components": [
+            {
+              "name": "opening_cash",
+              "value": {
+                "value": "0.00",
+                "display": "£0",
+                "unit": "money"
+              },
+              "snapshot_id": "4f8c1208-ffde-4307-829f-69bfacc77d35"
+            },
+            {
+              "name": "net_cash_movement",
+              "value": {
+                "value": "0.00",
+                "display": "£0",
+                "unit": "money"
+              },
+              "snapshot_id": "4f8c1208-ffde-4307-829f-69bfacc77d35"
+            }
+          ],
+          "variance": {
+            "prev_period": {
+              "value": {
+                "value": "0",
+                "display": "£0",
+                "unit": "money"
+              },
+              "pct_change": null,
+              "comparison_period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "basis_differs": false,
+              "snapshot_id": "d9602217-f19f-409c-8145-1c5b77252108"
+            },
+            "same_period_last_year": {
+              "value": null,
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": false,
+              "snapshot_id": "7b452069-6964-4d0a-b2c4-74bfd6d55003"
+            },
+            "trailing_3m_avg": {
+              "value": {
+                "value": "0",
+                "display": "£0",
+                "unit": "money"
+              },
+              "pct_change": null,
+              "comparison_period": null,
+              "basis_differs": true,
+              "snapshot_id": "9d958d2f-db66-4d44-94a7-752f8c9b186f"
+            }
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            },
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 10,
+      "name": "get_metric_trend",
+      "input": {
+        "metric_key": "revenue",
+        "from": "Apr 2026",
+        "to": "May 2026"
+      },
+      "result": {
+        "seq": 10,
+        "name": "get_metric_trend",
+        "ok": true,
+        "data": {
+          "points": [
+            {
+              "metric_key": "revenue",
+              "period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026",
+                "start": "2026-04-01",
+                "end": "2026-04-30",
+                "complete": true
+              },
+              "value": {
+                "value": "18000",
+                "display": "£18,000",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "b7f86fe6-2423-40a2-bade-bb27e1f05778"
+            },
+            {
+              "metric_key": "revenue",
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026",
+                "start": "2026-05-01",
+                "end": "2026-05-31",
+                "complete": true
+              },
+              "value": {
+                "value": "25000",
+                "display": "£25,000",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "e68a2663-4a57-41cc-a07f-a4f0b43df2ac"
+            }
+          ],
+          "summary": {
+            "min": {
+              "value": "18000",
+              "display": "£18,000",
+              "unit": "money"
+            },
+            "max": {
+              "value": "25000",
+              "display": "£25,000",
+              "unit": "money"
+            },
+            "first": {
+              "value": "18000",
+              "display": "£18,000",
+              "unit": "money"
+            },
+            "last": {
+              "value": "25000",
+              "display": "£25,000",
+              "unit": "money"
+            },
+            "change_abs": {
+              "value": "7000",
+              "display": "£7,000",
+              "unit": "money"
+            },
+            "change_ratio": {
+              "value": "0.38888888888888888889",
+              "display": "38.9%",
+              "unit": "ratio"
+            }
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            },
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 11,
+      "name": "get_expense_changes",
+      "input": {
+        "period": "May 2026",
+        "compare_to": "prev_period",
+        "by": "standard_category"
+      },
+      "result": {
+        "seq": 11,
+        "name": "get_expense_changes",
+        "ok": true,
+        "data": {
+          "rows": [
+            {
+              "subject": {
+                "type": "standard_category",
+                "id": "marketing",
+                "name": "<data name=\"name\">Marketing</data>"
+              },
+              "current": {
+                "value": "3400",
+                "display": "£3,400",
+                "unit": "money"
+              },
+              "previous": {
+                "value": "1200",
+                "display": "£1,200",
+                "unit": "money"
+              },
+              "change_abs": {
+                "value": "2200",
+                "display": "£2,200",
+                "unit": "money"
+              },
+              "change_ratio": {
+                "value": "1.833333",
+                "display": "183.3%",
+                "unit": "ratio"
+              },
+              "basis_differs": false,
+              "snapshot_id": "5a09b75a-cfe5-4fce-8abd-b98f78adf2ee",
+              "change_snapshot_id": "dfb6ff5c-6af4-4ee8-b9be-9354ef30b455"
+            },
+            {
+              "subject": {
+                "type": "standard_category",
+                "id": "operating_expense",
+                "name": "<data name=\"name\">Other running costs</data>"
+              },
+              "current": {
+                "value": "900",
+                "display": "£900",
+                "unit": "money"
+              },
+              "previous": {
+                "value": "0",
+                "display": "£0",
+                "unit": "money"
+              },
+              "change_abs": {
+                "value": "900",
+                "display": "£900",
+                "unit": "money"
+              },
+              "change_ratio": null,
+              "basis_differs": false,
+              "snapshot_id": "40fff3c4-2f3e-4a90-973d-a27c2287b807",
+              "change_snapshot_id": "6609cc5b-4615-4969-90e6-c09f0d35b3a1"
+            },
+            {
+              "subject": {
+                "type": "standard_category",
+                "id": "cost_of_sales",
+                "name": "<data name=\"name\">Cost of sales</data>"
+              },
+              "current": {
+                "value": "6000",
+                "display": "£6,000",
+                "unit": "money"
+              },
+              "previous": {
+                "value": "5400",
+                "display": "£5,400",
+                "unit": "money"
+              },
+              "change_abs": {
+                "value": "600",
+                "display": "£600",
+                "unit": "money"
+              },
+              "change_ratio": {
+                "value": "0.111111",
+                "display": "11.1%",
+                "unit": "ratio"
+              },
+              "basis_differs": false,
+              "snapshot_id": "4bedc30f-f903-46f3-a619-6772fc66aa89",
+              "change_snapshot_id": "0c3052e9-db39-4b07-bc73-5e93f6dd284a"
+            },
+            {
+              "subject": {
+                "type": "standard_category",
+                "id": "payroll",
+                "name": "<data name=\"name\">Payroll</data>"
+              },
+              "current": {
+                "value": "5000",
+                "display": "£5,000",
+                "unit": "money"
+              },
+              "previous": {
+                "value": "5000",
+                "display": "£5,000",
+                "unit": "money"
+              },
+              "change_abs": {
+                "value": "0",
+                "display": "£0",
+                "unit": "money"
+              },
+              "change_ratio": {
+                "value": "0.000000",
+                "display": "0.0%",
+                "unit": "ratio"
+              },
+              "basis_differs": false,
+              "snapshot_id": "17727150-dd20-4288-b6b0-13d5320be86e",
+              "change_snapshot_id": "b57ac6f5-4a35-4e22-b837-0b65609caa49"
+            }
+          ]
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            },
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 12,
+      "name": "get_customer_profitability",
+      "input": {
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 12,
+        "name": "get_customer_profitability",
+        "ok": true,
+        "data": {
+          "rows": [
+            {
+              "subject": {
+                "type": "counterparty",
+                "id": "1ce5effa-0a55-4d15-a6e0-6de19c49322e",
+                "name": "<data name=\"name\">Acme Trading Ltd</data>"
+              },
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "revenue": {
+                "value": "16000",
+                "display": "£16,000",
+                "unit": "money"
+              },
+              "share": {
+                "value": "0.64",
+                "display": "64.0%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "5af575f2-47b0-4ffc-b2b9-1a1eb74ff30d",
+              "share_snapshot_id": "6b5eb2a4-1849-44b1-b6ae-b0a3effb3f16"
+            },
+            {
+              "subject": {
+                "type": "counterparty",
+                "id": "a790cd15-3e10-4737-a1b6-1cd589a9286c",
+                "name": "<data name=\"name\">Beta Retail</data>"
+              },
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "revenue": {
+                "value": "9000",
+                "display": "£9,000",
+                "unit": "money"
+              },
+              "share": {
+                "value": "0.36",
+                "display": "36.0%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "9fde5f43-692b-4b49-8e58-129769c40057",
+              "share_snapshot_id": "907e0e7b-6436-4e07-8a46-b352af627f90"
+            },
+            {
+              "subject": {
+                "type": "counterparty",
+                "id": "unattributed",
+                "name": "<data name=\"name\">Unattributed</data>"
+              },
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "revenue": {
+                "value": "0",
+                "display": "£0",
+                "unit": "money"
+              },
+              "share": {
+                "value": "0",
+                "display": "0.0%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "1e99a90f-a05a-4f6f-b211-eb1729d319b3",
+              "share_snapshot_id": "f5195576-0696-422b-b309-f71743ad6f17"
+            }
+          ],
+          "concentration": {
+            "top1": {
+              "value": {
+                "value": "0.64",
+                "display": "64.0%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "ed5ce2ca-4245-49ee-afcd-772f51d49bbc"
+            },
+            "top5": {
+              "value": {
+                "value": "1",
+                "display": "100.0%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "f82656fe-97d1-43b9-8592-729a010522b3"
+            },
+            "hhi": {
+              "value": {
+                "value": "0.5392",
+                "display": "53.9%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "81130e0e-c9d7-400b-9261-4ef638239703"
+            }
+          },
+          "note": "Contribution is revenue contribution in MOTION today; cost allocation per customer is not available yet."
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 13,
+      "name": "get_cash_analysis",
+      "input": {
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 13,
+        "name": "get_cash_analysis",
+        "ok": true,
+        "data": {
+          "periods": [
+            {
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "opening_cash": {
+                "metric_key": "opening_cash",
+                "value": {
+                  "value": "0",
+                  "display": "£0",
+                  "unit": "money"
+                },
+                "basis": "none",
+                "assurance_level": "verified",
+                "snapshot_id": "47550179-dcbf-47f3-840d-a99c21ec51e9"
+              },
+              "cash_inflows": {
+                "metric_key": "cash_inflows",
+                "value": {
+                  "value": "0",
+                  "display": "£0",
+                  "unit": "money"
+                },
+                "basis": "ledger",
+                "assurance_level": "calculated",
+                "snapshot_id": "43a90630-08e2-4f4d-b4ca-bcf840b44f1b"
+              },
+              "cash_outflows": {
+                "metric_key": "cash_outflows",
+                "value": {
+                  "value": "0",
+                  "display": "£0",
+                  "unit": "money"
+                },
+                "basis": "ledger",
+                "assurance_level": "calculated",
+                "snapshot_id": "b17a7ec4-8681-49ce-8fbe-4a4bb44cf79e"
+              },
+              "net_cash_movement": {
+                "metric_key": "net_cash_movement",
+                "value": {
+                  "value": "0",
+                  "display": "£0",
+                  "unit": "money"
+                },
+                "basis": "ledger",
+                "assurance_level": "calculated",
+                "snapshot_id": "ff0c1715-4520-4965-a4ea-3f2ee6d7dc0d"
+              },
+              "closing_cash": {
+                "metric_key": "closing_cash",
+                "value": {
+                  "value": "0",
+                  "display": "£0",
+                  "unit": "money"
+                },
+                "basis": "ledger",
+                "assurance_level": "calculated",
+                "snapshot_id": "4f8c1208-ffde-4307-829f-69bfacc77d35"
+              },
+              "cash_runway_months": {
+                "metric_key": "cash_runway_months",
+                "value": null,
+                "basis": "ledger",
+                "assurance_level": "calculated",
+                "snapshot_id": "4c9efeff-0f8b-47b8-9f2b-6b5892829c05"
+              }
+            }
+          ],
+          "largest_inflows": [],
+          "largest_outflows": [],
+          "coverage": {
+            "bank_accounts": {
+              "value": "0",
+              "display": "0",
+              "unit": "count"
+            },
+            "months_with_bank_data": {
+              "value": "1",
+              "display": "1",
+              "unit": "count"
+            },
+            "missing_opening_balance": false
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 14,
+      "name": "get_receivables",
+      "input": {
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 14,
+        "name": "get_receivables",
+        "ok": false,
+        "data": {
+          "code": "NO_DATA",
+          "message": "There is no receivables figure for that period yet."
+        }
+      }
+    },
+    {
+      "seq": 15,
+      "name": "get_payables",
+      "input": {
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 15,
+        "name": "get_payables",
+        "ok": false,
+        "data": {
+          "code": "NO_DATA",
+          "message": "There is no payables figure for that period yet."
+        }
+      }
+    },
+    {
+      "seq": 16,
+      "name": "get_alerts",
+      "input": {
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 16,
+        "name": "get_alerts",
+        "ok": true,
+        "data": {
+          "alerts": [
+            {
+              "id": "7b5dc6a8-3517-4040-a174-ee561569c361",
+              "revision_no": 0,
+              "rule_key": "expense.spike_category",
+              "severity": "high",
+              "status": "open",
+              "title": "<data name=\"title\">marketing spending jumped</data>",
+              "explanation": "<data name=\"explanation\">marketing spending was £3,400 this period, up £2,200 (183.3%) on the month before.</data>",
+              "threshold_summary": {
+                "value": {
+                  "value": "2200.00",
+                  "display": "£2,200",
+                  "unit": "money"
+                },
+                "current": "<data name=\"current\">3400.00</data>",
+                "revenue": null,
+                "category": "<data name=\"category\">marketing</data>",
+                "previous": "<data name=\"previous\">1200.00</data>",
+                "pct_change": {
+                  "value": "1.833333",
+                  "display": "183.3%",
+                  "unit": "ratio"
+                },
+                "threshold_pct": "<data name=\"threshold_pct\">0.250000</data>",
+                "threshold_value": "<data name=\"threshold_value\">500.00</data>"
+              },
+              "metric_key": "expense_by_category",
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "recommended_next_step": "<data name=\"next_step\">Review the largest marketing transactions and confirm they are expected.</data>",
+              "evidence_bundle_id": "82fa502e-ef00-4d72-955b-a641e31fcc02",
+              "subject": null
+            },
+            {
+              "id": "f25e6c17-9de2-4316-9ab8-7b9a1b5ded3d",
+              "revision_no": 0,
+              "rule_key": "concentration.customer",
+              "severity": "high",
+              "status": "open",
+              "title": "<data name=\"title\">Acme Trading Ltd is a large share of revenue</data>",
+              "explanation": "<data name=\"explanation\">Acme Trading Ltd makes up 64.0% of revenue this period.</data>",
+              "threshold_summary": {
+                "band": "<data name=\"band\">high</data>",
+                "share": {
+                  "value": "0.640000",
+                  "display": "64.0%",
+                  "unit": "ratio"
+                },
+                "revenue": {
+                  "value": "16000",
+                  "display": "£16,000",
+                  "unit": "money"
+                },
+                "customer": "<data name=\"customer\">Acme Trading Ltd</data>",
+                "threshold": {
+                  "value": "0.350000",
+                  "display": "£0",
+                  "unit": "money"
+                }
+              },
+              "metric_key": "customer_concentration_top1",
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "recommended_next_step": "<data name=\"next_step\">Reduce reliance on Acme Trading Ltd: protect the account and grow the next tier.</data>",
+              "evidence_bundle_id": "223f118a-8f19-4ece-9535-623cb634491f",
+              "subject": {
+                "type": "counterparty",
+                "id": "1ce5effa-0a55-4d15-a6e0-6de19c49322e",
+                "name": "<data name=\"name\"></data>"
+              }
+            }
+          ]
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 17,
+      "name": "get_health_score",
+      "input": {
+        "period": "May 2026"
+      },
+      "result": {
+        "seq": 17,
+        "name": "get_health_score",
+        "ok": true,
+        "data": {
+          "period": {
+            "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+            "label": "May 2026"
+          },
+          "score": {
+            "value": "50",
+            "display": "50",
+            "unit": "count"
+          },
+          "band": "needs_attention",
+          "change_vs_previous": {
+            "value": "1",
+            "display": "1",
+            "unit": "count"
+          },
+          "dimensions_used": {
+            "value": "6",
+            "display": "6",
+            "unit": "count"
+          },
+          "dimensions_total": {
+            "value": "6",
+            "display": "6",
+            "unit": "count"
+          },
+          "breakdown": [
+            {
+              "key": "profitability",
+              "score": {
+                "value": "95",
+                "display": "95",
+                "unit": "count"
+              },
+              "weight_applied": {
+                "value": "0.25",
+                "display": "25.0%",
+                "unit": "ratio"
+              },
+              "included": true,
+              "exclusion_reason": null,
+              "positives": [
+                {
+                  "text": "<data name=\"factor\">Net margin of 38.8% is healthy</data>",
+                  "values": {
+                    "net_margin": {
+                      "value": "0.388",
+                      "display": "38.8%",
+                      "unit": "ratio"
+                    }
+                  },
+                  "snapshot_ids": [
+                    "73c74b3f-8431-4b51-a0c9-725ee87b0aa7"
+                  ]
+                }
+              ],
+              "negatives": [],
+              "metrics": [
+                {
+                  "metric_key": "net_margin",
+                  "value": {
+                    "value": "0.388",
+                    "display": "£0",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "73c74b3f-8431-4b51-a0c9-725ee87b0aa7"
+                },
+                {
+                  "metric_key": "gross_margin",
+                  "value": {
+                    "value": "0.76",
+                    "display": "£1",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "8603adc5-56df-4fb1-a170-30be17155ff1"
+                },
+                {
+                  "metric_key": "gross_margin.variance.trailing_3m_avg",
+                  "value": null,
+                  "snapshot_id": "88023d64-c355-46b1-9dcf-5c6046b6e3c5"
+                },
+                {
+                  "metric_key": "net_profit.variance.prev_period",
+                  "value": {
+                    "value": "3300",
+                    "display": "£3,300",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "043e8181-a931-4768-b479-0e4f866208d0"
+                },
+                {
+                  "metric_key": "net_profit",
+                  "value": {
+                    "value": "9700",
+                    "display": "£9,700",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "e4e8728d-a452-4b31-803c-d23758351804"
+                }
+              ]
+            },
+            {
+              "key": "cash_flow",
+              "score": {
+                "value": "0",
+                "display": "0",
+                "unit": "count"
+              },
+              "weight_applied": {
+                "value": "0.25",
+                "display": "25.0%",
+                "unit": "ratio"
+              },
+              "included": true,
+              "exclusion_reason": null,
+              "positives": [],
+              "negatives": [
+                {
+                  "text": "<data name=\"factor\">Cash fell for 3 months in a row</data>",
+                  "values": {
+                    "n": {
+                      "value": "3",
+                      "display": "3",
+                      "unit": "count"
+                    }
+                  },
+                  "snapshot_ids": [
+                    "ff0c1715-4520-4965-a4ea-3f2ee6d7dc0d"
+                  ]
+                }
+              ],
+              "metrics": [
+                {
+                  "metric_key": "closing_cash",
+                  "value": {
+                    "value": "0",
+                    "display": "£0",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "4f8c1208-ffde-4307-829f-69bfacc77d35"
+                },
+                {
+                  "metric_key": "net_cash_movement",
+                  "value": {
+                    "value": "0",
+                    "display": "£0",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "ff0c1715-4520-4965-a4ea-3f2ee6d7dc0d"
+                },
+                {
+                  "metric_key": "cash_runway_months",
+                  "value": null,
+                  "snapshot_id": "4c9efeff-0f8b-47b8-9f2b-6b5892829c05"
+                },
+                {
+                  "metric_key": "cash_outflows",
+                  "value": {
+                    "value": "0",
+                    "display": "£0",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "b17a7ec4-8681-49ce-8fbe-4a4bb44cf79e"
+                }
+              ]
+            },
+            {
+              "key": "revenue_growth",
+              "score": {
+                "value": "70",
+                "display": "70",
+                "unit": "count"
+              },
+              "weight_applied": {
+                "value": "0.15",
+                "display": "15.0%",
+                "unit": "ratio"
+              },
+              "included": true,
+              "exclusion_reason": null,
+              "positives": [
+                {
+                  "text": "<data name=\"factor\">Revenue is up 38.9% on last month</data>",
+                  "values": {
+                    "pct": "<data name=\"pct\">0.388889</data>",
+                    "comparison": "<data name=\"comparison\">last month</data>"
+                  },
+                  "snapshot_ids": [
+                    "0daf844c-e265-49bb-97a7-96fc7e807231"
+                  ]
+                }
+              ],
+              "negatives": [],
+              "metrics": [
+                {
+                  "metric_key": "revenue",
+                  "value": {
+                    "value": "25000",
+                    "display": "£25,000",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "e68a2663-4a57-41cc-a07f-a4f0b43df2ac"
+                },
+                {
+                  "metric_key": "revenue_growth_mom",
+                  "value": {
+                    "value": "0.388889",
+                    "display": "£0",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "0daf844c-e265-49bb-97a7-96fc7e807231"
+                },
+                {
+                  "metric_key": "customer_concentration_top1",
+                  "value": {
+                    "value": "0.64",
+                    "display": "£1",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "ed5ce2ca-4245-49ee-afcd-772f51d49bbc"
+                }
+              ]
+            },
+            {
+              "key": "cost_control",
+              "score": {
+                "value": "50",
+                "display": "50",
+                "unit": "count"
+              },
+              "weight_applied": {
+                "value": "0.15",
+                "display": "15.0%",
+                "unit": "ratio"
+              },
+              "included": true,
+              "exclusion_reason": null,
+              "positives": [],
+              "negatives": [
+                {
+                  "text": "<data name=\"factor\">marketing spending jumped 183.3% this month</data>",
+                  "values": {
+                    "pct": "<data name=\"pct\">1.833333</data>",
+                    "category": "<data name=\"category\">marketing</data>"
+                  },
+                  "snapshot_ids": [
+                    "dfb6ff5c-6af4-4ee8-b9be-9354ef30b455"
+                  ]
+                }
+              ],
+              "metrics": [
+                {
+                  "metric_key": "operating_expenses",
+                  "value": {
+                    "value": "9300",
+                    "display": "£9,300",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "52d9da4d-8c0a-4d37-8fa6-6302d65d24b9"
+                },
+                {
+                  "metric_key": "revenue",
+                  "value": {
+                    "value": "25000",
+                    "display": "£25,000",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "e68a2663-4a57-41cc-a07f-a4f0b43df2ac"
+                },
+                {
+                  "metric_key": "operating_expenses.variance.prev_period",
+                  "value": {
+                    "value": "3100",
+                    "display": "£3,100",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "097fe8cb-90b1-4b3d-a403-2f06379bb206"
+                },
+                {
+                  "metric_key": "revenue.variance.prev_period",
+                  "value": {
+                    "value": "7000",
+                    "display": "£7,000",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "68e9bab0-ab13-4a1f-82d5-785c5d00f6f9"
+                }
+              ]
+            },
+            {
+              "key": "customer_quality",
+              "score": {
+                "value": "15",
+                "display": "15",
+                "unit": "count"
+              },
+              "weight_applied": {
+                "value": "0.1",
+                "display": "10.0%",
+                "unit": "ratio"
+              },
+              "included": true,
+              "exclusion_reason": null,
+              "positives": [],
+              "negatives": [
+                {
+                  "text": "<data name=\"factor\">Your largest customer is 64.0% of revenue — a concentration risk</data>",
+                  "values": {
+                    "share": {
+                      "value": "0.64",
+                      "display": "64.0%",
+                      "unit": "ratio"
+                    }
+                  },
+                  "snapshot_ids": [
+                    "ed5ce2ca-4245-49ee-afcd-772f51d49bbc"
+                  ]
+                }
+              ],
+              "metrics": [
+                {
+                  "metric_key": "customer_concentration_top1",
+                  "value": {
+                    "value": "0.64",
+                    "display": "£1",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "ed5ce2ca-4245-49ee-afcd-772f51d49bbc"
+                },
+                {
+                  "metric_key": "customer_concentration_top5",
+                  "value": {
+                    "value": "1",
+                    "display": "£1",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "f82656fe-97d1-43b9-8592-729a010522b3"
+                },
+                {
+                  "metric_key": "revenue_concentration_hhi",
+                  "value": {
+                    "value": "0.5392",
+                    "display": "£1",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "81130e0e-c9d7-400b-9261-4ef638239703"
+                },
+                {
+                  "metric_key": "receivables_days",
+                  "value": null,
+                  "snapshot_id": null
+                }
+              ]
+            },
+            {
+              "key": "banking_health",
+              "score": {
+                "value": "70",
+                "display": "70",
+                "unit": "count"
+              },
+              "weight_applied": {
+                "value": "0.1",
+                "display": "10.0%",
+                "unit": "ratio"
+              },
+              "included": true,
+              "exclusion_reason": null,
+              "positives": [],
+              "negatives": [],
+              "metrics": [
+                {
+                  "metric_key": "closing_cash",
+                  "value": {
+                    "value": "0",
+                    "display": "£0",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "4f8c1208-ffde-4307-829f-69bfacc77d35"
+                },
+                {
+                  "metric_key": "cash_inflows",
+                  "value": {
+                    "value": "0",
+                    "display": "£0",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "43a90630-08e2-4f4d-b4ca-bcf840b44f1b"
+                },
+                {
+                  "metric_key": "cash_outflows",
+                  "value": {
+                    "value": "0",
+                    "display": "£0",
+                    "unit": "money"
+                  },
+                  "snapshot_id": "b17a7ec4-8681-49ce-8fbe-4a4bb44cf79e"
+                }
+              ]
+            }
+          ],
+          "evidence_bundle_id": "7d3999f9-70d3-45ee-b3c4-254e38e0e1b6"
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 18,
+      "name": "get_data_coverage",
+      "input": {},
+      "result": {
+        "seq": 18,
+        "name": "get_data_coverage",
+        "ok": true,
+        "data": {
+          "months": [
+            {
+              "period": {
+                "id": "63de579e-f3d9-4770-bd88-c8e5e619e561",
+                "label": "Sep 2025"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "90d42bcb-360c-486c-b6d9-fa46a6f6e301",
+                "label": "Oct 2025"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "aa76ee2b-d87e-473b-abc9-844991713ac1",
+                "label": "Nov 2025"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "683db569-c4c6-4f24-a062-b99b637ac178",
+                "label": "Dec 2025"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "06512a16-b81a-4e4d-a845-a8c3eb007197",
+                "label": "Jan 2026"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "3cab4cb7-1a42-4940-8beb-d0f5f5701659",
+                "label": "Feb 2026"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "83062c23-2a55-4ed5-b5a2-207edc418918",
+                "label": "Mar 2026"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "is_complete": true,
+              "has_data": true,
+              "basis_pnl": "ledger",
+              "basis_cash": "ledger",
+              "completeness": {
+                "value": "1",
+                "display": "1.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+                "label": "May 2026"
+              },
+              "is_complete": true,
+              "has_data": true,
+              "basis_pnl": "ledger",
+              "basis_cash": "ledger",
+              "completeness": {
+                "value": "1",
+                "display": "1.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "3188d941-676b-4670-a68f-c95302536d29",
+                "label": "Jun 2026"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "e7a85a8e-f72f-4628-88c9-c34d6f23943f",
+                "label": "Jul 2026"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "5a0375a0-ac47-4dd7-b4ed-06b10beea02b",
+                "label": "Aug 2026"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "89eecb3f-6fc4-41e2-bae0-10d835426368",
+                "label": "Sep 2026"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "eba9a45a-2e89-4a3b-b871-05916a440ced",
+                "label": "Oct 2026"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "0c5ab25f-4db1-47eb-8f7e-8ac296b1f97b",
+                "label": "Nov 2026"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "76f05308-6c94-4a10-8f22-9968e24d5495",
+                "label": "Dec 2026"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "096b59f6-4670-4a8e-a15c-81ffa08e5e28",
+                "label": "Jan 2027"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "773a1a4c-cc01-4ee9-ab80-a9960b9f19d7",
+                "label": "Feb 2027"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "efc82529-aff1-4394-8ff8-8a893b51c163",
+                "label": "Mar 2027"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "2ef70445-b2d9-44ea-8550-9a9f8ee196d0",
+                "label": "Apr 2027"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "b88675f2-de6c-4cfd-aa82-05342298f539",
+                "label": "May 2027"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "74e5210e-e45a-4c33-b498-6d9da995bbf0",
+                "label": "Jun 2027"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "0c8eeb0a-64de-447b-a832-d066af2d4b80",
+                "label": "Jul 2027"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            },
+            {
+              "period": {
+                "id": "d211c6a1-c797-4eb7-8b27-4daf0dafc179",
+                "label": "Aug 2027"
+              },
+              "is_complete": false,
+              "has_data": true,
+              "basis_pnl": "none",
+              "basis_cash": "none",
+              "completeness": {
+                "value": "0",
+                "display": "0.00",
+                "unit": "count"
+              }
+            }
+          ],
+          "latest_complete": {
+            "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+            "label": "May 2026"
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "63de579e-f3d9-4770-bd88-c8e5e619e561",
+              "label": "Sep 2025"
+            },
+            {
+              "id": "90d42bcb-360c-486c-b6d9-fa46a6f6e301",
+              "label": "Oct 2025"
+            },
+            {
+              "id": "aa76ee2b-d87e-473b-abc9-844991713ac1",
+              "label": "Nov 2025"
+            },
+            {
+              "id": "683db569-c4c6-4f24-a062-b99b637ac178",
+              "label": "Dec 2025"
+            },
+            {
+              "id": "06512a16-b81a-4e4d-a845-a8c3eb007197",
+              "label": "Jan 2026"
+            },
+            {
+              "id": "3cab4cb7-1a42-4940-8beb-d0f5f5701659",
+              "label": "Feb 2026"
+            },
+            {
+              "id": "83062c23-2a55-4ed5-b5a2-207edc418918",
+              "label": "Mar 2026"
+            },
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            },
+            {
+              "id": "714c0f25-6567-489c-bea2-98ae11e92abe",
+              "label": "May 2026"
+            },
+            {
+              "id": "3188d941-676b-4670-a68f-c95302536d29",
+              "label": "Jun 2026"
+            },
+            {
+              "id": "e7a85a8e-f72f-4628-88c9-c34d6f23943f",
+              "label": "Jul 2026"
+            },
+            {
+              "id": "5a0375a0-ac47-4dd7-b4ed-06b10beea02b",
+              "label": "Aug 2026"
+            },
+            {
+              "id": "89eecb3f-6fc4-41e2-bae0-10d835426368",
+              "label": "Sep 2026"
+            },
+            {
+              "id": "eba9a45a-2e89-4a3b-b871-05916a440ced",
+              "label": "Oct 2026"
+            },
+            {
+              "id": "0c5ab25f-4db1-47eb-8f7e-8ac296b1f97b",
+              "label": "Nov 2026"
+            },
+            {
+              "id": "76f05308-6c94-4a10-8f22-9968e24d5495",
+              "label": "Dec 2026"
+            },
+            {
+              "id": "096b59f6-4670-4a8e-a15c-81ffa08e5e28",
+              "label": "Jan 2027"
+            },
+            {
+              "id": "773a1a4c-cc01-4ee9-ab80-a9960b9f19d7",
+              "label": "Feb 2027"
+            },
+            {
+              "id": "efc82529-aff1-4394-8ff8-8a893b51c163",
+              "label": "Mar 2027"
+            },
+            {
+              "id": "2ef70445-b2d9-44ea-8550-9a9f8ee196d0",
+              "label": "Apr 2027"
+            },
+            {
+              "id": "b88675f2-de6c-4cfd-aa82-05342298f539",
+              "label": "May 2027"
+            },
+            {
+              "id": "74e5210e-e45a-4c33-b498-6d9da995bbf0",
+              "label": "Jun 2027"
+            },
+            {
+              "id": "0c8eeb0a-64de-447b-a832-d066af2d4b80",
+              "label": "Jul 2027"
+            },
+            {
+              "id": "d211c6a1-c797-4eb7-8b27-4daf0dafc179",
+              "label": "Aug 2027"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 19,
+      "name": "get_customer_profitability",
+      "input": {
+        "period": "Apr 2026"
+      },
+      "result": {
+        "seq": 19,
+        "name": "get_customer_profitability",
+        "ok": true,
+        "data": {
+          "rows": [
+            {
+              "subject": {
+                "type": "counterparty",
+                "id": "1ce5effa-0a55-4d15-a6e0-6de19c49322e",
+                "name": "<data name=\"name\">Acme Trading Ltd</data>"
+              },
+              "period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "revenue": {
+                "value": "12000",
+                "display": "£12,000",
+                "unit": "money"
+              },
+              "share": {
+                "value": "0.666667",
+                "display": "66.7%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "9fc91394-0df8-42a5-97d4-2d2d22029a82",
+              "share_snapshot_id": "152c0817-fc61-4a5f-bd65-340d3a1a147d"
+            },
+            {
+              "subject": {
+                "type": "counterparty",
+                "id": "a790cd15-3e10-4737-a1b6-1cd589a9286c",
+                "name": "<data name=\"name\">Beta Retail</data>"
+              },
+              "period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "revenue": {
+                "value": "6000",
+                "display": "£6,000",
+                "unit": "money"
+              },
+              "share": {
+                "value": "0.333333",
+                "display": "33.3%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "074cbeee-7da8-4c26-a3f6-0b8e1bcd0522",
+              "share_snapshot_id": "cd55cc08-e4d9-4960-8ee1-c951cdc0fa6a"
+            },
+            {
+              "subject": {
+                "type": "counterparty",
+                "id": "unattributed",
+                "name": "<data name=\"name\">Unattributed</data>"
+              },
+              "period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "revenue": {
+                "value": "0",
+                "display": "£0",
+                "unit": "money"
+              },
+              "share": {
+                "value": "0",
+                "display": "0.0%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "ef558a82-3e23-40e4-820d-2d48f4ff04a1",
+              "share_snapshot_id": "40e660ad-1adb-4a70-909f-3d2e3055e327"
+            }
+          ],
+          "concentration": {
+            "top1": {
+              "value": {
+                "value": "0.666667",
+                "display": "66.7%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "5b86e1c3-427d-44dd-b01d-f67ee4412cd6"
+            },
+            "top5": {
+              "value": {
+                "value": "1",
+                "display": "100.0%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "6e3908d1-7139-4177-8f0f-d7c06d795157"
+            },
+            "hhi": {
+              "value": {
+                "value": "0.555556",
+                "display": "55.6%",
+                "unit": "ratio"
+              },
+              "snapshot_id": "11e7b1c8-d6a4-44f3-a2c0-ad82bd959526"
+            }
+          },
+          "note": "Contribution is revenue contribution in MOTION today; cost allocation per customer is not available yet."
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 20,
+      "name": "get_business_summary",
+      "input": {
+        "period": "Apr 2026"
+      },
+      "result": {
+        "seq": 20,
+        "name": "get_business_summary",
+        "ok": true,
+        "data": {
+          "period": {
+            "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+            "label": "Apr 2026"
+          },
+          "health": {
+            "score": {
+              "value": "49",
+              "display": "49",
+              "unit": "count"
+            },
+            "dimensions_used": {
+              "value": "5",
+              "display": "5",
+              "unit": "count"
+            },
+            "dimensions_total": {
+              "value": "6",
+              "display": "6",
+              "unit": "count"
+            }
+          },
+          "metrics": [
+            {
+              "metric_key": "revenue",
+              "period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "value": {
+                "value": "18000",
+                "display": "£18,000",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "b7f86fe6-2423-40a2-bade-bb27e1f05778"
+            },
+            {
+              "metric_key": "gross_profit",
+              "period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "value": {
+                "value": "12600",
+                "display": "£12,600",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "c95507dc-1d5d-44ab-ac04-f164fe23ea75"
+            },
+            {
+              "metric_key": "operating_profit",
+              "period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "value": {
+                "value": "6400",
+                "display": "£6,400",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "aaa23f77-7c08-4ac0-819c-6391507bbf9a"
+            },
+            {
+              "metric_key": "net_profit",
+              "period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "value": {
+                "value": "6400",
+                "display": "£6,400",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "83fa27c1-66a6-4058-8c54-20a598afd60e"
+            },
+            {
+              "metric_key": "closing_cash",
+              "period": {
+                "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+                "label": "Apr 2026"
+              },
+              "value": {
+                "value": "0",
+                "display": "£0",
+                "unit": "money"
+              },
+              "basis": "ledger",
+              "assurance_level": "calculated",
+              "data_quality": {
+                "completeness": {
+                  "value": "1",
+                  "display": "1.00",
+                  "unit": "count"
+                },
+                "warnings": [],
+                "missing": []
+              },
+              "snapshot_id": "f9cb9896-4b77-404c-9dba-f0dc7b1747f6"
+            }
+          ],
+          "top_alerts": [],
+          "open_actions": {
+            "value": "0",
+            "display": "0",
+            "unit": "count"
+          },
+          "data_quality": {
+            "completeness": {
+              "value": "1",
+              "display": "1.00",
+              "unit": "count"
+            },
+            "warnings": []
+          }
+        },
+        "meta": {
+          "periods": [
+            {
+              "id": "ab5947b5-e47c-4298-bbc9-d93d87f72f4b",
+              "label": "Apr 2026"
+            }
+          ],
+          "calculation_run_id": null
+        }
+      }
+    },
+    {
+      "seq": 21,
+      "name": "get_actions",
+      "input": {},
+      "result": {
+        "seq": 21,
+        "name": "get_actions",
+        "ok": true,
+        "data": {
+          "actions": [],
+          "total": {
+            "value": "0",
+            "display": "0",
+            "unit": "count"
+          }
+        },
+        "meta": {
+          "periods": [],
+          "calculation_run_id": null
+        }
+      }
+    }
+  ]
+}

@@ -26,3 +26,6 @@ export {
 
 /** The purge is exported by name so a test can drive it with a claimed job, as the worker does. */
 export { runOrgPurgeJob } from './handlers';
+
+/** The ai.eval handler's one seam, for its own test: the model transport (ADR-081). */
+export { evalDeps } from './handlers';

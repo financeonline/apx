@@ -181,3 +181,9 @@ export { answer, FALLBACK_MESSAGE, type AnswerInput, type AnswerOutput } from '.
 
 export { aiQuotaStatus, quotaExhausted, type QuotaStatus } from './services/quota';
 export { submitFeedback, FEEDBACK_TYPES, MAX_FEEDBACK_COMMENT, type FeedbackType } from './services/feedback';
+
+export { judge, validate, type Candidate, type Verdict } from './domain/verdict';
+export {
+  runRecordedCase, runLiveSuite, LIVE_QUESTIONS, summarise, shortfalls, THRESHOLDS, MIN_CASES, type LiveQuestion, type LiveRunInput,
+  type CaseResult, type EvalCase, type EvalExpectation, type EvalMetrics, type EvalReport, type EvalSet, type RecordedToolCall,
+} from './eval';

@@ -6,6 +6,7 @@ export {
   enqueueNightlySweep,
   persistAssistantTurn,
   persistUserTurn,
+  createConversationAs,
   pruneRateLimits,
   purgeOrganization,
   recordAccessEvent,

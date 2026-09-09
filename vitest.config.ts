@@ -90,6 +90,14 @@ export default defineConfig({
       {
         resolve: { alias },
         test: {
+          name: 'eval',
+          include: ['test/eval/**/*.test.ts'],
+          environment: 'node',
+        },
+      },
+      {
+        resolve: { alias },
+        test: {
           name: 'integration',
           include: ['test/integration/**/*.test.ts'],
           environment: 'node',

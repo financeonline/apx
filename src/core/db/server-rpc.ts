@@ -416,6 +416,19 @@ export interface PersistedBundleItem {
   readonly assurance_level: string;
 }
 
+
+/**
+ * A conversation opened on a member's behalf by the server — the live evaluation job acting as its
+ * requester (AI_ARCHITECTURE.md §12; ADR-081). Bound to `(org, actor)` like every turn after it.
+ */
+export async function createConversationAs(actor: ServerRpcActor, organizationId: string): Promise<string> {
+  const { data, error } = await serverClient().schema('api_server').rpc('ai_create_conversation', {
+    p_actor: actor.userId, p_org: organizationId,
+  });
+  if (error) throw toMotionError(error, actor.requestId);
+  return data as string;
+}
+
 /**
  * Persists the USER half of a turn (AI_ARCHITECTURE.md §2 step 4; ADR-076). Charges the quota and
  * the 10/min throttle before any model call; throws `QuotaExceeded` when spent.

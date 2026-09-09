@@ -133,12 +133,22 @@ describe('degrade removes, never caveats (§7.8)', () => {
     expect(degraded.removed.some((m) => m.statement.includes('£9,999'))).toBe(true);
   });
 
-  it('its topic is server-generated and digit-free, from the metric label — never the sentence', () => {
+  it('its topic is server-generated and digit-free — never the sentence, never the model’s own key', () => {
     const topics = degraded.answer.unsupported.map((u) => u.topic);
     expect(topics.length).toBeGreaterThan(0);
     for (const t of topics) expect(t).not.toMatch(/\d/);
-    expect(topics.some((t) => /marketing/i.test(t))).toBe(true);
+    // "marketing" was the MODEL's metric_key on a path no tool returned: model text, so not echoed.
+    expect(topics.some((t) => /marketing/i.test(t))).toBe(false);
+    expect(topics.some((t) => /a figure for March/i.test(t))).toBe(true);
     expect(degraded.answer.unsupported.every((u) => u.reason === 'unverified')).toBe(true);
+  });
+
+  it('never echoes a period the turn does not know — an injected label stays out of "Not covered"', () => {
+    const s: SubmitAnswer['direct_answer'] = {
+      statement: 'x', kind: 'estimate', period: 'Jul-Sep', evidence_refs: [], entity_refs: [],
+      numbers: [{ text: '£120,000', tool_call_seq: 1, path: 'value', metric_key: 'revenue', entity_id: null }],
+    };
+    expect(topicFor(s, context)).toBe('Sales');
   });
 
   it('a recommendation resting only on removed evidence goes with it', () => {

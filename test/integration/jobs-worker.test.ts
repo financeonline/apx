@@ -136,11 +136,12 @@ describe('the worker drains the queue', () => {
      * A job type whose handler arrives in a later phase must not disappear: a quietly-succeeded
      * calculation would leave the dashboard stale with nothing to show for it.
      *
-     * `ai.eval` because it is genuinely unbuilt (Phase 11's harness). This case used to name
-     * `report.render`, which stopped being an example the day Phase 13 registered it — a test whose
-     * premise a later phase can delete without failing is a test that quietly stops checking.
+     * `snapshots.compact` because it is genuinely unbuilt. This case used to name `report.render`
+     * (registered in Phase 13) and then `ai.eval` (registered in Phase 11 Slice 5, ADR-081) — a
+     * test whose premise a later phase can delete without failing is a test that quietly stops
+     * checking, which is why the assertion below also pins that the type has NO handler today.
      */
-    const jobId = enqueue(orgId, 'ai.eval');
+    const jobId = enqueue(orgId, 'snapshots.compact');
 
     await drainJobs(5);
 
