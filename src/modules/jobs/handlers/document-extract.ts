@@ -194,6 +194,8 @@ export async function runDocumentExtractJob(job: ClaimedJob, scope: { db: unknow
     db, organizationId: orgId, actor, batchId, importType, table, columnMap,
     // The model returns money out as negative (§5.4 schema); the sign question never arises.
     transforms: { bankSign: 'negative_out' },
+    // §5.4: no deterministic capture exists for an AI-read document; without a typed pair, no commit.
+    balancesRequired: true,
     periodStart: b.period_start, periodEnd: b.period_end, bankAccountId: b.bank_account_id,
     annotateRow: (row) => {
       const page = row.sourcePage ?? 0;

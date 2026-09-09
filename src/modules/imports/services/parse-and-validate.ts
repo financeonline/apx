@@ -31,6 +31,7 @@ export interface ParseAndValidateInput {
   readonly bankAccountId?: string | null;
   /** Issues added to every tabular row by the caller — the extraction job's `IMP-PDF-001` (§5.4). */
   readonly annotateRow?: PipelineInput['annotateRow'];
+  readonly balancesRequired?: boolean;
 }
 
 export interface ParseAndValidateDeps {
@@ -166,6 +167,7 @@ export async function parseAndValidate(
       declaredPeriodStart: input.declaredPeriodStart,
       declaredPeriodEnd: input.declaredPeriodEnd,
       ...(input.annotateRow === undefined ? {} : { annotateRow: input.annotateRow }),
+      ...(input.balancesRequired === undefined ? {} : { balancesRequired: input.balancesRequired }),
       accounts,
       counterparties,
       existingRecords,

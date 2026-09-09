@@ -1,6 +1,8 @@
 import { readFileSync } from 'node:fs';
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
-import { loadBatchReview, startImport } from '@/modules/imports';
+import { loadBatchReview, setStatementBalancesAndRevalidate, startImport } from '@/modules/imports';
+import { permissionsFor } from '@/core/permissions';
+import type { AccessContext } from '@/modules/tenancy';
 import { adminSql, clientFor, createAuthUser } from './setup';
 
 /**
@@ -315,5 +317,28 @@ describe('a PDF statement goes in through the same wizard', () => {
         from public.import_batches b where b.id = '${result.batchId}'`);
     expect(batch).toMatch(/^failed\|pdf_text\|MOTION could not find a transaction table/);
     expect(one(`select status::text from public.source_documents where id = '${result.documentId}'`)).toBe('ready');
+  });
+
+  it('lets a reviewer type the printed balances and judges the statement again (§5.3, ADR-085)', async () => {
+    const result = await startImport({
+      organizationId: orgId, userId: ownerId, requestId: `itest-${RUN}`, db: userDb(),
+      file: pdf('bank_text_multiline.pdf'), importType: 'bank_statement',
+      periodStart: '2026-03-01', periodEnd: '2026-03-31', bankAccountId,
+    });
+    const ctx: AccessContext = {
+      userId: ownerId, orgId, orgSlug: null, effectiveRole: 'owner', permissions: permissionsFor('owner'), actorType: 'user',
+      db: userDb(), requestId: `itest-${RUN}`, now: () => new Date(), organizationStatus: 'active',
+    };
+    const before = (await loadBatchReview(userDb(), orgId, result.batchId))!;
+    const captured = before.typedBalances;
+    // Whatever the parser captured, the reviewer's figures replace them and the gate runs again.
+    const wrong = await setStatementBalancesAndRevalidate(ctx, { batchId: result.batchId, opening: '1.00', closing: '2.00' });
+    expect(wrong.reconciled).toBe(false);
+    expect((await loadBatchReview(userDb(), orgId, result.batchId))!.batchIssues.map((i) => i.code)).toContain('IMP-BAL-006');
+    if (captured.opening && captured.closing) {
+      const right = await setStatementBalancesAndRevalidate(ctx, { batchId: result.batchId, opening: captured.opening, closing: captured.closing });
+      expect(right.reconciled).toBe(true);
+      expect((await loadBatchReview(userDb(), orgId, result.batchId))!.batchIssues.map((i) => i.code)).not.toContain('IMP-BAL-006');
+    }
   });
 });

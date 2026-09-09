@@ -4,6 +4,8 @@ import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getAccessContext } from '@/modules/tenancy';
 import { callApi, enqueueServerJob } from '@/core/db';
+import { parseMoney } from '@/core/money';
+import { setStatementBalancesAndRevalidate } from '@/modules/imports';
 import { assertCan } from '@/core/permissions';
 import {
   commitImportBatch, decideImportRows, recordBatchConfirmation, rejectImportBatch,
@@ -258,16 +260,19 @@ export async function confirmPdfPageAction(_previous: ActionResult | null, form:
     const page = Number.parseInt(text(form, 'page'), 10);
     if (!Number.isInteger(page) || page < 1) throw new Error('Which page?');
 
-    const { data: batch, error } = await ctx.db.from('import_batches').select('extraction_stats')
+    const { data: batch, error } = await ctx.db.from('import_batches').select('extraction_stats, statement_opening_balance, statement_closing_balance')
       .eq('organization_id', ctx.orgId).eq('id', batchId).maybeSingle();
     if (error) throw error;
-    const stats = (batch?.extraction_stats ?? {}) as { confidence?: Record<string, string> };
+    const stats = (batch?.extraction_stats ?? {}) as { confidence?: Record<string, string>; balances_read?: { opening?: string; closing?: string } };
+    const typed = batch as { statement_opening_balance: number | string | null; statement_closing_balance: number | string | null } | null;
+    const same = (a?: string, b?: number | string | null) => a !== undefined && b !== null && b !== undefined && parseMoney(a).equals(parseMoney(String(b)));
+    const copiedFromModel = same(stats.balances_read?.opening, typed?.statement_opening_balance) && same(stats.balances_read?.closing, typed?.statement_closing_balance);
     const { data: rows, error: rowsError } = await ctx.db.from('import_rows').select('status, issues, reviewer_decision')
       .eq('organization_id', ctx.orgId).eq('batch_id', batchId).eq('source_page', page);
     if (rowsError) throw rowsError;
     const pageRows = (rows ?? []) as Array<{ status: string; issues: Array<{ code: string }>; reviewer_decision: string }>;
     const lineCountAgrees = pageRows.every((r) => !r.issues.some((i) => i.code === 'IMP-PDF-002'));
-    const pageWide = stats.confidence?.[String(page)] === 'high' && lineCountAgrees;
+    const pageWide = stats.confidence?.[String(page)] === 'high' && lineCountAgrees && !copiedFromModel;
     const everyRowDecided = pageRows.every((r) => r.reviewer_decision !== 'none' || r.status === 'skipped');
     if (!pageWide && !everyRowDecided) {
       return fail(new Error(`Page ${page} cannot be confirmed as a whole; confirm each row on it first.`), { requestId, action: 'imports.confirmPage' });
@@ -278,5 +283,36 @@ export async function confirmPdfPageAction(_previous: ActionResult | null, form:
     return done(`Page ${page} confirmed.`);
   } catch (error) {
     return fail(error, { requestId, action: 'imports.confirmPage' });
+  }
+}
+
+/**
+ * The printed balances, typed from the page, and the batch judged again on them (IMPORT_ENGINE.md
+ * §5.3, §5.4; ADR-085). `api.set_statement_balances` records who typed them; the re-validation runs
+ * the same gate the pipeline ran, over the rows that will commit.
+ */
+export async function statementBalancesAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    assertCan(ctx, 'imports.review');
+    const batchId = text(form, 'batch_id');
+    const money = /^-?\d{1,16}(\.\d{1,2})?$/;
+    const opening = text(form, 'opening').replace(/[,£\s]/g, '');
+    const closing = text(form, 'closing').replace(/[,£\s]/g, '');
+    if (!money.test(opening) || !money.test(closing)) {
+      return fail(new Error('Enter both balances as figures, for example 1234.56.'), { requestId, action: 'imports.balances' });
+    }
+    const result = await setStatementBalancesAndRevalidate(ctx, { batchId, opening, closing });
+    revalidatePath(`/app/${orgSlug}/data/imports/${batchId}`);
+    return done(result.reconciled
+      ? 'The statement reconciles to the balances you entered.'
+      : result.comparison === 'matches_ai'
+        ? 'Those are the balances the AI read, so they cannot vouch for its rows. Confirm each row against the page.'
+        : 'Saved. The transactions do not add up to those balances; see the note above.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'imports.balances' });
   }
 }

@@ -8,7 +8,7 @@ import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import {
   CommitControls, ConfirmationPrompt, DuplicateDecisions, SkipUnreadableRows,
 } from './review-controls';
-import { AiReadingRequest, DocumentPageView, PageConfirmation } from './pdf-review';
+import { AiReadingRequest, DocumentPageView, PageConfirmation, StatementBalancesForm } from './pdf-review';
 
 export const dynamic = 'force-dynamic';
 
@@ -87,6 +87,8 @@ export default async function ReviewBatchPage({
   const aiReadingOffered = review.batch.status === 'failed' && review.batch.extractionMethod === 'pdf_text'
     && (documentRow as { has_text_layer: boolean | null } | null)?.has_text_layer === true
     && ((orgRow as { features: Record<string, unknown> } | null)?.features?.ai_pdf_extraction === true);
+  const balancesNeeded = review.batch.status === 'awaiting_review' && review.batch.targetTable === 'bank_transactions'
+    && (review.batch.extractionMethod === 'pdf_claude' || review.batchIssues.some((i) => i.code === 'IMP-BAL-006' || i.code === 'IMP-BAL-007'));
   const aiPages = review.batch.extractionMethod === 'pdf_claude'
     ? [...new Set(review.rows.filter((r) => r.sourcePage !== null).map((r) => r.sourcePage!))].sort((a, b) => a - b)
     : [];
@@ -137,6 +139,21 @@ export default async function ReviewBatchPage({
             {review.batch.extractionStats.pages_extracted?.length ?? 0} of {review.batch.extractionStats.pages_total ?? '?'} pages read so far. Refresh to see progress.
           </Banner>
         ) : null}
+        {balancesNeeded ? (
+          <Card>
+            <CardBody className="p-4">
+              <h2 className="font-serif text-lg text-ink">The balances printed on the statement</h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                MOTION checks that the transactions add up to the difference between them. Type them from the page,
+                not from anywhere else.
+              </p>
+              <div className="mt-3">
+                <StatementBalancesForm orgSlug={orgSlug} batchId={batchId}
+                  opening={review.typedBalances.opening} closing={review.typedBalances.closing} comparison={review.balanceComparison} />
+              </div>
+            </CardBody>
+          </Card>
+        ) : null}
         {aiPages.length > 0 ? (
           <Card>
             <CardBody className="p-4">
@@ -149,7 +166,8 @@ export default async function ReviewBatchPage({
                 {aiPages.map((page) => {
                   const pageRows = review.rows.filter((r) => r.sourcePage === page && r.status !== 'skipped');
                   const lineCountAgrees = pageRows.every((r) => !r.issues.some((i) => i.code === 'IMP-PDF-002'));
-                  const pageWide = review.batch.extractionStats.confidence?.[String(page)] === 'high' && lineCountAgrees;
+                  // §5.4: balances copied from the model withhold the page-wide tick, whatever the confidence.
+                  const pageWide = review.batch.extractionStats.confidence?.[String(page)] === 'high' && lineCountAgrees && review.balanceComparison !== 'matches_ai';
                   return (
                     <section key={page} className="grid gap-4 lg:grid-cols-2" aria-label={`Page ${page}`}>
                       <DocumentPageView orgSlug={orgSlug} documentId={review.batch.sourceDocumentId} page={page} filename={review.filename ?? 'statement.pdf'} />

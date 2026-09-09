@@ -380,6 +380,11 @@ export interface BatchCheckInput {
   readonly balanceChain?: readonly (string | null)[];
   /** Liability accounts reconcile as −Σ amount = closing − opening (ADR-028). */
   readonly liabilityAccount?: boolean;
+  /**
+   * §5.4: an AI-read statement cannot commit without balances at all — with neither a deterministic
+   * capture nor a typed pair the gate is an ERROR that names what to do, not a warning.
+   */
+  readonly balancesRequired?: boolean;
   readonly journals?: ReadonlyArray<{ ref: string; debit: string; credit: string }>;
   readonly totalsBlocks?: ReadonlyArray<{ label: string; total: string; blockSum: string }>;
   readonly distinctMonths?: number;
@@ -405,13 +410,21 @@ export function checkBatch(input: BatchCheckInput): BatchIssue[] {
     const closing = parseDecimalOrNull(input.closingBalance ?? '');
 
     if (opening === null || closing === null) {
-      // Not an error: an unreconciled statement still imports, but the warning follows the figures
-      // all the way to the dashboard's data_quality (§5.3).
-      issues.push({
-        code: 'IMP-BAL-007', severity: 'warning',
-        message: 'The statement opening and closing balances could not be read, so this import cannot be reconciled.',
-        detail: { suggestion: 'Type the printed balances into the batch header to reconcile it.' },
-      });
+      if (input.balancesRequired) {
+        issues.push({
+          code: 'IMP-BAL-006', severity: 'error',
+          message: 'Enter the opening and closing balances printed on the statement.',
+          detail: { suggestion: 'Rows read by AI cannot be imported until the statement balances have been entered from the page.' },
+        });
+      } else {
+        // Not an error: an unreconciled statement still imports, but the warning follows the figures
+        // all the way to the dashboard's data_quality (§5.3).
+        issues.push({
+          code: 'IMP-BAL-007', severity: 'warning',
+          message: 'The statement opening and closing balances could not be read, so this import cannot be reconciled.',
+          detail: { suggestion: 'Type the printed balances into the batch header to reconcile it.' },
+        });
+      }
     } else {
       const total = sum(input.amounts);
       const movement = input.liabilityAccount ? total.negated() : total;

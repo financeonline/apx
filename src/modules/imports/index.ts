@@ -123,3 +123,4 @@ export {
   type ImportHistoryRow,
 } from './services/review';
 export { validateBatch, proposeColumnMap, type ValidateBatchInput } from './services/wizard';
+export { setStatementBalancesAndRevalidate, type BalanceComparison, type RevalidationResult } from './services/statement-balances';

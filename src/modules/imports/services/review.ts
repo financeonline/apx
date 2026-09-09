@@ -1,5 +1,6 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { parseMoney, toMoneyString } from '@/core/money';
 import { toMotionError } from '@/core/errors';
 import { countRowsByStatus, listBatchRows, listBatches } from '../data/repository';
 import type { ImportBatch, ImportRow } from '../domain/types';
@@ -54,6 +55,9 @@ export interface BatchReview {
   readonly blockingReason: string | null;
   /** §5.4: pages read by AI that carry rows and have not been confirmed, in page order. */
   readonly unconfirmedPages: readonly number[];
+  /** The typed balances against what the AI read (§5.4): shown only after both were typed. */
+  readonly balanceComparison: 'matches_ai' | 'differs_from_ai' | null;
+  readonly typedBalances: { readonly opening: string | null; readonly closing: string | null };
 }
 
 /**
@@ -124,6 +128,14 @@ export async function loadBatchReview(
       .filter((page) => batch.pageConfirmations[String(page)] === undefined)
       .sort((a, b) => a - b)
     : [];
+  const read = batch.extractionStats.balances_read ?? {};
+  const typedBoth = meta.openingBalance !== null && meta.closingBalance !== null;
+  const balanceComparison = batch.extractionMethod !== 'pdf_claude' || !typedBoth || (read.opening === undefined && read.closing === undefined)
+    ? null
+    : (read.opening !== undefined && read.closing !== undefined
+        && parseMoney(read.opening).equals(parseMoney(meta.openingBalance!))
+        && parseMoney(read.closing).equals(parseMoney(meta.closingBalance!)))
+      ? 'matches_ai' as const : 'differs_from_ai' as const;
   const blocking = blockingReasonFor(batch, importableRows, meta, duplicates, undecidedErrors, unconfirmedPages);
 
   return {
@@ -141,6 +153,8 @@ export async function loadBatchReview(
     committable: blocking === null,
     blockingReason: blocking,
     unconfirmedPages,
+    balanceComparison,
+    typedBalances: { opening: meta.openingBalance, closing: meta.closingBalance },
   };
 }
 
@@ -193,6 +207,8 @@ function blockingReasonFor(
 
 interface BatchMeta {
   readonly filename: string | null;
+  readonly openingBalance: string | null;
+  readonly closingBalance: string | null;
   readonly batchIssues: ReadonlyArray<{ code: string; message: string; severity: string }>;
   readonly requiredConfirmations: readonly string[];
   readonly confirmedCodes: readonly string[];
@@ -203,7 +219,7 @@ async function loadBatchMeta(
 ): Promise<BatchMeta> {
   const { data, error } = await db
     .from('import_batches')
-    .select(`batch_issues, required_confirmations, confirmations, source_document_id`)
+    .select(`batch_issues, required_confirmations, confirmations, source_document_id, statement_opening_balance, statement_closing_balance`)
     .eq('organization_id', orgId)
     .eq('id', batchId)
     .maybeSingle();
@@ -215,6 +231,8 @@ async function loadBatchMeta(
     required_confirmations?: unknown;
     confirmations?: unknown;
     source_document_id?: string | null;
+    statement_opening_balance?: number | string | null;
+    statement_closing_balance?: number | string | null;
   } | null;
 
   /*
@@ -240,6 +258,8 @@ async function loadBatchMeta(
     confirmedCodes: confirmations !== null && typeof confirmations === 'object'
       ? Object.keys(confirmations as Record<string, unknown>)
       : [],
+    openingBalance: row?.statement_opening_balance == null ? null : toMoneyString(parseMoney(String(row.statement_opening_balance))),
+    closingBalance: row?.statement_closing_balance == null ? null : toMoneyString(parseMoney(String(row.statement_closing_balance))),
   };
 }
 

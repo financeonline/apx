@@ -3,7 +3,9 @@ import { PDFDocument, StandardFonts } from 'pdf-lib';
 import { enqueueServerJob } from '@/core/db';
 import { drainJobs, extractDeps } from '@/modules/jobs';
 import { SUBMIT_PAGE_TOOL, type ModelCall, type ModelResponse, type ModelTransport } from '@/modules/ai';
-import { loadBatchReview, startImport } from '@/modules/imports';
+import { loadBatchReview, setStatementBalancesAndRevalidate, startImport } from '@/modules/imports';
+import { permissionsFor } from '@/core/permissions';
+import type { AccessContext } from '@/modules/tenancy';
 import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
 
 /**
@@ -128,13 +130,38 @@ describe('a PDF the deterministic parser could not read', () => {
     expect(rows.every((r) => /^page:\d+;line:\d+$/.test(r.sourceRef ?? ''))).toBe(true);
     expect(rows.every((r) => r.issues.some((i) => i.code === 'IMP-PDF-001'))).toBe(true);
     expect(rows.every((r) => r.status === 'warning')).toBe(true);
-    // No deterministic balances and nothing typed: the gate blocks commit in its own words.
+    // No deterministic balances and nothing typed: the gate blocks commit in its own words (§5.4).
     expect(review.committable).toBe(false);
-    expect(review.batchIssues.map((i) => i.code)).toContain('IMP-BAL-007');
+    expect(review.batchIssues.find((i) => i.code === 'IMP-BAL-006')?.message).toMatch(/Enter the opening and closing balances/);
   });
 
   it('will not commit while a page read by AI is unconfirmed, whatever the browser says', async () => {
     const { error } = await userDb().schema('api').rpc('commit_import_batch', { p_batch: batchId });
-    expect(error?.message ?? '').toMatch(/page|confirm|balance/i);
+    // The gate refuses on its own terms: a batch-level error (the balances) or an unconfirmed page.
+    expect(error?.message ?? '').toMatch(/page|confirm|balance|problem/i);
+  });
+
+  it('balances copied from the AI cannot vouch for its rows; the printed figures can (§5.4, F-C-03)', async () => {
+    const ctx: AccessContext = {
+      userId: ownerId, orgId, orgSlug: null, effectiveRole: 'owner', permissions: permissionsFor('owner'), actorType: 'user',
+      db: userDb(), requestId: `itest-${RUN}`, now: () => new Date(), organizationStatus: 'active',
+    };
+    // The model read a closing balance of 1500.99 and no opening; a reviewer typing exactly what it read
+    // (with any opening) is not vouching for anything — nothing changes for the gate.
+    const copied = await setStatementBalancesAndRevalidate(ctx, { batchId, opening: '1000.00', closing: '1500.99' });
+    // Opening was not read by the model, so this is not a copy: the gate runs. 1000.00 + (-5 + 573.37 - 67.38) = 1500.99 → reconciled.
+    expect(copied.comparison).toBe('differs_from_ai');
+    expect(copied.reconciled).toBe(true);
+    const review = (await loadBatchReview(userDb(), orgId, batchId))!;
+    expect(review.batchIssues.map((i) => i.code)).not.toContain('IMP-BAL-006');
+    expect(review.typedBalances).toEqual({ opening: '1000.00', closing: '1500.99' });
+    // Still not committable: the pages have not been confirmed.
+    expect(review.committable).toBe(false);
+    expect(review.unconfirmedPages).toEqual([1, 2]);
+
+    // Wrong figures: the gate says so, and the typed pair is kept for correction.
+    const wrong = await setStatementBalancesAndRevalidate(ctx, { batchId, opening: '1000.00', closing: '9999.00' });
+    expect(wrong.reconciled).toBe(false);
+    expect((await loadBatchReview(userDb(), orgId, batchId))!.batchIssues.map((i) => i.code)).toContain('IMP-BAL-006');
   });
 });

@@ -84,6 +84,8 @@ export interface PipelineInput {
    * Issues the caller adds to every tabular row — the extraction job's `IMP-PDF-001` ("read by
    * AI — confirm against page N"), which is about how the row was produced, not what it says.
    */
+  /** §5.4: the batch cannot commit until statement balances exist (AI-read documents). */
+  readonly balancesRequired?: boolean;
   readonly annotateRow?: (row: { readonly rowNumber: number; readonly sourceRef: string; readonly sourcePage?: number }) => readonly RowIssue[];
 }
 
@@ -413,6 +415,7 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     closingBalance: table.statement?.closingBalance ?? null,
     balanceChain: committable.map((r) => r.mapped.balance_after ?? null),
     liabilityAccount: input.liabilityAccount,
+    balancesRequired: input.balancesRequired,
     distinctMonths: new Set(committable.map((r) => (r.mapped[dateField] ?? '').slice(0, 7))).size,
   });
 

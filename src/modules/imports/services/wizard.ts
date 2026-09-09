@@ -330,6 +330,7 @@ export interface ValidateBatchInput {
   readonly bankAccountId: string | null;
   readonly transforms?: Transforms;
   readonly annotateRow?: PipelineInput['annotateRow'];
+  readonly balancesRequired?: boolean;
 }
 
 /** Validates a parsed table into a batch's rows: the wizard's and the extraction job's shared step. */
@@ -375,6 +376,7 @@ export async function validateBatch(input: ValidateBatchInput): Promise<{
       declaredPeriodEnd: input.periodEnd,
       bankAccountId: input.bankAccountId,
       ...(input.annotateRow === undefined ? {} : { annotateRow: input.annotateRow }),
+      ...(input.balancesRequired === undefined ? {} : { balancesRequired: input.balancesRequired }),
     },
   );
 }

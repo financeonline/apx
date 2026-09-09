@@ -2,7 +2,7 @@
 
 import { useActionState, useEffect, useState } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
-import { confirmPdfPageAction, requestAiReadingAction } from '../actions';
+import { confirmPdfPageAction, requestAiReadingAction, statementBalancesAction } from '../actions';
 
 /**
  * The PDF side of the review screen (IMPORT_ENGINE.md §5.4; ADR-084).
@@ -77,6 +77,38 @@ export function PageConfirmation({ orgSlug, batchId, page, pageWide, confirmed }
       </span>
       <SubmitButton tone="secondary" pendingLabel="Saving…">I have compared all rows on page {page}</SubmitButton>
       <ActionMessage state={state} />
+    </form>
+  );
+}
+
+/** The printed opening and closing balances, typed from the page (§5.3, §5.4). */
+export function StatementBalancesForm({ orgSlug, batchId, opening, closing, comparison }: {
+  orgSlug: string; batchId: string; opening: string | null; closing: string | null; comparison: 'matches_ai' | 'differs_from_ai' | null;
+}) {
+  const [state, submit] = useActionState(statementBalancesAction, null);
+  return (
+    <form action={submit} className="flex flex-col gap-3 text-sm">
+      <input type="hidden" name="org_slug" value={orgSlug} />
+      <input type="hidden" name="batch_id" value={batchId} />
+      <div className="flex flex-wrap gap-4">
+        <label className="flex flex-col gap-1">
+          <span className="text-ink-muted">Opening balance printed on the statement</span>
+          <input name="opening" inputMode="decimal" required defaultValue={opening ?? ''} className="rounded-md border border-line bg-surface px-3 py-2 text-ink tabular" placeholder="1000.00" />
+        </label>
+        <label className="flex flex-col gap-1">
+          <span className="text-ink-muted">Closing balance printed on the statement</span>
+          <input name="closing" inputMode="decimal" required defaultValue={closing ?? ''} className="rounded-md border border-line bg-surface px-3 py-2 text-ink tabular" placeholder="7320.14" />
+        </label>
+      </div>
+      {comparison === 'matches_ai' ? (
+        <p className="text-ink-muted">These match the AI&rsquo;s reading of the page, so they cannot vouch for the rows it read.</p>
+      ) : comparison === 'differs_from_ai' ? (
+        <p className="text-ink-muted">These differ from the AI&rsquo;s reading of the page.</p>
+      ) : null}
+      <div className="flex items-center gap-3">
+        <SubmitButton tone="secondary" pendingLabel="Checking…">Save balances and check</SubmitButton>
+        <ActionMessage state={state} />
+      </div>
     </form>
   );
 }
