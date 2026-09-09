@@ -99,11 +99,18 @@ const writable = sql(`
 
 // Owner and a pinned search_path are required of EVERY function in these schemas: an unpinned
 // search_path resolves unqualified names against the caller's path (ADR-044.3).
+//
+// One named exception to the OWNER half, mirrored from 00_structure.test.sql (ADR-075):
+// `api_server.revoke_user_sessions` deletes from `auth.sessions` / `auth.refresh_tokens`, and
+// Supabase's `postgres` role holds grant option on SELECT only for the auth tables, so
+// motion_definer can never be granted DELETE there. postgres owns that one function. Its
+// search_path is still required to be pinned — the exception is the owner, not the hygiene.
 const unpinned = sql(`
   select n.nspname || '.' || p.proname
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname in ('app', 'api', 'api_server')
-     and (pg_get_userbyid(p.proowner) <> 'motion_definer'
+     and ((pg_get_userbyid(p.proowner) <> 'motion_definer'
+           and not (n.nspname = 'api_server' and p.proname = 'revoke_user_sessions'))
           or not coalesce(p.proconfig::text like '%search_path=%', false))`);
 
 // SECURITY DEFINER is required of every function that TOUCHES A TABLE. ADR-044.3 says "every

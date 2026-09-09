@@ -388,6 +388,87 @@ async function serverRpc<T>(fn: string, args: Record<string, unknown>): Promise<
   return data as T;
 }
 
+/** One tool call as `api_server.ai_persist_turn` records it (AI_ARCHITECTURE.md §4). */
+export interface PersistedToolCall {
+  readonly sequence: number;
+  readonly tool_name: string;
+  readonly input: Record<string, unknown>;
+  readonly authorized: boolean;
+  readonly denial_reason: string | null;
+  readonly output_hash: string | null;
+  readonly output_summary: Record<string, unknown> | null;
+  readonly duration_ms: number | null;
+  readonly error: string | null;
+  /** Every evidence id this call returned — the only ids the bundle may cite (§14.2). */
+  readonly returned_ids: readonly string[];
+  /** Every descriptor hash (hex) this call returned. */
+  readonly returned_hashes: readonly string[];
+}
+
+export interface PersistedBundleItem {
+  readonly item_type: string;
+  readonly ref_id: string | null;
+  readonly ref_revision_no: number | null;
+  readonly query_descriptor: unknown | null;
+  readonly descriptor_hash: string | null;
+  readonly label: string;
+  readonly claim: string | null;
+  readonly assurance_level: string;
+}
+
+/**
+ * Persists the USER half of a turn (AI_ARCHITECTURE.md §2 step 4; ADR-076). Charges the quota and
+ * the 10/min throttle before any model call; throws `QuotaExceeded` when spent.
+ */
+export async function persistUserTurn(
+  actor: ServerRpcActor,
+  input: { organizationId: string; conversationId: string; message: string },
+): Promise<{ messageId: string; quota: Record<string, number | null> }> {
+  const { data, error } = await serverClient().schema('api_server').rpc('ai_persist_turn', {
+    p_actor: actor.userId, p_org: input.organizationId, p_conversation: input.conversationId,
+    p_user_message: input.message,
+  });
+  if (error) throw toMotionError(error, actor.requestId);
+  const row = data as { message_id: string; quota: Record<string, number | null> };
+  return { messageId: row.message_id, quota: row.quota };
+}
+
+/**
+ * Persists the ASSISTANT half of a turn (§2 step 11): the message, every tool call and the
+ * `ai_response` bundle, in one transaction. `grounding_status`, the tool-call log and the token
+ * counts are facts the server observed, and this is the only path that writes them (R2-A-01).
+ */
+export async function persistAssistantTurn(
+  actor: ServerRpcActor,
+  input: {
+    organizationId: string;
+    conversationId: string;
+    assistant: {
+      structured_response: unknown | null;
+      grounding_status: 'passed' | 'degraded' | 'failed' | 'not_applicable';
+      grounding_report: unknown | null;
+      period_context: unknown | null;
+      prompt_version: string;
+      model: string | null;
+      input_tokens: number;
+      output_tokens: number;
+      latency_ms: number;
+      title: string | null;
+      context_changed?: boolean;
+    };
+    toolCalls: readonly PersistedToolCall[];
+    bundle: { calculation_run_id: string | null; items: readonly PersistedBundleItem[] } | null;
+  },
+): Promise<{ messageId: string; evidenceBundleId: string | null }> {
+  const { data, error } = await serverClient().schema('api_server').rpc('ai_persist_turn', {
+    p_actor: actor.userId, p_org: input.organizationId, p_conversation: input.conversationId,
+    p_assistant: input.assistant, p_tool_calls: input.toolCalls, p_bundle: input.bundle,
+  });
+  if (error) throw toMotionError(error, actor.requestId);
+  const row = data as { message_id: string; evidence_bundle_id: string | null };
+  return { messageId: row.message_id, evidenceBundleId: row.evidence_bundle_id ?? null };
+}
+
 /**
  * Ends every session of one user (SECURITY_MODEL.md §4; ADR-075).
  *

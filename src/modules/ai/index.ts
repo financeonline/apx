@@ -6,13 +6,12 @@
  * `metric_snapshots` row or a committed record returned by a tool in the same turn, and the
  * grounding check is what makes that a property of the system rather than a hope about the model.
  *
- * Built so far (Phase 11 slice 0, Spike S3):
- *   * `untrusted()` — the wrapper every imported string passes through before it reaches the model;
- *   * the claim grammar (§7.9) — what counts as a numeric claim needing a `NumberRef`.
+ * Built: `untrusted()` (§9), the claim grammar (§7.9), the response contract (§5), the allowed
+ * set and grounding v3 (§7), period resolution (§8), the Claude client (§1.2, ADR-023), and the
+ * conversation service bound to (org, user) (§2 step 3, ADR-076).
  *
- * Still to come, in the order the plan builds them: the tool registry (§3), the tool loop and
- * period resolution (§2, §8), the response contract and grounding v3 (§5, §7), the chat UI, the
- * eval harness (§12) and the feedback queue (§13).
+ * Still to come, in the order the plan builds them: the tool registry (§3), the tool loop (§2),
+ * the chat UI, the eval harness (§12) and the feedback queue (§13).
  *
  * The Anthropic SDK will be imported in exactly one file, `data/claude-client.ts` (§1.2, ADR-023).
  * No key, prompt or tool definition ever reaches the browser.
@@ -100,3 +99,26 @@ export {
   type PeriodRow,
   type ResolveInput,
 } from './domain/periods';
+
+export {
+  createConversation,
+  findConversation,
+  listConversations,
+  loadHistory,
+  loadMessages,
+  HISTORY_TURNS,
+  type ConversationRef,
+  type HistoryTurn,
+  type StoredMessage,
+} from './services/conversations';
+
+export {
+  callModel,
+  liveTransport,
+  ANALYST_MAX_TOKENS,
+  DEFAULT_ANALYST_MODEL,
+  PROMPT_VERSION,
+  type ModelCall,
+  type ModelResponse,
+  type ModelTransport,
+} from './data/claude-client';

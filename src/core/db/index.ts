@@ -4,6 +4,8 @@ export {
   aggregationInstant,
   buildMetricBundle,
   enqueueNightlySweep,
+  persistAssistantTurn,
+  persistUserTurn,
   pruneRateLimits,
   purgeOrganization,
   recordAccessEvent,
@@ -30,6 +32,8 @@ export {
   failImportBatch,
   type ClaimedJobRow,
   type MetricBundleItem,
+  type PersistedBundleItem,
+  type PersistedToolCall,
   type ServerRpcActor,
 } from './server-rpc';
 export { callApi } from './api-rpc';

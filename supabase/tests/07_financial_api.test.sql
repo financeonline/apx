@@ -11,7 +11,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(82);
+select plan(86);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -640,6 +640,40 @@ select is((select status::text from public.ai_conversations
             where user_id = 'f7000000-0000-0000-0000-000000000005'
               and organization_id = 'f7a00000-0000-0000-0000-00000000000a'),
   'archived', 'revoking the assignment archived the employee''s conversation (SECURITY_MODEL.md §4, ADR-075)');
+
+-- ---------------------------------------------------------------------------
+-- 14. ADR-076: a turn is persisted by the server only, and only into the actor's own conversation.
+-- ---------------------------------------------------------------------------
+insert into public.ai_conversations (id, organization_id, user_id, status)
+values ('f7e00000-0000-0000-0000-0000000000e1', 'f7a00000-0000-0000-0000-00000000000a',
+        'f7000000-0000-0000-0000-000000000001', 'active');
+
+call pg_temp.act_as('f7000000-0000-0000-0000-000000000001');
+select throws_ok(
+  $$ select api_server.ai_persist_turn('f7000000-0000-0000-0000-000000000001',
+       'f7a00000-0000-0000-0000-00000000000a', 'f7e00000-0000-0000-0000-0000000000e1', 'hello') $$,
+  '42501', null, 'api_server.ai_persist_turn is refused to a user (authenticated) — no forged turn (R2-A-01)');
+call pg_temp.act_as_postgres();
+
+call pg_temp.act_as_service();
+-- The client (user 2) may not write into the owner's conversation: NOT_FOUND, not a denial.
+select throws_ok(
+  $$ select api_server.ai_persist_turn('f7000000-0000-0000-0000-000000000002',
+       'f7a00000-0000-0000-0000-00000000000a', 'f7e00000-0000-0000-0000-0000000000e1', 'hello') $$,
+  'P0002', null, 'a conversation belongs to (org, actor); another actor gets NOT_FOUND (F-C-11)');
+select lives_ok(
+  $$ select api_server.ai_persist_turn('f7000000-0000-0000-0000-000000000001',
+       'f7a00000-0000-0000-0000-00000000000a', 'f7e00000-0000-0000-0000-0000000000e1', 'hello') $$,
+  'the server persists the actor''s own user turn');
+-- A "passed" assistant turn whose bundle cites an id no tool returned is refused by the database.
+select throws_ok(
+  $$ select api_server.ai_persist_turn('f7000000-0000-0000-0000-000000000001',
+       'f7a00000-0000-0000-0000-00000000000a', 'f7e00000-0000-0000-0000-0000000000e1', null,
+       '{"grounding_status":"passed","input_tokens":1,"output_tokens":1,"latency_ms":1,"prompt_version":"t","structured_response":{}}'::jsonb,
+       '[]'::jsonb,
+       '{"items":[{"item_type":"metric_snapshot","ref_id":"00000000-0000-4000-8000-000000000001","label":"x","assurance_level":"verified"}]}'::jsonb) $$,
+  '22023', null, 'a bundle may cite only what a tool returned this turn (§14.2)');
+call pg_temp.act_as_postgres();
 
 select * from finish();
 rollback;

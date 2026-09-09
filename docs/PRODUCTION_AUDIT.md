@@ -244,7 +244,7 @@ Everything else in §2 is present and, where I tested it, behaves as specified. 
 
 ## Low
 
-**Status: all six fixed** — ADR-075 (L1 middleware 503; L2 `fix_import_row` dropped until re-validation exists; L3 `api_server.revoke_user_sessions` wired into member removal by an owner and platform-role revocation; L4 signer logs unvisited prefixes; L5 `revoke_assignment` archives the employee's conversations) and ADR-066 (L6 `evidence.bundle_built`).
+**Status: all six fixed** — ADR-075 *(correction: that commit's gate line claimed the schema-drift check green; it was not — the check flagged the deliberate `postgres` ownership of `revoke_user_sessions` from the moment it existed, and stayed red until the exception was allow-listed in `scripts/check-schema-drift.ts` alongside the pgTAP one, in the AI Slice 1 commit. No code was wrong; the report was.)* (L1 middleware 503; L2 `fix_import_row` dropped until re-validation exists; L3 `api_server.revoke_user_sessions` wired into member removal by an owner and platform-role revocation; L4 signer logs unvisited prefixes; L5 `revoke_assignment` archives the employee's conversations) and ADR-066 (L6 `evidence.bundle_built`).
 
 - **L1 · Middleware "fail closed" fails open.** `src/middleware.ts:81`: with `NEXT_PUBLIC_SUPABASE_URL`/anon key unset the request passes through with no family check. Server layouts (`platform/layout.tsx`, `app/[orgSlug]/layout.tsx`) still guard, so this is a wrong comment plus a lost defence layer, not a hole. Return 503.
 - **L2 · `api.fix_import_row` is a dead end.** No UI calls it; nothing re-validates a `pending` row; `assert_batch_committable` refuses `pending` rows. A direct call parks the batch until rejected or replaced. Either build the re-validate step or revoke the function.
