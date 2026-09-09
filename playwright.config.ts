@@ -69,7 +69,7 @@ export default defineConfig({
      */
     {
       name: 'api',
-      testMatch: /api-.*\.spec\.ts/,
+      testMatch: /(?:api|analyst)-.*\.spec\.ts/,
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/owner.json' },
     },

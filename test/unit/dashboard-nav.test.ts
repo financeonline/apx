@@ -47,9 +47,9 @@ describe('what each role sees in the navigation', () => {
    */
   it('links an owner only to sections that exist', () => {
     // Actions and Reports joined the list as their phases landed (plan Phases 12 and 13); Analyst
-    // is still `built: false` and so is still absent for everybody.
+    // joined with its page (Phase 11 Slice 4, ADR-079). Every role holds `ai.use`, so it is for all.
     expect(visibleNavItems(contextFor('owner')))
-      .toEqual(['Home', 'Insights', 'Money', 'Customers', 'Actions', 'Reports']);
+      .toEqual(['Home', 'Insights', 'Money', 'Customers', 'Actions', 'Reports', 'Analyst']);
   });
 
   it('never links a section that is not built', () => {

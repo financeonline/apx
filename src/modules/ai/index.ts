@@ -178,3 +178,6 @@ export {
 } from './domain/prompt';
 
 export { answer, FALLBACK_MESSAGE, type AnswerInput, type AnswerOutput } from './services/answer';
+
+export { aiQuotaStatus, quotaExhausted, type QuotaStatus } from './services/quota';
+export { submitFeedback, FEEDBACK_TYPES, MAX_FEEDBACK_COMMENT, type FeedbackType } from './services/feedback';

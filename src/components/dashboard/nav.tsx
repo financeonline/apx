@@ -66,7 +66,7 @@ const PRIMARY: readonly NavItem[] = [
   {
     label: 'Analyst', path: 'analyst', permission: 'ai.use',
     hint: 'Answers with evidence, drawn only from your validated numbers',
-    built: false,
+    built: true,
   },
 ];
 
