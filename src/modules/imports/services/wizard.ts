@@ -11,9 +11,11 @@ import { isKnownHeader, suggestCategory, suggestColumns } from '../domain/mappin
 import { resolveBankSign, type BankAccountType } from '../domain/transforms/signs';
 import { runPipeline } from '../domain/pipeline';
 import { parseCsv } from '../domain/parsers/csv';
+import { SCANNED_PDF_MESSAGE } from '../domain/parsers/pdf-scanned';
+import { parsePdfText } from '../domain/parsers/pdf-text';
 import { parseXlsx } from '../domain/parsers/xlsx';
 import type { ParsedTable, TargetField, Transforms } from '../domain/pipeline-types';
-import type { ImportTarget, ImportType } from '../domain/types';
+import type { ExtractionMethod, ImportTarget, ImportType } from '../domain/types';
 import { parseAndValidate } from './parse-and-validate';
 import { createImportAccounts, startImportBatch } from './index';
 
@@ -54,6 +56,12 @@ export interface StartImportResult {
   readonly columnMap: Readonly<Record<string, TargetField>>;
   /** True when the header row was proposed rather than recognised, so §5.1 wants confirmation. */
   readonly headerConfirmationRequired: boolean;
+  /**
+   * Set when the file was stored and a batch created, but no table could be read from it — a
+   * text-layer PDF whose layout no grammar matched (§5.3). The batch is `failed` with this reason,
+   * and the review screen is where the §5.4 "Read with AI" path starts from.
+   */
+  readonly parseFailure?: string;
 }
 
 const TARGET_BY_TYPE: Readonly<Record<ImportType, ImportTarget>> = {
@@ -74,22 +82,31 @@ export function targetFor(importType: ImportType): ImportTarget {
 }
 
 /** Reads a spreadsheet or delimited file into the shape the pipeline expects. */
-async function parseTable(file: File, bytes: Uint8Array): Promise<ParsedTable> {
+/** What the wizard read, and how — the batch records the method (ADR-083). */
+type Parsed =
+  | { readonly kind: 'table'; readonly table: ParsedTable; readonly method: ExtractionMethod }
+  /** §5.5: a PDF with no text layer. Stored as a document, never a batch. */
+  | { readonly kind: 'scanned' }
+  /** §5.3: a text-layer PDF whose layout no grammar matched. Stored, batched, and the batch failed. */
+  | { readonly kind: 'pdf_unparsed'; readonly reason: string };
+
+const PDF_UNPARSED_MESSAGE =
+  'MOTION could not find a transaction table in this PDF. The file is stored; '
+  + 'export the same statement as CSV or Excel from your bank and upload that.';
+
+async function parseTable(file: File, bytes: Uint8Array): Promise<Parsed> {
   const name = file.name.toLowerCase();
 
   if (name.endsWith('.xlsx') || name.endsWith('.xlsm')) {
-    return parseXlsx(bytes, { isHeaderCell: isKnownHeader });
+    return { kind: 'table', table: await parseXlsx(bytes, { isHeaderCell: isKnownHeader }), method: 'xlsx' };
   }
 
   if (name.endsWith('.pdf')) {
-    /*
-     * A PDF needs the extraction path — text layer, deterministic table parse, page-by-page review
-     * (§10) — which runs as a `document.extract` job rather than inline. Saying so is better than
-     * accepting the file and leaving a batch that never becomes rows.
-     */
-    throw new ValidationError(
-      'PDF statements are not ready yet. Export the same period as CSV or Excel and upload that.',
-    );
+    // §5.3: the deterministic text-layer parser. It yields a table, or says exactly why not.
+    const parsed = await parsePdfText(bytes);
+    if (parsed.ok) return { kind: 'table', table: parsed.table, method: 'pdf_text' };
+    if (parsed.reason === 'no_text_layer') return { kind: 'scanned' };
+    return { kind: 'pdf_unparsed', reason: PDF_UNPARSED_MESSAGE };
   }
 
   const decoded = decodeCsvBytes(bytes);
@@ -104,18 +121,16 @@ async function parseTable(file: File, bytes: Uint8Array): Promise<ParsedTable> {
   // An unsniffable delimiter falls back to a comma rather than refusing: a single-column file has
   // no delimiter to find, and refusing it would reject a perfectly importable list.
   const sniffed = sniffDelimiter(decoded.text);
-  return parseCsv(decoded.text, {
-    delimiter: sniffed.ok ? sniffed.delimiter : ',',
-    isHeaderCell: isKnownHeader,
-  });
+  return {
+    kind: 'table',
+    method: 'csv',
+    table: parseCsv(decoded.text, {
+      delimiter: sniffed.ok ? sniffed.delimiter : ',',
+      isHeaderCell: isKnownHeader,
+    }),
+  };
 }
 
-/**
- * The proposed map, from the file's own headers.
- *
- * §6.3 wants a saved mapping to win, then a synonym suggestion, then the reviewer. This supplies the
- * middle one and lets the reviewer override it; a saved-mapping lookup is the next thing to add.
- */
 function proposeColumnMap(
   table: ParsedTable, importType: ImportType,
 ): Record<string, TargetField> {
@@ -206,12 +221,14 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
    * things that never happened. A file MOTION cannot parse should leave no trace but the sentence
    * explaining why (ADR-058.1).
    */
-  const table = await parseTable(input.file, bytes);
-
+  const parsed = await parseTable(input.file, bytes);
   // Both are decided from the parsed table alone, and either can refuse the file — so both happen
-  // on the same side of the upload as the parse, for the same reason (ADR-058.1).
-  const columnMap = input.columnMap ?? proposeColumnMap(table, input.importType);
-  const transforms = await resolveTransforms(db, organizationId, input, columnMap);
+  // on the same side of the upload as the parse, for the same reason (ADR-058.1). A PDF that
+  // yielded no table is the exception: §5.3 and §5.5 say it is STORED, so the refusal comes after
+  // the upload, with the document kept.
+  const table = parsed.kind === 'table' ? parsed.table : null;
+  const columnMap = table === null ? {} : (input.columnMap ?? proposeColumnMap(table, input.importType));
+  const transforms = table === null ? {} : await resolveTransforms(db, organizationId, input, columnMap);
 
   const uploaded = await uploadDocument(
     {
@@ -231,12 +248,12 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
     },
   );
 
+  if (parsed.kind === 'scanned' || uploaded.status === 'unreadable') {
+    // §5.5: stored as a source document, no batch, and the reader told what to do instead.
+    throw new ValidationError(SCANNED_PDF_MESSAGE);
+  }
   if (uploaded.status !== 'ready') {
-    throw new ValidationError(
-      uploaded.status === 'quarantined'
-        ? 'That file did not pass the safety check, so it has not been imported.'
-        : 'That file could not be read. If it is a scan, we cannot extract figures from it yet.',
-    );
+    throw new ValidationError('That file did not pass the safety check, so it has not been imported.');
   }
 
   const batchId = await startImportBatch(db, {
@@ -247,7 +264,18 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
     ...(input.bankAccountId === null ? {} : { bankAccountId: input.bankAccountId }),
     periodStart: input.periodStart,
     periodEnd: input.periodEnd,
+    extractionMethod: parsed.kind === 'table' ? parsed.method : 'pdf_text',
   }, requestId);
+
+  if (parsed.kind !== 'table' || table === null) {
+    // §5.3: the batch exists and says why it has no rows; §5.4's "Read with AI" starts from here.
+    const reason = parsed.kind === 'pdf_unparsed' ? parsed.reason : PDF_UNPARSED_MESSAGE;
+    await failImportBatch(actor, organizationId, batchId, 'parsing', reason);
+    return {
+      batchId, documentId: uploaded.documentId, accountsCreated: 0, counts: {}, requiredConfirmations: [],
+      columns: [], columnMap: {}, headerConfirmationRequired: false, parseFailure: reason,
+    };
+  }
 
   /*
    * The accounts the file names, created before validation (§6.5).

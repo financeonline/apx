@@ -99,6 +99,17 @@ export default async function ReviewBatchPage({
             Its rows are part of your figures. Roll it back from the imports list if it was wrong.
           </Banner>
         ) : null}
+        {review.batch.status === 'failed' ? (
+          <Banner tone="danger" title="MOTION could not read this file.">
+            {review.batch.errorSummary?.message ?? 'Nothing was imported. The file is stored as a source document.'}
+          </Banner>
+        ) : null}
+        {review.batch.extractionMethod === 'pdf_text' && review.batch.status !== 'failed' ? (
+          <Banner tone="info" title="Read from the text of a PDF statement.">
+            The rows were read from the statement&rsquo;s own text and checked against its printed balances.
+            Until the balances reconcile, these figures are marked as calculated rather than verified.
+          </Banner>
+        ) : null}
 
         {review.batchIssues.length > 0 ? (
           <Card>

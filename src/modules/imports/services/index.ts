@@ -43,6 +43,7 @@ export async function startImportBatch(
       period_start: parsed.periodStart ?? null,
       period_end: parsed.periodEnd ?? null,
       balance_basis: parsed.balanceBasis ?? null,
+      extraction_method: parsed.extractionMethod ?? 'csv',
     },
   }, requestId);
 }

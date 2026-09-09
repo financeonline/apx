@@ -235,20 +235,85 @@ describe('the same file twice is caught before it is parsed (§2.5)', () => {
 
 describe('a file MOTION cannot read is refused before anything is stored', () => {
   it('refuses a PDF renamed .csv by its magic bytes (§4)', async () => {
-    await expect(runWizard(fixtureFile('fake_csv.pdf', 'text/csv')))
-      .rejects.toThrow();
+    // The bytes are a PDF; the NAME says CSV. The extension and the bytes disagree, and the bytes win.
+    const renamed = new File([new Uint8Array(readFileSync('fixtures/imports/fake_csv.pdf'))], 'fake_csv.csv', { type: 'text/csv' });
+    await expect(runWizard(renamed)).rejects.toThrow(/not a CSV file/);
 
     // Nothing was stored, and no batch was started, so there is no orphan to clean up.
     const batches = Number(one(`
       select count(*) from public.import_batches b
        join public.source_documents d
          on d.organization_id = b.organization_id and d.id = b.source_document_id
-      where b.organization_id = '${orgId}' and d.original_filename = 'fake_csv.pdf'`));
+      where b.organization_id = '${orgId}' and d.original_filename = 'fake_csv.csv'`));
     expect(batches).toBe(0);
   });
 
-  it('tells somebody uploading a PDF statement what to do instead', async () => {
-    await expect(runWizard(fixtureFile('bank_text.pdf', 'application/pdf')))
-      .rejects.toThrow(/CSV or Excel|not ready yet/);
+});
+
+/**
+ * PDF statements (IMPORT_ENGINE.md §5.3, §5.5; ADR-033; ADR-083). The deterministic parser was built
+ * and tested on its own; this is the wizard USING it: a text-layer statement becomes a `pdf_text`
+ * batch whose rows point at their page and line, a scan is stored and refused with the §5.5
+ * sentence, and a text PDF with no table is stored and its batch failed with the reason.
+ */
+describe('a PDF statement goes in through the same wizard', () => {
+  const pdf = (name: string) => fixtureFile(name, 'application/pdf');
+
+  it('reads a text-layer statement into a pdf_text batch with its printed balances', async () => {
+    const result = await startImport({
+      organizationId: orgId, userId: ownerId, requestId: `itest-${RUN}`, db: userDb(),
+      file: pdf('bank_text.pdf'), importType: 'bank_statement',
+      periodStart: '2026-03-01', periodEnd: '2026-03-31', bankAccountId,
+    });
+    expect(result.parseFailure).toBeUndefined();
+    expect(result.columns).toEqual(['Date', 'Description', 'Paid out', 'Paid in', 'Balance']);
+
+    const batch = one(`
+      select b.extraction_method::text || '|' || b.status::text || '|' || coalesce(b.statement_opening_balance::text, '-') || '|' || coalesce(b.statement_closing_balance::text, '-')
+        from public.import_batches b where b.id = '${result.batchId}'`);
+    expect(batch).toBe('pdf_text|awaiting_review|1000.00|7320.14');
+
+    const review = (await loadBatchReview(userDb(), orgId, result.batchId))!;
+    // 28 transactions and 7 lines of page furniture, every one of them kept (SOW §23).
+    const distribution = review.rows.reduce<Record<string, number>>((acc, r) => ({ ...acc, [r.status]: (acc[r.status] ?? 0) + 1 }), {});
+    const odd = review.rows.filter((r) => !['valid', 'warning', 'skipped'].includes(r.status)).slice(0, 2).map((r) => `${r.sourceRef} ${r.status} raw=${JSON.stringify(r.rawData).slice(0, 120)} mapped=${JSON.stringify(r.mappedData).slice(0, 120)} issues=${JSON.stringify(r.issues).slice(0, 300)}`);
+    expect(review.rows.length, JSON.stringify(distribution)).toBe(36);
+    expect(review.rows.filter((r) => r.status === 'valid' || r.status === 'warning').length, `${JSON.stringify(distribution)} ${odd.join(' | ')}`).toBe(28);
+    expect(review.rows.every((r) => /^page:\d+;line:\d+$/.test(r.sourceRef ?? ''))).toBe(true);
+    // The balances reconcile and the page chain holds, so no gate fires (§5.3).
+    const first = review.rows.filter((r) => r.status !== 'skipped').slice(0, 3).map((r) => JSON.stringify(r.mappedData));
+    expect(review.batchIssues.map((i) => i.code), `${JSON.stringify(review.batchIssues)} rows=${first.join(' | ')}`).not.toContain('IMP-BAL-006');
+    expect(review.batchIssues.map((i) => i.code)).not.toContain('IMP-BAL-007');
+  });
+
+  it('stores a scanned statement, opens no batch, and says what to do instead (§5.5)', async () => {
+    await expect(runWizard(pdf('bank_scanned.pdf'))).rejects.toThrow(/scanned image/);
+    const doc = one(`
+      select d.status::text || '|' || coalesce(d.has_text_layer::text, 'null') from public.source_documents d
+       where d.organization_id = '${orgId}' and d.original_filename = 'bank_scanned.pdf'`);
+    expect(doc).toBe('unreadable|false');
+    expect(one(`
+      select count(*) from public.import_batches b join public.source_documents d
+        on d.organization_id = b.organization_id and d.id = b.source_document_id
+       where b.organization_id = '${orgId}' and d.original_filename = 'bank_scanned.pdf'`)).toBe('0');
+  });
+
+  it('stores a text PDF with no transaction table and fails its batch with the reason (§5.3)', async () => {
+    const { PDFDocument, StandardFonts } = await import('pdf-lib');
+    const doc = await PDFDocument.create();
+    const font = await doc.embedFont(StandardFonts.Helvetica);
+    const page = doc.addPage([595, 842]);
+    ['Dear customer,', 'Thank you for banking with us.', 'Your statement is attached separately.']
+      .forEach((text, i) => page.drawText(text, { x: 60, y: 780 - i * 20, size: 11, font }));
+    const bytes = await doc.save();
+    const file = new File([new Uint8Array(bytes)], 'letter.pdf', { type: 'application/pdf' });
+
+    const result = await runWizard(file);
+    expect(result.parseFailure).toMatch(/could not find a transaction table/);
+    const batch = one(`
+      select b.status::text || '|' || b.extraction_method::text || '|' || coalesce(b.error_summary ->> 'message', '-')
+        from public.import_batches b where b.id = '${result.batchId}'`);
+    expect(batch).toMatch(/^failed\|pdf_text\|MOTION could not find a transaction table/);
+    expect(one(`select status::text from public.source_documents where id = '${result.documentId}'`)).toBe('ready');
   });
 });

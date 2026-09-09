@@ -13,6 +13,8 @@
  */
 
 import { maskDescription } from './transforms';
+import { detectDateColumn, parseDateValue, readsDifferentlyUnderAlternate } from './transforms/dates';
+import { detectNumberColumn, parseAmount } from './transforms/numbers';
 import {
   bankAmountFromInOut, bankAmountFromSigned, glFromDebitCredit, glFromSigned,
 } from './transforms/signs';
@@ -35,6 +37,24 @@ export interface CounterpartyRef {
   readonly normalizedName: string;
 }
 
+/** The target fields that hold money (§6.1), read through the §6.4 number transform before signs. */
+const MONEY_FIELDS = [
+  'amount', 'debit', 'credit', 'money_in', 'money_out', 'balance_after', 'opening_balance', 'closing_balance',
+  'subtotal', 'tax_amount', 'total_amount', 'amount_paid',
+] as const;
+
+/** The target fields that hold a date (§6.1), read through the §6.4 transform. */
+const DATE_FIELDS = ['entry_date', 'transaction_date', 'issue_date', 'due_date', 'paid_date', 'posted_date', 'period_start', 'period_end'] as const;
+
+function primaryDateFieldOf(target: ImportTarget): string {
+  switch (target) {
+    case 'ledger_entries': return 'entry_date';
+    case 'bank_transactions': return 'transaction_date';
+    case 'invoices': return 'issue_date';
+    case 'period_balances': return 'period_start';
+  }
+}
+
 export interface PipelineInput {
   readonly organizationId: string;
   readonly importType: ImportType;
@@ -43,6 +63,8 @@ export interface PipelineInput {
   readonly columnMap: Readonly<Record<string, TargetField>>;
   readonly transforms: Transforms;
   readonly baseCurrency: string;
+  /** ISO country, for the day-first default when a date column is ambiguous (§6.4). */
+  readonly countryCode?: string;
   readonly today: string;
   readonly declaredPeriodStart: string;
   readonly declaredPeriodEnd: string;
@@ -137,8 +159,46 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     readonly accountValue: string | null;
   }
 
-  const staged: Staged[] = table.rows.map((row) => {
+  // Map every line first: the §6.4 number formats are a property of a COLUMN, so they are decided
+  // over the whole table before any row's money is turned into a signed amount.
+  const mappedRows = table.rows.map((row) => {
+    /*
+     * The header line is a source line — it stays in `rows` so nothing is discarded (SOW §23) — but
+     * it is not a record. Every parser leaves it in place and names it by `headerRow`; treating it
+     * as data made "Date" fail the date column on every file and left a reviewer dismissing an
+     * "error" that was the column headings (ADR-083).
+     */
+    const nonTabular = row.nonTabular === true || (table.headerRow !== undefined && row.rowNumber === table.headerRow);
     const { mapped, raw } = mapRow(table.columns, row.cells, columnMap);
+    return { row, nonTabular, mapped, raw };
+  });
+
+  /*
+   * §6.4 numbers: separators are detected per column — `1.234,56` against `1,234.56`, a space as a
+   * thousands separator, currency symbols, every negative style — and each cell is read with the
+   * column's format. Detection and reading existed and were never called, so a cell of "2,500.00"
+   * reached the sign transform as text it could not parse and fell out of the sum; only files
+   * without thousands separators ever reconciled (ADR-083). A cell the format cannot read is left
+   * as written, so the row's own issue names it.
+   */
+  for (const field of MONEY_FIELDS) {
+    const cells = mappedRows.filter((m) => !m.nonTabular).map((m) => m.mapped[field] ?? null);
+    if (cells.every((cell) => cell === null || cell === undefined || cell.trim() === '')) continue;
+    const detected = detectNumberColumn(cells);
+    const format = {
+      decimalSeparator: input.transforms.decimalSeparator ?? detected.decimalSeparator,
+      thousandsSeparator: input.transforms.thousandsSeparator ?? detected.thousandsSeparator,
+    };
+    for (const m of mappedRows) {
+      if (m.nonTabular) continue;
+      const cell = m.mapped[field];
+      if (cell === null || cell === undefined || cell.trim() === '') continue;
+      const parsed = parseAmount(cell, { format });
+      if (parsed.ok && parsed.amount !== null) m.mapped[field] = parsed.amount;
+    }
+  }
+
+  const staged: Staged[] = mappedRows.map(({ row, nonTabular, mapped, raw }) => {
     const accountValue = mapped.account ?? null;
 
     /*
@@ -152,11 +212,11 @@ export function runPipeline(input: PipelineInput): PipelineResult {
      * `signs.ts` owns every one of these conversions, so the importer and the engine cannot disagree
      * about which way a debit points.
      */
-    if (!row.nonTabular) {
+    if (!nonTabular) {
       normaliseMoney(mapped, input.targetTable, input.transforms);
     }
 
-    if (!row.nonTabular && accountValue) {
+    if (!nonTabular && accountValue) {
       const byCode = mapped.code ? accountsByCode.get(mapped.code.toLowerCase()) : undefined;
       const byName = accountsByName.get(accountValue.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim());
       const account = byCode ?? byName;
@@ -165,7 +225,7 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     }
 
     const counterpartyValue = mapped.counterparty ?? mapped.customer ?? mapped.supplier ?? null;
-    if (!row.nonTabular && counterpartyValue) {
+    if (!nonTabular && counterpartyValue) {
       const key = counterpartyValue.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
       const existing = counterpartiesByName.get(key);
       if (existing) mapped.counterparty_id = existing.id;
@@ -181,15 +241,42 @@ export function runPipeline(input: PipelineInput): PipelineResult {
       sourceRef: row.sourceRef,
       raw,
       mapped,
-      nonTabular: row.nonTabular === true,
+      nonTabular,
       hidden: row.hidden === true,
-      fieldCountMismatch: row.cells.length !== table.columns.length && !row.nonTabular,
+      fieldCountMismatch: row.cells.length !== table.columns.length && !nonTabular,
       accountValue,
     };
   });
 
   // ---- Pass B: validate ----
   const amountMedian = medianAbsolute(staged.map((s) => s.mapped.amount ?? s.mapped.total_amount ?? null));
+  /*
+   * §6.4 dates: detect each date column's order over the whole column, then read every cell with
+   * it. Detection and reading existed and were never called, so a column of "01 Mar 2026" reached
+   * the validator as text and failed `IMP-DATE-001` on every row; only ISO-dated files ever passed
+   * (ADR-083). The order is the reviewer's per-column choice, else the file's, else what the column
+   * itself disambiguates, else the organisation's country. Rows that would read differently the
+   * other way round are marked `IMP-DATE-003` so the reviewer sees them.
+   */
+  const ambiguousDateRows = new Set<number>(input.ambiguousDateRows ?? []);
+  const dateFields = DATE_FIELDS.filter((field) => staged.some((s) => !s.nonTabular && s.mapped[field] !== undefined));
+  for (const field of dateFields) {
+    const detection = detectDateColumn(
+      staged.filter((s) => !s.nonTabular).map((s) => s.mapped[field] ?? null),
+      { countryCode: input.countryCode },
+    );
+    const order = input.transforms.dateOrderByColumn?.[field] ?? input.transforms.dateOrder ?? detection.order ?? detection.proposedOrder;
+    for (const s of staged) {
+      if (s.nonTabular) continue;
+      const cell = s.mapped[field];
+      if (cell === null || cell === undefined || cell.trim() === '') continue;
+      const iso = parseDateValue(cell, order);
+      // An unreadable cell is left as written, so `IMP-DATE-001` names it rather than a blank.
+      if (iso !== null) s.mapped[field] = iso;
+      if (field === primaryDateFieldOf(input.targetTable) && readsDifferentlyUnderAlternate(cell, order)) ambiguousDateRows.add(s.rowNumber);
+    }
+  }
+
   const hiddenRows = new Set(staged.filter((s) => s.hidden).map((s) => s.rowNumber));
 
   const validationCtx = {
@@ -201,7 +288,7 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     today: input.today,
     amountMedian,
     uncategorisedAccounts: unmappedAccounts,
-    ambiguousDateRows: input.ambiguousDateRows,
+    ambiguousDateRows,
     hiddenRows,
   };
 

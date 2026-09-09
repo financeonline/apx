@@ -6,6 +6,8 @@
  * swallowed: an unmapped failure becomes InternalError and is logged with its requestId.
  */
 
+import { log } from '@/core/logging';
+
 export type ErrorCode =
   | 'NOT_FOUND'
   | 'PERMISSION_DENIED'
@@ -162,6 +164,11 @@ export function fromPostgresError(error: PostgrestLikeError, requestId?: string)
   const message = withoutPrefix.length > 0 ? withoutPrefix : 'Something went wrong.';
 
   const factory = error.code ? SQLSTATE_MAP[error.code] : undefined;
+  if (!factory) {
+    // Never swallowed: the user sees "Something went wrong" and the log keeps the code and the
+    // database's own sentence, which is what turns a support ticket into a fix.
+    log.error('unmapped database error', { requestId, code: error.code ?? null, message: raw.slice(0, 500) });
+  }
   const mapped = factory ? factory(message) : new InternalError();
   mapped.requestId = requestId;
   return mapped;

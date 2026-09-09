@@ -60,10 +60,12 @@ test('a new owner uploads a ledger and sees their own figures', async ({ page })
   await expect(page.getByText(/every row we read/i)).toBeVisible();
 
   /*
-   * The header row and the preamble are recorded as rows that cannot import, with their reasons
-   * (§5.2). That is the promise: nothing from the file is thrown away silently.
+   * The header line is on the screen as a line MOTION read and set aside — nothing from the file is
+   * thrown away silently (§5.2, SOW §23) — but it is the column headings, not a row that "cannot
+   * import", and it asks the reviewer for nothing (ADR-083). Before that, every CSV import made
+   * its reviewer dismiss an "error" that was the header.
    */
-  await expect(page.getByText(/cannot import/i).first()).toBeVisible();
+  await expect(page.getByText(/cannot import/i)).toHaveCount(0);
 
   /*
    * §8.2: a file that raises a question cannot commit until it is answered. This is the question,
@@ -77,14 +79,8 @@ test('a new owner uploads a ledger and sees their own figures', async ({ page })
     await expect(question).toHaveCount(remaining - 1, { timeout: 15_000 });
   }
 
-  /*
-   * The header row is not a transaction, and the gate will not commit while any unreadable row is
-   * undecided (§8.2). Saying so is the reviewer's job, and it is one action for all of them.
-   */
-  const skip = page.getByRole('button', { name: /^skip \d+ rows?$/i });
-  await expect(skip, 'the header row needs a decision before anything commits').toBeVisible();
-  await skip.click();
-  await expect(skip).toHaveCount(0, { timeout: 15_000 });
+  // No unreadable row is left undecided, so no "skip" decision is asked for.
+  await expect(page.getByRole('button', { name: /^skip \d+ rows?$/i })).toHaveCount(0);
 
   const commit = page.getByRole('button', { name: /^import \d+ rows?$/i });
   await expect(commit, 'once the questions are answered, Commit is offered').toBeVisible({

@@ -56,6 +56,9 @@ export interface SourceDocument {
   readonly createdAt: string;
 }
 
+/** How a batch's rows were read (`import_batches.extraction_method`). */
+export type ExtractionMethod = 'csv' | 'xlsx' | 'pdf_text' | 'pdf_claude' | 'manual';
+
 export interface ImportBatch {
   readonly id: string;
   readonly sourceDocumentId: string;
@@ -70,6 +73,9 @@ export interface ImportBatch {
   readonly balanceBasis: 'cumulative' | 'movement' | null;
   readonly committedAt: string | null;
   readonly rolledBackAt: string | null;
+  readonly extractionMethod: ExtractionMethod;
+  /** `{stage, message}` when the batch failed (§7.2, §16). */
+  readonly errorSummary: { readonly stage?: string; readonly message?: string } | null;
 }
 
 export interface ImportIssue {

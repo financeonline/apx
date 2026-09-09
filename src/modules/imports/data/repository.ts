@@ -49,7 +49,8 @@ export async function listBatches(
   const { data, error } = await db
     .from('import_batches')
     .select(`id, source_document_id, import_type, target_table, bank_account_id, status,
-             row_counts, period_start, period_end, balance_basis, committed_at, rolled_back_at`)
+             row_counts, period_start, period_end, balance_basis, committed_at, rolled_back_at,
+             extraction_method, error_summary`)
     .eq('organization_id', orgId)
     .order('created_at', { ascending: false })
     .range(page.offset, page.offset + page.limit - 1);
@@ -67,6 +68,8 @@ export async function listBatches(
     balanceBasis: r.balance_basis,
     committedAt: r.committed_at,
     rolledBackAt: r.rolled_back_at,
+    extractionMethod: (r.extraction_method as ImportBatch['extractionMethod']) ?? 'csv',
+    errorSummary: (r.error_summary as ImportBatch['errorSummary']) ?? null,
   }));
 }
 

@@ -131,6 +131,9 @@ export async function uploadDocument(ctx: UploadContext, input: UploadInput): Pr
     : (validation.quarantine ? 'quarantined' : 'unreadable');
 
   const documentId = await ctx.registerDocument({
+    // §4: what the probe found, kept on the row — §5.4 reads `has_text_layer` (ADR-083).
+    has_text_layer: validation.hasTextLayer ?? null,
+    page_count: validation.pageCount ?? null,
     original_filename: input.filename,
     mime_type: input.declaredMimeType,
     byte_size: input.bytes.byteLength,
