@@ -8,6 +8,7 @@ import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import {
   CommitControls, ConfirmationPrompt, DuplicateDecisions, SkipUnreadableRows,
 } from './review-controls';
+import { AiReadingRequest, DocumentPageView, PageConfirmation } from './pdf-review';
 
 export const dynamic = 'force-dynamic';
 
@@ -76,6 +77,19 @@ export default async function ReviewBatchPage({
   if (review === null) notFound();
 
   const total = Object.values(review.counts).reduce((sum, n) => sum + n, 0);
+
+  // §5.4: "Read with AI" exists only for a text-layer PDF the deterministic parser could not read,
+  // in an organisation that has enabled it. The job re-checks all three when it runs.
+  const [{ data: documentRow }, { data: orgRow }] = await Promise.all([
+    ctx.db.from('source_documents').select('has_text_layer').eq('organization_id', ctx.orgId!).eq('id', review.batch.sourceDocumentId).maybeSingle(),
+    ctx.db.from('organizations').select('features').eq('id', ctx.orgId!).maybeSingle(),
+  ]);
+  const aiReadingOffered = review.batch.status === 'failed' && review.batch.extractionMethod === 'pdf_text'
+    && (documentRow as { has_text_layer: boolean | null } | null)?.has_text_layer === true
+    && ((orgRow as { features: Record<string, unknown> } | null)?.features?.ai_pdf_extraction === true);
+  const aiPages = review.batch.extractionMethod === 'pdf_claude'
+    ? [...new Set(review.rows.filter((r) => r.sourcePage !== null).map((r) => r.sourcePage!))].sort((a, b) => a - b)
+    : [];
   const outstanding = review.requiredConfirmations
     .filter((code) => !review.confirmedCodes.includes(code));
 
@@ -103,6 +117,71 @@ export default async function ReviewBatchPage({
           <Banner tone="danger" title="MOTION could not read this file.">
             {review.batch.errorSummary?.message ?? 'Nothing was imported. The file is stored as a source document.'}
           </Banner>
+        ) : null}
+        {aiReadingOffered ? (
+          <Card>
+            <CardBody className="p-4">
+              <h2 className="font-serif text-lg text-ink">Read this statement with AI</h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                MOTION could not find the table on its own. AI can read the rows for you; every row it reads will
+                need your confirmation against the page before it counts (CD-11).
+              </p>
+              <div className="mt-3">
+                <AiReadingRequest orgSlug={orgSlug} batchId={batchId} documentId={review.batch.sourceDocumentId} />
+              </div>
+            </CardBody>
+          </Card>
+        ) : null}
+        {review.batch.extractionMethod === 'pdf_claude' && review.batch.status === 'parsing' ? (
+          <Banner tone="info" title="MOTION is reading this document with AI.">
+            {review.batch.extractionStats.pages_extracted?.length ?? 0} of {review.batch.extractionStats.pages_total ?? '?'} pages read so far. Refresh to see progress.
+          </Banner>
+        ) : null}
+        {aiPages.length > 0 ? (
+          <Card>
+            <CardBody className="p-4">
+              <h2 className="font-serif text-lg text-ink">Rows read by AI, page by page</h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                Compare each page&rsquo;s rows with the statement beside them. These rows are marked as read by AI
+                and are imported as &ldquo;please check&rdquo; figures until you confirm them.
+              </p>
+              <div className="mt-4 flex flex-col gap-8">
+                {aiPages.map((page) => {
+                  const pageRows = review.rows.filter((r) => r.sourcePage === page && r.status !== 'skipped');
+                  const lineCountAgrees = pageRows.every((r) => !r.issues.some((i) => i.code === 'IMP-PDF-002'));
+                  const pageWide = review.batch.extractionStats.confidence?.[String(page)] === 'high' && lineCountAgrees;
+                  return (
+                    <section key={page} className="grid gap-4 lg:grid-cols-2" aria-label={`Page ${page}`}>
+                      <DocumentPageView orgSlug={orgSlug} documentId={review.batch.sourceDocumentId} page={page} filename={review.filename ?? 'statement.pdf'} />
+                      <div className="flex flex-col gap-3">
+                        <h3 className="text-sm font-medium text-ink">Page {page} · {pageRows.length} row{pageRows.length === 1 ? '' : 's'} read</h3>
+                        <TableWrap>
+                          <table className="w-full text-sm">
+                            <THead columns={['Line', 'Date', 'Description', 'Amount', 'Balance']} />
+                            <TBody>
+                              {pageRows.map((row) => (
+                                <TR key={row.id}>
+                                  <TD className="tabular">{(row.sourceRef ?? '').replace(/^page:\d+;line:/, '')}</TD>
+                                  <TD>{String(row.mappedData?.transaction_date ?? '')}</TD>
+                                  <TD>{String(row.mappedData?.description ?? '')}</TD>
+                                  <TD className="tabular">{String(row.mappedData?.amount ?? '')}</TD>
+                                  <TD className="tabular">{String(row.mappedData?.balance_after ?? '')}</TD>
+                                </TR>
+                              ))}
+                            </TBody>
+                          </table>
+                        </TableWrap>
+                        {review.batch.status === 'awaiting_review' ? (
+                          <PageConfirmation orgSlug={orgSlug} batchId={batchId} page={page} pageWide={pageWide}
+                            confirmed={review.batch.pageConfirmations[String(page)] !== undefined} />
+                        ) : null}
+                      </div>
+                    </section>
+                  );
+                })}
+              </div>
+            </CardBody>
+          </Card>
         ) : null}
         {review.batch.extractionMethod === 'pdf_text' && review.batch.status !== 'failed' ? (
           <Banner tone="info" title="Read from the text of a PDF statement.">

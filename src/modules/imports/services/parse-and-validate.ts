@@ -2,7 +2,7 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { ConflictError, ValidationError, toMotionError } from '@/core/errors';
 import { log } from '@/core/logging';
-import { runPipeline, type AccountRef, type CounterpartyRef } from '../domain/pipeline';
+import { runPipeline, type PipelineInput, type AccountRef, type CounterpartyRef } from '../domain/pipeline';
 import type { ParsedTable, TargetField, Transforms } from '../domain/pipeline-types';
 import type { ImportTarget, ImportType } from '../domain/types';
 
@@ -29,6 +29,8 @@ export interface ParseAndValidateInput {
   readonly declaredPeriodStart: string;
   readonly declaredPeriodEnd: string;
   readonly bankAccountId?: string | null;
+  /** Issues added to every tabular row by the caller — the extraction job's `IMP-PDF-001` (§5.4). */
+  readonly annotateRow?: PipelineInput['annotateRow'];
 }
 
 export interface ParseAndValidateDeps {
@@ -163,6 +165,7 @@ export async function parseAndValidate(
       today: deps.today,
       declaredPeriodStart: input.declaredPeriodStart,
       declaredPeriodEnd: input.declaredPeriodEnd,
+      ...(input.annotateRow === undefined ? {} : { annotateRow: input.annotateRow }),
       accounts,
       counterparties,
       existingRecords,
@@ -176,6 +179,7 @@ export async function parseAndValidate(
       result.rows.map((row) => ({
         row_number: row.rowNumber,
         source_ref: row.sourceRef,
+        source_page: row.sourcePage ?? null,
         raw_data: row.raw,
         mapped_data: row.mapped,
         status: row.status,

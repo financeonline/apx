@@ -122,3 +122,4 @@ export {
   type BatchReview,
   type ImportHistoryRow,
 } from './services/review';
+export { validateBatch, proposeColumnMap, type ValidateBatchInput } from './services/wizard';

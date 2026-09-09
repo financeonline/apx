@@ -629,10 +629,44 @@ export async function setBatchValidation(
 }
 
 export async function failImportBatch(
-  actor: ServerRpcActor, orgId: string, batchId: string, stage: string, message: string,
+  actor: ServerRpcActor, orgId: string, batchId: string, stage: string, message: string, deferred = false,
 ): Promise<void> {
   await serverRpc('fail_import_batch', {
     p_actor: actor.userId, p_org: orgId, p_batch: batchId,
-    p_stage: stage, p_message: message, p_deferred: false,
+    p_stage: stage, p_message: message, p_deferred: deferred,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Claude-assisted PDF extraction (IMPORT_ENGINE.md §5.4; ADR-084). The job's three writes.
+// ---------------------------------------------------------------------------
+
+export async function beginExtraction(
+  actor: ServerRpcActor, organizationId: string,
+  input: { batchId: string; documentId: string; pagesTotal: number },
+): Promise<void> {
+  await serverRpc('begin_extraction', {
+    p_actor: actor.userId, p_org: organizationId, p_batch: input.batchId, p_document: input.documentId,
+    p_pages_total: input.pagesTotal,
+  });
+}
+
+/** BEFORE every model call: the flag, the daily page budget and the monthly ceiling (R2-C-11). */
+export async function chargeExtractionPage(actor: ServerRpcActor, organizationId: string, documentId: string): Promise<void> {
+  await serverRpc('charge_extraction_page', { p_actor: actor.userId, p_org: organizationId, p_document: documentId });
+}
+
+export async function recordExtractionPage(
+  actor: ServerRpcActor, organizationId: string,
+  input: {
+    batchId: string; page: number; outcome: 'extracted' | 'failed' | 'deferred';
+    tokensIn?: number; tokensOut?: number; confidence?: string | null; lineCount?: number | null; error?: string | null;
+    balancesRead?: { opening?: string; closing?: string } | null;
+  },
+): Promise<void> {
+  await serverRpc('record_extraction_page', {
+    p_actor: actor.userId, p_org: organizationId, p_batch: input.batchId, p_page: input.page, p_outcome: input.outcome,
+    p_tokens_in: input.tokensIn ?? 0, p_tokens_out: input.tokensOut ?? 0, p_confidence: input.confidence ?? null,
+    p_line_count: input.lineCount ?? null, p_error: input.error ?? null, p_balances_read: input.balancesRead ?? null,
   });
 }

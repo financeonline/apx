@@ -13,6 +13,7 @@ import { runOrgPurgeJob } from './org-purge';
 import { runReportRenderJob } from './report-render';
 import { runStorageCleanupJob } from './storage-cleanup';
 import { runAiEvalJob } from './ai-eval';
+import { runDocumentExtractJob } from './document-extract';
 
 /**
  * Wiring the queue (ADR-013, IMPLEMENTATION_PLAN.md — "handlers arrive with the phases that own
@@ -37,6 +38,7 @@ const HANDLERS: ReadonlyArray<readonly [ClaimedJob['jobType'], (job: ClaimedJob,
   ['storage.cleanup_orphans', runStorageCleanupJob],
   ['org.purge', runOrgPurgeJob],
   ['ai.eval', runAiEvalJob],
+  ['document.extract', runDocumentExtractJob],
 ];
 
 let registered = false;
@@ -68,3 +70,4 @@ export { runOrgPurgeJob } from './org-purge';
 export { evaluateAlertsJob } from './alerts-evaluate';
 export { commitLargeBatchJob } from './import-commit-large';
 export { runAiEvalJob, evalDeps } from './ai-eval';
+export { runDocumentExtractJob, extractDeps, lineCountAgrees, AI_ROW_ISSUE, LINE_COUNT_ISSUE } from './document-extract';

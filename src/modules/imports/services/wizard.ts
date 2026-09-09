@@ -15,6 +15,7 @@ import { SCANNED_PDF_MESSAGE } from '../domain/parsers/pdf-scanned';
 import { parsePdfText } from '../domain/parsers/pdf-text';
 import { parseXlsx } from '../domain/parsers/xlsx';
 import type { ParsedTable, TargetField, Transforms } from '../domain/pipeline-types';
+import type { PipelineInput } from '../domain/pipeline';
 import type { ExtractionMethod, ImportTarget, ImportType } from '../domain/types';
 import { parseAndValidate } from './parse-and-validate';
 import { createImportAccounts, startImportBatch } from './index';
@@ -131,7 +132,7 @@ async function parseTable(file: File, bytes: Uint8Array): Promise<Parsed> {
   };
 }
 
-function proposeColumnMap(
+export function proposeColumnMap(
   table: ParsedTable, importType: ImportType,
 ): Record<string, TargetField> {
   const map: Record<string, TargetField> = {};
@@ -316,7 +317,7 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
   };
 }
 
-interface ValidateBatchInput {
+export interface ValidateBatchInput {
   readonly db: SupabaseClient;
   readonly organizationId: string;
   readonly actor: { userId: string; requestId: string };
@@ -328,9 +329,11 @@ interface ValidateBatchInput {
   readonly periodEnd: string;
   readonly bankAccountId: string | null;
   readonly transforms?: Transforms;
+  readonly annotateRow?: PipelineInput['annotateRow'];
 }
 
-async function validateBatch(input: ValidateBatchInput): Promise<{
+/** Validates a parsed table into a batch's rows: the wizard's and the extraction job's shared step. */
+export async function validateBatch(input: ValidateBatchInput): Promise<{
   counts: Record<string, number>;
   requiredConfirmations: readonly string[];
 }> {
@@ -371,6 +374,7 @@ async function validateBatch(input: ValidateBatchInput): Promise<{
       declaredPeriodStart: input.periodStart,
       declaredPeriodEnd: input.periodEnd,
       bankAccountId: input.bankAccountId,
+      ...(input.annotateRow === undefined ? {} : { annotateRow: input.annotateRow }),
     },
   );
 }

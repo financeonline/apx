@@ -76,6 +76,15 @@ export interface ImportBatch {
   readonly extractionMethod: ExtractionMethod;
   /** `{stage, message}` when the batch failed (§7.2, §16). */
   readonly errorSummary: { readonly stage?: string; readonly message?: string } | null;
+  /** §5.4 per-page completion (`import_batches.extraction_stats`). */
+  readonly extractionStats: {
+    readonly pages_total?: number; readonly pages_extracted?: number[]; readonly pages_failed?: number[]; readonly pages_deferred?: number[];
+    readonly attempts?: Record<string, number>; readonly tokens_in?: number; readonly tokens_out?: number;
+    readonly confidence?: Record<string, string>; readonly line_counts?: Record<string, number>;
+    readonly balances_read?: { opening?: string; closing?: string }; readonly errors?: Record<string, string>;
+  };
+  /** Pages a reviewer has confirmed, by page number (`api.confirm_pdf_page`). */
+  readonly pageConfirmations: Record<string, { by: string; at: string }>;
 }
 
 export interface ImportIssue {
@@ -90,6 +99,7 @@ export interface ImportRow {
   readonly id: string;
   readonly rowNumber: number;
   readonly sourceRef: string | null;
+  readonly sourcePage: number | null;
   readonly rawData: Readonly<Record<string, unknown>>;
   readonly mappedData: Readonly<Record<string, unknown>> | null;
   readonly status: ImportRowStatus;

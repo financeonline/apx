@@ -29,3 +29,4 @@ export { runOrgPurgeJob } from './handlers';
 
 /** The ai.eval handler's one seam, for its own test: the model transport (ADR-081). */
 export { evalDeps } from './handlers';
+export { extractDeps, lineCountAgrees, AI_ROW_ISSUE, LINE_COUNT_ISSUE } from './handlers';

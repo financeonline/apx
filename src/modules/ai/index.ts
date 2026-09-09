@@ -191,3 +191,7 @@ export {
   listFeedback, loadFeedback, reviewFeedback, countOpenFeedback, REVIEW_STATUSES,
   type FeedbackDetail, type FeedbackListItem, type FeedbackStatus, type ReviewStatus,
 } from './services/feedback-review';
+export {
+  extractStatementPage, isProviderOutage, PageExtractionSchema, PageRowSchema, SUBMIT_PAGE_TOOL, EXTRACTION_PROMPT_VERSION,
+  type ExtractPageInput, type ExtractPageResult, type PageExtraction,
+} from './services/extract-page';

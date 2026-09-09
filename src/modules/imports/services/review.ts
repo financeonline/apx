@@ -52,6 +52,8 @@ export interface BatchReview {
   /** True when every gate §8.2 names is satisfied and Commit may be the primary action. */
   readonly committable: boolean;
   readonly blockingReason: string | null;
+  /** §5.4: pages read by AI that carry rows and have not been confirmed, in page order. */
+  readonly unconfirmedPages: readonly number[];
 }
 
 /**
@@ -117,7 +119,12 @@ export async function loadBatchReview(
     (r) => r.status === 'error' && undecided(r.reviewerDecision),
   );
   const importableRows = (counts.valid ?? 0) + (counts.warning ?? 0);
-  const blocking = blockingReasonFor(batch, importableRows, meta, duplicates, undecidedErrors);
+  const unconfirmedPages = batch.extractionMethod === 'pdf_claude'
+    ? [...new Set(rows.filter((r) => r.sourcePage !== null && ['valid', 'warning', 'duplicate'].includes(r.status)).map((r) => r.sourcePage!))]
+      .filter((page) => batch.pageConfirmations[String(page)] === undefined)
+      .sort((a, b) => a - b)
+    : [];
+  const blocking = blockingReasonFor(batch, importableRows, meta, duplicates, undecidedErrors, unconfirmedPages);
 
   return {
     batch,
@@ -133,6 +140,7 @@ export async function loadBatchReview(
     importableRows,
     committable: blocking === null,
     blockingReason: blocking,
+    unconfirmedPages,
   };
 }
 
@@ -149,6 +157,7 @@ function blockingReasonFor(
   meta: BatchMeta,
   duplicates: readonly ImportRow[],
   undecidedErrors: readonly ImportRow[],
+  unconfirmedPages: readonly number[] = [],
 ): string | null {
   if (batch.status === 'committed') return 'This file has already been imported.';
   if (batch.status === 'rolled_back') return 'This import was rolled back.';
@@ -172,6 +181,11 @@ function blockingReasonFor(
 
   if (importableRows === 0) {
     return 'No rows in this file are ready to import.';
+  }
+
+  // §5.4: a page the reviewer has not compared cannot contribute rows. The database refuses too.
+  if (unconfirmedPages.length > 0) {
+    return `Page${unconfirmedPages.length === 1 ? '' : 's'} ${unconfirmedPages.join(', ')} read by AI still need${unconfirmedPages.length === 1 ? 's' : ''} confirming against the statement.`;
   }
 
   return null;

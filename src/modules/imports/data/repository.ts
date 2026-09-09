@@ -50,7 +50,7 @@ export async function listBatches(
     .from('import_batches')
     .select(`id, source_document_id, import_type, target_table, bank_account_id, status,
              row_counts, period_start, period_end, balance_basis, committed_at, rolled_back_at,
-             extraction_method, error_summary`)
+             extraction_method, error_summary, extraction_stats, page_confirmations, source_document_id`)
     .eq('organization_id', orgId)
     .order('created_at', { ascending: false })
     .range(page.offset, page.offset + page.limit - 1);
@@ -70,6 +70,8 @@ export async function listBatches(
     rolledBackAt: r.rolled_back_at,
     extractionMethod: (r.extraction_method as ImportBatch['extractionMethod']) ?? 'csv',
     errorSummary: (r.error_summary as ImportBatch['errorSummary']) ?? null,
+    extractionStats: (r.extraction_stats as ImportBatch['extractionStats']) ?? {},
+    pageConfirmations: (r.page_confirmations as ImportBatch['pageConfirmations']) ?? {},
   }));
 }
 
@@ -88,7 +90,7 @@ export async function listBatchRows(
 ): Promise<ImportRow[]> {
   let query = db
     .from('import_rows')
-    .select(`id, row_number, source_ref, raw_data, mapped_data, status, issues,
+    .select(`id, row_number, source_ref, source_page, raw_data, mapped_data, status, issues,
              reviewer_decision, reviewer_reason, committed_table, committed_record_id`)
     .eq('organization_id', orgId)
     .eq('batch_id', batchId);
@@ -103,6 +105,7 @@ export async function listBatchRows(
     id: r.id,
     rowNumber: r.row_number,
     sourceRef: r.source_ref,
+    sourcePage: (r.source_page as number | null) ?? null,
     rawData: r.raw_data ?? {},
     mappedData: r.mapped_data,
     status: r.status,

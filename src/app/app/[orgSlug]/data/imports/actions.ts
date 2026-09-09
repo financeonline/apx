@@ -3,6 +3,7 @@
 import { redirect } from 'next/navigation';
 import { revalidatePath } from 'next/cache';
 import { getAccessContext } from '@/modules/tenancy';
+import { callApi, enqueueServerJob } from '@/core/db';
 import { assertCan } from '@/core/permissions';
 import {
   commitImportBatch, decideImportRows, recordBatchConfirmation, rejectImportBatch,
@@ -207,5 +208,75 @@ export async function rollbackBatchAction(
     );
   } catch (error) {
     return fail(error, { requestId, action: 'imports.rollback' });
+  }
+}
+
+/**
+ * "Read with AI" (IMPORT_ENGINE.md §5.4; ADR-084; CD-35). The only path that creates a
+ * `document.extract` job: a reviewer, after the consent line, on a batch the deterministic parser
+ * could not read. `api_server.enqueue_job` re-checks `imports.review`; `begin_extraction` re-checks
+ * the organisation's `ai_pdf_extraction` flag and the batch's state when the job runs.
+ */
+export async function requestAiReadingAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    assertCan(ctx, 'imports.review');
+    if (!ctx.orgId) throw new Error('No organisation.');
+    if (form.get('consent') !== 'yes') {
+      return fail(new Error('Please confirm you understand the text of this document will be sent to the AI provider.'), { requestId, action: 'imports.aiReading' });
+    }
+    const batchId = text(form, 'batch_id');
+    const documentId = text(form, 'document_id');
+    await enqueueServerJob({ userId: ctx.userId, requestId }, {
+      organizationId: ctx.orgId, jobType: 'document.extract', payload: { document_id: documentId, batch_id: batchId },
+    });
+    revalidatePath(`/app/${orgSlug}/data/imports/${batchId}`);
+    return done('MOTION is reading the document. This page will show the rows when it is done.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'imports.aiReading' });
+  }
+}
+
+/**
+ * "I have compared all rows on page N" (§5.4). The page-wide tick is offered only when the page's
+ * confidence was high and `IMP-PDF-002` passed; otherwise every row on the page must have been
+ * decided first. Both are re-checked here, and `api.confirm_pdf_page` re-checks the permission and
+ * the batch's method.
+ */
+export async function confirmPdfPageAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    assertCan(ctx, 'imports.review');
+    if (!ctx.orgId) throw new Error('No organisation.');
+    const batchId = text(form, 'batch_id');
+    const page = Number.parseInt(text(form, 'page'), 10);
+    if (!Number.isInteger(page) || page < 1) throw new Error('Which page?');
+
+    const { data: batch, error } = await ctx.db.from('import_batches').select('extraction_stats')
+      .eq('organization_id', ctx.orgId).eq('id', batchId).maybeSingle();
+    if (error) throw error;
+    const stats = (batch?.extraction_stats ?? {}) as { confidence?: Record<string, string> };
+    const { data: rows, error: rowsError } = await ctx.db.from('import_rows').select('status, issues, reviewer_decision')
+      .eq('organization_id', ctx.orgId).eq('batch_id', batchId).eq('source_page', page);
+    if (rowsError) throw rowsError;
+    const pageRows = (rows ?? []) as Array<{ status: string; issues: Array<{ code: string }>; reviewer_decision: string }>;
+    const lineCountAgrees = pageRows.every((r) => !r.issues.some((i) => i.code === 'IMP-PDF-002'));
+    const pageWide = stats.confidence?.[String(page)] === 'high' && lineCountAgrees;
+    const everyRowDecided = pageRows.every((r) => r.reviewer_decision !== 'none' || r.status === 'skipped');
+    if (!pageWide && !everyRowDecided) {
+      return fail(new Error(`Page ${page} cannot be confirmed as a whole; confirm each row on it first.`), { requestId, action: 'imports.confirmPage' });
+    }
+
+    await callApi(ctx.db, 'confirm_pdf_page', { p_batch: batchId, p_page: page }, requestId);
+    revalidatePath(`/app/${orgSlug}/data/imports/${batchId}`);
+    return done(`Page ${page} confirmed.`);
+  } catch (error) {
+    return fail(error, { requestId, action: 'imports.confirmPage' });
   }
 }

@@ -180,6 +180,20 @@ export async function putObject(
  * the row is already marked `deleted` and `storage.cleanup_orphans` will finish the job, which is
  * why the outcome is returned rather than thrown.
  */
+/**
+ * Reads a stored object for a job that has to see its bytes — the extraction job reading a PDF's
+ * text layer (IMPORT_ENGINE.md §5.4). Same guard as every other key: it must belong to the
+ * organisation the caller is scoped to.
+ */
+export async function getObject(ctx: SignerContext, bucket: string, key: string): Promise<Uint8Array> {
+  assertKeyBelongsTo(ctx.orgId, key);
+  const { data, error } = await storageClient().storage.from(bucket).download(key);
+  if (error || !data) {
+    throw new InternalError('That file could not be read from storage.');
+  }
+  return new Uint8Array(await data.arrayBuffer());
+}
+
 export async function removeObject(
   ctx: SignerContext,
   bucket: string,

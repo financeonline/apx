@@ -80,6 +80,11 @@ export interface PipelineInput {
   };
   readonly liabilityAccount?: boolean;
   readonly ambiguousDateRows?: ReadonlySet<number>;
+  /**
+   * Issues the caller adds to every tabular row — the extraction job's `IMP-PDF-001` ("read by
+   * AI — confirm against page N"), which is about how the row was produced, not what it says.
+   */
+  readonly annotateRow?: (row: { readonly rowNumber: number; readonly sourceRef: string; readonly sourcePage?: number }) => readonly RowIssue[];
 }
 
 export interface PipelineResult {
@@ -157,6 +162,7 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     readonly hidden: boolean;
     readonly fieldCountMismatch: boolean;
     readonly accountValue: string | null;
+    readonly sourcePage?: number;
   }
 
   // Map every line first: the §6.4 number formats are a property of a COLUMN, so they are decided
@@ -245,6 +251,7 @@ export function runPipeline(input: PipelineInput): PipelineResult {
       hidden: row.hidden === true,
       fieldCountMismatch: row.cells.length !== table.columns.length && !nonTabular,
       accountValue,
+      ...(row.sourcePage === undefined ? {} : { sourcePage: row.sourcePage }),
     };
   });
 
@@ -369,10 +376,14 @@ export function runPipeline(input: PipelineInput): PipelineResult {
   // ---- Assemble ----
   const rows: ValidatedRow[] = staged.map((s) => {
     const duplicate = duplicateOutcomes.get(s.rowNumber);
-    const issues = [...(issuesByRow.get(s.rowNumber) ?? []), ...(duplicate?.issues ?? [])];
+    const annotated = s.nonTabular || input.annotateRow === undefined
+      ? []
+      : input.annotateRow({ rowNumber: s.rowNumber, sourceRef: s.sourceRef, ...(s.sourcePage === undefined ? {} : { sourcePage: s.sourcePage }) });
+    const issues = [...(issuesByRow.get(s.rowNumber) ?? []), ...(duplicate?.issues ?? []), ...annotated];
     return {
       rowNumber: s.rowNumber,
       sourceRef: s.sourceRef,
+      ...(s.sourcePage === undefined ? {} : { sourcePage: s.sourcePage }),
       raw: s.raw,
       mapped: s.mapped,
       issues,

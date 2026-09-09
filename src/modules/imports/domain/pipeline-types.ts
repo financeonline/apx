@@ -35,6 +35,8 @@ export interface ParsedRow {
   readonly nonTabular?: boolean;
   /** Set when the source marked the row hidden (`IMP-ROW-003`). */
   readonly hidden?: boolean;
+  /** The PDF page this line came from (`import_rows.source_page`), for per-page review (§5.4). */
+  readonly sourcePage?: number;
 }
 
 /** Statement metadata a bank parser can recover from the document itself. */
@@ -184,6 +186,8 @@ export interface ValidatedRow {
   /** The default the review screen offers, which a reviewer may override (§9.2). */
   readonly suggestedDecision?: 'keep' | 'skip';
   readonly suggestedReason?: string;
+  /** The PDF page the line came from, carried to `import_rows.source_page` (§5.4). */
+  readonly sourcePage?: number;
 }
 
 export interface BatchIssue {
