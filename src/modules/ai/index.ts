@@ -10,8 +10,9 @@
  * set and grounding v3 (§7), period resolution (§8), the Claude client (§1.2, ADR-023), and the
  * conversation service bound to (org, user) (§2 step 3, ADR-076).
  *
- * Still to come, in the order the plan builds them: the tool registry (§3), the tool loop (§2),
- * the chat UI, the eval harness (§12) and the feedback queue (§13).
+ * Slice 2 adds the closed tool registry (§3) and `runTool`, the per-call authorisation wrapper (§4).
+ *
+ * Still to come: the tool loop (§2), the chat UI, the eval harness (§12) and the feedback queue (§13).
  *
  * The Anthropic SDK will be imported in exactly one file, `data/claude-client.ts` (§1.2, ADR-023).
  * No key, prompt or tool definition ever reaches the browser.
@@ -122,3 +123,32 @@ export {
   type ModelResponse,
   type ModelTransport,
 } from './data/claude-client';
+
+export {
+  TOOLS,
+  TOOL_NAMES,
+  MAX_TOOL_CALLS,
+  REGENERATION_EXTRA_CALLS,
+  TOOL_TIMEOUT_MS,
+  toolNamed,
+  type AnyTool,
+} from './domain/tools/registry';
+
+export type {
+  ToolCallContext,
+  ToolDefinition,
+  ToolError,
+  ToolErrorCode,
+  ToolMeta,
+  ToolOutcome,
+  ReturnedRefs,
+} from './domain/tools/types';
+
+export {
+  runTool,
+  snapshotAccess,
+  ContextChanged,
+  type RunToolInput,
+  type RunToolOutput,
+  type TurnAccess,
+} from './services/run-tool';
