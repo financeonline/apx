@@ -88,6 +88,27 @@ export default async function ImportsPage({ params }: { params: Promise<{ orgSlu
           </Card>
         )}
       </div>
+      {can(ctx, 'data.export') ? (
+        <div className="mt-6">
+          <Card>
+            <CardBody className="p-4">
+              <h2 className="font-serif text-lg text-ink">Export your data</h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                A CSV of what your figures rest on. Bank lines carry the masked description only; every export is recorded.
+              </p>
+              <ul className="mt-3 flex flex-wrap gap-2 text-sm">
+                {([['ledger', 'Ledger'], ['bank_transactions', 'Bank transactions'], ['invoices', 'Invoices'], ['metrics', 'Metrics']] as const).map(([kind, label]) => (
+                  <li key={kind}>
+                    <a className="rounded-md border border-line px-3 py-1.5 text-ink hover:bg-surface-sunken" href={`/api/exports/${kind}?org=${orgSlug}`} download>
+                      {label} (CSV)
+                    </a>
+                  </li>
+                ))}
+              </ul>
+            </CardBody>
+          </Card>
+        </div>
+      ) : null}
     </>
   );
 }

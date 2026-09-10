@@ -1,6 +1,7 @@
 'use client';
 
-import { useActionState, useEffect, useState } from 'react';
+import { useActionState } from 'react';
+import { DocumentViewer } from '@/components/dashboard/document-viewer';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { confirmPdfPageAction, requestAiReadingAction, statementBalancesAction } from '../actions';
 
@@ -38,28 +39,7 @@ export function AiReadingRequest({ orgSlug, batchId, documentId }: { orgSlug: st
 }
 
 export function DocumentPageView({ orgSlug, documentId, page, filename }: { orgSlug: string; documentId: string; page: number; filename: string }) {
-  const [url, setUrl] = useState<string | null>(null);
-  const [failed, setFailed] = useState<string | null>(null);
-  useEffect(() => {
-    let cancelled = false;
-    fetch(`/api/documents/${documentId}/url?org=${encodeURIComponent(orgSlug)}`)
-      .then(async (response) => {
-        if (!response.ok) throw new Error((await response.json().catch(() => null))?.error?.message ?? 'The document could not be opened.');
-        return (await response.json()) as { url: string };
-      })
-      .then((signed) => { if (!cancelled) setUrl(signed.url); })
-      .catch((error: Error) => { if (!cancelled) setFailed(error.message); });
-    return () => { cancelled = true; };
-  }, [documentId, orgSlug]);
-  if (failed) return <p className="text-sm text-ink-muted">{failed}</p>;
-  if (!url) return <p className="text-sm text-ink-muted">Opening {filename}…</p>;
-  return (
-    <object data={`${url}#page=${page}&toolbar=0`} type="application/pdf" className="h-[520px] w-full rounded-md border border-line" aria-label={`${filename}, page ${page}`}>
-      <p className="p-3 text-sm text-ink-muted">
-        Your browser cannot show the PDF here. <a className="underline" href={url} target="_blank" rel="noreferrer">Open page {page} in a new tab</a>.
-      </p>
-    </object>
-  );
+  return <DocumentViewer orgSlug={orgSlug} documentId={documentId} filename={filename} page={page} height={520} />;
 }
 
 export function PageConfirmation({ orgSlug, batchId, page, pageWide, confirmed }: { orgSlug: string; batchId: string; page: number; pageWide: boolean; confirmed: boolean }) {

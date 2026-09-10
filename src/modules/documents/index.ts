@@ -46,3 +46,4 @@ export {
   type UploadInput,
   type UploadResult,
 } from './services/upload';
+export { listDocuments, getDocument, deleteDocument, deletable, type DocumentSummary } from './services/library';

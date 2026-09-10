@@ -79,7 +79,7 @@ const PRIMARY: readonly NavItem[] = [
 const DATA_MENU: readonly { label: string; path: string; built: boolean }[] = [
   { label: 'Add data', path: 'data/imports/new', built: true },
   { label: 'Imports', path: 'data/imports', built: true },
-  { label: 'Documents', path: 'data/documents', built: false },
+  { label: 'Documents', path: 'data/documents', built: true },
   { label: 'Accounts', path: 'data/accounts', built: true },
 ];
 
