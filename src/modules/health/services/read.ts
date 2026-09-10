@@ -1,6 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { bandFor } from '../domain/config';
+import type { HealthDimensionKey } from '../domain/config';
 import type { DimensionBreakdown, HealthBand } from '../domain/types';
 import * as repo from '../data/repository';
 
@@ -65,6 +66,48 @@ export async function loadHealthCard(
     configVersion: current.configVersion,
     breakdown: current.breakdown,
     updatedAt: current.updatedAt,
+  };
+}
+
+/**
+ * One dimension of a stored score, for the drill-down (`getHealthDimensionDetails` in the Phase 6
+ * brief; FINANCIAL_ENGINE.md §7.4).
+ *
+ * Everything a reader needs to understand one area — its score, the weight it carried, the metrics
+ * it rested on with the snapshot behind each, the rules that moved it, the factor sentences, the
+ * cap, the exclusion reason and the data quality — is already in the breakdown the engine stored.
+ * This picks one out and nothing else: recomputing a dimension on read is how a detail page comes
+ * to disagree with the card that linked to it.
+ */
+export interface HealthDimensionView {
+  readonly periodId: string;
+  readonly configVersion: string;
+  readonly updatedAt: string;
+  /** The bundle behind the score as a whole (§5); each metric below also pins its own snapshot. */
+  readonly evidenceBundleId: string | null;
+  readonly dimension: DimensionBreakdown;
+}
+
+/** NULL when the period has no stored score, or the score has no such dimension. */
+export async function loadHealthDimension(
+  db: SupabaseClient,
+  orgId: string,
+  periodId: string,
+  dimension: HealthDimensionKey,
+  requestId?: string,
+): Promise<HealthDimensionView | null> {
+  const current = await repo.loadHealthScore(db, orgId, periodId, bandFor, requestId);
+  if (current === null) return null;
+
+  const found = current.breakdown.find((entry) => entry.key === dimension);
+  if (found === undefined) return null;
+
+  return {
+    periodId: current.periodId,
+    configVersion: current.configVersion,
+    updatedAt: current.updatedAt,
+    evidenceBundleId: await repo.loadHealthBundleId(db, orgId, current.scoreId),
+    dimension: found,
   };
 }
 

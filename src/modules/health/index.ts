@@ -129,9 +129,11 @@ export {
 export {
   isNotEnoughData,
   loadHealthCard,
+  loadHealthDimension,
   loadHealthHistory,
   loadPortfolioScores,
   type HealthCardView,
+  type HealthDimensionView,
   type HealthHistoryPoint,
   type PortfolioScore,
 } from './services/read';

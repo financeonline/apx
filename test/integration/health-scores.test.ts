@@ -1,4 +1,5 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { loadHealthDimension } from '@/modules/health';
 import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
 
 /**
@@ -295,5 +296,81 @@ describe('one tenant never sees another’s score', () => {
     const scores = await clientFor(otherOwnerId).from('health_scores')
       .select('id').eq('organization_id', orgId);
     expect(scores.data ?? []).toHaveLength(0);
+  });
+});
+
+/**
+ * The dimension drill-down (`getHealthDimensionDetails` in the Phase 6 brief).
+ *
+ * It reads the stored breakdown and nothing else — the point of the assertions below is that what
+ * the detail returns is exactly what the engine wrote, and that a reader from another organisation
+ * gets nothing at all rather than a partly-filled shape.
+ */
+describe('one dimension of a stored score', () => {
+  const detailScore = (periodId: string): Record<string, unknown> => ({
+    period_id: periodId,
+    score: 71,
+    dimensions_used: 6,
+    dimensions_total: 6,
+    config_version: 'health.config.v1',
+    breakdown: [
+      {
+        key: 'profitability', score: 62, weight_config: 25, weight_applied: 25, included: true,
+        exclusion_reason: null,
+        metrics: [{ metric_key: 'net_margin', value: '0.083', snapshot_id: '11111111-1111-4111-8111-111111111111' }],
+        rules: [{ rule: 'P1', result: '0.05-0.15', points: 15 }],
+        conditions: [], capped: false, cap_reason: null,
+        positives: ['Net margin of 8.3% is healthy'], negatives: [],
+        positives_structured: [], negatives_structured: [],
+        data_quality: { completeness: 0.94, warnings: [] },
+      },
+      {
+        key: 'customer_quality', score: null, weight_config: 10, weight_applied: 0, included: false,
+        exclusion_reason: 'required_metric_missing', metrics: [], rules: [], conditions: [],
+        capped: false, cap_reason: null, positives: [], negatives: [],
+        positives_structured: [], negatives_structured: [],
+        data_quality: { completeness: 0, warnings: [] },
+      },
+    ],
+  });
+
+  beforeEach(() => {
+    // The fingerprint is stored as bytea: hex only.
+    const run = startRun(Date.now().toString(16).slice(-8));
+    finishHealth(run, [detailScore(periodMar)], [periodMar]);
+    serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'succeeded' });
+  });
+
+  it('returns the stored dimension whole: score, weight, metrics with their snapshots, rules, factors and data quality', async () => {
+    const view = await loadHealthDimension(clientFor(ownerId), orgId, periodMar, 'profitability');
+    expect(view).not.toBeNull();
+    expect(view!.periodId).toBe(periodMar);
+    expect(view!.configVersion).toBe('health.config.v1');
+
+    const dimension = view!.dimension;
+    expect(dimension.score).toBe(62);
+    expect(dimension.weight_config).toBe(25);
+    expect(dimension.included).toBe(true);
+    // Each metric pins the snapshot the score rested on, which is what the evidence link opens (§7.4).
+    expect(dimension.metrics.map((m) => m.snapshot_id)).toEqual(['11111111-1111-4111-8111-111111111111']);
+    expect(dimension.rules.map((r) => r.rule)).toEqual(['P1']);
+    expect(dimension.positives).toEqual(['Net margin of 8.3% is healthy']);
+    expect(dimension.data_quality.completeness).toBe(0.94);
+  });
+
+  it('returns an excluded dimension with its reason rather than pretending it scored', async () => {
+    const view = await loadHealthDimension(clientFor(ownerId), orgId, periodMar, 'customer_quality');
+    expect(view!.dimension.included).toBe(false);
+    expect(view!.dimension.score).toBeNull();
+    expect(view!.dimension.exclusion_reason).toBe('required_metric_missing');
+  });
+
+  it('is NULL for a dimension the stored score does not carry, and for a period with no score', async () => {
+    expect(await loadHealthDimension(clientFor(ownerId), orgId, periodMar, 'banking_health')).toBeNull();
+    expect(await loadHealthDimension(clientFor(ownerId), orgId, periodApr, 'profitability')).toBeNull();
+  });
+
+  it('gives another organisation’s reader nothing at all', async () => {
+    expect(await loadHealthDimension(clientFor(otherOwnerId), orgId, periodMar, 'profitability')).toBeNull();
   });
 });

@@ -1,7 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
-  HEALTH_CONFIG_VERSION, MIN_REQUIRED_COMPLETENESS, PROXY_CAP, PROXY_CAP_NOTE,
-  computeHealthScore, dimensionScoreFromRules, scoreFromBreakdown,
+  DIMENSION_WEIGHTS, HEALTH_CONFIG_VERSION, HEALTH_DIMENSION_KEYS, MIN_REQUIRED_COMPLETENESS,
+  PROXY_CAP, PROXY_CAP_NOTE, computeHealthScore, dimensionScoreFromRules, scoreFromBreakdown,
+  type DimensionBreakdown, type RuleApplication,
 } from '@/modules/health';
 import {
   baselineSnapshots, healthInput, withMetric, withoutMetric,
@@ -197,5 +198,54 @@ describe('determinism', () => {
     const reversed = computeHealthScore(healthInput({ snapshots: [...snapshots].reverse() }))!;
     expect(reversed.score).toBe(forward.score);
     expect(reversed.breakdown.map((d) => d.score)).toEqual(forward.breakdown.map((d) => d.score));
+  });
+});
+
+/**
+ * The 0 and 100 boundaries (Phase 6 brief).
+ *
+ * §7.3 starts every dimension at 50 and lets rules add and subtract; profitability's four rules can
+ * reach +55 and −65, so both bounds are reachable from real rule combinations rather than from
+ * contrived arithmetic. The clamp is what stops a run of good months reporting 105 out of 100, and
+ * a catastrophic one reporting a negative score — either would be visibly wrong to a customer, and
+ * both would break the "0–100" the product promises.
+ */
+describe('score boundaries (0 and 100)', () => {
+  const rules = (points: readonly number[]): RuleApplication[] =>
+    points.map((p, i) => ({ rule: `R${i + 1}`, result: 'band', points: p, value: '0', skipped_reason: null }));
+  const dimension = (over: Partial<DimensionBreakdown>): DimensionBreakdown => ({
+    key: 'profitability', score: null, weight_config: 25, weight_applied: 25, included: true,
+    exclusion_reason: null, metrics: [], rules: [], conditions: [], capped: false, cap_reason: null,
+    positives: [], negatives: [], positives_structured: [], negatives_structured: [],
+    data_quality: { completeness: 1, warnings: [] }, ...over,
+  });
+
+  it('clamps a dimension at 100 when its rules would take it past the top', () => {
+    // 50 + 30 + 10 + 10 + 5 = 105 — profitability's own maximum.
+    expect(dimensionScoreFromRules(dimension({ rules: rules([30, 10, 10, 5]) }))).toBe(100);
+    expect(dimensionScoreFromRules(dimension({ rules: rules([30, 10, 10, 5, 40]) }))).toBe(100);
+  });
+
+  it('clamps a dimension at 0 when its rules would take it below the bottom', () => {
+    // 50 − 30 − 10 − 15 − 10 = −15 — profitability's own minimum.
+    expect(dimensionScoreFromRules(dimension({ rules: rules([-30, -10, -15, -10]) }))).toBe(0);
+    expect(dimensionScoreFromRules(dimension({ rules: rules([-30, -10, -15, -10, -40]) }))).toBe(0);
+  });
+
+  it('lands exactly on 100 and exactly on 0 without stepping past them', () => {
+    expect(dimensionScoreFromRules(dimension({ rules: rules([50]) }))).toBe(100);
+    expect(dimensionScoreFromRules(dimension({ rules: rules([-50]) }))).toBe(0);
+  });
+
+  it('reports an overall 100 when every included dimension is at the top, and 0 when all are at the bottom', () => {
+    const all = (score: number) => HEALTH_DIMENSION_KEYS.map((key) => dimension({
+      key, score, weight_config: DIMENSION_WEIGHTS[key], weight_applied: DIMENSION_WEIGHTS[key],
+    }));
+    expect(scoreFromBreakdown(all(100))).toBe(100);
+    expect(scoreFromBreakdown(all(0))).toBe(0);
+  });
+
+  it('a capped dimension cannot exceed the cap even when its rules reach the top', () => {
+    expect(dimensionScoreFromRules(dimension({ rules: rules([30, 10, 10, 5]), capped: true }))).toBe(PROXY_CAP);
   });
 });
