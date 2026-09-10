@@ -23,6 +23,8 @@ export default async function PlatformLayout({ children }: { children: React.Rea
             <Link href="/platform/assignments" className="text-ink-muted hover:text-ink">Assignments</Link>
             <Link href="/platform/jobs" className="text-ink-muted hover:text-ink">Jobs</Link>
             <Link href="/platform/ai-feedback" className="text-ink-muted hover:text-ink">AI feedback</Link>
+            <Link href="/platform/audit" className="text-ink-muted hover:text-ink">Audit</Link>
+            <Link href="/platform/settings" className="text-ink-muted hover:text-ink">Settings</Link>
           </nav>
           <Link href="/account" className="ml-auto text-sm text-ink-muted hover:text-ink">Account</Link>
         </div>

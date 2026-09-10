@@ -473,6 +473,7 @@ Common contract (ADR-026, ADR-043, ADR-044.3): `SECURITY DEFINER`, owned by `mot
 | `is_recalculating(org)` | one boolean: whether a `calculation.run` job is queued or running | `jobs` is readable by platform staff only, and widening that policy to render a banner would expose payloads, worker state and queue depth to a tenant. The function answers the one question the interface needs and nothing else. It keys off the JOB, never off `calculation_runs.status`, so an orphaned run row cannot leave the banner up forever (UX_ARCHITECTURE.md §7.1; F-D-03) |
 | `org_members(org)` / `org_invitations(org)` / `org_advisers(org)` | the team, pending invitations, assigned employees | Joins `profiles`, which is own-row-only under RLS; the function is the audited seam that exposes a co-member's name |
 | `org_audit_events(org, …)` | the organization's audit trail | `audit.view` holders only, paged |
+| `platform_audit_events(org?, action?, actor?, from?, to?, limit, offset)` | super admin at aal2 (`app.require_super_admin(true)`) — an employee holds `audit.view` for assigned organisations only and must not read the platform's whole trail (ADR-088) | cross-organisation and platform-level events; `action` matches a prefix; resolves the organisation and the actor's name, which `profiles`' own-row-only RLS otherwise hides; paged, 500 max | — | audit_events (read) | `/platform/audit` |
 
 Two mutations in §14.1 have a second form for the same reason:
 

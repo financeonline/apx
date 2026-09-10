@@ -1,3 +1,4 @@
+import Link from 'next/link';
 import { toMotionError } from '@/core/errors';
 import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardBody, EmptyState, Badge } from '@/components/ui/surfaces';
@@ -37,7 +38,7 @@ export default async function PlatformOrganizationsPage() {
                 <TBody>
                   {organizations.map((organization) => (
                     <TR key={organization.id}>
-                      <TD>{organization.name}</TD>
+                      <TD><Link href={`/platform/organizations/${organization.id}`} className="underline">{organization.name}</Link></TD>
                       <TD>{organization.slug}</TD>
                       <TD>{organization.plan}</TD>
                       <TD>
