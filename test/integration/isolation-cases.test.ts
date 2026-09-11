@@ -205,3 +205,33 @@ describe('case 15 — a stranger cannot tell a real organisation from an invente
       .toBe(`ITest Isolation ${RUN}`);
   });
 });
+
+/**
+ * A tenant user never reaches the platform's own trail (Phase 8 brief; SECURITY_MODEL.md §14;
+ * ADR-088).
+ *
+ * `audit_events` carries both an organisation's own history and the platform's — the latter with
+ * `organization_id IS NULL`. One policy separates them, and an owner holding `audit.view` for their
+ * own organisation must not cross it. Asserted here because the two live in one table: a policy
+ * rewritten later could widen the tenant's half without anyone noticing.
+ */
+describe('a tenant user reads their own trail and none of the platform’s', () => {
+  it('sees their organisation’s events, no platform events, and is refused the global search', async () => {
+    adminSql(`
+      insert into public.audit_events (organization_id, actor_user_id, actor_type, action, target_table)
+      values (null, '${superAdmin}', 'platform_admin', 'platform.settings_changed', 'platform_settings')`);
+
+    const o = clientFor(ownerA);
+    const mine = await o.from('audit_events').select('id').eq('organization_id', orgA);
+    expect(mine.error).toBeNull();
+    expect((mine.data ?? []).length, 'an owner sees their own organisation’s trail').toBeGreaterThan(0);
+
+    const platform = await o.from('audit_events').select('id').is('organization_id', null);
+    expect(platform.error).toBeNull();
+    expect(platform.data ?? [], 'and nothing the platform did to itself').toHaveLength(0);
+
+    // The global search refuses outright rather than returning an empty list (ADR-088).
+    const search = await o.schema('api').rpc('platform_audit_events', {});
+    expect(sqlstate(search.error)).toBe('42501');
+  });
+});

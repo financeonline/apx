@@ -721,6 +721,66 @@ describe('the permission stop at the document level (§9, §10, CD-17)', () => {
   });
 });
 
+/**
+ * A platform employee reaches evidence only for the organisations assigned to them (Phase 8 brief;
+ * RBAC_MATRIX.md §2.1, §3.5; SECURITY_MODEL.md §4; ADR-044.1).
+ *
+ * The bundle and its items are org-scoped rows read through `app.accessible_org_ids()`, so the stop
+ * is the assignment itself rather than a rule written per table. Asserted because evidence is the
+ * layer that makes a figure checkable, and an unassigned employee reading it would be a quiet
+ * disclosure of a customer's records — the mistake ADR-082 found in the other direction, where a
+ * policy locked out the employee who was supposed to look.
+ */
+describe('an employee reaches evidence only where assigned (§9)', () => {
+  let assignedId: string;
+  let unassignedId: string;
+  let bundleId: string;
+
+  /** Platform staff resolve nothing without a second factor (ADR-044.1), so the session carries aal2. */
+  const employeeContext = (userId: string): AccessContext => ({
+    userId, orgId, orgSlug: null, effectiveRole: 'employee', permissions: permissionsFor('employee'),
+    actorType: 'employee', db: clientFor(userId, { email: `employee@${DOMAIN}`, aal: 'aal2' }),
+    requestId: `itest-${RUN}`, now: () => new Date('2026-06-15T00:00:00Z'), organizationStatus: 'active',
+  });
+
+  beforeAll(async () => {
+    assignedId = createAuthUser(`assigned@${DOMAIN}`);
+    unassignedId = createAuthUser(`unassigned@${DOMAIN}`);
+    adminSql(`
+      insert into public.platform_users (user_id, platform_role, status) values
+        ('${assignedId}', 'employee', 'active'), ('${unassignedId}', 'employee', 'active');
+      update public.profiles set mfa_enrolled_at = now() where id in ('${assignedId}', '${unassignedId}');
+      insert into public.organization_assignments (organization_id, employee_user_id, status)
+      values ('${orgId}', '${assignedId}', 'active');`);
+    bundleId = await buildBundleForMetric(contextFor(ownerId, 'owner'), snapshotOf('revenue'));
+  });
+
+  it('the assigned employee opens the bundle and descends to the records', async () => {
+    const view = await loadEvidenceDrawer(employeeContext(assignedId), bundleId);
+    expect(view.metric?.metricKey).toBe('revenue');
+    expect(view.records[0]!.selection.count).toBeGreaterThan(0);
+  });
+
+  it('the unassigned employee is told NotFound, learning nothing about whether it exists (§14)', async () => {
+    await expect(loadEvidenceDrawer(employeeContext(unassignedId), bundleId))
+      .rejects.toBeInstanceOf(NotFound);
+
+    // And nothing of the underlying rows either, addressed directly.
+    const direct = await clientFor(unassignedId, { aal: 'aal2' })
+      .from('evidence_items').select('id').eq('bundle_id', bundleId);
+    expect(direct.data ?? []).toHaveLength(0);
+  });
+
+  it('revoking the assignment closes it again', async () => {
+    adminSql(`update public.organization_assignments set status = 'revoked'
+               where organization_id = '${orgId}' and employee_user_id = '${assignedId}'`);
+    await expect(loadEvidenceDrawer(employeeContext(assignedId), bundleId))
+      .rejects.toBeInstanceOf(NotFound);
+    adminSql(`update public.organization_assignments set status = 'active'
+               where organization_id = '${orgId}' and employee_user_id = '${assignedId}'`);
+  });
+});
+
 describe('a bundle belongs to exactly one organisation (§8.4, isolation case 3)', () => {
   it('another organisation’s context gets NotFound, not a permission error', async () => {
     const strangerId = createAuthUser(`stranger@${DOMAIN}`);
