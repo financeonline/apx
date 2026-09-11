@@ -28,6 +28,8 @@ let ownerId: string;
 let clientUserId: string;
 let orgId: string;
 let mayPeriodId: string;
+let ledgerDocumentId: string;
+let aLedgerEntryId: string;
 let periodContext: PeriodContext;
 
 const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
@@ -89,7 +91,10 @@ beforeAll(async () => {
     adminSql(`
       insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id)
       values ('${orgId}', 'ledger_entries', '${entryId}', 'accepted', '${batchId}')`);
+    // Kept so the two Phase 9 evidence tools can be exercised against a real row and its real file.
+    aLedgerEntryId = entryId;
   };
+  ledgerDocumentId = documentId;
   post('revenue', 'credit', '20000.00', '10', 2);
   post('revenue', 'credit', '5000.00', '18', 3);
   post('cost_of_sales', 'debit', '6000.00', '12', 4);
@@ -140,6 +145,8 @@ const INPUTS: Record<string, () => unknown> = {
   get_transactions_for_evidence: () => ({ metric_snapshot_id: snapshotOf('revenue') }),
   get_data_coverage: () => ({}),
   get_actions: () => ({}),
+  get_record_evidence: () => ({ record_type: 'ledger_entry', record_id: aLedgerEntryId }),
+  get_document_evidence: () => ({ document_id: ledgerDocumentId }),
 };
 
 function snapshotOf(metricKey: string): string {
@@ -150,9 +157,11 @@ function snapshotOf(metricKey: string): string {
 }
 
 describe('the registry is closed and complete', () => {
-  it('has exactly the fifteen tools §3 names, each with a permission and a schema', () => {
-    expect(TOOL_NAMES).toHaveLength(15);
-    expect(new Set(TOOL_NAMES).size).toBe(15);
+  it('has exactly the seventeen tools §3 names, each with a permission and a schema', () => {
+    // Fifteen through Phase 8; `get_record_evidence` and `get_document_evidence` added in Phase 9
+    // (ADR-097). The count is asserted so a tool cannot be added without this test being edited.
+    expect(TOOL_NAMES).toHaveLength(17);
+    expect(new Set(TOOL_NAMES).size).toBe(17);
     for (const tool of TOOLS) {
       expect(tool.permission, `${tool.name} has a permission`).toBeTruthy();
       expect(tool.description.length, `${tool.name} tells the model when to use it`).toBeGreaterThan(40);
@@ -189,6 +198,90 @@ describe('the role × tool matrix (§10.1)', () => {
     const { result, persisted } = await invoke(ctx, 'get_metric', INPUTS.get_metric!());
     expect(persisted.authorized).toBe(true);
     expect(result.ok, JSON.stringify(result.data)).toBe(true);
+  });
+});
+
+// -----------------------------------------------------------------------------------------------
+// The two Phase 9 evidence tools (ADR-097)
+// -----------------------------------------------------------------------------------------------
+
+describe('the analyst can reach the two ends of the evidence chain (ADR-096, ADR-097)', () => {
+  it('walks one record to its import and the line of the file it came from', async () => {
+    const { result, persisted } = await invoke(
+      contextFor(ownerId, 'owner'), 'get_record_evidence',
+      { record_type: 'ledger_entry', record_id: aLedgerEntryId },
+    );
+    expect(persisted.authorized).toBe(true);
+    expect(result.ok, JSON.stringify(result.data)).toBe(true);
+
+    const data = result.data as Record<string, unknown>;
+    expect(data.counted, 'an accepted, unsuperseded row is inside the figures').toBe(true);
+    expect(data.has_document).toBe(true);
+    expect(data.document_id).toBe(ledgerDocumentId);
+    expect((data.imported_by as { import_id: string } | null)?.import_id).toBeTruthy();
+
+    // The amount is a branded envelope, not a bare number the model could restate its own way.
+    expect(data.amount).toMatchObject({ unit: 'money' });
+    // Imported text travels wrapped, so an instruction inside a description is data (§9).
+    expect(JSON.stringify(data.where_in_file)).toMatch(/csv:row:/);
+  });
+
+  it('tells the analyst what rests on one file, in records and months', async () => {
+    const { result } = await invoke(
+      contextFor(ownerId, 'owner'), 'get_document_evidence', { document_id: ledgerDocumentId },
+    );
+    expect(result.ok, JSON.stringify(result.data)).toBe(true);
+    const data = result.data as Record<string, unknown>;
+
+    expect(data.records_in_figures).toMatchObject({ unit: 'count' });
+    expect(data.contributed_to, 'the months are the reader’s labels, not ids').toContain('May 2026');
+    expect(JSON.stringify(data), 'no table name reaches the model').not.toMatch(/ledger_entries/);
+  });
+
+  it('refuses a client the document tool, and gives them no filename from the record tool', async () => {
+    const ctx = contextFor(clientUserId, 'client');
+
+    const document = await invoke(ctx, 'get_document_evidence', { document_id: ledgerDocumentId });
+    expect(document.result.ok).toBe(false);
+    expect((document.result.data as { code: string }).code).toBe('PERMISSION_DENIED');
+    expect(document.persisted.authorized, 'and it is recorded as an unauthorised attempt').toBe(false);
+    expect(document.persisted.denial_reason).toBe('missing:documents.view');
+
+    /*
+     * The record tool IS open to a client — the row is theirs to see. What must not travel is the
+     * file: §10 and CD-17 stop a client at the document, and the line reference is what lets them
+     * ask an admin for the right thing.
+     */
+    const record = await invoke(ctx, 'get_record_evidence', { record_type: 'ledger_entry', record_id: aLedgerEntryId });
+    expect(record.persisted.authorized).toBe(true);
+    expect(record.result.ok).toBe(true);
+    const data = record.result.data as Record<string, unknown>;
+    expect(data.counted).toBe(true);
+    expect(data.document_id, 'a client is not told which file it is').toBeNull();
+    expect(JSON.stringify(data.document_filename)).not.toMatch(/gl\.csv/);
+  });
+
+  it('answers NOT FOUND for a record and a document of another organisation', async () => {
+    const ctx = contextFor(ownerId, 'owner');
+    const invented = '00000000-0000-4000-8000-000000000000';
+
+    const record = await invoke(ctx, 'get_record_evidence', { record_type: 'ledger_entry', record_id: invented });
+    expect(record.result.ok).toBe(false);
+    expect((record.result.data as { code: string }).code).toBe('NOT_FOUND');
+
+    const document = await invoke(ctx, 'get_document_evidence', { document_id: invented });
+    expect(document.result.ok).toBe(false);
+    expect((document.result.data as { code: string }).code).toBe('NOT_FOUND');
+  });
+
+  it('refuses a record type the enum does not name, before any query runs', async () => {
+    const { result } = await invoke(
+      contextFor(ownerId, 'owner'), 'get_record_evidence',
+      { record_type: 'ledger_entries', record_id: aLedgerEntryId },
+    );
+    expect(result.ok, 'a table name is not a record type').toBe(false);
+    // Refused before any query runs; the code is the pipeline's, not this tool's invention.
+    expect(['INVALID_INPUT', 'NOT_FOUND']).toContain((result.data as { code: string }).code);
   });
 });
 

@@ -4,7 +4,8 @@ import { loadHealthCard } from '@/modules/health';
 import { loadPeriods } from '@/modules/dashboard';
 import { isMetricKey, metricDefinition } from '@/modules/financial-engine';
 import {
-  getBundle, getDocumentReference, resolveItem, type EvidenceItemView,
+  RECORD_KINDS, getBundle, getDocumentEvidence, getDocumentReference, getRecordProvenance,
+  resolveItem, type EvidenceItemView, type RecordKind,
 } from '@/modules/evidence';
 import { NotFound, PermissionDenied } from '@/core/errors';
 import { can } from '@/core/permissions';
@@ -312,3 +313,119 @@ async function queryItemOfSnapshot(call: ToolCallContext, snapshotId: string): P
   return firstQueryItem(call, bundleId);
 }
 
+// -----------------------------------------------------------------------------------------------
+// 16. get_record_evidence — one record's own history (Phase 9; ADR-096, ADR-097)
+// -----------------------------------------------------------------------------------------------
+
+/**
+ * The record end of the chain, as a tool.
+ *
+ * Phase 8 built `getRecordProvenance` for a reader who is looking at one row. The analyst needs the
+ * same answer for the same reason: asked "is that £4,000 payment real?", the honest reply names the
+ * import it came in with and the line of the file, and says whether the row is still counted — and
+ * before this tool existed there was no way for the model to learn any of that. It calls the Phase 8
+ * service; it does not re-derive a single field.
+ *
+ * `financials.view`, the same permission the service requires, so this opens nothing new. The
+ * document half is whatever `getDocumentReference` gives THIS caller: a client gets `has_document`
+ * and the line, never a filename (§4, §10, CD-17), because the service has already decided that and
+ * deciding it again here would be a second place for the rule to drift.
+ */
+const RECORD_KIND_OF: Readonly<Record<string, RecordKind>> = {
+  ledger_entry: 'ledger', bank_transaction: 'bank', invoice: 'invoice', period_balance: 'balance',
+};
+
+export const getRecordEvidence: ToolDefinition<{ record_type: string; record_id: string }, unknown> = {
+  name: 'get_record_evidence',
+  description:
+    'Where one record came from and whether it still counts towards the figures: its month, the import that brought it in, and whether a source file exists behind it. Use it when the reader asks about a specific transaction, invoice or line rather than a figure.',
+  permission: 'financials.view',
+  input: z.object({
+    record_type: z.enum(['ledger_entry', 'bank_transaction', 'invoice', 'period_balance']),
+    record_id: uuid,
+  }),
+  async run(input, call) {
+    try {
+      const kind = RECORD_KIND_OF[input.record_type]!;
+      const record = await getRecordProvenance(call.ctx, kind, input.record_id);
+      return ok({
+        record_type: input.record_type,
+        record_id: record.recordId,
+        /* Imported text: a description is something a customer typed into a spreadsheet (§9). */
+        description: untrusted('description', record.description),
+        date: record.date,
+        amount: money(record.amount, record.currency),
+        period: record.periodLabel,
+        /*
+         * §6: the model may not call a row a verified fact that the server does not. `counted` is
+         * the resolver's own predicate, so a superseded or rejected row cannot be quoted as though
+         * it were inside the figures.
+         */
+        counted: record.standing.countsTowardsFigures,
+        status: record.standing.status,
+        assurance_level: record.standing.assurance,
+        superseded: record.standing.superseded,
+        rejected_reason: untrusted('rejected_reason', record.standing.rejectedReason),
+        imported_by: record.importedBy === null ? null : {
+          import_id: record.importedBy.batchId,
+          committed_at: record.importedBy.committedAt,
+          covering_from: record.importedBy.periodStart,
+          covering_to: record.importedBy.periodEnd,
+        },
+        /*
+         * Whether a file exists, and — only for a role that may know it — which. A row with no file
+         * behind it is a real state and is reported as one: §8.6 forbids inventing a provenance.
+         */
+        has_document: record.document !== null,
+        document_id: record.document?.documentId ?? null,
+        document_filename: untrusted('filename', record.document?.filename ?? null),
+        where_in_file: untrusted('source_ref', record.document?.sourceRef ?? null),
+      }, { periods: [], calculation_run_id: null }, call);
+    } catch (e) { const mapped = asToolError(e); if (mapped) return mapped; throw e; }
+  },
+};
+
+// -----------------------------------------------------------------------------------------------
+// 17. get_document_evidence — what rests on one file (Phase 9; ADR-096, ADR-097)
+// -----------------------------------------------------------------------------------------------
+
+/**
+ * The file end of the chain, as a tool.
+ *
+ * `documents.view`, which a client does not hold — so a client asking "what is in the sales export?"
+ * is refused by the registry before this runs, exactly as `get_source_document_reference` is. The
+ * filename is imported text and travels wrapped; the counts are counts, not money.
+ *
+ * Months are stated as a CONTRIBUTION, matching the service: a month's figures rest on every file
+ * covering it, and a tool output that said "produced" would hand the model a claim the data does not
+ * support.
+ */
+export const getDocumentEvidenceTool: ToolDefinition<{ document_id: string }, unknown> = {
+  name: 'get_document_evidence',
+  description:
+    'What rests on one uploaded file: how many records from it are in the figures, and which months it contributed to. A summary only — never the file’s contents. Not available to every role.',
+  permission: 'documents.view',
+  input: z.object({ document_id: uuid }),
+  async run(input, call) {
+    try {
+      const evidence = await getDocumentEvidence(call.ctx, input.document_id);
+      return ok({
+        document_id: evidence.documentId,
+        original_filename: untrusted('filename', evidence.filename),
+        document_kind: evidence.documentKind,
+        uploaded_at: evidence.uploadedAt,
+        records_in_figures: count(evidence.recordsCommitted, 0),
+        contributed_to: evidence.periods.map((p) => p.label),
+        imports: evidence.imports.map((i) => ({
+          import_id: i.batchId,
+          status: i.status,
+          rolled_back: i.rolledBackAt !== null,
+          records_committed: i.rowsCommitted === null ? null : count(i.rowsCommitted, 0),
+        })),
+      }, { periods: [], calculation_run_id: null }, call);
+    } catch (e) { const mapped = asToolError(e); if (mapped) return mapped; throw e; }
+  },
+};
+
+/** Kept beside the tools so the record-kind map cannot drift from `modules/evidence` (ADR-096). */
+void RECORD_KINDS;
