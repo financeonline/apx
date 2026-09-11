@@ -14,15 +14,22 @@
  *   * `buildBundleForMetric` — materialises a metric's bundle on demand from its `evidence_query`;
  *   * `getDocumentReference` — the level-4 signed URL, minted only behind an audit row (ADR-038.1).
  *
- * Still deliberately absent, and where each lands:
- *   * `buildBundleForHealthScore` — EVIDENCE_MODEL.md §5 puts it at the health score write, which is
- *     Phase 8's engine path and was not built there; a health factor's "Why?" therefore opens the
- *     bundle of the metric behind it rather than a `health_score` bundle of its own;
- *   * `buildBundleForAlert` — exists, but in SQL: `app.build_alert_bundle`, called by
- *     `api_server.persist_alerts` inside the evaluation transaction (Phase 9);
- *   * `buildBundleForAiResponse` — needs grounding v2 and `ai_tool_calls` (Phase 11);
- *   * `cloneBundleForAction` — needs `actions` (Phase 12).
- * None of them is stubbed here: an empty function that returned a bundle id would look implemented.
+ * Added in Phase 8 (the two ends of the chain, ADR-096):
+ *   * `getRecordProvenance` — one record's own history: is it still counted, which import brought
+ *     it in, and which line of which file it is;
+ *   * `getDocumentEvidence` — one file's reach: the imports it produced, the months they declare,
+ *     and how many records rest on it.
+ *
+ * Every §5 producer now builds its bundle, and each is written where the write happens rather than
+ * here — which is why no builder but the metric one is exported from this module:
+ *   * health score — `modules/health/services/score-run.ts` (`evidenceFor`), written inside
+ *     `api_server.finish_health` so the bundle and the score land in one transaction;
+ *   * alert — `app.build_alert_bundle`, called by `api_server.persist_alerts` per revision;
+ *   * AI response — `api_server.ai_persist_turn`, after grounding;
+ *   * action — `app.clone_bundle_for_action`, which copies the source's items so an action's
+ *     evidence is frozen even when the alert behind it is re-evaluated;
+ *   * report — `api_server.record_report_file`.
+ * None is stubbed: an empty function that returned a bundle id would look implemented.
  */
 
 export {
@@ -134,3 +141,18 @@ export {
   type EvidenceRefView,
   type ResolvedItem,
 } from './services/bundle';
+
+export {
+  RECORD_KINDS,
+  RECORD_KIND_LABELS,
+  getDocumentEvidence,
+  getRecordProvenance,
+  isRecordKind,
+  mayOpenDocuments,
+  type DocumentEvidence,
+  type DocumentImport,
+  type RecordImport,
+  type RecordKind,
+  type RecordProvenance,
+  type RecordStanding,
+} from './services/provenance';

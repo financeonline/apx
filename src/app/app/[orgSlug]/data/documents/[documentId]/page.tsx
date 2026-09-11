@@ -3,6 +3,7 @@ import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { can } from '@/core/permissions';
 import { deletable, getDocument } from '@/modules/documents';
+import { getDocumentEvidence } from '@/modules/evidence';
 import { getAccessContext } from '@/modules/tenancy';
 import { Badge, Card, CardBody, CardHeader, DetailList, PageHeader } from '@/components/ui/surfaces';
 import { formatDateTime } from '@/components/labels';
@@ -20,8 +21,14 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
   if (!/^[0-9a-f-]{36}$/i.test(documentId)) notFound();
 
   let document;
+  let evidence;
   try {
-    document = await getDocument(ctx, documentId);
+    // Both read through the caller's own client; the second adds no reach, only the other half of
+    // the question (ADR-096). One await so the two round trips overlap.
+    [document, evidence] = await Promise.all([
+      getDocument(ctx, documentId),
+      getDocumentEvidence(ctx, documentId),
+    ]);
   } catch (error) {
     if (isMotionError(error) && error.code === 'NOT_FOUND') notFound();
     throw error;
@@ -52,6 +59,43 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
                 { label: 'Text layer', value: document.hasTextLayer === null ? '—' : document.hasTextLayer ? 'yes' : 'no (scanned)' },
               ]} />
               {can(ctx, 'imports.review') && deletable(document) ? <div className="mt-4"><DeleteDocumentControl orgSlug={orgSlug} documentId={document.id} filename={document.filename} /></div> : null}
+            </CardBody>
+          </Card>
+          <Card>
+            <CardHeader title="What rests on this file" />
+            <CardBody>
+              {/*
+                * The other end of the evidence chain (EVIDENCE_MODEL.md §1, ADR-096). A reader who
+                * has followed a figure down to a file can now turn round and ask what else that file
+                * is behind. "Contributed to" and not "produced": a month's figures rest on every file
+                * covering it, and only a committed import that has not been rolled back counts.
+                */}
+              {evidence.recordsCommitted === 0 ? (
+                <p className="text-sm text-ink-muted">
+                  Nothing rests on this file yet. Its records reach the figures when an import from it
+                  is committed.
+                </p>
+              ) : (
+                <div className="flex flex-col gap-3 text-sm">
+                  <p className="text-ink">
+                    {evidence.recordsCommitted.toLocaleString('en-GB')} {evidence.recordsCommitted === 1 ? 'record' : 'records'} in your figures.
+                  </p>
+                  {evidence.periods.length === 0 ? null : (
+                    <div>
+                      <p className="text-ink-muted">Months it contributed to</p>
+                      <ul className="mt-1 flex flex-wrap gap-x-3 gap-y-1">
+                        {evidence.periods.map((period) => (
+                          <li key={period.id}>
+                            <Link href={`/app/${orgSlug}/money?period=${period.id}`} className="text-accent underline underline-offset-2">
+                              {period.label}
+                            </Link>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              )}
             </CardBody>
           </Card>
           <Card>

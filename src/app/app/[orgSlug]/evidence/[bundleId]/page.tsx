@@ -4,7 +4,8 @@ import { isMotionError } from '@/core/errors';
 import { formatValue, missingReasonText, statusFor, BASIS_TEXT } from '@/modules/dashboard';
 import type { AssuranceLevel, DataQuality } from '@/modules/financial-engine';
 import {
-  DEFAULT_DESCRIPTOR_LIMIT, getDocumentReference, loadEvidenceDrawer, type DocumentReference,
+  DEFAULT_DESCRIPTOR_LIMIT, RECORD_KINDS, getDocumentReference, loadEvidenceDrawer,
+  type DocumentReference, type RecordKind,
 } from '@/modules/evidence';
 import { getAccessContext } from '@/modules/tenancy';
 import { StatusBadgeView } from '@/components/dashboard';
@@ -279,7 +280,7 @@ export default async function EvidenceBundlePage({
               <div className="mt-4">
                 <TableWrap>
                   <table className="w-full text-sm">
-                    <THead columns={['Date', 'Description', 'Amount', 'Status', 'Source']} />
+                    <THead columns={['Date', 'Description', 'Amount', 'Status', 'Source', 'This row']} />
                     <TBody>
                       {block.selection.rows.map((record) => (
                         <TR key={record.id}>
@@ -303,6 +304,26 @@ export default async function EvidenceBundlePage({
                               Source
                               <span className="sr-only"> document for this row</span>
                             </Link>
+                          </TD>
+                          {/*
+                            * The chain, turned round (ADR-096). "Source" stays where it was: it opens
+                            * the FILE behind this row, in place, which is what a reader reconciling a
+                            * figure wants. This asks a different question — is this one row counted,
+                            * which import brought it in, has something replaced it — and so it is a
+                            * page of its own rather than a fourth panel on this one.
+                            */}
+                          <TD>
+                            {recordKindOf(record.table) === null ? (
+                              <span className="text-ink-faint">—</span>
+                            ) : (
+                              <Link
+                                href={`/app/${orgSlug}/evidence/record/${recordKindOf(record.table)}/${record.id}`}
+                                className="text-accent underline underline-offset-2"
+                              >
+                                Where from?
+                                <span className="sr-only"> — the history of this record</span>
+                              </Link>
+                            )}
                           </TD>
                         </TR>
                       ))}
@@ -424,4 +445,11 @@ function formatInstant(iso: string | null): string {
   return Number.isNaN(date.getTime())
     ? 'an earlier run'
     : date.toLocaleDateString('en-GB', { day: 'numeric', month: 'long', year: 'numeric' });
+}
+
+/** The four record tables in the product's words; anything else has no record page (ADR-096). */
+function recordKindOf(table: string | null): RecordKind | null {
+  if (table === null) return null;
+  const found = Object.entries(RECORD_KINDS).find(([, name]) => name === table);
+  return found === undefined ? null : (found[0] as RecordKind);
 }

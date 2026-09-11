@@ -151,6 +151,35 @@ For `period_balances`-based metrics the record item is the `period_balance` row;
 
 ---
 
+## 5.2 The chain read backwards (Phase 8, ADR-096)
+
+§5 describes how a bundle is BUILT, which is always forward: a producer writes a figure and pins what
+it rests on. The same chain is also read in the other direction, by a reader who is looking at one
+record or one file rather than at a figure. That question has no bundle behind it — there is nothing
+to pin, because nothing was concluded — so it is answered from the stored columns directly.
+
+| Service | Question | Reads |
+|---|---|---|
+| `getRecordProvenance(ctx, kind, id)` | "Where did this row come from, and is it still counted?" | the record's own `record_status` / `superseded_by` / `assurance_level`, its `period_id`, its `import_batch_id`, and its file through `getDocumentReference` |
+| `getDocumentEvidence(ctx, documentId)` | "What rests on this file?" | `import_batches` by `source_document_id`, each batch's `row_counts` as its commit wrote them, and the `fiscal_periods` its declared range covers |
+
+Three rules govern what these may say:
+
+1. **A record's standing is the resolver's rule applied to one row.** `countsTowardsFigures` is
+   `accepted && !superseded` — the predicate `isVisibleAtInstant` applies to a selection — so one row
+   and the set it belongs to never disagree. A superseded row names its replacement; a rejected row
+   gives the reviewer's reason. Neither is hidden (§4).
+2. **Absence is an answer.** A row restored by a rollback, created by a merge or entered by hand has
+   no file behind it, and that is said rather than filled in (§8.6).
+3. **A file "contributed to" a month; it did not produce it.** A month's figures rest on every file
+   covering it. Only a committed import that has not been rolled back counts towards what rests on a
+   file: a rolled-back batch stays listed as history, and its rows and months are excluded.
+
+The four record tables reach the reader as `ledger`, `bank`, `invoice` and `balance`. A table name is
+never shown and never accepted in a URL (`UX_ARCHITECTURE.md §7`).
+
+---
+
 ## 6. Evidence Drawer — UI contract (`UX_ARCHITECTURE.md` owns the visual design)
 
 The drawer opens from any evidence affordance (the "ⓘ Why?" on a figure, "Show evidence" on an alert/AI finding/health factor) and presents levels the user can descend, never all at once:
@@ -191,6 +220,11 @@ Behaviour rules: level 3 shows `total` next to the metric value and a visible re
 ---
 
 ## 9. Service contract sketches (`src/modules/evidence/index.ts`)
+
+> Phase 8 adds `getRecordProvenance` and `getDocumentEvidence` (§5.2, ADR-096) to the read side
+> below. Both take the caller's `AccessContext` and read through their client, like everything else
+> here; neither takes an organisation id as an argument.
+
 
 ```ts
 getBundle(ctx, bundleId): Promise<EvidenceBundleView>            // items unresolved, plus assurance
