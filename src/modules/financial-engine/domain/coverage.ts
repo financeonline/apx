@@ -15,6 +15,8 @@
  * Pure: no I/O, no clock. The batches, periods and accounts are supplied by the caller.
  */
 
+import { bankCoverageFromRatio, completenessHolds } from '@/core/periods';
+
 import type {
   BankAccountRef, BasisChoice, DataQualityWarning, PeriodCoverage, PeriodRef, SourceCoverage,
   SourceKind,
@@ -249,12 +251,19 @@ export function choosePrecedence(
 }
 
 /**
- * `fiscal_periods.is_complete` (ADR-030.1, ADR-047.6).
+ * `fiscal_periods.is_complete` (ADR-030.1, ADR-047.6, ADR-093).
  *
  * The chosen P&L source's latest data date reaches the period end, AND bank coverage is full or
  * there is no active cash-like account. Partial bank coverage is a data-quality warning rather than
  * incompleteness, so a ledger-based organization with quarterly statements still gets complete
  * months — which is the case the rule exists to allow.
+ *
+ * **This function resolves; it does not decide.** ADR-030.1 puts the rule in `core/periods`, and
+ * this used to be a second copy of it — one that asked about bank coverage as a ratio while the
+ * other asked about a three-valued enum. What is left here is the engine's own work: choosing the
+ * P&L source by §2.3 precedence, finding that source's latest data date, and deciding which bank
+ * accounts count as cash-like. The verdict itself is `completenessHolds`, and this is the only
+ * caller that supplies it from engine coverage.
  */
 export function isPeriodComplete(
   coverage: PeriodCoverage,
@@ -262,12 +271,12 @@ export function isPeriodComplete(
   bankAccounts: readonly BankAccountRef[],
 ): boolean {
   const pnlBasis = choosePrecedence(coverage, 'pnl');
-  if (pnlBasis.basis === 'none') return false;
+  const source = pnlBasis.basis === 'none' ? null : (pnlBasis.basis as SourceKind);
 
-  const source = pnlBasis.basis as SourceKind;
-  const latest = coverage.latestDataDate[source];
-  if (!latest || latest < period.periodEnd) return false;
-
-  const hasActiveCashLike = bankAccounts.some((a) => a.isActive && CASH_LIKE.has(a.accountType));
-  return !hasActiveCashLike || coverage.bankCoverageRatio >= 1;
+  return completenessHolds({
+    pnlLatestDataDate: source === null ? null : coverage.latestDataDate[source] ?? null,
+    periodEnd: period.periodEnd,
+    bankCoverage: bankCoverageFromRatio(coverage.bankCoverageRatio),
+    hasActiveCashLikeAccount: bankAccounts.some((a) => a.isActive && CASH_LIKE.has(a.accountType)),
+  });
 }

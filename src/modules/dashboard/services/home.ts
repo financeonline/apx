@@ -21,8 +21,16 @@ import { BASIS_TEXT } from '../domain/status';
  * every figure on the page must equal its snapshot.
  */
 
-/** §4: Home opens on the LATEST COMPLETE month, the same rule the analyst uses. */
-export function latestCompletePeriod(periods: readonly PeriodLabel[]): PeriodLabel | null {
+/**
+ * §4: Home opens on the LATEST COMPLETE month, the same rule the analyst uses.
+ *
+ * This is a SELECTION, not a second predicate (ADR-093). `isComplete` is `fiscal_periods.is_complete`
+ * as the engine wrote it, and the engine wrote it through `core/periods.completenessHolds` — so the
+ * dashboard and the engine agree because the dashboard is reading the engine's answer rather than
+ * working one out. The name says so, because a `latestCompletePeriod` that looked like a rule is
+ * how this came to be read as a third implementation of one.
+ */
+export function latestCompletePeriodByFlag(periods: readonly PeriodLabel[]): PeriodLabel | null {
   return periods.find((p) => p.isComplete) ?? null;
 }
 
@@ -35,7 +43,7 @@ export function latestCompletePeriod(periods: readonly PeriodLabel[]): PeriodLab
 export function partialPeriod(
   periods: readonly PeriodLabel[], withData: ReadonlySet<string>,
 ): PeriodLabel | null {
-  const complete = latestCompletePeriod(periods);
+  const complete = latestCompletePeriodByFlag(periods);
   const candidate = periods.find((p) => !p.isComplete && withData.has(p.id));
   if (!candidate) return null;
   if (complete && candidate.periodStart <= complete.periodStart) return null;
@@ -246,7 +254,7 @@ export async function loadHome(
     return { kind: 'first_run' };
   }
 
-  const period = latestCompletePeriod(periods.filter((p) => withData.has(p.id)))
+  const period = latestCompletePeriodByFlag(periods.filter((p) => withData.has(p.id)))
     // No complete month yet: fall back to the latest month that has data, and let the partial line
     // carry the caveat (§4, core/periods.latestCompletePeriod).
     ?? periods.find((p) => withData.has(p.id))

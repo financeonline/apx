@@ -57,7 +57,7 @@ export {
 export {
   ASSURANCE_LEVELS,
   isAssuranceLevel,
-  minAssurance,
+  minAssurance, weakestOf,
   type AssuranceLevel,
 } from './domain/assurance';
 

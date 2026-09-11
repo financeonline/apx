@@ -73,6 +73,16 @@ export default defineConfig({
       dependencies: ['setup'],
       use: { ...devices['Desktop Chrome'], storageState: 'e2e/.auth/owner.json' },
     },
+    /*
+     * The §11 route → RBAC status matrix. It signs in as three different callers of its own, so it
+     * takes no shared storage state: what is under test is what each ROLE is told, and a shared
+     * owner session would test one of them three times (ADR-091).
+     */
+    {
+      name: 'authz',
+      testMatch: /authorization-.*\.spec\.ts/,
+      use: { ...devices['Desktop Chrome'] },
+    },
     {
       name: 'sweep',
       testMatch: /accessibility\.spec\.ts/,

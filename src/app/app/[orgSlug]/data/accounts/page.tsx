@@ -1,9 +1,10 @@
 import { getAccessContext } from '@/modules/tenancy';
-import { assertCan, can } from '@/core/permissions';
+import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, Banner } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody } from '@/components/ui/table';
 import { CATEGORY_LABELS, loadAccountsPage } from '@/modules/dashboard';
 import { AccountRowView } from './account-map-form';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +19,7 @@ export const dynamic = 'force-dynamic';
 export default async function AccountsPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'financials.view');
+  requirePermission(ctx, 'financials.view');
 
   const view = await loadAccountsPage(ctx.db, ctx.orgId!, ctx.requestId);
   const canEdit = can(ctx, 'financials.edit');

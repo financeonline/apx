@@ -12,7 +12,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(77);
+select plan(89);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures. Two organizations with different fiscal calendars, plus a second tenant for the
@@ -245,8 +245,15 @@ select lives_ok(
              'ledger_entries','f5100000-0000-0000-0000-000000000001') $$,
   'same_org_ref permits import_rows.duplicate_of_id pointing at the same organization');
 
--- A discriminator that names no table at all is skipped rather than rejected (`none`, category).
-select lives_ok(
+-- ---------------------------------------------------------------------------
+-- ADR-092: a discriminator that names no table must name no ROW either.
+--
+-- This case previously asserted `lives_ok` for a `standard_category` alert carrying another
+-- organisation's account id. That WAS the behaviour, and it was the hole: the trigger skipped an
+-- unmapped value, so the column held a cross-tenant id that nothing resolved and nothing checked.
+-- The expectation changes because the implementation was wrong, not the other way round.
+-- ---------------------------------------------------------------------------
+select throws_ok(
   $$ insert into public.alerts
        (organization_id, rule_key, rule_version, severity, period_id, subject_type, subject_id,
         title, explanation, dedupe_key, key_kind, calculation_run_id)
@@ -254,7 +261,116 @@ select lives_ok(
              (select id from public.fiscal_periods where organization_id='f5a00000-0000-0000-0000-00000000000a' and period_start='2026-05-01'),
              'standard_category','f5d00000-0000-0000-0000-00000000000c','t','e','pgt-trg-cat','state',
              'f5500000-0000-0000-0000-000000000001') $$,
-  'same_org_ref skips a discriminator that names no table (standard_category)');
+  '22023', null, 'same_org_ref refuses an id beside a discriminator that names no table');
+
+-- The shape the product actually writes: the category identifies itself through the dedupe key,
+-- and there is no id at all (ADR-053).
+select lives_ok(
+  $$ insert into public.alerts
+       (organization_id, rule_key, rule_version, severity, period_id, subject_type, subject_id,
+        title, explanation, dedupe_key, key_kind, calculation_run_id)
+     values ('f5a00000-0000-0000-0000-00000000000a','pgt.trg','1','low',
+             (select id from public.fiscal_periods where organization_id='f5a00000-0000-0000-0000-00000000000a' and period_start='2026-05-01'),
+             'standard_category', null,'t','e','pgt-trg-cat|standard_category|office_costs','state',
+             'f5500000-0000-0000-0000-000000000001') $$,
+  'same_org_ref permits a no-table discriminator with no id');
+
+-- `none` is the same rule, and it is the default subject of most alerts.
+select lives_ok(
+  $$ insert into public.alerts
+       (organization_id, rule_key, rule_version, severity, period_id, subject_type, subject_id,
+        title, explanation, dedupe_key, key_kind, calculation_run_id)
+     values ('f5a00000-0000-0000-0000-00000000000a','pgt.trg2','1','low',
+             (select id from public.fiscal_periods where organization_id='f5a00000-0000-0000-0000-00000000000a' and period_start='2026-05-01'),
+             'none', null,'t','e','pgt-trg-none','state',
+             'f5500000-0000-0000-0000-000000000001') $$,
+  'same_org_ref permits subject_type = none with no id');
+
+-- ---------------------------------------------------------------------------
+-- ADR-092: `actions.source_type = 'ai'` — the mapping that was missing entirely.
+--
+-- Before this, an action could name ANOTHER organisation's ai_message and the database had no
+-- opinion at all; the invariant rested on two api.* functions re-reading the message themselves.
+-- ---------------------------------------------------------------------------
+insert into public.ai_conversations (id, organization_id, user_id, title)
+values ('f5700000-0000-0000-0000-0000000000c1','f5c00000-0000-0000-0000-00000000000c',
+        'f5000000-0000-0000-0000-000000000001','foreign conversation');
+insert into public.ai_messages (id, organization_id, conversation_id, role, content)
+values ('f5700000-0000-0000-0000-0000000000a1','f5c00000-0000-0000-0000-00000000000c',
+        'f5700000-0000-0000-0000-0000000000c1','user','hello');
+
+select throws_ok(
+  $$ insert into public.actions (organization_id, title, source_type, source_id)
+     values ('f5a00000-0000-0000-0000-00000000000a','foreign ai source',
+             'ai','f5700000-0000-0000-0000-0000000000a1') $$,
+  '22023', null, 'same_org_ref refuses actions.source_id naming another organization''s ai_message');
+
+select throws_ok(
+  $$ insert into public.actions (organization_id, title, source_type, source_id)
+     values ('f5a00000-0000-0000-0000-00000000000a','invented ai source',
+             'ai','f5700000-0000-0000-0000-0000000000fe') $$,
+  '22023', null, 'same_org_ref refuses actions.source_id naming an ai_message that does not exist');
+
+-- `user` names no table, so an action somebody typed must carry no source id.
+select throws_ok(
+  $$ insert into public.actions (organization_id, title, source_type, source_id)
+     values ('f5a00000-0000-0000-0000-00000000000a','typed with a source',
+             'user','f5700000-0000-0000-0000-0000000000a1') $$,
+  '22023', null, 'same_org_ref refuses a source id on a user-created action');
+
+select lives_ok(
+  $$ insert into public.actions (organization_id, title, source_type, source_id)
+     values ('f5a00000-0000-0000-0000-00000000000a','typed, no source','user', null) $$,
+  'same_org_ref permits a user-created action with no source');
+
+-- ---------------------------------------------------------------------------
+-- ADR-092: evidence_bundles.origin_table is `text`, and was restricted by nothing at all.
+-- ---------------------------------------------------------------------------
+-- A BEFORE trigger runs ahead of the row's CHECK constraints, so an unknown origin is refused by
+-- the trigger and the caller never reaches the constraint. Both are asserted: the refusal here, and
+-- the constraint's existence below, because the constraint is what holds if the trigger is ever
+-- dropped.
+select throws_ok(
+  $$ insert into public.evidence_bundles (organization_id, kind, origin_table, origin_id)
+     values ('f5a00000-0000-0000-0000-00000000000a','metric','ledger_entries', null) $$,
+  '22023', null, 'evidence_bundles.origin_table admits only the six documented origins');
+
+select col_has_check('public', 'evidence_bundles', 'origin_table',
+  'evidence_bundles.origin_table carries a CHECK, not only a trigger');
+
+select throws_ok(
+  $$ insert into public.evidence_bundles (organization_id, kind, origin_table, origin_id)
+     values ('f5a00000-0000-0000-0000-00000000000a','ai_response','ai_messages',
+             'f5700000-0000-0000-0000-0000000000a1') $$,
+  '22023', null, 'same_org_ref refuses a bundle whose origin is another organization''s row');
+
+-- ---------------------------------------------------------------------------
+-- ADR-092: a `query` evidence item is the descriptor form and cannot carry a ref_id.
+-- ---------------------------------------------------------------------------
+select throws_ok(
+  $$ insert into public.evidence_items
+       (organization_id, bundle_id, item_type, ref_id, label, assurance_level)
+     values ('f5a00000-0000-0000-0000-00000000000a','f5600000-0000-0000-0000-000000000001',
+             'query','f5100000-0000-0000-0000-0000000000fe','a query with an id','calculated') $$,
+  '22023', null, 'a query evidence item cannot carry a ref_id');
+
+-- Named rather than asked by column, because the constraint spans two columns: it is the pairing
+-- of item_type and query_descriptor that it exists to state.
+select is(
+  (select count(*)::int from pg_constraint where conname = 'evidence_items_query_is_descriptor'),
+  1, 'evidence_items.item_type is tied to the descriptor form by a CHECK as well');
+
+-- ---------------------------------------------------------------------------
+-- ADR-092: a calculation trigger that names no row must carry no trigger_ref_id.
+-- ---------------------------------------------------------------------------
+select throws_ok(
+  $$ insert into public.calculation_runs
+       (organization_id, trigger, trigger_ref_id, engine_version, period_from, period_to, as_of, status)
+     values ('f5a00000-0000-0000-0000-00000000000a','scheduled','f5100000-0000-0000-0000-0000000000ff','1.0.0',
+             (select id from public.fiscal_periods where organization_id='f5a00000-0000-0000-0000-00000000000a' and period_start='2026-05-01'),
+             (select id from public.fiscal_periods where organization_id='f5a00000-0000-0000-0000-00000000000a' and period_start='2026-05-01'),
+             '2026-05-31','succeeded') $$,
+  '22023', null, 'same_org_ref refuses a trigger_ref_id on a trigger that names no table');
 
 -- ===========================================================================
 -- 3. mask_description (ADR-038.4)

@@ -47,8 +47,11 @@ export {
 export { currentYearMonth, todayInTimeZone } from './timezone';
 
 export {
+  bankCoverageFromRatio,
+  completenessHolds,
   isPeriodComplete,
   latestCompletePeriod,
+  type CompletenessFacts,
   type BankCoverage,
   type LatestPeriod,
   type OrganizationCoverage,

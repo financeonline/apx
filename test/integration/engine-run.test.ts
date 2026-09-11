@@ -1,6 +1,6 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
 
-import { adminSql, clientFor, createAuthUser, resetFixtures } from './setup';
+import { adminSql, clientFor, createAuthUser, resetFixtures, serverSession } from './setup';
 
 /**
  * The calculation run's SQL surface (FINANCIAL_ENGINE.md §2.4; ADR-031, ADR-047.7/8).
@@ -31,7 +31,7 @@ function serverRpc(fn: string, args: Record<string, unknown>): string {
     .map(([k, v]) => `${k} => ${v === null ? 'null' : typeof v === 'number' ? String(v) : `'${String(v).replace(/'/g, "''")}'`}`)
     .join(', ');
   const output = adminSql(`
-    select set_config('request.jwt.claims', '{"role":"service_role"}', false);
+    ${serverSession(args.p_org as string | undefined)}
     select api_server.${fn}(${params})::text`);
   return output.split('\n').map((line) => line.trim()).filter(Boolean).pop() ?? '';
 }
@@ -204,7 +204,7 @@ describe('the pointer rewrite (§2.4 step 8, F-B-16)', () => {
 
   function writeChunk(runId: string, snapshots: unknown[]): void {
     adminSql(`
-      select set_config('request.jwt.claims', '{"role":"service_role"}', false);
+      ${serverSession(orgId)}
       select api_server.finish_chunk(
         '${orgId}', '${runId}',
         '${JSON.stringify(snapshots).replace(/'/g, "''")}'::jsonb,
@@ -373,7 +373,7 @@ describe('the pointer rewrite (§2.4 step 8, F-B-16)', () => {
 describe('a run marks its periods complete (ADR-030.1)', () => {
   it('sets is_complete only where the engine says so', () => {
     adminSql(`
-      select set_config('request.jwt.claims', '{"role":"service_role"}', false);
+      ${serverSession(orgId)}
       select api_server.set_period_completeness(
         '${orgId}', array['${periodMay}']::uuid[], array[true]::boolean[])`);
 

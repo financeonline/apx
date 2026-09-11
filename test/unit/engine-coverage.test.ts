@@ -4,6 +4,10 @@ import {
   choosePrecedence, chooseBalanceKind, computeCoverage, isPeriodComplete, winningBalanceBatch,
   type BankAccountRef, type CoverageBatch, type PeriodRef,
 } from '@/modules/financial-engine';
+import {
+  bankCoverageFromRatio, completenessHolds, isPeriodComplete as coreIsPeriodComplete,
+  type BankCoverage,
+} from '@/core/periods';
 
 /**
  * Coverage and precedence (FINANCIAL_ENGINE.md §2.2, §2.3).
@@ -346,5 +350,99 @@ describe('period completeness (ADR-030.1)', () => {
       })],
     });
     expect(isPeriodComplete(coverage, may, [])).toBe(false);
+  });
+});
+
+/**
+ * One rule, two doors (ADR-093).
+ *
+ * ADR-030.1 says the rule lives in `core/periods` and is cited by both. It was written twice: once
+ * here over the engine's coverage shape, once there over a period-coverage shape, and the two asked
+ * about bank coverage differently — a ratio against 1, an enum against `'full'`. They agreed, but
+ * nothing made them, and only one of them was reachable from the product.
+ *
+ * The engine's function now resolves the P&L source and calls the core predicate. These cases hold
+ * the two doors against each other over the whole truth table, so a change to either that does not
+ * change the other fails here rather than in a customer's figures.
+ */
+describe('the engine and core/periods decide completeness identically', () => {
+  const CASES: ReadonlyArray<{
+    pnlLatest: string | null;
+    coverage: BankCoverage;
+    hasCashLike: boolean;
+  }> = [
+    { pnlLatest: '2026-05-31', coverage: 'full', hasCashLike: true },
+    { pnlLatest: '2026-05-31', coverage: 'full', hasCashLike: false },
+    { pnlLatest: '2026-05-31', coverage: 'partial', hasCashLike: true },
+    { pnlLatest: '2026-05-31', coverage: 'partial', hasCashLike: false },
+    { pnlLatest: '2026-05-31', coverage: 'none', hasCashLike: true },
+    { pnlLatest: '2026-05-31', coverage: 'none', hasCashLike: false },
+    { pnlLatest: '2026-06-30', coverage: 'full', hasCashLike: true },
+    { pnlLatest: '2026-05-20', coverage: 'full', hasCashLike: true },
+    { pnlLatest: '2026-05-20', coverage: 'full', hasCashLike: false },
+    { pnlLatest: null, coverage: 'full', hasCashLike: false },
+    { pnlLatest: null, coverage: 'none', hasCashLike: true },
+  ];
+
+  for (const c of CASES) {
+    const name = `pnl=${c.pnlLatest ?? 'none'} bank=${c.coverage} cashLike=${c.hasCashLike}`;
+    it(`agrees for ${name}`, () => {
+      const viaFacts = completenessHolds({
+        pnlLatestDataDate: c.pnlLatest as never,
+        periodEnd: '2026-05-31',
+        bankCoverage: c.coverage,
+        hasActiveCashLikeAccount: c.hasCashLike,
+      });
+      const viaCore = coreIsPeriodComplete(
+        {
+          periodId: 'p-may',
+          periodStart: '2026-05-01',
+          periodEnd: '2026-05-31',
+          pnlLatestDataDate: c.pnlLatest as never,
+          bankCoverage: c.coverage,
+          hasAcceptedData: true,
+        },
+        c.hasCashLike,
+      );
+      expect(viaCore, `${name}: the period-coverage door`).toBe(viaFacts);
+    });
+  }
+
+  it('maps the engine ratio onto the same three words', () => {
+    expect(bankCoverageFromRatio(1)).toBe('full');
+    expect(bankCoverageFromRatio(1.5)).toBe('full');
+    expect(bankCoverageFromRatio(0.4)).toBe('partial');
+    expect(bankCoverageFromRatio(0)).toBe('none');
+  });
+
+  it('reaches the same verdict from engine coverage as from the facts behind it', () => {
+    const covered = coverageOf({
+      batches: [
+        batch({ targetTable: 'period_balances', balanceKind: 'trial_balance' }),
+        batch({ id: 'b-bank', targetTable: 'bank_transactions', bankAccountId: 'ba-1' }),
+      ],
+      bankAccounts: [current],
+    });
+    expect(isPeriodComplete(covered, may, [current])).toBe(
+      completenessHolds({
+        pnlLatestDataDate: '2026-05-31',
+        periodEnd: '2026-05-31',
+        bankCoverage: bankCoverageFromRatio(covered.bankCoverageRatio),
+        hasActiveCashLikeAccount: true,
+      }),
+    );
+
+    const uncovered = coverageOf({
+      batches: [batch({ targetTable: 'period_balances', balanceKind: 'trial_balance' })],
+      bankAccounts: [current],
+    });
+    expect(isPeriodComplete(uncovered, may, [current])).toBe(
+      completenessHolds({
+        pnlLatestDataDate: '2026-05-31',
+        periodEnd: '2026-05-31',
+        bankCoverage: bankCoverageFromRatio(uncovered.bankCoverageRatio),
+        hasActiveCashLikeAccount: true,
+      }),
+    );
   });
 });

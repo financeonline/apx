@@ -1,16 +1,17 @@
 import { getAccessContext, listMembers, listInvitations, listAdvisers } from '@/modules/tenancy';
-import { assertCan, can, canInviteRole, ceilingAllows } from '@/core/permissions';
+import { can, canInviteRole, ceilingAllows } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, Badge, EmptyState } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody } from '@/components/ui/table';
 import { MEMBERSHIP_ROLE_LABELS, MEMBER_STATUS_LABELS } from '@/components/labels';
 import { InviteForm, MemberRow, InvitationRow, AdviserRow } from './team-forms';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
 export default async function TeamPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'users.view');
+  requirePermission(ctx, 'users.view');
 
   const [members, invitations, advisers] = await Promise.all([
     listMembers(ctx),

@@ -1,7 +1,7 @@
 import 'server-only';
 import { cache } from 'react';
 import { createUserClient } from '@/core/db/user-client';
-import { permissionsFor, type EffectiveRole, type Permission } from '@/core/permissions';
+import { permissionsFor, type EffectiveRole } from '@/core/permissions';
 import { NotFound, toMotionError } from '@/core/errors';
 import { newRequestId } from '@/core/logging';
 import type { AccessContext } from '../context';
@@ -74,34 +74,14 @@ export async function resolveAccessFresh(orgSlug: string): Promise<AccessContext
   };
 }
 
-/** Per-request memoisation: layout, page and server actions share one resolution. */
-export const getAccessContext = cache(async (orgSlug: string): Promise<AccessContext> => {
-  const requestId = newRequestId();
-  const user = await loadSessionUser();
-  if (!user) throw new NotFound();
-
-  const db = await createUserClient();
-  const { data, error } = await db.schema('api').rpc('my_context', { p_slug: orgSlug });
-  if (error) throw toMotionError(error, requestId);
-
-  const row = (data as MyContextRow[] | null)?.[0];
-  if (!row || !row.role) throw new NotFound();
-
-  const permissions: ReadonlySet<Permission> = permissionsFor(row.role);
-
-  return {
-    userId: user.id,
-    orgId: row.organization_id,
-    orgSlug: row.slug,
-    effectiveRole: row.role,
-    permissions,
-    actorType: row.actor_type,
-    organizationStatus: row.status,
-    db,
-    requestId,
-    now: () => new Date(),
-  };
-});
+/**
+ * Per-request memoisation: layout, page and server actions share one resolution.
+ *
+ * Deliberately `cache(resolveAccessFresh)` and not a second copy of the body (ADR-094). The two were
+ * written out twice, which means a correction to how access is resolved — the one function that
+ * decides what every request may see — had to be made in two places or it was made in none.
+ */
+export const getAccessContext = cache(resolveAccessFresh);
 
 /** Context with no organization, for /platform, /portfolio and /account. */
 export const getPlatformContext = cache(async (): Promise<AccessContext> => {

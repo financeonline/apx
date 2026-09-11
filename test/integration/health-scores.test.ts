@@ -1,6 +1,6 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadHealthDimension } from '@/modules/health';
-import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
+import { adminSql, clientFor, createAuthUser, serverSession, sqlstate } from './setup';
 
 /**
  * The health score's SQL surface (FINANCIAL_ENGINE.md §7; ADR-030.4, ADR-031.5, ADR-051.4, ADR-055).
@@ -35,7 +35,7 @@ function serverRpc(fn: string, args: Record<string, unknown>): string {
       : `${`'${String(v).replace(/'/g, "''")}'`}`}`)
     .join(', ');
   const output = adminSql(`
-    select set_config('request.jwt.claims', '{"role":"service_role"}', false);
+    ${serverSession(args.p_org as string | undefined)}
     select api_server.${fn}(${params})::text`);
   return output.split('\n').map((line) => line.trim()).filter(Boolean).pop() ?? '';
 }
@@ -62,7 +62,7 @@ function score(periodId: string, value: number | null, used = 6): Record<string,
 
 function finishHealth(runId: string, scores: Record<string, unknown>[], periodIds: string[], org = orgId): string {
   const output = adminSql(`
-    select set_config('request.jwt.claims', '{"role":"service_role"}', false);
+    ${serverSession(org)}
     select api_server.finish_health(
       '${org}', '${runId}',
       '${JSON.stringify(scores).replace(/'/g, "''")}'::jsonb,

@@ -1,7 +1,7 @@
 import { notFound, redirect } from 'next/navigation';
-import { can } from '@/core/permissions';
 import { buildBundleForMetric, currentSnapshotId } from '@/modules/evidence';
 import { getAccessContext } from '@/modules/tenancy';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +26,7 @@ export default async function EvidenceEntryPage({
   const { metric, period, dimension, snapshot } = await searchParams;
 
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'financials.view')) notFound();
+  requirePermission(ctx, 'financials.view');
   /*
    * `?snapshot=` is how the drawer descends into a component (§6 level 2, "a link to its own
    * snapshot"). It names an id because a component IS one specific figure — the one this

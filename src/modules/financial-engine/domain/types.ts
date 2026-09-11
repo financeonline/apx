@@ -20,7 +20,9 @@ import type { StandardCategory } from '@/modules/financials';
 /** Which record table a figure came from. `none` means nothing covered the period. */
 export type MetricBasis = 'period_balances' | 'ledger' | 'invoices' | 'bank' | 'mixed' | 'none';
 
-export type AssuranceLevel = 'verified' | 'calculated' | 'estimated' | 'inferred';
+import type { AssuranceLevel } from '@/core/assurance';
+
+export type { AssuranceLevel };
 
 export type MetricUnit = 'money' | 'ratio' | 'count' | 'days';
 

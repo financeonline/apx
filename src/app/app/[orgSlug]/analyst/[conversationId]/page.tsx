@@ -9,6 +9,7 @@ import { conversationLabel } from '@/components/dashboard';
 import { AnalystChat, type MessageView } from '../analyst-chat';
 import { ConversationRail } from '../conversation-rail';
 import { FactsCard } from '../facts-card';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,8 @@ export default async function ConversationPage({
 }) {
   const { orgSlug, conversationId } = await params;
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'ai.use') || !ctx.orgId) notFound();
+  if (!ctx.orgId) notFound();
+  requirePermission(ctx, 'ai.use');
   if (!/^[0-9a-f-]{36}$/i.test(conversationId)) notFound();
 
   let own = true;

@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
-import { can } from '@/core/permissions';
 import { formatValue, missingReasonText, statusFor, BASIS_TEXT } from '@/modules/dashboard';
 import type { AssuranceLevel, DataQuality } from '@/modules/financial-engine';
 import {
@@ -12,6 +11,7 @@ import { StatusBadgeView } from '@/components/dashboard';
 import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
 import { TBody, TD, THead, TR, TableWrap } from '@/components/ui/table';
 import { DocumentPanel } from './document-panel';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -46,7 +46,7 @@ export default async function EvidenceBundlePage({
   const { row, block, from } = await searchParams;
 
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'financials.view')) notFound();
+  requirePermission(ctx, 'financials.view');
 
   // Cross-organisation or invented: NOT FOUND, never FORBIDDEN (§8.4, isolation case 3).
   /*

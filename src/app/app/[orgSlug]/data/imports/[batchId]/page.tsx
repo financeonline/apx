@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
-import { can } from '@/core/permissions';
 import { loadBatchReview, type BatchIssueGroup } from '@/modules/imports';
 import { PageHeader, Card, CardBody, Badge, Banner } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
@@ -9,6 +8,7 @@ import {
   CommitControls, ConfirmationPrompt, DuplicateDecisions, SkipUnreadableRows,
 } from './review-controls';
 import { AiReadingRequest, DocumentPageView, PageConfirmation, StatementBalancesForm } from './pdf-review';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,7 +70,7 @@ export default async function ReviewBatchPage({
 }) {
   const { orgSlug, batchId } = await params;
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'imports.review')) notFound();
+  requirePermission(ctx, 'imports.review');
 
   const review = await loadBatchReview(ctx.db, ctx.orgId!, batchId, ctx.requestId);
   // Cross-organisation or invented: NOT FOUND, never FORBIDDEN (SECURITY_MODEL.md §14).

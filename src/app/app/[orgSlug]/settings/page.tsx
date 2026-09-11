@@ -1,15 +1,16 @@
 import Link from 'next/link';
 import { getAccessContext } from '@/modules/tenancy';
-import { assertCan, can } from '@/core/permissions';
+import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody } from '@/components/ui/surfaces';
 import { OrganizationForm } from './organization-form';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
 export default async function SettingsPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'settings.manage');
+  requirePermission(ctx, 'settings.manage');
 
   const { data } = await ctx.db
     .from('organizations')

@@ -33,6 +33,7 @@ import {
   EXPENSE_BY_CATEGORY_CATEGORIES,
   OPEX_CATEGORIES,
 } from './categories';
+import { weakestOf } from '@/core/assurance';
 import type {
   AccountRef,
   AssuranceLevel,
@@ -135,13 +136,14 @@ export const UNCATEGORISED_ESTIMATED_THRESHOLD = '0.25';
 /** Above this share of invoice rows falling back to `total_amount`, the figure is VAT-inclusive enough to be an estimate. */
 export const INVOICE_VAT_FALLBACK_THRESHOLD = '0.10';
 
-const ASSURANCE_ORDER: Readonly<Record<AssuranceLevel, number>> = {
-  verified: 3, calculated: 2, estimated: 1, inferred: 0,
-};
-
-/** The weakest of two assurance levels. A derived figure is never firmer than its softest input. */
+/**
+ * The weakest of two assurance levels. A derived figure is never firmer than its softest input.
+ *
+ * One line, because the ladder is `core/assurance` and this file used to hold a second rank table
+ * ordered against the one in `modules/evidence` (ADR-094).
+ */
 export function minAssurance(a: AssuranceLevel, b: AssuranceLevel): AssuranceLevel {
-  return ASSURANCE_ORDER[a] <= ASSURANCE_ORDER[b] ? a : b;
+  return weakestOf(a, b);
 }
 
 // ---------------------------------------------------------------------------------------------

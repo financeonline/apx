@@ -9,6 +9,7 @@ import {
 import { PageHeader, Card, CardBody, Banner } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
 import { AlertCard, HealthScoreCard, NO_ALERTS_BODY, NO_ALERTS_TITLE } from '@/components/dashboard';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -176,6 +177,13 @@ function BankOnlyIntro({ orgSlug, canImport }: { orgSlug: string; canImport: boo
 export default async function HomePage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
+  /*
+   * Home was the one tenant page with no explicit gate (ADR-094). It was correct — every effective
+   * role that resolves holds `dashboard.view`, and `suspended_member`'s entire grant is that one
+   * bit — but it was correct by a property of the matrix rather than by anything this page said,
+   * and the matrix is the thing most likely to change.
+   */
+  requirePermission(ctx, 'dashboard.view');
   const canImport = can(ctx, 'imports.create');
 
   const state = await loadHome(ctx.db, ctx.orgId!, orgSlug, ctx.requestId, {

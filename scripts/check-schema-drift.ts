@@ -131,6 +131,50 @@ const serverReachable = sql(`
     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
    where n.nspname = 'api_server' and has_function_privilege('authenticated', p.oid, 'execute')`);
 
+/*
+ * Every value of every polymorphic discriminator must be mapped in its `same_org_ref` trigger —
+ * to a table, or to '-' for the values that name none (ADR-092).
+ *
+ * `app.same_org_ref` now raises on an unmapped value, so the cost of forgetting is a failed write
+ * at runtime. This turns that into a failed build instead: adding a value to `action_source_enum`
+ * without saying what table it points at is exactly the mistake that left `source_type = 'ai'`
+ * unguarded, and it is invisible until something writes the new value.
+ *
+ * The trigger's arguments are NUL-separated in `pg_trigger.tgargs`; the first two are the id column
+ * and the discriminator column, and the rest are value/table pairs.
+ */
+const unmappedDiscriminators = sql(`
+  with trig as (
+    select c.relname as table_name,
+           a.attname as disc_column,
+           t.tgname,
+           string_to_array(encode(t.tgargs, 'escape'), '\\000') as args,
+           format_type(a.atttypid, null) as disc_type,
+           a.atttypid as disc_type_oid
+      from pg_trigger t
+      join pg_class c on c.oid = t.tgrelid
+      join pg_namespace n on n.oid = c.relnamespace
+      join pg_proc p on p.oid = t.tgfoid
+      join pg_attribute a
+        on a.attrelid = c.oid
+       and a.attname = (string_to_array(encode(t.tgargs, 'escape'), '\\000'))[2]
+     where p.proname = 'same_org_ref'
+       and not t.tgisinternal
+       and n.nspname = 'public'
+       and c.relispartition = false
+       and (string_to_array(encode(t.tgargs, 'escape'), '\\000'))[2] <> ''
+  ),
+  mapped as (
+    select table_name, disc_column, disc_type_oid,
+           array(select args[i] from generate_series(3, array_length(args, 1), 2) i) as values
+      from trig
+  )
+  select m.table_name || '.' || m.disc_column || ' = ' || e.enumlabel
+    from mapped m
+    join pg_enum e on e.enumtypid = m.disc_type_oid
+   where not (e.enumlabel = any (m.values))
+   order by 1`);
+
 const ok = [
   report('Tables in the database with no section in DATABASE_ARCHITECTURE.md', undocumented),
   report('Tables documented but absent from the database', missing),
@@ -140,6 +184,10 @@ const ok = [
   report('Functions not owned by motion_definer or without a pinned search_path (ADR-044.3)', unpinned),
   report('Table-touching functions that are not SECURITY DEFINER (ADR-044.3)', unsafeDefiners),
   report('api_server functions reachable by `authenticated` (ADR-043)', serverReachable),
+  report(
+    "Discriminator values with no same_org_ref mapping — add the table, or '-' if it names none (ADR-092)",
+    unmappedDiscriminators,
+  ),
 ].every(Boolean);
 
 if (!ok) {

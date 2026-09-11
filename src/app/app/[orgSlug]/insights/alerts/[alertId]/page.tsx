@@ -7,6 +7,7 @@ import { PageHeader, Card, CardBody, Badge } from '@/components/ui/surfaces';
 import { AlertCard, severityLabel, severityTone } from '@/components/dashboard';
 import { AlertActions } from '../alert-actions';
 import { ConvertControl } from './convert-control';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +26,7 @@ export default async function AlertPage({
 }) {
   const { orgSlug, alertId } = await params;
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'financials.view')) notFound();
+  requirePermission(ctx, 'financials.view');
 
   const detail = await loadAlertDetail(ctx.db, ctx.orgId!, orgSlug, alertId, ctx.requestId);
   // Cross-organisation or invented: NOT FOUND, never FORBIDDEN (SECURITY_MODEL.md §14).

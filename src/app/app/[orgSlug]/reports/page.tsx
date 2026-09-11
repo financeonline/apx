@@ -1,10 +1,9 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
-import { can } from '@/core/permissions';
 import { listAvailable } from '@/modules/reporting';
 import { getAccessContext } from '@/modules/tenancy';
 import { ReportsBeforeFirstMonthEmpty } from '@/components/dashboard';
 import { Card, CardBody, PageHeader } from '@/components/ui/surfaces';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -22,7 +21,7 @@ export default async function ReportsPage({
 }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'reports.view')) notFound();
+  requirePermission(ctx, 'reports.view');
 
   const reports = await listAvailable(ctx);
 

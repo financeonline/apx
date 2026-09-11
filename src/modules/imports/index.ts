@@ -33,7 +33,6 @@ export {
   commitImportBatch,
   confirmPdfPage,
   decideImportRows,
-  deleteDocument,
   recordBatchConfirmation,
   rejectImportBatch,
   replaceImportBatch,

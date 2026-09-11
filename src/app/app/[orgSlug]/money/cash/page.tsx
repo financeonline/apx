@@ -1,10 +1,11 @@
 import { getAccessContext } from '@/modules/tenancy';
-import { assertCan, can } from '@/core/permissions';
+import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState, DetailList } from '@/components/ui/surfaces';
 import { loadBankAccountsForBalances, loadCash, loadPeriodScope } from '@/modules/dashboard';
 import { PeriodHeading } from '../_components/period-heading';
 import { FigureTable } from '../_components/figures';
 import { OpeningBalanceForm } from './opening-balance-form';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -26,7 +27,7 @@ export default async function CashPage({
   const { orgSlug } = await params;
   const { period } = await searchParams;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'financials.view');
+  requirePermission(ctx, 'financials.view');
 
   const [scope, currency] = await Promise.all([
     loadPeriodScope(ctx.db, ctx.orgId!, period ?? null, ctx.requestId),

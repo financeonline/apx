@@ -1,9 +1,9 @@
 import Link from 'next/link';
 import { getAccessContext } from '@/modules/tenancy';
-import { assertCan } from '@/core/permissions';
 import { PageHeader, Card, CardBody } from '@/components/ui/surfaces';
 import { loadHealthTrend, loadHome } from '@/modules/dashboard';
 import { HealthExplainPanel, HealthHistoryChart, NO_SCORE_FOR_PARTIAL_MONTH } from '@/components/dashboard';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +21,7 @@ export const dynamic = 'force-dynamic';
 export default async function HealthPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'dashboard.view');
+  requirePermission(ctx, 'dashboard.view');
 
   const state = await loadHome(ctx.db, ctx.orgId!, orgSlug, ctx.requestId, {
     suspended: ctx.organizationStatus === 'suspended',

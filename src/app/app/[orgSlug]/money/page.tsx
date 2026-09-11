@@ -1,10 +1,11 @@
 import Link from 'next/link';
 import { getAccessContext } from '@/modules/tenancy';
-import { assertCan, can } from '@/core/permissions';
+import { can } from '@/core/permissions';
 import { PageHeader, Card, CardBody, EmptyState } from '@/components/ui/surfaces';
 import { PeriodPicker, StatusBadgeView } from '@/components/dashboard';
 import { loadMoneyIndex, loadPeriodScope } from '@/modules/dashboard';
 import { WhyLink } from './_components/figures';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -25,7 +26,7 @@ export default async function MoneyPage({
   const { orgSlug } = await params;
   const { period } = await searchParams;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'financials.view');
+  requirePermission(ctx, 'financials.view');
 
   const scope = await loadPeriodScope(ctx.db, ctx.orgId!, period ?? null, ctx.requestId);
 

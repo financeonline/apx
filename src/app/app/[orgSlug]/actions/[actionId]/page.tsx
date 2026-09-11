@@ -9,6 +9,7 @@ import { ACTION_SOURCE_LABELS, ACTION_STATUS_LABELS, priorityLabel } from '@/com
 import { Badge, Card, CardBody, DetailList, PageHeader } from '@/components/ui/surfaces';
 import { StatusControls } from '../status-controls';
 import { AssignControl } from './assign-control';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +28,7 @@ export default async function ActionPage({
 }) {
   const { orgSlug, actionId } = await params;
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'actions.view')) notFound();
+  requirePermission(ctx, 'actions.view');
 
   // Cross-organisation or invented: NOT FOUND, never FORBIDDEN (SECURITY_MODEL.md §14).
   const action = await getAction(ctx, actionId);

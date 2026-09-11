@@ -11,7 +11,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(86);
+select plan(88);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -44,6 +44,9 @@ language plpgsql as $$
 begin
   perform set_config('role', 'postgres', true);
   perform set_config('request.jwt.claims', '', true);
+  -- ADR-090: pgTAP runs the whole file in ONE transaction, so a transaction-local header set by a
+  -- scoped case would still be set for every case after it. Stepping out of a role clears it.
+  perform set_config('request.headers', '', true);
 end $$;
 
 -- ===========================================================================
@@ -543,11 +546,19 @@ call pg_temp.act_as_postgres();
 -- 10. ADR-067: the purge. Service role only, and it re-verifies the two facts the trigger relied on
 --     thirty days earlier before it deletes a single row.
 -- ---------------------------------------------------------------------------
-create procedure pg_temp.act_as_service()
+-- ADR-090: PostgREST sets `request.headers` on every request, and the organization scope rides in
+-- it. A pgTAP session is a plain connection, so a case that drives a scoped `api_server.*` function
+-- has to set the header itself — exactly as the server would.
+create procedure pg_temp.act_as_service(p_org uuid default null)
 language plpgsql as $$
 begin
   perform set_config('role', 'service_role', true);
   perform set_config('request.jwt.claims', '{"role":"service_role"}', true);
+  perform set_config(
+    'request.headers',
+    case when p_org is null then '{}'
+         else jsonb_build_object('x-motion-org', p_org::text)::text end,
+    true);
 end $$;
 
 call pg_temp.act_as('f7000000-0000-0000-0000-000000000001');
@@ -557,7 +568,7 @@ select throws_ok(
   '42501', null, 'api_server.purge_organization is refused to a user (authenticated)');
 call pg_temp.act_as_postgres();
 
-call pg_temp.act_as_service();
+call pg_temp.act_as_service('f7a00000-0000-0000-0000-00000000000a');
 select throws_ok(
   $$ select api_server.purge_organization('f7a00000-0000-0000-0000-00000000000a',
                                           '00000000-0000-0000-0000-000000000000') $$,
@@ -567,11 +578,27 @@ call pg_temp.act_as_postgres();
 update public.organizations
    set status = 'pending_deletion', deletion_requested_at = now() - interval '1 day'
  where id = 'f7a00000-0000-0000-0000-00000000000a';
-call pg_temp.act_as_service();
+call pg_temp.act_as_service('f7a00000-0000-0000-0000-00000000000a');
 select throws_ok(
   $$ select api_server.purge_organization('f7a00000-0000-0000-0000-00000000000a',
                                           '00000000-0000-0000-0000-000000000000') $$,
   '23514', null, 'the purge refuses an organisation scheduled less than thirty days ago');
+call pg_temp.act_as_postgres();
+
+-- ADR-090: the same call with no scope, and with another organisation's, is refused before it
+-- reaches the checks above — a scoped server function will not act on an unestablished scope.
+call pg_temp.act_as_service();
+select throws_ok(
+  $$ select api_server.purge_organization('f7a00000-0000-0000-0000-00000000000a',
+                                          '00000000-0000-0000-0000-000000000000') $$,
+  '42501', null, 'a scoped server function refuses a call with no organization scope');
+call pg_temp.act_as_postgres();
+
+call pg_temp.act_as_service('f7b00000-0000-0000-0000-00000000000b');
+select throws_ok(
+  $$ select api_server.purge_organization('f7a00000-0000-0000-0000-00000000000a',
+                                          '00000000-0000-0000-0000-000000000000') $$,
+  '42501', null, 'a scoped server function refuses a call scoped to another organization');
 call pg_temp.act_as_postgres();
 
 -- ---------------------------------------------------------------------------

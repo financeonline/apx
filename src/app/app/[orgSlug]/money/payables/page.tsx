@@ -1,7 +1,7 @@
 import { getAccessContext } from '@/modules/tenancy';
-import { assertCan } from '@/core/permissions';
 import { loadLedgerBook, loadPeriodScope } from '@/modules/dashboard';
 import { LedgerBookPage, LedgerBookEmpty } from '../_components/ledger-book';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,7 +18,7 @@ export default async function PayablesPage({
   const { orgSlug } = await params;
   const { period } = await searchParams;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'financials.view');
+  requirePermission(ctx, 'financials.view');
 
   const scope = await loadPeriodScope(ctx.db, ctx.orgId!, period ?? null, ctx.requestId);
   if (!scope) return <LedgerBookEmpty orgSlug={orgSlug} title={TITLE} />;

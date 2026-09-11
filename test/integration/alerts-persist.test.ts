@@ -1,5 +1,5 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
+import { adminSql, clientFor, createAuthUser, serverSession, sqlstate } from './setup';
 
 /**
  * The alert engine's SQL surface (FINANCIAL_ENGINE.md §8.1/§8.3; ADR-018, ADR-034, ADR-036,
@@ -34,7 +34,7 @@ function serverRpc(fn: string, args: Record<string, unknown>): string {
       : `'${String(v).replace(/'/g, "''")}'`}`)
     .join(', ');
   const output = adminSql(`
-    select set_config('request.jwt.claims', '{"role":"service_role"}', false);
+    ${serverSession(args.p_org as string | undefined)}
     select api_server.${fn}(${params})::text`);
   return output.split('\n').map((line) => line.trim()).filter(Boolean).pop() ?? '';
 }
@@ -50,7 +50,7 @@ function startRun(fingerprint: string): string {
 
 function persist(runId: string, changes: unknown[]): Record<string, number> {
   const output = adminSql(`
-    select set_config('request.jwt.claims', '{"role":"service_role"}', false);
+    ${serverSession(orgId)}
     select api_server.persist_alerts(
       '${orgId}', '${runId}',
       '${JSON.stringify(changes).replace(/'/g, "''")}'::jsonb)::text`);

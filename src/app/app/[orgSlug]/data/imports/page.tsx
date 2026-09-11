@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { loadImportHistory } from '@/modules/imports';
@@ -7,6 +6,7 @@ import { PageHeader, Card, CardBody, Badge, EmptyState } from '@/components/ui/s
 import { ButtonLink } from '@/components/ui/button';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { RollbackControl } from './rollback-control';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -20,7 +20,7 @@ export const dynamic = 'force-dynamic';
 export default async function ImportsPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'imports.review')) notFound();
+  requirePermission(ctx, 'imports.review');
 
   const history = await loadImportHistory(ctx.db, ctx.orgId!, ctx.requestId);
 

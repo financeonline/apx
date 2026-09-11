@@ -1,8 +1,7 @@
-import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
-import { can } from '@/core/permissions';
 import { PageHeader, Card, CardBody } from '@/components/ui/surfaces';
 import { UploadForm } from './upload-form';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +20,7 @@ export default async function NewImportPage({
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
   // Hidden in the navigation for a role that lacks it; a deep link gets the uniform not-found (§7.4).
-  if (!can(ctx, 'imports.create')) notFound();
+  requirePermission(ctx, 'imports.create');
 
   const { data } = await ctx.db
     .from('bank_accounts')

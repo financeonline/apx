@@ -36,6 +36,17 @@ export const REPORTS_BUCKET = 'reports';
 const SIGNED_URL_TTL_SECONDS = 60;
 /** The audit event must be from this request, not an old one replayed (ADR-043.5). */
 const AUDIT_MAX_AGE_SECONDS = 30;
+/**
+ * How far the database's clock may run ahead of this process's before a just-written event looks
+ * like it came from the future (ADR-095).
+ *
+ * `created_at` is Postgres's `now()`; the age is measured against Node's `Date.now()`, on a
+ * different host. A few hundred milliseconds of NTP skew between two machines is ordinary, and the
+ * check that does the real work is the UPPER bound — that is what stops an old event being replayed
+ * to authorise a fresh download. Refusing a legitimate download because the database's clock is
+ * 200 ms ahead is a fail-closed that protects nothing and breaks the product.
+ */
+const AUDIT_CLOCK_SKEW_SECONDS = 5;
 
 let cached: SupabaseClient | null = null;
 
@@ -104,7 +115,7 @@ async function assertAuditEvent(
     data.actor_user_id === ctx.userId &&
     data.target_table === targetTable &&
     data.target_id === targetId &&
-    ageSeconds >= 0 &&
+    ageSeconds >= -AUDIT_CLOCK_SKEW_SECONDS &&
     ageSeconds <= AUDIT_MAX_AGE_SECONDS;
 
   if (!matches) {

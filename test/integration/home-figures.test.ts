@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import {
-  formatValue, latestCompletePeriod, loadHome, loadPeriodSnapshots, loadTrend, partialPeriod,
+  formatValue, latestCompletePeriodByFlag, loadHome, loadPeriodSnapshots, loadTrend, partialPeriod,
 } from '@/modules/dashboard';
 import { adminSql, clientFor, createAuthUser, resetFixtures } from './setup';
 
@@ -390,7 +390,7 @@ describe('the period helpers', () => {
       { id: 'a', label: 'Apr', periodStart: '2026-04-01', periodEnd: '2026-04-30', isComplete: false },
       { id: 'm', label: 'Mar', periodStart: '2026-03-01', periodEnd: '2026-03-31', isComplete: true },
     ];
-    expect(latestCompletePeriod(periods)?.id).toBe('m');
+    expect(latestCompletePeriodByFlag(periods)?.id).toBe('m');
   });
 
   it('offers a partial month only when it is after the complete one', () => {

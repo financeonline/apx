@@ -1,6 +1,7 @@
 import 'server-only';
 import { createClient, type SupabaseClient } from '@supabase/supabase-js';
 import { toMotionError } from '@/core/errors';
+import { currentOrgScope, scopedServiceClient } from './service-client';
 
 /**
  * Service-role access — sanctioned use #3 of 3 (ADR-043; finding R2-A-01).
@@ -17,7 +18,22 @@ import { toMotionError } from '@/core/errors';
 
 let cached: SupabaseClient | null = null;
 
+/**
+ * The client every `api_server.*` call is made on.
+ *
+ * Inside a job it is the SCOPED client for that job's organization, so the call carries
+ * `x-motion-org` and `app.require_scope` / `app.audit` can check it (ADR-090). This file used to
+ * keep one unscoped client of its own, which is why the organization scope never reached a single
+ * `api_server.*` call even before the `set_config` fault: the scope was asserted on a different
+ * client from the one making the requests (audit H1).
+ *
+ * Outside a job — a page, a route handler, a server action — there is no organization scope to
+ * carry, and none is claimed. Those paths pass a human actor instead, which the function
+ * re-validates against `app.has_permission_of`.
+ */
 function serverClient(): SupabaseClient {
+  const scope = currentOrgScope();
+  if (scope) return scopedServiceClient(scope);
   if (cached) return cached;
   const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
   const key = process.env.SUPABASE_SERVICE_ROLE_KEY;

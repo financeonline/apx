@@ -100,16 +100,13 @@ export async function rejectImportBatch(
   }, requestId);
 }
 
-/**
- * Marks a document deleted and returns its storage path, which the Storage signer then removes
- * (ADR-043.4). The row is kept: `storage.cleanup_orphans` finishes the job if the object delete
- * fails, and a `deleted` row with no object is recoverable where a missing row is not.
+/*
+ * `deleteDocument` used to live here too: a bare `api.delete_document` wrapper with no permission
+ * check, no object removal, no caller, and a public export from this module's barrel. Deleting a
+ * document is `modules/documents`' `deleteDocument(ctx, id)`, which asserts `imports.review` and
+ * removes the object; the database enforces the permission either way, so nothing was exposed, but
+ * an unguarded twin of a guarded operation is an invitation and it is gone (ADR-094).
  */
-export async function deleteDocument(
-  db: SupabaseClient, documentId: string, requestId?: string,
-): Promise<string> {
-  return callApi<string>(db, 'delete_document', { p_document: documentId }, requestId);
-}
 
 /**
  * Commit, rollback and replace (IMPORT_ENGINE.md §11, §12).

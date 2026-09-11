@@ -44,7 +44,7 @@ export {
 export {
   basisLine,
   buildHeadlineCards,
-  latestCompletePeriod,
+  latestCompletePeriodByFlag,
   loadHealthTrend,
   loadHome,
   loadTrend,

@@ -1,4 +1,3 @@
-import { notFound } from 'next/navigation';
 import { can } from '@/core/permissions';
 import { todayInTimeZone, systemClock } from '@/core/periods';
 import { canManage, listActions, type ActionStatus } from '@/modules/actions';
@@ -7,6 +6,7 @@ import { ActionCard, ActionsNoneEmpty } from '@/components/dashboard';
 import { PageHeader } from '@/components/ui/surfaces';
 import { StatusControls } from './status-controls';
 import { NewActionForm } from './new-action-form';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +27,7 @@ export default async function ActionsPage({
   const { orgSlug } = await params;
   const { show } = await searchParams;
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'actions.view')) notFound();
+  requirePermission(ctx, 'actions.view');
 
   const filters: Readonly<Record<string, readonly ActionStatus[]>> = {
     open: ['open', 'in_progress'],

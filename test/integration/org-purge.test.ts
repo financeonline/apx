@@ -1,4 +1,5 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { withOrgScope } from '@/core/db';
 import { drainJobs, runOrgPurgeJob, type ClaimedJob } from '@/modules/jobs';
 import { adminSql, clientFor, createAuthUser, drainUntilFinished, serviceStorage } from './setup';
 
@@ -145,7 +146,11 @@ async function seedTenantData(organizationId: string, period: string): Promise<v
            (organization_id, rule_key, rule_version, severity, metric_key, period_id, subject_type,
             subject_id, title, explanation, dedupe_key, key_kind, calculation_run_id)
     values ('${organizationId}', 'revenue.decline', '1', 'medium', 'revenue', '${period}', 'none',
-            '00000000-0000-0000-0000-000000000000', 'Revenue fell', 'fixture', 'd-${RUN}', 'event',
+            -- ADR-092: subject_type 'none' names no table, so it names no row either. This used to
+            -- be an all-zero uuid: a reference to nothing, in a column nothing resolves. That is
+            -- what the guard now refuses, and it is a shape the alert engine never writes --
+            -- NO_SUBJECT is type none with a null id and a null key.
+            null, 'Revenue fell', 'fixture', 'd-${RUN}', 'event',
             '${reportId}');
 
     insert into public.report_files
@@ -206,10 +211,20 @@ describe('requesting deletion', () => {
  * afterwards, because a purge row left `running` would make every later purge of the organisation
  * wait for it — which is correct behaviour, and exactly why the cleanup is in `finally`.
  */
+/**
+ * Runs the handler the way the worker runs it (ADR-090).
+ *
+ * `runOne` in `services/worker.ts` wraps every organisation-scoped handler in `withOrgScope`, and
+ * `api_server.purge_organization` now refuses a call that arrives with no scope. Driving the
+ * handler bare would be testing a path production never takes.
+ */
+const runPurge = (organizationId: string, job: ClaimedJob) =>
+  withOrgScope(organizationId, () => runOrgPurgeJob(job));
+
 async function refused(organizationId: string, pattern: RegExp): Promise<void> {
   const jobId = runningPurgeRow(organizationId);
   try {
-    await expect(runOrgPurgeJob(claimed(organizationId, jobId))).rejects.toThrow(pattern);
+    await expect(runPurge(organizationId, claimed(organizationId, jobId))).rejects.toThrow(pattern);
   } finally {
     adminSql(`delete from public.jobs where id = '${jobId}'`);
   }
@@ -232,7 +247,7 @@ describe('the purge refuses to run when it should not', () => {
     const jobId = runningPurgeRow(orgId);
     let outcome;
     try {
-      outcome = await runOrgPurgeJob(claimed(orgId, jobId));
+      outcome = await runPurge(orgId, claimed(orgId, jobId));
     } finally {
       adminSql(`delete from public.jobs where id in ('${jobId}', '${other}')`);
     }
@@ -259,7 +274,7 @@ describe('the purge, thirty days on', () => {
 
   it('succeeds', async () => {
     purgeJobId = runningPurgeRow(orgId);
-    const outcome = await runOrgPurgeJob(claimed(orgId, purgeJobId));
+    const outcome = await runPurge(orgId, claimed(orgId, purgeJobId));
     expect(outcome.status, JSON.stringify(outcome)).toBe('succeeded');
     const rows = (outcome.result as { rows: { status: string; rows: Record<string, number> } }).rows;
     expect(rows.status).toBe('purged');
@@ -314,7 +329,7 @@ describe('the purge, thirty days on', () => {
   });
 
   it('is idempotent: a retry after the rows went finds nothing to re-verify and finishes', async () => {
-    const outcome = await runOrgPurgeJob(claimed(orgId, purgeJobId));
+    const outcome = await runPurge(orgId, claimed(orgId, purgeJobId));
     expect(outcome.status).toBe('succeeded');
     expect((outcome.result as { rows: { status: string } }).rows.status).toBe('already_deleted');
     adminSql(`delete from public.jobs where id = '${purgeJobId}'`);

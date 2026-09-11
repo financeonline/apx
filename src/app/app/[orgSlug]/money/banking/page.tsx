@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import { getAccessContext } from '@/modules/tenancy';
-import { assertCan } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState, Badge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { formatDate } from '@/components/labels';
 import { loadBanking, loadPeriodScope, type BankingFilter } from '@/modules/dashboard';
 import { PeriodHeading } from '../_components/period-heading';
 import { FigureTable } from '../_components/figures';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,7 +31,7 @@ export default async function BankingPage({
   const { orgSlug } = await params;
   const { period, filter } = await searchParams;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'banking.view');
+  requirePermission(ctx, 'banking.view');
 
   const wanted: BankingFilter = filter === 'uncategorised' ? 'uncategorised' : 'all';
   const scope = await loadPeriodScope(ctx.db, ctx.orgId!, period ?? null, ctx.requestId);

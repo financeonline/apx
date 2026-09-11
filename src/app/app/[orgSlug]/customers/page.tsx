@@ -1,12 +1,12 @@
 import Link from 'next/link';
 import { getAccessContext } from '@/modules/tenancy';
-import { assertCan } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { CustomersNoneEmpty, StatusBadgeView } from '@/components/dashboard';
 import { loadCustomers, loadPeriodScope } from '@/modules/dashboard';
 import { PeriodHeading } from '../money/_components/period-heading';
 import { FigureTable, WhyLink } from '../money/_components/figures';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +30,7 @@ export default async function CustomersPage({
   const { orgSlug } = await params;
   const { period } = await searchParams;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'customers.view');
+  requirePermission(ctx, 'customers.view');
 
   const scope = await loadPeriodScope(ctx.db, ctx.orgId!, period ?? null, ctx.requestId);
   if (!scope) return <CustomersEmpty orgSlug={orgSlug} />;

@@ -1,8 +1,8 @@
 import { getAccessContext, listOrgAuditEvents } from '@/modules/tenancy';
-import { assertCan } from '@/core/permissions';
 import { PageHeader, Card, CardBody, EmptyState, Badge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { auditActionLabel, ACTOR_TYPE_LABELS } from '@/components/labels';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -27,7 +27,7 @@ export default async function AuditPage({
   const { orgSlug } = await params;
   const { page: pageParam } = await searchParams;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'audit.view');
+  requirePermission(ctx, 'audit.view');
 
   const pageIndex = Math.max(0, Number.parseInt(pageParam ?? '0', 10) || 0);
   const offset = pageIndex * PAGE_SIZE;

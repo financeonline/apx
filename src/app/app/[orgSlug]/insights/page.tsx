@@ -1,5 +1,4 @@
 import Link from 'next/link';
-import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { loadAlertsPage, loadInsights, type MovementView } from '@/modules/dashboard';
@@ -11,6 +10,7 @@ import {
 } from '@/components/dashboard';
 import { AlertActions } from './alerts/alert-actions';
 import { AlertFilters, parseAlertFilters } from './alerts/filters';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -74,7 +74,7 @@ export default async function InsightsPage({
 
   // The section is hidden in the navigation for a role that lacks it; a deep link gets the uniform
   // not-found rather than a page describing what it cannot show (§7.4).
-  if (!can(ctx, 'financials.view')) notFound();
+  requirePermission(ctx, 'financials.view');
 
   const [state, alerts] = await Promise.all([
     loadInsights(ctx.db, ctx.orgId!, orgSlug, ctx.requestId),

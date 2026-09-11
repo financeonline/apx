@@ -104,11 +104,50 @@ export function isPeriodComplete(
   hasActiveCashLikeAccount: boolean,
 ): boolean {
   assertConsistent(period);
+  return completenessHolds({
+    pnlLatestDataDate: period.pnlLatestDataDate,
+    periodEnd: period.periodEnd,
+    bankCoverage: period.bankCoverage,
+    hasActiveCashLikeAccount,
+  });
+}
+
+/**
+ * The rule itself, over the four facts it actually needs (ADR-093).
+ *
+ * ADR-030.1 says "the rule lives in `core/periods` and is cited by both", and it did not: the
+ * financial engine carried a second implementation over its own coverage shape, and this module was
+ * imported by nothing but its unit test. Two expressions of one rule, differing in how they asked
+ * about bank coverage — `bankCoverage === 'full'` here, `bankCoverageRatio >= 1` there — with only
+ * one of them reachable.
+ *
+ * This is now the only place the predicate is written. `isPeriodComplete` above is the shape the
+ * period-coverage callers hold; `financial-engine/domain/coverage.ts` adapts the engine's shape onto
+ * the same call. Neither restates the rule.
+ */
+export interface CompletenessFacts {
+  /** The chosen P&L source's latest declared data date, or null when no source covers the family. */
+  readonly pnlLatestDataDate: IsoDate | null;
+  readonly periodEnd: IsoDate;
+  readonly bankCoverage: BankCoverage;
+  readonly hasActiveCashLikeAccount: boolean;
+}
+
+export function completenessHolds(facts: CompletenessFacts): boolean {
   const pnlReachesPeriodEnd =
-    period.pnlLatestDataDate !== null &&
-    compareIsoDates(period.pnlLatestDataDate, period.periodEnd) >= 0;
-  const cashSatisfied = !hasActiveCashLikeAccount || period.bankCoverage === 'full';
+    facts.pnlLatestDataDate !== null &&
+    compareIsoDates(facts.pnlLatestDataDate, facts.periodEnd) >= 0;
+  const cashSatisfied = !facts.hasActiveCashLikeAccount || facts.bankCoverage === 'full';
   return pnlReachesPeriodEnd && cashSatisfied;
+}
+
+/**
+ * The engine measures bank coverage as a ratio and this module names it in three values. One
+ * conversion, here, so "full" means the same thing on both sides of the boundary (ADR-093).
+ */
+export function bankCoverageFromRatio(ratio: number): BankCoverage {
+  if (ratio >= 1) return 'full';
+  return ratio > 0 ? 'partial' : 'none';
 }
 
 function toLatest(period: PeriodCoverage, status: PeriodStatus): LatestPeriod {

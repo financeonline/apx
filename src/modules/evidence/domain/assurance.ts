@@ -7,31 +7,13 @@
  * `UX_ARCHITECTURE.md §8.1` (ADR-037) — and are deliberately not restated here.
  */
 
-export const ASSURANCE_LEVELS = ['verified', 'calculated', 'estimated', 'inferred'] as const;
-export type AssuranceLevel = (typeof ASSURANCE_LEVELS)[number];
+import { weakestIn, type AssuranceLevel } from '@/core/assurance';
 
-/** Descending strength; the index is the rank used by `minAssurance`. */
-const RANK: Record<AssuranceLevel, number> = {
-  verified: 0,
-  calculated: 1,
-  estimated: 2,
-  inferred: 3,
-};
+export {
+  ASSURANCE_LEVELS, ASSURANCE_RANK, isAssuranceLevel, weakestOf, type AssuranceLevel,
+} from '@/core/assurance';
 
-export function isAssuranceLevel(value: unknown): value is AssuranceLevel {
-  return typeof value === 'string' && value in RANK;
-}
-
-/**
- * The weakest level in the list, or `null` for an empty list.
- *
- * `null` rather than a default: §8.6 says a claim whose bundle would be empty is downgraded and not
- * shown at all, so inventing `verified` here would paper over exactly the case the rule exists for.
- */
+/** The weakest level in the list, or `null` for an empty list. One ladder, in `core` (ADR-094). */
 export function minAssurance(levels: readonly AssuranceLevel[]): AssuranceLevel | null {
-  let weakest: AssuranceLevel | null = null;
-  for (const level of levels) {
-    if (weakest === null || RANK[level] > RANK[weakest]) weakest = level;
-  }
-  return weakest;
+  return weakestIn(levels);
 }

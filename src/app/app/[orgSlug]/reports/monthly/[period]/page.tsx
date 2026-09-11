@@ -6,6 +6,7 @@ import { getAccessContext } from '@/modules/tenancy';
 import { HealthScoreInline, StatusBadgeView } from '@/components/dashboard';
 import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
 import { PdfControl } from './pdf-control';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -24,7 +25,7 @@ export default async function MonthlyReportPage({
 }) {
   const { orgSlug, period } = await params;
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'reports.view')) notFound();
+  requirePermission(ctx, 'reports.view');
 
   // A month with no figures, or one that has not finished, has no report — NOT FOUND rather than an
   // empty page that looks like a fault (§119).

@@ -8,6 +8,7 @@ import { PageHeader } from '@/components/ui/surfaces';
 import { AnalystChat } from './analyst-chat';
 import { ConversationRail } from './conversation-rail';
 import { FactsCard } from './facts-card';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
@@ -30,7 +31,8 @@ export default async function AnalystPage({
   const { orgSlug } = await params;
   const { ask } = await searchParams;
   const ctx = await getAccessContext(orgSlug);
-  if (!can(ctx, 'ai.use') || !ctx.orgId) notFound();
+  if (!ctx.orgId) notFound();
+  requirePermission(ctx, 'ai.use');
 
   const home = await loadHome(ctx.db, ctx.orgId, orgSlug, ctx.requestId, {
     suspended: ctx.organizationStatus === 'suspended',

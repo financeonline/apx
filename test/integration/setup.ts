@@ -129,6 +129,37 @@ export function serviceStorage(): SupabaseClient {
 }
 
 /**
+ * The session preamble a direct `psql` call needs to look like a scoped server request (ADR-090).
+ *
+ * PostgREST sets `request.jwt.claims` and `request.headers` on every request, and the organization
+ * scope rides in the latter. `adminSql` opens a plain connection, so a test that drives an
+ * `api_server.*` function has to set both itself — otherwise it is asserting against a session the
+ * server never produces.
+ */
+export function serverSession(organizationId?: string): string {
+  const headers = organizationId
+    ? `'{"x-motion-org":"${organizationId}"}'`
+    : `'{}'`;
+  return `select set_config('request.jwt.claims', '{"role":"service_role"}', false);
+    select set_config('request.headers', ${headers}, false);`;
+}
+
+/**
+ * A service-role client that asserts a given organization scope, or none (ADR-090).
+ *
+ * The production scope is set by `withOrgScope` from the `jobs` row; this exists so a test can
+ * assert what happens when it is absent, or wrong, which is the whole point of a fail-closed guard.
+ */
+export function serviceClientScoped(organizationId?: string): SupabaseClient {
+  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
+  if (!key) throw new Error('the local Supabase service-role key is not configured');
+  return createClient(SUPABASE_URL, key, {
+    auth: { persistSession: false, autoRefreshToken: false },
+    ...(organizationId ? { global: { headers: { 'x-motion-org': organizationId } } } : {}),
+  });
+}
+
+/**
  * Drains the queue until ONE named job reaches a terminal state.
  *
  * `drainJobs(n)` claims at most n jobs from a queue every suite shares, so a fixed count is a bet

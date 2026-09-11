@@ -1,14 +1,14 @@
 import { getAccessContext } from '@/modules/tenancy';
-import { assertCan } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody } from '@/components/ui/surfaces';
 import { DangerForms } from './danger-forms';
+import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
 export default async function DangerPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
-  assertCan(ctx, 'org.delete');
+  requirePermission(ctx, 'org.delete');
 
   return (
     <>
