@@ -19,12 +19,15 @@ export async function reportAnswerAction(_previous: ActionResult | null, form: F
   try {
     const ctx = await getAccessContext(orgSlug);
     requestId = ctx.requestId;
+    const type = text(form, 'type') as FeedbackType;
     await submitFeedback(ctx, {
       messageId: text(form, 'message_id'),
-      type: text(form, 'type') as FeedbackType,
+      type,
       comment: optionalText(form, 'comment') ?? null,
     });
-    return done('Thank you. Someone will look at this answer.');
+    return done(type === 'helpful'
+      ? 'Thank you — noted.'
+      : 'Thank you. Someone will look at this answer.');
   } catch (error) {
     return fail(error, { requestId, action: 'ai.feedback' });
   }

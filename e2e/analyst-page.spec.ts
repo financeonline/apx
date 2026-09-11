@@ -56,13 +56,27 @@ test.describe('the analyst page', () => {
     test.skip(conversationId === '', 'needs the conversation the previous test created');
 
     await page.goto(`/app/${slug}/analyst/${conversationId}`);
-    await page.getByRole('button', { name: /report this answer/i }).first().click();
+    await page.getByRole('button', { name: /report an incorrect figure/i }).first().click();
     await page.getByLabel(/what was wrong/i).selectOption('unhelpful');
-    await page.getByLabel(/tell us more/i).fill('It did not answer about May.');
+    await page.getByLabel(/which figure/i).fill('It did not answer about May.');
     await page.getByRole('button', { name: /send report/i }).click();
     await expect(page.getByText(/someone will look at this answer/i)).toBeVisible();
     expect(sql(`select feedback_type from public.ai_feedback f join public.ai_messages m on m.id = f.message_id
                  where m.conversation_id = '${conversationId}' order by f.created_at desc limit 1`)).toBe('unhelpful');
+  });
+
+  test('a reader can say an answer was helpful in one click', async ({ page }) => {
+    const slug = seededOrgSlug();
+    const conversationId = sql(`
+      select c.id from public.ai_conversations c join public.organizations o on o.id = c.organization_id
+       where o.slug = '${slug}' order by c.created_at desc limit 1`);
+    test.skip(conversationId === '', 'needs the conversation the first test created');
+
+    await page.goto(`/app/${slug}/analyst/${conversationId}`);
+    await page.getByRole('button', { name: /^helpful$/i }).first().click();
+    await expect(page.getByText(/noted/i)).toBeVisible();
+    expect(sql(`select feedback_type from public.ai_feedback f join public.ai_messages m on m.id = f.message_id
+                 where m.conversation_id = '${conversationId}' order by f.created_at desc limit 1`)).toBe('helpful');
   });
 
   test('a conversation that does not exist is 404', async ({ page }) => {

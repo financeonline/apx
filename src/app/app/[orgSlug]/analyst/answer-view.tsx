@@ -58,7 +58,7 @@ export function AnswerView({
     return (
       <div className="flex flex-col gap-3">
         <Unavailable facts={facts} />
-        <div className="flex justify-end text-sm"><ReportForm orgSlug={orgSlug} messageId={message.id} /></div>
+        <div className="flex justify-end text-sm"><FeedbackControls orgSlug={orgSlug} messageId={message.id} /></div>
       </div>
     );
   }
@@ -140,7 +140,7 @@ export function AnswerView({
                 See the evidence behind this answer
               </Link>
             ) : <span />}
-            <ReportForm orgSlug={orgSlug} messageId={message.id} />
+            <FeedbackControls orgSlug={orgSlug} messageId={message.id} />
           </footer>
         </>
       ) : null}
@@ -213,39 +213,67 @@ function Recommendation({
   );
 }
 
-function ReportForm({ orgSlug, messageId }: { orgSlug: string; messageId: string }) {
-  const [open, setOpen] = useState(false);
+/**
+ * What the reader thought of the answer (AI_ARCHITECTURE.md §13, CD-25).
+ *
+ * Three ways to say it, because they cost the reader different amounts and are worth different
+ * things. "Helpful" is one click and is not a complaint: §13 turns confirmed reports into eval
+ * cases, and an answer somebody vouched for is the other half of that corpus — the regression
+ * fixture you want to keep passing. "Not helpful" is also one click, because making somebody write
+ * an essay to say "that missed the point" is how you stop hearing it. A wrong figure is the one
+ * worth a sentence, so only that path opens a form.
+ */
+function FeedbackControls({ orgSlug, messageId }: { orgSlug: string; messageId: string }) {
   const [state, submit] = useActionState(reportAnswerAction, null);
+  const [reporting, setReporting] = useState(false);
+
   if (state?.ok) return <ActionMessage state={state} />;
-  if (!open) {
+
+  if (reporting) {
     return (
-      <button type="button" onClick={() => setOpen(true)} className="text-ink-muted underline underline-offset-2 hover:text-ink">
-        Report this answer
-      </button>
+      <form action={submit} className="flex w-full flex-col gap-2 rounded-md border border-line p-3">
+        <input type="hidden" name="org_slug" value={orgSlug} />
+        <input type="hidden" name="message_id" value={messageId} />
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-ink-muted">What was wrong?</span>
+          <select name="type" required className="rounded-md border border-line bg-surface px-3 py-2 text-ink" defaultValue="incorrect">
+            <option value="incorrect">A figure or claim is incorrect</option>
+            <option value="unsafe">It said something it should not have</option>
+            <option value="unhelpful">It did not answer the question</option>
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-sm">
+          <span className="text-ink-muted">Which figure, and what should it be? (optional)</span>
+          <textarea name="comment" rows={2} maxLength={1000} className="rounded-md border border-line bg-surface px-3 py-2 text-ink" />
+        </label>
+        <div className="flex items-center gap-3">
+          <SubmitButton tone="secondary" pendingLabel="Sending…">Send report</SubmitButton>
+          <button type="button" onClick={() => setReporting(false)} className="text-sm text-ink-muted">Cancel</button>
+          <ActionMessage state={state} />
+        </div>
+      </form>
     );
   }
+
   return (
-    <form action={submit} className="flex w-full flex-col gap-2 rounded-md border border-line p-3">
-      <input type="hidden" name="org_slug" value={orgSlug} />
-      <input type="hidden" name="message_id" value={messageId} />
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-ink-muted">What was wrong?</span>
-        <select name="type" required className="rounded-md border border-line bg-surface px-3 py-2 text-ink" defaultValue="incorrect">
-          <option value="incorrect">A figure or claim is incorrect</option>
-          <option value="unhelpful">It did not answer the question</option>
-          <option value="unsafe">It said something it should not have</option>
-        </select>
-      </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-ink-muted">Tell us more (optional)</span>
-        <textarea name="comment" rows={2} maxLength={1000} className="rounded-md border border-line bg-surface px-3 py-2 text-ink" />
-      </label>
-      <div className="flex items-center gap-3">
-        <SubmitButton tone="secondary" pendingLabel="Sending…">Send report</SubmitButton>
-        <button type="button" onClick={() => setOpen(false)} className="text-sm text-ink-muted">Cancel</button>
-        <ActionMessage state={state} />
-      </div>
-    </form>
+    <div className="flex flex-wrap items-center gap-3 text-sm">
+      <span className="text-ink-faint">Was this helpful?</span>
+      <form action={submit} className="contents">
+        <input type="hidden" name="org_slug" value={orgSlug} />
+        <input type="hidden" name="message_id" value={messageId} />
+        <input type="hidden" name="type" value="helpful" />
+        <SubmitButton tone="quiet" pendingLabel="Saving…">Helpful</SubmitButton>
+      </form>
+      <form action={submit} className="contents">
+        <input type="hidden" name="org_slug" value={orgSlug} />
+        <input type="hidden" name="message_id" value={messageId} />
+        <input type="hidden" name="type" value="unhelpful" />
+        <SubmitButton tone="quiet" pendingLabel="Saving…">Not helpful</SubmitButton>
+      </form>
+      <button type="button" onClick={() => setReporting(true)} className="text-ink-muted underline underline-offset-2 hover:text-ink">
+        Report an incorrect figure
+      </button>
+    </div>
   );
 }
 

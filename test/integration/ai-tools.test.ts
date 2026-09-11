@@ -115,6 +115,7 @@ beforeAll(async () => {
 afterAll(() => {
   adminSql(`
     delete from public.organizations where name like 'ITest Tools%${RUN}';
+    delete from public.platform_users where user_id in (select id from auth.users where email like '%@${DOMAIN}');
     delete from auth.users where email like '%@${DOMAIN}';
     delete from public.organizations where name like 'ITest Tools %' and created_at < now() - interval '1 hour';
     delete from auth.users where email like '%.tools.itest' and created_at < now() - interval '1 hour';`);
@@ -283,6 +284,80 @@ describe('the boundaries a tool never crosses (§4)', () => {
       resolveAccess: async () => demoted, started,
       call: { periodContext, knownPeriods: [], now: new Date() },
     })).rejects.toBeInstanceOf(ContextChanged);
+  });
+});
+
+/**
+ * A platform employee reaches an organisation's figures through the analyst only where assigned
+ * (Phase 9 brief; RBAC_MATRIX.md §2.1, §3.5; AI_ARCHITECTURE.md §4; ADR-044.1).
+ *
+ * Two independent stops, and the test proves both because either alone would be a bad design. The
+ * permission check answers "may this role call this tool at all"; RLS answers "and what may this
+ * session see" — an unassigned employee passes the first and is stopped by the second, which is why
+ * a tool that returned rows from `ctx.db` without RLS would leak a whole customer's ledger to any
+ * member of staff who typed a question.
+ */
+describe('an employee reaches figures only where assigned (§4)', () => {
+  let assignedEmployee: string;
+  let unassignedEmployee: string;
+
+  beforeAll(() => {
+    assignedEmployee = createAuthUser(`assigned@${DOMAIN}`);
+    unassignedEmployee = createAuthUser(`unassigned@${DOMAIN}`);
+    adminSql(`
+      insert into public.platform_users (user_id, platform_role, status) values
+        ('${assignedEmployee}', 'employee', 'active'), ('${unassignedEmployee}', 'employee', 'active');
+      update public.profiles set mfa_enrolled_at = now()
+       where id in ('${assignedEmployee}', '${unassignedEmployee}');
+      insert into public.organization_assignments (organization_id, employee_user_id, status)
+      values ('${orgId}', '${assignedEmployee}', 'active');`);
+  });
+
+  const employeeContext = (userId: string) => ({
+    ...contextFor(userId, 'employee'),
+    db: clientFor(userId, { email: `employee@${DOMAIN}`, aal: 'aal2' }),
+  });
+
+  it('the assigned employee reads the organisation’s figures', async () => {
+    const { result, persisted } = await invoke(employeeContext(assignedEmployee), 'get_metric',
+      { metric_key: 'revenue', period: MAY() });
+    expect(persisted.authorized, 'an employee holds financials.view').toBe(true);
+    expect(result.ok, JSON.stringify(result.data)).toBe(true);
+    expect(JSON.stringify(result.data)).toContain('£25,000');
+  });
+
+  it('the unassigned employee is authorised by role and still gets no figures, because RLS decides', async () => {
+    const { result, persisted } = await invoke(employeeContext(unassignedEmployee), 'get_metric',
+      { metric_key: 'revenue', period: MAY() });
+    // The permission check passes — the role holds financials.view — and the session still sees
+    // nothing, so the tool answers honestly rather than with another organisation's figure.
+    expect(persisted.authorized).toBe(true);
+    expect(result.ok).toBe(false);
+    expect((result.data as { code: string }).code).toMatch(/NO_DATA|PERIOD_NOT_FOUND/);
+    expect(JSON.stringify(result.data)).not.toContain('25,000');
+  });
+
+  it('the same employee at aal1 sees nothing even where assigned (ADR-044.1)', async () => {
+    const atAal1 = {
+      ...contextFor(assignedEmployee, 'employee'),
+      db: clientFor(assignedEmployee, { email: `employee@${DOMAIN}`, aal: 'aal1' }),
+    };
+    const { result } = await invoke(atAal1, 'get_metric', { metric_key: 'revenue', period: MAY() });
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result.data)).not.toContain('25,000');
+  });
+
+  it('the source-document tool is refused to neither employee by role, and yields nothing unassigned', async () => {
+    // An employee holds documents.view, so the denial is not the stop here — the assignment is.
+    const assigned = await invoke(employeeContext(assignedEmployee), 'get_source_document_reference',
+      { record_table: 'ledger_entries', record_id: '00000000-0000-4000-8000-000000000000' });
+    expect(assigned.persisted.authorized).toBe(true);
+    expect((assigned.result.data as { code: string }).code).toBe('NOT_FOUND');
+
+    const unassigned = await invoke(employeeContext(unassignedEmployee), 'get_source_document_reference',
+      { record_table: 'ledger_entries', record_id: '00000000-0000-4000-8000-000000000000' });
+    expect(unassigned.persisted.authorized).toBe(true);
+    expect((unassigned.result.data as { code: string }).code).toBe('NOT_FOUND');
   });
 });
 
