@@ -20,6 +20,8 @@ const DOMAIN = `${RUN}.alerts.itest`;
 
 let ownerId: string;
 let clientUserId: string;
+let assignedEmployeeId: string;
+let strangerEmployeeId: string;
 let orgId: string;
 let periodMar: string;
 
@@ -102,6 +104,8 @@ function alertId(): string {
 beforeAll(async () => {
   ownerId = createAuthUser(`owner@${DOMAIN}`);
   clientUserId = createAuthUser(`client@${DOMAIN}`);
+  assignedEmployeeId = createAuthUser(`assigned@${DOMAIN}`);
+  strangerEmployeeId = createAuthUser(`unassigned@${DOMAIN}`);
 
   const created = await clientFor(ownerId).schema('api').rpc('create_organization', {
     p_name: `ITest Alerts ${RUN}`,
@@ -112,6 +116,14 @@ beforeAll(async () => {
   adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status)
             values ('${orgId}', '${clientUserId}', 'client', 'active')`);
 
+  // A platform employee ASSIGNED to this organisation, and one who is not (RBAC §3.5: a platform
+  // user is never also a member, so both reach the organisation only through an assignment).
+  adminSql(`
+    insert into public.platform_users (user_id, platform_role, status) values
+      ('${assignedEmployeeId}', 'employee', 'active'), ('${strangerEmployeeId}', 'employee', 'active');
+    insert into public.organization_assignments (organization_id, employee_user_id, status)
+    values ('${orgId}', '${assignedEmployeeId}', 'active');`);
+
   periodMar = one(`select id from public.fiscal_periods
                     where organization_id = '${orgId}' and period_start = '2026-03-01'`);
 });
@@ -119,6 +131,7 @@ beforeAll(async () => {
 afterAll(() => {
   adminSql(`
     delete from public.organizations where name like 'ITest Alerts%${RUN}';
+    delete from public.platform_users where user_id in (select id from auth.users where email like '%@${DOMAIN}');
     delete from auth.users where email like '%@${DOMAIN}';
     delete from public.organizations where name like 'ITest Alerts %' and created_at < now() - interval '1 hour';
     delete from auth.users where email like '%.alerts.itest' and created_at < now() - interval '1 hour';`);
@@ -434,5 +447,78 @@ describe('one tenant never sees another’s alerts', () => {
     const stranger = createAuthUser(`stranger@${DOMAIN}`);
     const theirs = await clientFor(stranger).from('alerts').select('id').eq('organization_id', orgId);
     expect(theirs.data ?? []).toHaveLength(0);
+  });
+});
+
+/**
+ * A platform employee reaches an organisation's alerts only through an assignment (Phase 7 brief;
+ * RBAC_MATRIX.md §2.1, §3.5; SECURITY_MODEL.md §4; ADR-044.1).
+ *
+ * The alerts policy is `organization_id in (select app.accessible_org_ids())`, and an employee's
+ * accessible set IS their active assignments at aal2 — so this holds by construction rather than by
+ * a rule written twice. It is asserted here because "by construction" has been wrong before: the
+ * feedback queue's policies named owner/admin/super_admin and silently locked out the very employee
+ * the matrix sends to review it (ADR-082). A financial alert is exactly the kind of row where that
+ * mistake is expensive in both directions.
+ */
+describe('a platform employee sees only the organisations assigned to them', () => {
+  beforeEach(() => {
+    const run = startRun('e7');
+    persist(run, [insertChange()]);
+  });
+
+  it('the assigned employee at aal2 reads the organisation’s alerts and their revisions', async () => {
+    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}`, aal: 'aal2' });
+    const alerts = await employee.from('alerts').select('id, rule_key, severity').eq('organization_id', orgId);
+    expect(alerts.error).toBeNull();
+    expect(alerts.data).toHaveLength(1);
+    expect((alerts.data as Array<{ rule_key: string }>)[0]!.rule_key).toBe('concentration.customer');
+
+    // The evidence behind it is reachable too, or the alert is a claim they cannot check.
+    const revisions = await employee.from('alert_revisions').select('id').eq('organization_id', orgId);
+    expect(revisions.error).toBeNull();
+    expect((revisions.data ?? []).length).toBeGreaterThan(0);
+  });
+
+  it('the same employee at aal1 reads nothing at all (ADR-044.1)', async () => {
+    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}`, aal: 'aal1' });
+    const alerts = await employee.from('alerts').select('id').eq('organization_id', orgId);
+    expect(alerts.error).toBeNull();
+    expect(alerts.data ?? []).toHaveLength(0);
+  });
+
+  it('an employee with no assignment to this organisation reads nothing, even at aal2', async () => {
+    const stranger = clientFor(strangerEmployeeId, { email: `unassigned@${DOMAIN}`, aal: 'aal2' });
+    const alerts = await stranger.from('alerts').select('id').eq('organization_id', orgId);
+    expect(alerts.error).toBeNull();
+    expect(alerts.data ?? []).toHaveLength(0);
+    const revisions = await stranger.from('alert_revisions').select('id').eq('organization_id', orgId);
+    expect(revisions.data ?? []).toHaveLength(0);
+  });
+
+  it('the assigned employee may act on an alert; the unassigned one is refused', async () => {
+    const id = alertId();
+    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}`, aal: 'aal2' });
+    const acted = await employee.schema('api').rpc('set_alert_status', {
+      p_alert: id, p_status: 'acknowledged', p_reason: null,
+    });
+    expect(acted.error, JSON.stringify(acted.error)).toBeNull();
+
+    const stranger = clientFor(strangerEmployeeId, { email: `unassigned@${DOMAIN}`, aal: 'aal2' });
+    const refused = await stranger.schema('api').rpc('set_alert_status', {
+      p_alert: id, p_status: 'resolved', p_reason: null,
+    });
+    // NOT_FOUND, never a denial: a stranger learns nothing about whether the alert exists (§14).
+    expect(sqlstate(refused.error)).toBe('P0002');
+  });
+
+  it('the assignment is what grants it: revoking the assignment closes the door', async () => {
+    adminSql(`update public.organization_assignments set status = 'revoked'
+               where organization_id = '${orgId}' and employee_user_id = '${assignedEmployeeId}'`);
+    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}`, aal: 'aal2' });
+    const alerts = await employee.from('alerts').select('id').eq('organization_id', orgId);
+    expect(alerts.data ?? []).toHaveLength(0);
+    adminSql(`update public.organization_assignments set status = 'active'
+               where organization_id = '${orgId}' and employee_user_id = '${assignedEmployeeId}'`);
   });
 });
