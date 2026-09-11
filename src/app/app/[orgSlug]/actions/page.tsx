@@ -1,6 +1,8 @@
 import { can } from '@/core/permissions';
 import { todayInTimeZone, systemClock } from '@/core/periods';
-import { canManage, listActions, type ActionStatus } from '@/modules/actions';
+import {
+  ACTION_VIEWS, ACTION_VIEW_LABELS, canManage, isActionView, loadActionCentre,
+} from '@/modules/actions';
 import { getAccessContext } from '@/modules/tenancy';
 import { ActionCard, ActionsNoneEmpty } from '@/components/dashboard';
 import { PageHeader } from '@/components/ui/surfaces';
@@ -29,34 +31,39 @@ export default async function ActionsPage({
   const ctx = await getAccessContext(orgSlug);
   requirePermission(ctx, 'actions.view');
 
-  const filters: Readonly<Record<string, readonly ActionStatus[]>> = {
-    open: ['open', 'in_progress'],
-    done: ['completed', 'dismissed'],
-    all: ['open', 'in_progress', 'completed', 'dismissed'],
-  };
-  const selected = show === 'done' || show === 'all' ? show : 'open';
-  const actions = await listActions(ctx, { status: filters[selected] });
   const today = todayInTimeZone(systemClock, 'UTC');
+  const selected = show !== undefined && isActionView(show) ? show : 'attention';
+  const centre = await loadActionCentre(ctx, today, selected);
+  const { actions } = centre;
 
   return (
     <>
       <PageHeader
         eyebrow="Action Centre"
         title="What we have decided to do"
-        description="Everything this business chose to act on, and who is doing it."
+        description={headline(centre.needingAttention, centre.overdue)}
       />
 
+      {/*
+        * The lenses (SOW §17). A tab carries its count so a reader can see where the work is before
+        * choosing, and a lens with nothing in it is shown greyed rather than hidden — "nothing is
+        * overdue" is the most reassuring thing this page can say, and hiding the tab would make it
+        * unsayable.
+        */}
       <nav className="mt-6 flex flex-wrap gap-2 text-sm" aria-label="Filter actions">
-        {(['open', 'done', 'all'] as const).map((key) => (
+        {ACTION_VIEWS.map((key) => (
           <a
             key={key}
             href={`/app/${orgSlug}/actions?show=${key}`}
             aria-current={selected === key ? 'page' : undefined}
             className={selected === key
               ? 'rounded-md bg-accent-soft px-3 py-1.5 text-accent'
-              : 'rounded-md px-3 py-1.5 text-ink-muted hover:text-ink'}
+              : centre.counts[key] === 0
+                ? 'rounded-md px-3 py-1.5 text-ink-faint hover:text-ink'
+                : 'rounded-md px-3 py-1.5 text-ink-muted hover:text-ink'}
           >
-            {key === 'open' ? 'To do' : key === 'done' ? 'Finished' : 'Everything'}
+            {ACTION_VIEW_LABELS[key]}
+            <span className="ml-1.5 tabular-nums text-ink-faint">{centre.counts[key]}</span>
           </a>
         ))}
       </nav>
@@ -91,4 +98,18 @@ export default async function ActionsPage({
       </div>
     </>
   );
+}
+
+/**
+ * The sentence at the top: what needs doing, and whether anything is late.
+ *
+ * Plain words and a number, because that is the whole question the page answers on arrival. Nothing
+ * is said about priority here — the list is already ordered by it, and a second summary of the same
+ * fact is one more thing to read before acting.
+ */
+function headline(needingAttention: number, overdue: number): string {
+  if (needingAttention === 0) return 'Nothing is waiting on anybody. Finished work is still here.';
+  const thing = needingAttention === 1 ? '1 thing needs' : `${needingAttention} things need`;
+  if (overdue === 0) return `${thing} attention.`;
+  return `${thing} attention, and ${overdue === 1 ? '1 is' : `${overdue} are`} past its due date.`;
 }

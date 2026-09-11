@@ -90,6 +90,10 @@ export interface ActionFilter {
   readonly status?: readonly ActionStatus[];
   readonly ownerUserId?: string;
   readonly sourceType?: ActionSource;
+  /** ADR-098: the Action Centre's priority filter. */
+  readonly priority?: readonly ActionPriority[];
+  /** Actions due on or before this date, inclusive. A row with no date is never "due" (§17). */
+  readonly dueOnOrBefore?: string;
 }
 
 export async function listActions(
@@ -101,6 +105,15 @@ export async function listActions(
   }
   if (filter.ownerUserId !== undefined) query = query.eq('owner_user_id', filter.ownerUserId);
   if (filter.sourceType !== undefined) query = query.eq('source_type', filter.sourceType);
+  if (filter.priority !== undefined && filter.priority.length > 0) {
+    query = query.in('priority', [...filter.priority]);
+  }
+  /*
+   * `lte` and not `is not null` + `lte`: PostgREST leaves NULLs out of a comparison, which is the
+   * behaviour this wants. An action with no due date is not due — it is simply undated, and putting
+   * it in "due soon" would invent a deadline nobody set.
+   */
+  if (filter.dueOnOrBefore !== undefined) query = query.lte('due_date', filter.dueOnOrBefore);
 
   const { data, error } = await query.order('created_at', { ascending: false });
   if (error) throw toMotionError(error);

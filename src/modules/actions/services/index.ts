@@ -2,7 +2,11 @@ import 'server-only';
 import { callApi } from '@/core/db';
 import { assertCan, can } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
-import { byUrgency, canTransition, isOpen, isOverdue, type Action, type ActionPriority, type ActionStatus } from '../domain/types';
+import {
+  OPEN_STATUSES, byUrgency, canTransition, isOpen, isOverdue,
+  type Action, type ActionPriority, type ActionStatus,
+} from '../domain/types';
+import { ACTION_VIEWS, inView, type ActionView } from '../domain/views';
 import * as repo from '../data/repository';
 import { ValidationError } from '@/core/errors';
 
@@ -55,14 +59,18 @@ export async function createAction(ctx: AccessContext, input: CreateActionInput)
  * month later, which is the question an action list exists to answer.
  */
 export async function createFromAlert(
-  ctx: AccessContext, alertId: string, input: Partial<CreateActionInput> = {},
+  ctx: AccessContext, alertId: string, input: Omit<Partial<CreateActionInput>, 'priority'> = {},
 ): Promise<string> {
   assertCan(ctx, 'actions.create');
+  /*
+   * No `priority` here, and the type will not accept one (ADR-098). The action's priority IS the
+   * alert's severity, decided by the rule that fired and derived in SQL; offering the caller a field
+   * the function ignores would be an interface that lies about what it does.
+   */
   return callApi<string>(ctx.db, 'create_action_from_alert', {
     p_alert: alertId,
     p_input: {
       ...(input.title === undefined ? {} : { title: input.title }),
-      ...(input.priority === undefined ? {} : { priority: input.priority }),
       ...(input.ownerUserId == null ? {} : { owner_user_id: input.ownerUserId }),
       ...(input.dueDate == null ? {} : { due_date: input.dueDate }),
     },
@@ -194,6 +202,62 @@ export async function getActionsSummary(
     overdue: actions.filter((action) => isOverdue(action, today)).length,
     mine: actions.filter((action) => action.ownerUserId === ctx.userId).length,
     top: actions.slice(0, limit),
+  };
+}
+
+/**
+ * Everything the Action Centre screen needs, in two reads (SOW §17; ADR-098).
+ *
+ * Two and not seven: the lenses are all views of the same small set — a business's open actions are
+ * bounded by what people can actually attend to — so they are counted in memory rather than asked
+ * for one query at a time. Finished work is the second read, and it is capped, because "recently
+ * completed" is a reassurance and not an archive; the archive is the `Everything` lens.
+ *
+ * The counts come from `inView`, so the number on a tab and the list behind it cannot disagree.
+ */
+export interface ActionCentreView {
+  readonly view: ActionView;
+  readonly actions: readonly Action[];
+  /** One count per lens, for the tabs. */
+  readonly counts: Readonly<Record<ActionView, number>>;
+  /** Open work only — the sentence at the top of the page. */
+  readonly needingAttention: number;
+  readonly overdue: number;
+  readonly today: string;
+}
+
+const RECENTLY_COMPLETED_LIMIT = 20;
+
+export async function loadActionCentre(
+  ctx: AccessContext, today: string, view: ActionView = 'attention',
+): Promise<ActionCentreView> {
+  assertCan(ctx, 'actions.view');
+  const orgId = orgOf(ctx);
+  const names = can(ctx, 'users.view');
+
+  const [open, finished] = await Promise.all([
+    repo.listActions(ctx.db, orgId, { status: [...OPEN_STATUSES] }, names),
+    repo.listActions(ctx.db, orgId, { status: ['completed', 'dismissed'] }, names),
+  ]);
+  const recent = finished.slice(0, RECENTLY_COMPLETED_LIMIT);
+  const everything = [...open, ...finished];
+
+  const counts = Object.fromEntries(
+    ACTION_VIEWS.map((key) => [
+      key,
+      (key === 'done' ? finished : key === 'all' ? everything : open)
+        .filter((action) => inView(key, action, today, ctx.userId)).length,
+    ]),
+  ) as Record<ActionView, number>;
+
+  const source = view === 'done' ? recent : view === 'all' ? everything : open;
+  return {
+    view,
+    actions: source.filter((action) => inView(view, action, today, ctx.userId)).sort(byUrgency),
+    counts,
+    needingAttention: open.length,
+    overdue: open.filter((action) => isOverdue(action, today)).length,
+    today,
   };
 }
 

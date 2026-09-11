@@ -354,6 +354,95 @@ describe('an action created from an alert keeps what the alert said (§5, ADR-03
   });
 });
 
+/**
+ * ADR-098: the priority of an action made from an alert is the alert's severity.
+ *
+ * It used to be `coalesce(p_input->>'priority', 'medium')` and the product never sent one, so every
+ * action converted from an alert was medium — a critical one included. The suite below drives each
+ * severity through the real function and reads the row back.
+ */
+describe('an alert’s severity decides the action’s priority (ADR-098)', () => {
+  const seedAlert = (severity: string, key: string): string => {
+    const runId = one(`
+      insert into public.calculation_runs
+             (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
+      select '${orgId}', 'recalc_manual', '1.0.0', p.id, p.id, '2026-06-15', 'succeeded'
+        from public.fiscal_periods p
+       where p.organization_id = '${orgId}' and p.period_start = '2026-05-01'
+      returning id`);
+    return one(`
+      insert into public.alerts
+             (organization_id, period_id, rule_key, rule_version, severity, key_kind,
+              calculation_run_id, title, explanation, status, first_seen_at, dedupe_key)
+      select '${orgId}', p.id, 'cash.runway_low', '1', '${severity}', 'state', '${runId}',
+             'Runway is short', 'Cash would last under two months.', 'open', now(),
+             'itest-prio-${RUN}-${key}'
+        from public.fiscal_periods p
+       where p.organization_id = '${orgId}' and p.period_start = '2026-05-01'
+      returning id`);
+  };
+
+  const cases: ReadonlyArray<[string, string]> = [
+    ['critical', 'critical'], ['high', 'high'], ['medium', 'medium'], ['low', 'low'],
+    // `info` has no counterpart among the four priorities: the least urgent thing worth doing.
+    ['info', 'low'],
+  ];
+
+  for (const [severity, expected] of cases) {
+    it(`a ${severity} alert becomes a ${expected} action`, async () => {
+      const alert = seedAlert(severity, severity);
+      const created = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
+        .schema('api').rpc('create_action_from_alert', { p_alert: alert, p_input: {} });
+      expect(created.error, JSON.stringify(created.error)).toBeNull();
+
+      expect(one(`select priority from public.actions where id = '${created.data as string}'`))
+        .toBe(expected);
+    });
+  }
+
+  it('ignores a priority the caller supplies rather than letting it contradict the rule', async () => {
+    const alert = seedAlert('critical', 'override');
+    const created = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
+      .schema('api').rpc('create_action_from_alert', {
+        p_alert: alert, p_input: { priority: 'low' },
+      });
+    expect(created.error).toBeNull();
+
+    expect(
+      one(`select priority from public.actions where id = '${created.data as string}'`),
+      'the rule said critical; a caller saying low does not make it low',
+    ).toBe('critical');
+  });
+
+  it('records the derivation on the audit row, so “why is this critical?” is answerable', async () => {
+    const alert = seedAlert('critical', 'audit');
+    const created = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
+      .schema('api').rpc('create_action_from_alert', { p_alert: alert, p_input: {} });
+    expect(created.error).toBeNull();
+
+    const after = one(`
+      select after::text from public.audit_events
+       where organization_id = '${orgId}' and action = 'alert.converted_to_action'
+         and target_id = '${alert}' order by id desc limit 1`);
+    expect(after).toMatch(/"severity": ?"critical"/);
+    expect(after).toMatch(/"priority": ?"critical"/);
+  });
+
+  it('a later change of mind is still possible, and goes through the permission', async () => {
+    const alert = seedAlert('low', 'change');
+    const created = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
+      .schema('api').rpc('create_action_from_alert', { p_alert: alert, p_input: {} });
+    const actionId = created.data as string;
+    expect(one(`select priority from public.actions where id = '${actionId}'`)).toBe('low');
+
+    // Deterministic at creation; changeable afterwards by somebody who may (RBAC_MATRIX §2.1).
+    const patched = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
+      .schema('api').rpc('update_action', { p_action: actionId, p_patch: { priority: 'high' } });
+    expect(patched.error, JSON.stringify(patched.error)).toBeNull();
+    expect(one(`select priority from public.actions where id = '${actionId}'`)).toBe('high');
+  });
+});
+
 describe('an AI recommendation becomes an action only when it was grounded (ADR-032.5)', () => {
   const conversation = () => one(`
     select id::text from public.ai_conversations

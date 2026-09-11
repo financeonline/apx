@@ -27,6 +27,17 @@ export {
 } from './domain/types';
 
 export {
+  ACTION_VIEWS,
+  ACTION_VIEW_LABELS,
+  DUE_SOON_DAYS,
+  addDays,
+  inView,
+  isActionView,
+  isDueSoon,
+  type ActionView,
+} from './domain/views';
+
+export {
   assignAction,
   assignableOwners,
   canManage,
@@ -35,12 +46,14 @@ export {
   createFromRecommendation,
   getAction,
   getActionsSummary,
+  loadActionCentre,
   listActions,
   listOpenActionsForJob,
   ownerLabel,
   setStatus,
   updateAction,
   type ActionFilter,
+  type ActionCentreView,
   type ActionsSummary,
   type CreateActionInput,
   type OutcomeInput,
