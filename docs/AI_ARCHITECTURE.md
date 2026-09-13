@@ -82,6 +82,15 @@ All tools share:
 | 16 | `get_record_evidence` | One record's own history: whether it still counts, the import it came in with, and whether a file sits behind it (Phase 9, ADR-097) | `{ record_type: 'ledger_entry'\|'bank_transaction'\|'invoice'\|'period_balance', record_id: uuid }` | `financials.view` | `{ record_type, record_id, description (untrusted), date, amount: Money, period, counted, status, assurance_level, superseded, rejected_reason (untrusted), imported_by: { import_id, committed_at, covering_from, covering_to } \| null, has_document, document_id \| null, document_filename (untrusted, null for a client), where_in_file (untrusted) }` |
 | 17 | `get_document_evidence` | What rests on one uploaded file: records in the figures and the months it contributed to (Phase 9, ADR-097) | `{ document_id: uuid }` | `documents.view` | `{ document_id, original_filename (untrusted), document_kind, uploaded_at, records_in_figures: Count, contributed_to: string[], imports: { import_id, status, rolled_back, records_committed: Count \| null }[] }` |
 
+| 18 | `get_forecast` | What MOTION expects for the months ahead, read from the deterministic forecast engine — never computed by the model (Phase 11, ADR-099) | `{ metric_key?: string }` | `dashboard.view` | `{ method, basis: 'strong'\|'limited'\|'weak', periods_used: Count, generated_at, stale, evidence_bundle_id, periods: { period, period_id, metrics: { metric_key, forecast: Money, derivation, derived_from, last_actual: { period, value: Money } \| null, change_vs_last_actual: Money \| null }[] }[], not_forecast: { metric_key, reason }[] }` |
+
+Tool 18 makes forecast questions answerable and §18's rule enforceable at the same time: the figures
+come from `forecast_values`, written by the deterministic engine, and every one crosses as a `money`
+envelope carrying `estimated` — so the response contract marks a forecast statement as an estimate
+rather than a verified fact without the model being asked to remember. A model that worked out its
+own figure would have no `NumberRef` to ground it and the sentence would be removed. "What if"
+questions remain refused: scenarios are Phase 12.
+
 Tools 16 and 17 are the two ends of the evidence chain `EVIDENCE_MODEL.md §5.2` describes, given to the
 analyst so that "is that payment real?" and "what is this file behind?" are answered from the same
 services the drawer uses. Both call the Phase 8 services unchanged and re-derive nothing. Tool 17 is

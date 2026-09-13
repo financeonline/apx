@@ -65,6 +65,27 @@ export default async function MoneyPage({
         />
       </div>
 
+      {/*
+        * The forecast, reached from Money rather than from the primary navigation (ADR-099).
+        * §3.1 fixes that navigation at seven items and ADR-037 created the Data menu specifically to
+        * keep it there; an eighth would undo a decision the UX made on purpose. Money is "the
+        * numbers in detail", and what the next months are expected to look like belongs beside them
+        * — the same precedent `/evidence` and `/home/health` already set.
+        */}
+      <Card className="mb-4">
+        <CardBody>
+          <h2 className="text-base">
+            <Link href={`/app/${orgSlug}/forecast`} className="underline underline-offset-2">
+              What is expected
+            </Link>
+          </h2>
+          <p className="mt-1 text-sm text-ink-muted">
+            What your finished months suggest the next three will look like. Expectations, not
+            results.
+          </p>
+        </CardBody>
+      </Card>
+
       <ul className="flex flex-col gap-4">
         {links.map((link) => (
           <li key={link.href}>

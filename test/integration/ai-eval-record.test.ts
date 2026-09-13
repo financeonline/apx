@@ -4,6 +4,7 @@ import { permissionsFor } from '@/core/permissions';
 import { drainJobs } from '@/modules/jobs';
 import { PROMPT_VERSION, resolvePeriodContext, runTool, snapshotAccess, type PeriodRow as PeriodRowInput, type RecordedToolCall } from '@/modules/ai';
 import type { AccessContext } from '@/modules/tenancy';
+import { generateForecast } from '@/modules/forecast';
 import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
 
 /**
@@ -65,6 +66,8 @@ const CALLS: ReadonlyArray<{ name: string; input: Record<string, unknown> }> = [
   { name: 'get_customer_profitability', input: { period: 'Apr 2026' } },
   { name: 'get_business_summary', input: { period: 'Apr 2026' } },
   { name: 'get_actions', input: {} },
+  // Phase 11: the corpus needs a real forecast output to build golden forecast cases from (ADR-099).
+  { name: 'get_forecast', input: {} },
 ];
 
 export interface Recording {
@@ -143,6 +146,13 @@ beforeAll(async () => {
     await drainJobs(5);
   }
   expect(adminSql(`select count(*) from public.jobs where organization_id = '${orgId}' and status in ('queued', 'running')`), "the organisation's queue is empty before recording").toBe('0');
+
+  /*
+   * A forecast exists only once somebody has asked for one (ADR-099), so the recorder asks — the
+   * same call the page makes. Recording `get_forecast` against an organisation with no forecast
+   * would record a NO_DATA and build a corpus that could never test a forecast answer.
+   */
+  await generateForecast(contextFor(ownerId));
 
   const withData = new Set(adminSql(`select distinct period_id::text from public.ledger_entries where organization_id = '${orgId}'`).split('\n').map((l) => l.trim()));
   periods = adminSql(`select id || '|' || label || '|' || period_start || '|' || is_complete from public.fiscal_periods where organization_id = '${orgId}' order by period_start`)

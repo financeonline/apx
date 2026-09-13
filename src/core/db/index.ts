@@ -26,6 +26,7 @@ export {
   finishChunk,
   finishCalculationRun,
   setPeriodCompleteness,
+  finishForecast,
   finishHealth,
   persistAlerts,
   aggregatePeriods,

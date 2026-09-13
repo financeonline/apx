@@ -574,6 +574,29 @@ export async function finishHealth(input: Record<string, unknown>): Promise<{ wr
   return { written: Number(written ?? 0) };
 }
 
+/**
+ * Writes one forecast run, its figures and its evidence bundle in one transaction (ADR-099).
+ *
+ * `api_server` and not `api`: a forecast is a fact the SERVER observed about the engine's own
+ * output, in the same sense a health score is, and `authenticated` holds no write privilege on the
+ * tables in any case. The actor is passed explicitly and re-validated in SQL against
+ * `dashboard.view` for the organisation, so a server call cannot forecast for somebody who may not
+ * see the figures it is made of.
+ */
+export async function finishForecast(input: {
+  actor: string;
+  organizationId: string;
+  run: Record<string, unknown>;
+  values: ReadonlyArray<Record<string, unknown>>;
+}): Promise<string> {
+  return serverRpc<string>('finish_forecast', {
+    p_actor: input.actor,
+    p_org: input.organizationId,
+    p_input: input.run,
+    p_values: input.values,
+  });
+}
+
 export async function persistAlerts(
   input: Record<string, unknown>,
 ): Promise<Record<string, number>> {

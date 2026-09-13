@@ -7,6 +7,7 @@ import {
   RECORD_KINDS, getBundle, getDocumentEvidence, getDocumentReference, getRecordProvenance,
   resolveItem, type EvidenceItemView, type RecordKind,
 } from '@/modules/evidence';
+import { hasForecast, loadForecast } from '@/modules/forecast';
 import { NotFound, PermissionDenied } from '@/core/errors';
 import { can } from '@/core/permissions';
 import type { PeriodRef } from '../periods';
@@ -429,3 +430,80 @@ export const getDocumentEvidenceTool: ToolDefinition<{ document_id: string }, un
 
 /** Kept beside the tools so the record-kind map cannot drift from `modules/evidence` (ADR-096). */
 void RECORD_KINDS;
+
+// -----------------------------------------------------------------------------------------------
+// 18. get_forecast — what the deterministic forecast engine expects (Phase 11; ADR-099)
+// -----------------------------------------------------------------------------------------------
+
+/**
+ * The forecast, read — never computed.
+ *
+ * This is the tool that makes §17's questions answerable and §18's rule enforceable at the same
+ * time. The analyst may now say what MOTION expects revenue or cash to be, and it can only say what
+ * this tool returns: the figures come from `forecast_values`, written by the deterministic engine
+ * through `api_server.finish_forecast`, and there is no path by which a model-supplied number could
+ * reach the answer as a forecast. A model that worked out its own figure would have no `NumberRef`
+ * to ground it against and grounding would remove the sentence (§7.8).
+ *
+ * Every figure crosses as a `money` envelope carrying `estimated`, so the response contract's own
+ * machinery marks a forecast statement as an estimate rather than a verified fact — REQ-FC-05 and
+ * §18 are enforced by the envelope, not by asking the model to remember.
+ *
+ * `dashboard.view`: the same permission the page needs, and no new one (§22).
+ */
+export const getForecast: ToolDefinition<{ metric_key?: string }, unknown> = {
+  name: 'get_forecast',
+  description:
+    'What MOTION expects for the months ahead: revenue, running costs, operating profit, cash, and what is owed. These are estimates worked out from finished months, never results. Use this for "what will…", "how much will…" and "what is the forecast" questions. It cannot answer "what if" questions.',
+  permission: 'dashboard.view',
+  input: z.object({ metric_key: z.string().max(60).optional() }),
+  async run(input, call) {
+    try {
+      const state = await loadForecast(call.ctx);
+      if (!hasForecast(state)) {
+        return fail({
+          code: 'NO_DATA',
+          message: state.reason === 'never_generated'
+            ? 'No forecast has been worked out for this organisation yet.'
+            : 'There is not enough finished history to forecast from.',
+        });
+      }
+
+      const wanted = input.metric_key;
+      const periods = state.periods.map((period) => ({
+        period: period.periodLabel,
+        period_id: period.periodId,
+        metrics: period.metrics
+          .filter((m) => wanted === undefined || m.metricKey === wanted)
+          .map((m) => ({
+            metric_key: m.metricKey,
+            /*
+             * The forecast figure. `estimated` is not a label the model chooses — the value is a
+             * branded envelope and the statement kind is recomputed from it (§6.2).
+             */
+            forecast: money(m.value, m.currency),
+            derivation: m.derivation,
+            derived_from: m.derivedFrom,
+            last_actual: m.lastActual === null ? null : {
+              period: m.lastActual.periodLabel,
+              value: money(m.lastActual.value, m.currency),
+            },
+            change_vs_last_actual: m.change === null ? null : money(m.change, m.currency),
+          })),
+      }));
+
+      return ok({
+        method: state.method,
+        // §19: words from conditions the server checked, never a percentage.
+        basis: state.basis,
+        periods_used: count(state.periodsUsed, 0),
+        generated_at: state.generatedAt,
+        // §20: a figure the engine has moved past is said to be stale rather than shown as current.
+        stale: state.stale,
+        evidence_bundle_id: state.evidenceBundleId,
+        periods,
+        not_forecast: state.unavailable.map((u) => ({ metric_key: u.metricKey, reason: u.reason })),
+      }, { periods: [], calculation_run_id: null }, call);
+    } catch (e) { const mapped = asToolError(e); if (mapped) return mapped; throw e; }
+  },
+};

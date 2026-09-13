@@ -2,12 +2,12 @@ import type { ToolDefinition } from './types';
 import { getBusinessSummary, getDataCoverage, getExpenseChanges, getMetric, getMetricTrend } from './metrics';
 import { getActions, getCashAnalysis, getCustomerProfitability, getPayables, getReceivables } from './money';
 import {
-  getAlerts, getDocumentEvidenceTool, getEvidence, getHealthScore, getRecordEvidence,
+  getAlerts, getDocumentEvidenceTool, getEvidence, getForecast, getHealthScore, getRecordEvidence,
   getSourceDocumentReference, getTransactionsForEvidence,
 } from './intelligence';
 
 /**
- * The closed registry (AI_ARCHITECTURE.md §3): the seventeen tools, and no way to add an eighteenth
+ * The closed registry (AI_ARCHITECTURE.md §3): the eighteen tools, and no way to add a nineteenth
  * without a code change here, a permission, a Zod schema with branded numbers, and a test.
  *
  * The last two were added in Phase 9 (ADR-097). They give the analyst the two ends of the evidence
@@ -39,6 +39,7 @@ export const TOOLS: readonly AnyTool[] = [
   getActions,
   getRecordEvidence,
   getDocumentEvidenceTool,
+  getForecast,
 ];
 
 export const TOOL_NAMES: readonly string[] = TOOLS.map((t) => t.name);
