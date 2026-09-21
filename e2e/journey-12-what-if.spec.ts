@@ -3,22 +3,32 @@ import { expect, test } from '@playwright/test';
 import { cleanUpOwn, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
 
 /**
- * The what-if page (REQ-SC-01…10; ADR-100).
+ * The what-if page (REQ-SC-01…10; ADR-100; remediated per `PHASE_12_REMEDIATION.md`).
  *
- * Three things a wrong build would hide, and this asserts all three by clicking:
+ * What a wrong build would hide, and this asserts by clicking:
  *   * an organisation with no forecast is told what it needs first, and is given no form to fail at;
- *   * MOTION refuses what it cannot work out, names the field that stopped it, and saves nothing —
- *     it never quietly answers a different question by reading a blank box as zero (§4, §9);
- *   * a scenario shows BASELINE beside SCENARIO, with the assumptions printed on the page and the
- *     figures never presented as results (§14, §16).
+ *   * a scenario MOTION cannot work out is refused in the error tone, with the change and the reason
+ *     named, and nothing saved — both when nothing has been saved yet and, the case the audit found
+ *     broken, when an earlier scenario is already on the page: that earlier scenario must stay
+ *     labelled as the last SAVED one and never be presented as the answer to the refused request;
+ *   * a scenario shows BASELINE beside SCENARIO with the assumptions printed, in the organisation's
+ *     own currency, carrying the forecast's basis word and the notes its figures carried (§12).
+ *
+ * The organisation is Indian-rupee and its figures carry a data-quality warning, so the currency
+ * and warning paths are proven on the page and not only in the service.
  */
 
 const ORG = uniqueName('WhatIf Ltd');
 
 test.afterAll(() => cleanUpOwn([ORG, `${ORG} Thin`], ['wi-owner', 'wi-thin']));
 
-/** Six steady months, written the way the engine writes them, plus the category breakdown. */
+/**
+ * Six steady months, written the way the engine writes them — in INR, every figure flagged as a
+ * cash-basis estimate, and deliberately WITHOUT the `expense_by_category` breakdown, so a
+ * percentage of wages has nothing to be a percentage of and is refused.
+ */
 function seedHistory(orgId: string): void {
+  sql(`update public.organizations set base_currency = 'INR' where id = '${orgId}'`);
   const runId = sql(`
     with q as (
       insert into public.calculation_runs
@@ -40,31 +50,21 @@ function seedHistory(orgId: string): void {
       select id from public.fiscal_periods
        where organization_id = '${orgId}' and period_start = '${start}'`);
     sql(`update public.fiscal_periods set is_complete = true where id = '${periodId}'`);
-
-    const write = (key: string, value: string, dimensionKey: string | null) => {
-      const dimensionType = dimensionKey === null ? 'none' : 'standard_category';
-      const dim = dimensionKey === null ? 'null' : `'${dimensionKey}'`;
+    for (const [key, value] of Object.entries(monthly)) {
       const snapshotId = sql(`
         with q as (
           insert into public.metric_snapshots
                  (organization_id, calculation_run_id, period_id, metric_key, dimension_type,
-                  dimension_key, value, unit, currency, basis, assurance_level, data_quality)
-          values ('${orgId}', '${runId}', '${periodId}', '${key}', '${dimensionType}',
-                  ${dim}, ${value}, 'money', 'GBP', 'ledger', 'verified',
-                  '{"completeness": 1, "proxy": false, "warnings": [], "missing": []}'::jsonb)
+                  value, unit, currency, basis, assurance_level, data_quality)
+          values ('${orgId}', '${runId}', '${periodId}', '${key}', 'none',
+                  ${value}, 'money', 'INR', 'bank', 'estimated',
+                  '{"completeness": 1, "proxy": true, "warnings": ["cash_basis_proxy"], "missing": []}'::jsonb)
           returning id) select * from q`);
       sql(`
         insert into public.metric_current
-               (organization_id, period_id, metric_key, dimension_type, dimension_key,
-                snapshot_id, calculation_run_id)
-        values ('${orgId}', '${periodId}', '${key}', '${dimensionType}', ${dim},
-                '${snapshotId}', '${runId}')`);
-    };
-
-    for (const [key, value] of Object.entries(monthly)) write(key, value, null);
-    // The engine's own breakdown of running costs, which a percentage assumption reads (§3).
-    write('expense_by_category', '2000', 'payroll');
-    write('expense_by_category', '500', 'marketing');
+               (organization_id, period_id, metric_key, dimension_type, snapshot_id, calculation_run_id)
+        values ('${orgId}', '${periodId}', '${key}', 'none', '${snapshotId}', '${runId}')`);
+    }
   }
 }
 
@@ -81,12 +81,13 @@ test('an organisation with no forecast is told what it needs first', async ({ pa
   await expect(page.getByRole('button', { name: /^work it out$/i })).toHaveCount(0);
 });
 
-test('a person asks what would happen, and is answered — or told why not', async ({ page }) => {
+test('a person asks what would happen, and is answered — or told exactly why not', async ({ page }) => {
   const owner = seedUser('wi-owner');
   await signIn(page, owner);
   const slug = await onboard(page, ORG);
   const orgId = sql(`select id from public.organizations where slug = '${slug}'`);
   seedHistory(orgId);
+  const saved = () => sql(`select count(*) from public.scenario_runs where organization_id = '${orgId}'`);
 
   // The forecast a what-if changes has to exist first.
   await page.goto(`/app/${slug}/forecast`);
@@ -107,12 +108,38 @@ test('a person asks what would happen, and is answered — or told why not', asy
   const axe = await new AxeBuilder({ page })
     .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])
     .analyze();
-  const serious = axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical');
-  expect(serious.map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+  expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical')
+    .map((v) => `${v.id}: ${v.help}`)).toEqual([]);
+
+  const wages = () => page.locator('details', { hasText: /what if wages change/i });
+  // Scoped to `main`: Next's route announcer is also `role="alert"`, and a bare lookup finds both.
+  const refusal = () => page.locator('main').getByRole('alert');
 
   // ---------------------------------------------------------------------------------------------
-  // First, the thing MOTION will not do: a price change with no answer about the number of sales.
+  // 1. Refused for a missing figure, before anything has been saved (§7).
   // ---------------------------------------------------------------------------------------------
+  await page.getByLabel(/what shall we call this/i).fill('Wages pct');
+  await wages().locator('summary').click();
+  await wages().getByRole('checkbox', { name: /include this change/i }).check();
+  await page.locator('#payroll_change\\.value').fill('10');
+  await page.getByRole('button', { name: /^work it out$/i }).click();
+
+  // The error tone, the change that failed, the real reason, and the statement that nothing was
+  // saved — and NOT the success message. The audit found the earlier build saying "the reasons are
+  // below" in the success tone with no reasons anywhere (HIGH-1).
+  await expect(refusal()).toBeVisible({ timeout: 30_000 });
+  await expect(refusal()).toContainText(/nothing was saved/i);
+  await expect(refusal()).toContainText(/wages/i);
+  await expect(refusal()).toContainText(/does not know what this has been running at/i);
+  await expect(page.getByText(/worked out and saved/i)).toHaveCount(0);
+  await expect(page.getByText(/reasons are below/i)).toHaveCount(0);
+  await expect(page.getByText(/last saved scenario/i), 'nothing to show as saved yet').toHaveCount(0);
+  expect(saved(), 'nothing was saved').toBe('0');
+
+  // ---------------------------------------------------------------------------------------------
+  // 2. Refused for an answer MOTION cannot read: a price change with no volume answer (§4, §9).
+  // ---------------------------------------------------------------------------------------------
+  await page.reload();
   const pricing = page.locator('details', { hasText: /what if you change your prices/i });
   await page.getByLabel(/what shall we call this/i).fill('Impossible');
   await pricing.locator('summary').click();
@@ -120,17 +147,11 @@ test('a person asks what would happen, and is answered — or told why not', asy
   await page.locator('#pricing_change\\.pricePercent').fill('5');
   await page.locator('#pricing_change\\.volumePercent').fill('');
   await page.getByRole('button', { name: /^work it out$/i }).click();
-
-  // A named objection, not a generic failure — and above all not a silent zero (§4, §9).
-  await expect(page.getByText(/need fixing|must be a number/i).first())
-    .toBeVisible({ timeout: 30_000 });
-  expect(
-    sql(`select count(*) from public.scenario_runs where organization_id = '${orgId}'`),
-    'nothing was saved under a name whose answer MOTION refused',
-  ).toBe('0');
+  await expect(page.getByText(/need fixing|must be a number/i).first()).toBeVisible({ timeout: 30_000 });
+  expect(saved()).toBe('0');
 
   // ---------------------------------------------------------------------------------------------
-  // Then the thing it will do.
+  // 3. The thing it will do.
   // ---------------------------------------------------------------------------------------------
   await page.reload();
   const sales = page.locator('details', { hasText: /what if sales change/i });
@@ -140,8 +161,12 @@ test('a person asks what would happen, and is answered — or told why not', asy
   await page.locator('#revenue_change\\.value').fill('10');
   await page.getByRole('button', { name: /^work it out$/i }).click();
   await expect(page.getByText(/worked out and saved/i)).toBeVisible({ timeout: 30_000 });
+  expect(saved()).toBe('1');
 
-  // §14: BASELINE beside SCENARIO, both labelled, neither mistakable for the other.
+  // §14: BASELINE beside SCENARIO, both labelled, neither mistakable for the other; and the section
+  // is labelled as the last SAVED scenario, with its date.
+  await expect(page.getByText(/last saved scenario/i)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sales up 10%' })).toBeVisible();
   await expect(page.getByText('If this happens').first()).toBeVisible();
   await expect(page.getByText(/expected now/i).first()).toBeVisible();
 
@@ -149,9 +174,19 @@ test('a person asks what would happen, and is answered — or told why not', asy
   await expect(page.getByText(/not results and not a forecast/i)).toBeVisible();
   await expect(page.getByText(/\d+% confidence/i), 'no invented confidence score').toHaveCount(0);
 
-  // The figures: 11,000 sales and 4,000 operating profit (11,000 − 4,000 − 3,000).
-  await expect(page.getByText('£11,000').first()).toBeVisible();
-  await expect(page.getByText('£4,000').first()).toBeVisible();
+  // The organisation's currency, on the figures AND on the assumptions (MEDIUM-3).
+  await expect(page.getByText('₹11,000').first()).toBeVisible();
+  await expect(page.getByText('₹4,000').first()).toBeVisible();
+  await expect(page.getByText(/£/), 'no pound sign anywhere for a rupee organisation').toHaveCount(0);
+
+  // §12: how much to lean on it, in the forecast's words, and the note its figures carried
+  // (MEDIUM-2) — no percentage anywhere. Six months would be a STRONG basis, but every figure here
+  // is an `estimated` cash-basis proxy, and Phase 11's rule pulls the basis down to LIMITED for
+  // that (ADR-099) — which is precisely the disclosure this section exists to carry.
+  const basis = page.getByTestId('scenario-basis');
+  await expect(basis).toContainText(/limited basis/i);
+  await expect(basis).toContainText(/some of the figures behind them are estimates/i);
+  await expect(basis).toContainText(/estimated from bank activity/i);
 
   // §3: the assumptions are printed in words, not hidden behind the figures.
   await expect(page.getByText(/sales up by 10%/i)).toBeVisible();
@@ -169,9 +204,30 @@ test('a person asks what would happen, and is answered — or told why not', asy
   // §17: an integration point with the Action Centre, and nothing created on the user's behalf.
   await expect(page.getByRole('link', { name: /record it in your actions/i })).toBeVisible();
 
+  // ---------------------------------------------------------------------------------------------
+  // 4. Refused AGAIN, now that a scenario is saved — the exact state the audit found misleading.
+  // ---------------------------------------------------------------------------------------------
+  await page.getByLabel(/what shall we call this/i).fill('Wages pct');
+  await wages().locator('summary').click();
+  await wages().getByRole('checkbox', { name: /include this change/i }).check();
+  await page.locator('#payroll_change\\.value').fill('10');
+  await page.getByRole('button', { name: /^work it out$/i }).click();
+
+  await expect(refusal()).toBeVisible({ timeout: 30_000 });
+  await expect(refusal()).toContainText(/nothing was saved/i);
+  await expect(refusal()).toContainText(/does not know what this has been running at/i);
+  // This is the assertion that fails on the audited build: the success text must not appear, the
+  // saved section must still be the EARLIER scenario and say so, and "Wages pct" must appear
+  // nowhere as a heading.
+  await expect(page.getByText(/worked out and saved/i)).toHaveCount(0);
+  await expect(page.getByText(/last saved scenario/i)).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Sales up 10%' })).toBeVisible();
+  await expect(page.getByRole('heading', { name: 'Wages pct' })).toHaveCount(0);
+  expect(saved(), 'still exactly the one that succeeded').toBe('1');
+
   // §15: no database terminology reaches the reader.
   const body = (await page.locator('main').innerText()).toLowerCase();
-  for (const term of ['scenario_values', 'forecast_values', 'metric_snapshots', 'operating_expenses', 'cost_of_sales', 'select ']) {
+  for (const term of ['scenario_values', 'forecast_values', 'metric_snapshots', 'operating_expenses', 'cost_of_sales', 'cash_basis_proxy', 'select ']) {
     expect(body, term).not.toContain(term);
   }
 });

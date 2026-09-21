@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { formatMoney } from '@/core/money';
 import {
   ASSUMPTION_KINDS, ASSUMPTION_NOTE, ASSUMPTION_QUESTION, SCENARIO_DISCLAIMER,
-  assumptionSentence, unavailableText, type Assumption,
+  assumptionSentence, forecastWarningsOf, unavailableText, type Assumption,
 } from '@/modules/scenarios';
 
 /**
@@ -108,14 +108,37 @@ describe('nothing reaches the reader as a raw enum or a table name (§15)', () =
   });
 
   it('renders every refusal reason in words, and an unknown one without saying "unknown"', () => {
-    for (const reason of ['no_forecast', 'metric_not_forecast', 'no_category_baseline', 'no_direct_costs', 'no_revenue_baseline']) {
+    for (const reason of ['no_forecast', 'metric_not_forecast', 'no_category_baseline', 'no_direct_costs', 'no_revenue_baseline', 'starts_after_horizon']) {
       expect(unavailableText(reason), reason).not.toContain('_');
     }
+    expect(unavailableText('starts_after_horizon')).toMatch(/choose an earlier month/i);
     expect(unavailableText('something_new_later'))
       .toBe('MOTION cannot work this one out from the figures it has.');
   });
 
   it('separates a scenario from a forecast and from a result, in one sentence (§16)', () => {
     expect(SCENARIO_DISCLAIMER).toContain('not results and not a forecast');
+  });
+});
+
+describe('the forecast’s warnings survive into the scenario (MEDIUM-2 remediation)', () => {
+  it('lifts each metric’s warning codes out of the forecast’s stored breakdown', () => {
+    const breakdown = [
+      { metricKey: 'revenue', warnings: ['cash_basis_proxy', 'vat_inclusive', 'cash_basis_proxy'] },
+      { metricKey: 'cash_inflows', warnings: ['bank_coverage_partial'] },
+      { metricKey: 'payables', warnings: [] },
+    ];
+    expect(forecastWarningsOf(breakdown)).toEqual([
+      { metricKey: 'revenue', warnings: ['cash_basis_proxy', 'vat_inclusive'] },
+      { metricKey: 'cash_inflows', warnings: ['bank_coverage_partial'] },
+    ]);
+  });
+
+  it('contributes nothing for a malformed breakdown rather than throwing, so a saved scenario still opens', () => {
+    expect(forecastWarningsOf(null)).toEqual([]);
+    expect(forecastWarningsOf('not a list')).toEqual([]);
+    expect(forecastWarningsOf([{ metricKey: 42, warnings: ['x'] }, { warnings: 'x' }, null])).toEqual([]);
+    expect(forecastWarningsOf([{ metricKey: 'revenue', warnings: ['ok', 7, ''] }]))
+      .toEqual([{ metricKey: 'revenue', warnings: ['ok'] }]);
   });
 });

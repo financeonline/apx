@@ -587,14 +587,19 @@ export const getScenario: ToolDefinition<{ scenario_id?: string }, unknown> = {
           sales_volume_percent: assumption.kind === 'pricing_change'
             ? percentAsRatio(assumption.volumePercent)
             : null,
+          /*
+           * In the ORGANISATION's currency (`organizations.base_currency`, carried on the view),
+           * never a default: the audit found an INR organisation's assumption shown to the model
+           * as £50,000 beside figures in ₹, and the model quotes `display` verbatim (MEDIUM-3).
+           */
           amount: 'mode' in assumption && assumption.mode === 'amount'
-            ? money(assumption.value, null)
-            : assumption.kind === 'hiring' ? money(assumption.monthlyCostPerPerson, null)
-              : assumption.kind === 'debt_drawdown' ? money(assumption.amount, null)
-                : assumption.kind === 'debt_repayment' ? money(assumption.monthlyAmount, null)
+            ? money(assumption.value, state.currency)
+            : assumption.kind === 'hiring' ? money(assumption.monthlyCostPerPerson, state.currency)
+              : assumption.kind === 'debt_drawdown' ? money(assumption.amount, state.currency)
+                : assumption.kind === 'debt_repayment' ? money(assumption.monthlyAmount, state.currency)
                   : null,
           interest: assumption.kind === 'debt_repayment' && assumption.monthlyInterest !== null
-            ? money(assumption.monthlyInterest, null)
+            ? money(assumption.monthlyInterest, state.currency)
             : null,
           headcount: assumption.kind === 'hiring' ? count(assumption.headcount, 0) : null,
           direct_costs_follow_sales:
@@ -607,9 +612,9 @@ export const getScenario: ToolDefinition<{ scenario_id?: string }, unknown> = {
             metric_key: metric.metricKey,
             // BOTH halves cross, so a scenario figure can never be quoted as if it were the
             // expectation it is being compared against (§16).
-            expected_now: money(metric.baselineValue, metric.currency),
-            if_this_happens: money(metric.scenarioValue, metric.currency),
-            change: money(metric.change, metric.currency),
+            expected_now: money(metric.baselineValue, metric.currency ?? state.currency),
+            if_this_happens: money(metric.scenarioValue, metric.currency ?? state.currency),
+            change: money(metric.change, metric.currency ?? state.currency),
             change_share: metric.changeRatio === null ? null : ratio(metric.changeRatio),
             derivation: metric.derivation,
             derived_from: metric.derivedFrom,

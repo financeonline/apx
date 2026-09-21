@@ -62,7 +62,18 @@ export interface ScenarioView {
   readonly basis: 'strong' | 'limited' | 'weak' | null;
   readonly assumptions: readonly Assumption[];
   readonly periods: readonly ScenarioPeriodView[];
-  /** Inherited from the forecast: warnings on the figures the baseline was built from (§12). */
+  /**
+   * The organisation's configured currency (`organizations.base_currency`), which every money
+   * figure on the page and in the analyst's tool is formatted in. Never a default dressed up as a
+   * fact: it falls back to the forecast's own cell currency only when the setting is absent.
+   */
+  readonly currency: string;
+  /**
+   * Inherited from the forecast: the data-quality warnings on the figures the baseline was built
+   * from, flattened and deduplicated across metrics, plus the metrics the forecast refused (§12).
+   * Stored on the run at save time, so a saved scenario keeps disclosing what its baseline carried
+   * even after the forecast has been regenerated.
+   */
   readonly dataQuality: {
     readonly warnings: readonly string[];
     readonly forecastUnavailable: ReadonlyArray<{ metricKey: string; reason: string }>;
@@ -101,6 +112,32 @@ const orgOf = (ctx: AccessContext): string => {
 function storedAssumptions(value: unknown): Assumption[] {
   if (!Array.isArray(value)) return [];
   return value as Assumption[];
+}
+
+/** One metric's inherited warnings, as stored on `scenario_runs.data_quality.forecast_warnings`. */
+export interface ForecastWarning {
+  readonly metricKey: string;
+  readonly warnings: readonly string[];
+}
+
+/**
+ * The per-metric warnings out of a forecast's stored `breakdown` (`Baseline[]`, ADR-099).
+ *
+ * Only entries that actually carry a warning are kept, and only string codes: the engine writes
+ * warnings as codes (`FINANCIAL_ENGINE.md §5`) and the page renders them through the same
+ * plain-English table the analyst's confidence line uses, so nothing free-text reaches a reader.
+ */
+export function forecastWarningsOf(breakdown: unknown): ForecastWarning[] {
+  if (!Array.isArray(breakdown)) return [];
+  const out: ForecastWarning[] = [];
+  for (const entry of breakdown) {
+    if (entry === null || typeof entry !== 'object') continue;
+    const { metricKey, warnings } = entry as { metricKey?: unknown; warnings?: unknown };
+    if (typeof metricKey !== 'string' || !Array.isArray(warnings)) continue;
+    const codes = warnings.filter((w): w is string => typeof w === 'string' && w.length > 0);
+    if (codes.length > 0) out.push({ metricKey, warnings: [...new Set(codes)].sort() });
+  }
+  return out;
 }
 
 /**
@@ -249,11 +286,23 @@ async function storeScenario(
   forecast: ForecastView,
   cells: readonly ScenarioCell[],
 ): Promise<string> {
-  const [forecastBundleId, calculationRunId] = await Promise.all([
+  const [forecastBundleId, calculationRunId, baseCurrency] = await Promise.all([
     repo.loadForecastBundleId(ctx.db, orgId, forecast.runId, ctx.requestId),
     repo.forecastCalculationRunId(ctx.db, orgId, forecast.runId, ctx.requestId),
+    repo.loadBaseCurrency(ctx.db, orgId, ctx.requestId),
   ]);
-  const currency = currencyOf(forecast);
+  // The organisation's setting first; the forecast's own cell currency only if it has none.
+  const currency = baseCurrency ?? currencyOf(forecast);
+
+  /*
+   * §12: the warnings the forecast's baselines inherited from the engine's snapshots
+   * (`cash_basis_proxy`, `bank_coverage_partial`, …) are copied onto the scenario at save time.
+   * `forecast_runs.breakdown` is the forecast's `Baseline[]`, each carrying the warnings of the
+   * months it averaged; a scenario that dropped them would present a clean sheet over a baseline
+   * the forecast itself had flagged. Read defensively: it is `unknown` on the view because it is
+   * stored jsonb, and a malformed entry contributes nothing rather than throwing.
+   */
+  const forecastWarnings = forecastWarningsOf(forecast.breakdown);
 
   return finishScenario({
     actor: ctx.userId,
@@ -272,6 +321,7 @@ async function storeScenario(
         forecast_config_version: forecast.configVersion,
         forecast_stale_at_creation: forecast.stale,
         forecast_unavailable: forecast.unavailable,
+        forecast_warnings: forecastWarnings,
       },
       unavailable: [],
       forecast_bundle_id: forecastBundleId,
@@ -291,14 +341,16 @@ async function storeScenario(
 
 interface StoredQuality {
   forecast_unavailable?: Array<{ metricKey?: string; reason?: string }>;
+  forecast_warnings?: Array<{ metricKey?: string; warnings?: string[] }>;
 }
 
 async function viewOf(
   ctx: AccessContext, orgId: string, stored: repo.StoredScenarioRow,
 ): Promise<ScenarioView> {
-  const [bundleId, latestForecastRunId] = await Promise.all([
+  const [bundleId, latestForecastRunId, baseCurrency] = await Promise.all([
     repo.loadScenarioBundleId(ctx.db, orgId, stored.runId, ctx.requestId),
     repo.latestForecastRunId(ctx.db, orgId, ctx.requestId),
+    repo.loadBaseCurrency(ctx.db, orgId, ctx.requestId),
   ]);
 
   const byPeriod = new Map<string, ScenarioMetricView[]>();
@@ -345,6 +397,13 @@ async function viewOf(
     .sort((a, b) => (starts.get(a.periodId) ?? '').localeCompare(starts.get(b.periodId) ?? ''));
 
   const quality = (stored.dataQuality ?? {}) as StoredQuality;
+  // Flattened across metrics and deduplicated: the page says "the figures this rests on carry these
+  // notes", once each, rather than the same note for every metric that inherited it.
+  const warnings = [...new Set(
+    (quality.forecast_warnings ?? [])
+      .flatMap((item) => (Array.isArray(item.warnings) ? item.warnings : []))
+      .filter((w): w is string => typeof w === 'string' && w.length > 0),
+  )].sort();
 
   return {
     runId: stored.runId,
@@ -356,8 +415,10 @@ async function viewOf(
     basis: stored.basis,
     assumptions: storedAssumptions(stored.assumptions),
     periods,
+    // The organisation's setting; the stored cells' currency only if the setting is absent.
+    currency: baseCurrency ?? stored.values.find((v) => v.currency !== null)?.currency ?? 'GBP',
     dataQuality: {
-      warnings: [],
+      warnings,
       forecastUnavailable: (quality.forecast_unavailable ?? []).map((item) => ({
         metricKey: String(item.metricKey ?? ''),
         reason: String(item.reason ?? ''),

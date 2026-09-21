@@ -4,11 +4,11 @@ import { can } from '@/core/permissions';
 import { hasForecast, loadForecast } from '@/modules/forecast';
 import {
   ASSUMPTION_NOTE, ASSUMPTION_QUESTION, CASH_EFFECT_LABEL, CASH_ONLY_KINDS,
-  DEFAULT_CASH_EFFECT, UNAVAILABLE_HEADLINE, hasScenario, listScenarios, loadScenario,
+  DEFAULT_CASH_EFFECT, hasScenario, listScenarios, loadScenario,
 } from '@/modules/scenarios';
 import { Card, CardBody, CardHeader, EmptyState, PageHeader } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
-import { ScenarioComparison, ScenarioUnavailableView } from './comparison';
+import { ScenarioComparison } from './comparison';
 import { ScenarioForm } from './scenario-form';
 import { ArchiveControl } from './archive-control';
 
@@ -114,9 +114,23 @@ export default async function WhatIfPage({
         </p>
       )}
 
+      {/*
+        * What sits below the form is always the LAST SAVED scenario, and it says so. A refusal of
+        * the request just made is reported inside the form (`ActionMessage`, error tone) and saves
+        * nothing, so this section cannot change in response to one — the label and the date are
+        * what stop a reader taking an older answer for the answer to their latest question (HIGH-1,
+        * `PHASE_12_REMEDIATION.md`).
+        */}
       {hasScenario(latest) ? (
         <>
-          <h2 className="mt-10 font-serif text-xl text-ink">{latest.name}</h2>
+          <p className="mt-10 text-xs uppercase tracking-wide text-ink-faint">
+            Last saved scenario
+            {' · '}
+            {new Date(latest.createdAt).toLocaleDateString('en-GB', {
+              day: 'numeric', month: 'short', year: 'numeric',
+            })}
+          </p>
+          <h2 className="mt-1 font-serif text-xl text-ink">{latest.name}</h2>
           <ScenarioComparison scenario={latest} orgSlug={orgSlug} />
           {mayRun ? (
             <div className="mt-4">
@@ -124,16 +138,9 @@ export default async function WhatIfPage({
             </div>
           ) : null}
         </>
-      ) : latest.unavailable.length > 0 ? (
-        <Card className="mt-6">
-          <CardHeader title={UNAVAILABLE_HEADLINE} />
-          <CardBody>
-            <ScenarioUnavailableView unavailable={latest.unavailable} />
-          </CardBody>
-        </Card>
       ) : (
         <p className="mt-6 text-sm text-ink-muted">
-          No scenario has been worked out yet.
+          No scenario has been saved yet.
         </p>
       )}
 

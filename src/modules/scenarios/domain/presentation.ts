@@ -68,6 +68,8 @@ export const UNAVAILABLE_TEXT: Readonly<Record<UnavailableReason, string>> = {
     'Your books have no direct costs, so there is nothing here for this change to move.',
   no_revenue_baseline:
     'Your forecast sales are zero, so MOTION cannot work out what share of them this amount is.',
+  starts_after_horizon:
+    'This change would start after the last month MOTION can see, so it would not touch any figure in this scenario. Choose an earlier month.',
 };
 
 export function unavailableText(reason: string): string {

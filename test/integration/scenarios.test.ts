@@ -1,6 +1,6 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '@/core/permissions';
-import { Decimal } from '@/core/money';
+import { Decimal, formatMoney } from '@/core/money';
 import { generateForecast } from '@/modules/forecast';
 import {
   archiveScenario, hasScenario, listScenarios, loadScenario, runScenario,
@@ -29,6 +29,17 @@ const DOMAIN = `${RUN}.scenario.itest`;
 let ownerA: string; let clientA: string; let ownerB: string;
 let empAssigned: string; let empOther: string; let superAdmin: string;
 let orgA: string; let orgB: string;
+/*
+ * Remediation fixtures (`PHASE_12_REMEDIATION.md`): an organisation with no category breakdown
+ * (so a percentage of wages has nothing to be a percentage of), one with four complete months (a
+ * `limited` basis), one whose figures carry a data-quality warning, and three whose configured
+ * currency is not GBP.
+ */
+let orgNoCat: string; let orgLimited: string; let orgWarn: string;
+let orgINR: string; let orgAED: string; let orgUSD: string;
+/** Each remediation organisation has its own owner: `create_organization` is throttled per actor. */
+const ownerOf = new Map<string, string>();
+const ownerCtx = (org: string): AccessContext => contextFor(ownerOf.get(org)!, 'owner', org);
 
 const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 
@@ -51,8 +62,23 @@ const STEADY = {
   receivables: '5000', payables: '2000', closing_cash: '20000',
 };
 
-/** Six complete months of a steady business, written the way the engine writes them. */
-function seedHistory(org: string, monthly: Readonly<Record<string, string>>, months = 6): void {
+interface SeedOptions {
+  /** The currency written on every snapshot; the organisation's `base_currency` is set to match. */
+  readonly currency?: string;
+  /** Data-quality warnings written on every snapshot, so the forecast inherits them (§12). */
+  readonly warnings?: readonly string[];
+  /** Whether the `expense_by_category` breakdown is written; without it a percentage of wages has no baseline. */
+  readonly categories?: boolean;
+}
+
+/** Complete months of a steady business, written the way the engine writes them. */
+function seedHistory(
+  org: string, monthly: Readonly<Record<string, string>>, months = 6, options: SeedOptions = {},
+): void {
+  const currency = options.currency ?? 'GBP';
+  const warnings = JSON.stringify(options.warnings ?? []);
+  const categories = options.categories ?? true;
+  adminSql(`update public.organizations set base_currency = '${currency}' where id = '${org}'`);
   const runId = one(`
     insert into public.calculation_runs
            (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
@@ -76,8 +102,8 @@ function seedHistory(org: string, monthly: Readonly<Record<string, string>>, mon
                (organization_id, calculation_run_id, period_id, metric_key, dimension_type,
                 dimension_key, value, unit, currency, basis, assurance_level, data_quality)
         values ('${org}', '${runId}', '${periodId}', '${metricKey}', '${dimensionType}',
-                ${key}, ${value}, 'money', 'GBP', 'ledger', 'verified',
-                '{"completeness": 1, "proxy": false, "warnings": [], "missing": []}'::jsonb)
+                ${key}, ${value}, 'money', '${currency}', 'ledger', 'verified',
+                '{"completeness": 1, "proxy": false, "warnings": ${warnings}, "missing": []}'::jsonb)
         returning id`);
       adminSql(`
         insert into public.metric_current
@@ -89,8 +115,10 @@ function seedHistory(org: string, monthly: Readonly<Record<string, string>>, mon
 
     for (const [metricKey, value] of Object.entries(monthly)) write(metricKey, value, null);
     // The engine's own breakdown of running costs, which a percentage assumption reads (§3).
-    write('expense_by_category', '2000', 'payroll');
-    write('expense_by_category', '500', 'marketing');
+    if (categories) {
+      write('expense_by_category', '2000', 'payroll');
+      write('expense_by_category', '500', 'marketing');
+    }
   }
 }
 
@@ -130,9 +158,38 @@ beforeAll(async () => {
   seedHistory(orgA, STEADY);
   seedHistory(orgB, { ...STEADY, revenue: '99999' });
 
-  // A scenario needs a forecast to move, so both organisations get one.
+  // Remediation fixtures, all owned by A's owner so no extra users are needed. Three complete
+  // months is the forecast's minimum, and enough for every property asserted on them.
+  const make = async (label: string): Promise<string> => {
+    // One owner per organisation: `api.create_organization` is throttled per actor (ADR-044.5),
+    // and a fixture that tripped that throttle would be testing the throttle, not scenarios.
+    const owner = createAuthUser(`rem-${label.toLowerCase()}@${DOMAIN}`);
+    const created = await clientFor(owner).schema('api').rpc('create_organization', { p_name: `ITest Sc ${label} ${RUN}` });
+    if (created.error) throw new Error(`fixture org ${label} failed: ${created.error.message}`);
+    const org = created.data as unknown as string;
+    ownerOf.set(org, owner);
+    return org;
+  };
+  ownerOf.set(orgA, ownerA);
+  orgNoCat = await make('NoCat');
+  orgLimited = await make('Limited');
+  orgWarn = await make('Warn');
+  orgINR = await make('INR');
+  orgAED = await make('AED');
+  orgUSD = await make('USD');
+  seedHistory(orgNoCat, STEADY, 3, { categories: false });
+  seedHistory(orgLimited, STEADY, 4);
+  seedHistory(orgWarn, STEADY, 3, { warnings: ['cash_basis_proxy', 'bank_coverage_partial'] });
+  seedHistory(orgINR, STEADY, 3, { currency: 'INR' });
+  seedHistory(orgAED, STEADY, 3, { currency: 'AED' });
+  seedHistory(orgUSD, STEADY, 3, { currency: 'USD' });
+
+  // A scenario needs a forecast to move, so every organisation gets one.
   await generateForecast(contextFor(ownerA, 'owner'));
   await generateForecast(contextFor(ownerB, 'owner', orgB));
+  for (const org of [orgNoCat, orgLimited, orgWarn, orgINR, orgAED, orgUSD]) {
+    await generateForecast(ownerCtx(org));
+  }
 });
 
 afterAll(() => {
@@ -231,20 +288,39 @@ describe('a scenario is the forecast with stated changes, and nothing else (REQ-
 describe('what a scenario will not do (§7, §10, §11)', () => {
   const ctx = () => contextFor(ownerA, 'owner');
 
-  it('refuses a percentage of a category it has no figure for, and stores nothing', async () => {
-    const before = one(`select count(*) from public.scenario_runs where organization_id = '${orgA}'`);
-    const state = await runScenario(ctx(), {
-      name: 'Depreciation up',
+  it('refuses a percentage of a category it has no figure for, names the reason, and stores nothing', async () => {
+    /*
+     * The audit found the earlier version of this case titled "refuses…" while asserting success
+     * (it used an organisation that HAD the category). This organisation has no
+     * `expense_by_category` rows, so a percentage of wages has nothing to be a percentage of.
+     */
+    const before = one(`select count(*) from public.scenario_runs where organization_id = '${orgNoCat}'`);
+    const state = await runScenario(ownerCtx(orgNoCat), {
+      name: 'Wages pct',
       assumptions: [
-        { kind: 'supplier_cost_change', mode: 'percent', value: '10', startsInMonth: 1, cashEffect: 'none' },
-        { kind: 'marketing_change', mode: 'percent', value: '10', startsInMonth: 1, cashEffect: 'none' },
+        { kind: 'payroll_change', mode: 'percent', value: '10', startsInMonth: 1, cashEffect: 'none' },
+        REVENUE_UP_10,
       ],
     });
-    // Marketing HAS a baseline here, so this one succeeds — the assertion is that it stored a row
-    // only because nothing was missing.
+    expect(hasScenario(state)).toBe(false);
+    if (hasScenario(state)) return;
+    // The reason is a real condition, named against the change that failed; the in-range sales
+    // change is not applied on its own — a partial scenario would look complete (§7).
+    expect(state.unavailable).toEqual([
+      { kind: 'payroll_change', reason: 'no_category_baseline', metricKey: 'expense_by_category' },
+    ]);
+    expect(one(`select count(*) from public.scenario_runs where organization_id = '${orgNoCat}'`))
+      .toBe(before);
+  });
+
+  it('accepts an AMOUNT of wages for the same organisation, which needs no baseline', async () => {
+    const state = await runScenario(ownerCtx(orgNoCat), {
+      name: 'Wages amount',
+      assumptions: [
+        { kind: 'payroll_change', mode: 'amount', value: '500', startsInMonth: 1, cashEffect: 'none' },
+      ],
+    });
     expect(hasScenario(state)).toBe(true);
-    expect(Number(one(`select count(*) from public.scenario_runs where organization_id = '${orgA}'`)))
-      .toBe(Number(before) + 1);
   });
 
   it('adds no sales when marketing spend rises (§10)', async () => {
@@ -569,6 +645,118 @@ describe('a scenario belongs to exactly one organisation (§20, §21)', () => {
              (organization_id, name, forecast_run_id, method, config_version, horizon_months)
       values ('${orgA}', 'stolen', '${theirForecast}', 'scenario.v1', 'scenario.config.v1', 3)`))
       .toThrow(/scenario_runs_forecast_fk|violates foreign key/);
+  });
+});
+
+/**
+ * Remediation of the audit's MEDIUM-2 and MEDIUM-3 (`PHASE_12_REMEDIATION.md`): the forecast's basis
+ * and warnings must reach the scenario view, and every money figure must be in the organisation's
+ * configured currency. Each property is asserted at the storage layer AND on the surface a reader
+ * or the analyst actually gets.
+ */
+describe('the forecast’s quality survives into the scenario (§12)', () => {
+  it('carries a limited basis through to the view when the history is short', async () => {
+    const ctx = ownerCtx(orgLimited);
+    const state = await runScenario(ctx, { name: 'Limited', assumptions: [REVENUE_UP_10] });
+    if (!hasScenario(state)) throw new Error(JSON.stringify(state));
+    // Four complete months: enough to forecast, fewer than STRONG_MIN_PERIODS.
+    expect(state.basis).toBe('limited');
+    expect(one(`select basis::text from public.scenario_runs where id = '${state.runId}'`)).toBe('limited');
+  });
+
+  it('carries a strong basis through when the history is long', async () => {
+    const state = await loadScenario(contextFor(ownerA, 'owner'));
+    if (!hasScenario(state)) throw new Error('expected a scenario');
+    expect(state.basis).toBe('strong');
+  });
+
+  it('carries the figures’ warnings into the stored run and the view, deduplicated', async () => {
+    const ctx = ownerCtx(orgWarn);
+    const state = await runScenario(ctx, { name: 'Warned', assumptions: [REVENUE_UP_10] });
+    if (!hasScenario(state)) throw new Error(JSON.stringify(state));
+
+    // Every snapshot carried both codes, so every baseline inherited both; the view says each once.
+    expect(state.dataQuality.warnings).toEqual(['bank_coverage_partial', 'cash_basis_proxy']);
+
+    // And they are ON THE RUN, so a saved scenario keeps disclosing them after the forecast moves.
+    const stored = one(`
+      select jsonb_array_length(data_quality -> 'forecast_warnings')
+        from public.scenario_runs where id = '${state.runId}'`);
+    expect(Number(stored)).toBeGreaterThan(0);
+    expect(one(`
+      select data_quality -> 'forecast_warnings' -> 0 ->> 'warnings'
+        from public.scenario_runs where id = '${state.runId}'`)).toContain('cash_basis_proxy');
+  });
+
+  it('reports no warnings for an organisation whose figures carry none', async () => {
+    const state = await loadScenario(contextFor(ownerA, 'owner'));
+    if (!hasScenario(state)) throw new Error('expected a scenario');
+    expect(state.dataQuality.warnings).toEqual([]);
+  });
+});
+
+describe('every money figure is in the organisation’s configured currency (MEDIUM-3)', () => {
+  const toolFor = async (ctx: AccessContext) => {
+    const periods = adminSql(`
+      select id || '|' || label || '|' || period_start || '|' || is_complete
+        from public.fiscal_periods where organization_id = '${ctx.orgId}' order by period_start`)
+      .split('\n').filter(Boolean).map((line) => {
+        const [id, label, periodStart, complete] = line.trim().split('|') as [string, string, string, string];
+        return { id, label, periodStart, isComplete: complete === 'true' || complete === 't', hasData: true };
+      }) as PeriodRow[];
+    const periodContext = resolvePeriodContext({ question: 'my scenario?', periods, fiscalYearStartMonth: 1 });
+    return runTool({
+      seq: 1, name: 'get_scenario', rawInput: {},
+      resolveAccess: async () => ctx, started: snapshotAccess(ctx),
+      call: { periodContext, knownPeriods: periods, now: new Date('2026-09-15T00:00:00Z') },
+    });
+  };
+
+  const CASES: ReadonlyArray<{ code: string; org: () => string }> = [
+    { code: 'GBP', org: () => orgA },
+    { code: 'INR', org: () => orgINR },
+    { code: 'AED', org: () => orgAED },
+    { code: 'USD', org: () => orgUSD },
+  ];
+
+  for (const { code, org } of CASES) {
+    it(`${code}: the view, the stored cells and the analyst's tool all carry it`, async () => {
+      const ctx = ownerCtx(org());
+      const state = await runScenario(ctx, {
+        name: `${code} hire`,
+        assumptions: [{ kind: 'hiring', headcount: 1, monthlyCostPerPerson: '50000', startsInMonth: 1, cashEffect: 'none' }],
+      });
+      if (!hasScenario(state)) throw new Error(JSON.stringify(state));
+
+      // The view: what the page formats every amount with.
+      expect(state.currency).toBe(code);
+      // The stored cells: the currency travels with the figures, not with the request.
+      expect(one(`
+        select distinct currency from public.scenario_values where scenario_run_id = '${state.runId}'`)).toBe(code);
+
+      // The analyst's tool: the assumption amount AND the figures, formatted by the product's own
+      // formatter in the organisation's currency. The audit found £50,000 beside ₹10,000 here.
+      const { result } = await toolFor(ctx);
+      expect(result.ok, JSON.stringify(result.data)).toBe(true);
+      const data = result.data as {
+        assumptions: Array<{ amount: { display: string; value: string } | null }>;
+        periods: Array<{ metrics: Array<{ metric_key: string; if_this_happens: { display: string } }> }>;
+      };
+      const amount = data.assumptions[0]!.amount!;
+      expect(amount.display).toBe(formatMoney('50000', { currency: code }));
+      expect(amount.value, 'the number itself is untouched').toBe('50000');
+      // The figures too: the tool's display is the product's own formatter applied to the view's
+      // figure in the organisation's currency. (Not a magic number — an earlier case in this file
+      // raises org A's revenue and regenerates its forecast, so the GBP baseline is not 10,000.)
+      const revenueCell = state.periods[0]!.metrics.find((m) => m.metricKey === 'revenue')!;
+      const revenue = data.periods[0]!.metrics.find((m) => m.metric_key === 'revenue')!;
+      expect(revenue.if_this_happens.display)
+        .toBe(formatMoney(revenueCell.scenarioValue, { currency: code }));
+    });
+  }
+
+  it('never falls back to a default when the organisation has a setting', () => {
+    expect(one(`select base_currency from public.organizations where id = '${orgINR}'`).trim()).toBe('INR');
   });
 });
 

@@ -108,6 +108,14 @@ export const UNAVAILABLE_REASONS = [
   'no_category_baseline',
   'no_direct_costs',
   'no_revenue_baseline',
+  /*
+   * The change would start after the last month the forecast speaks about, so it could not touch
+   * a single figure in this scenario. Refused rather than accepted-and-ignored: a saved scenario
+   * listing an assumption it never applied would be a lie of omission (remediation of MEDIUM-1,
+   * `PHASE_12_REMEDIATION.md`). The form's month picker cannot produce this; the service can be
+   * asked to.
+   */
+  'starts_after_horizon',
 ] as const;
 export type UnavailableReason = (typeof UNAVAILABLE_REASONS)[number];
 

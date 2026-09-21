@@ -186,19 +186,37 @@ sit in the list looking like a complete answer (§7).
 | `no_category_baseline` | A percentage of wages or marketing, with no `expense_by_category` level to take it of. The amount form is offered instead |
 | `no_direct_costs` | CD-05: the books have no cost-of-sales accounts, so there are no direct costs to move and no gross profit to invent |
 | `no_revenue_baseline` | An amount of extra sales whose direct costs should follow, against forecast sales of zero — there is no share to compute |
+| `starts_after_horizon` | The change would start after the last month the forecast speaks about, so it could not touch a single figure. Refused rather than accepted-and-ignored (remediation of the audit's MEDIUM-1, `PHASE_12_REMEDIATION.md §3`); a start exactly on the last month is inside |
 
 A change assumed to move cash is refused when there is no cash figure to move; the same change with
 "does not change cash" is accepted, and the page says which.
 
 Each reason is rendered in words by `presentation.ts` and never shown raw.
 
+**How a refusal reaches the reader** (corrected in remediation — the audit's HIGH-1,
+`PHASE_12_REMEDIATION.md §2`). The server action returns the refusal through the ordinary
+`ActionResult` error channel: a `ValidationError` headed "This cannot be worked out, because
+something it needs is missing. Nothing was saved.", with one issue per refused change naming the
+change ("Wages") and the reason. `ActionMessage` renders it as a `role="alert"` box in the error
+tone beside the form. Nothing is revalidated, because nothing changed; the section below the form is
+always the **last saved** scenario and is labelled "Last saved scenario · {date}" so it can never be
+read as the answer to the request just made. Journey 12 drives this state both before and after a
+save.
+
 ---
 
 ## 7. Data quality
 
 - A scenario **inherits** the forecast's basis (`strong` / `limited` / `weak`), its config version,
-  whether it was already stale when the scenario was made, and the list of metrics the forecast
-  refused. All of it is stored on `scenario_runs.data_quality` and shown in "Not included".
+  whether it was already stale when the scenario was made, the list of metrics the forecast
+  refused, and — since remediation (`PHASE_12_REMEDIATION.md §4`) — the data-quality **warnings**
+  the forecast's baselines carried, lifted per metric from `forecast_runs.breakdown` into
+  `scenario_runs.data_quality.forecast_warnings` at save time. The page renders the basis word with
+  the forecast's own sentence directly under the disclaimer, and the warnings in plain words through
+  the dashboard's existing note table ("The figures this rests on carry a note: figures are
+  estimated from bank activity, not from your accounts"). Refused metrics are shown in "Not
+  included". Because all of it is on the run, a saved scenario keeps disclosing what its baseline
+  carried after the forecast has been regenerated.
 - Every `scenario_values` row is `estimated` by DEFAULT and by CHECK. A scenario result is not an
   actual and not a forecast, and there is no way to write one that claims more.
 - The three claims are kept apart in words as well as in tables: "Expected now" against "If this
@@ -275,6 +293,10 @@ half-visible or exist without its evidence. No second evidence system was create
   would have no `NumberRef` and the sentence would be removed by grounding (§7.8).
 - Every scenario figure carries `assurance: estimated` from the response contract, so it is marked
   as an estimate without the model having to remember.
+- Every amount — the figures and the assumptions — is formatted in the organisation's configured
+  currency (`organizations.base_currency`, carried on the view as `currency`), never a default.
+  The audit found an INR organisation's assumption shown to the model as `£50,000` beside figures in
+  `₹`; remediated and proven for GBP, INR, AED and USD (`PHASE_12_REMEDIATION.md §5`).
 
 **The refusal template changed meaning.** It no longer claims what-ifs are unavailable — they are —
 it says *who does the arithmetic and where*:
@@ -414,9 +436,9 @@ below was fixed in the code or in a test expectation that was itself wrong, and 
 | Suite | File | Count |
 |---|---|---|
 | Unit — what may be assumed | `test/unit/scenario-assumptions.test.ts` | **28** |
-| Unit — the words a reader sees | `test/unit/scenario-presentation.test.ts` | **14** |
-| Unit — the engine | `test/unit/scenario-apply.test.ts` | **39** |
-| Integration — storage, RBAC, isolation, the tool | `test/integration/scenarios.test.ts` | **39** |
+| Unit — the words a reader sees | `test/unit/scenario-presentation.test.ts` | **16** |
+| Unit — the engine | `test/unit/scenario-apply.test.ts` | **44** |
+| Integration — storage, RBAC, isolation, the tool, quality and currency | `test/integration/scenarios.test.ts` | **49** |
 | Integration — AI tool registry | `test/integration/ai-tools.test.ts` (18 → 19 tools) | 22 |
 | AI evaluation | `test/fixtures/ai/corpus.ts` + `ai-eval-record.test.ts` | **158** (151 → 158) |
 | Playwright journey | `e2e/journey-12-what-if.spec.ts` | **2** (with an axe sweep over the form) |
@@ -442,7 +464,13 @@ stranger's (P0002, rather than confirming the row exists); that an unassigned em
 `aal1` employee see nothing; that cross-tenant reads, archives and service-role writes all fail; and that
 `scenario.created` records who assumed what.
 
-**Three defects found during the build. Two were fixed; the third was measured and attributed.**
+**After the build, an independent audit (`PHASE_12_FINAL_AUDIT.md`) found one HIGH and three
+MEDIUM defects that these suites had not caught — the refusal state never reaching the reader, an
+out-of-horizon start silently ignored, the basis and warnings not rendered, and a GBP fallback in
+tool 19 — all remediated and re-tested before Phase 13 (`PHASE_12_REMEDIATION.md`). The counts
+above are post-remediation.**
+
+**Three defects found during the build itself. Two were fixed; the third was measured and attributed.**
 
 > **The money lint rule caught three real ADR-006 violations.** `basisFromForecast` and the view
 > builder subtracted money with `Number.parseFloat`, and the assumption bound checks compared with

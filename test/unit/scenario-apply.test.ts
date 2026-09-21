@@ -358,8 +358,58 @@ describe('what MOTION refuses to work out, and says so (§7, §12)', () => {
     const missing = sufficiency(parseAssumptions([
       { ...REVENUE_UP_10, directCostsFollow: true },
       { kind: 'supplier_cost_change', mode: 'amount', value: '100', startsInMonth: 1, cashEffect: 'none' },
-    ]) as Assumption[], without('cost_of_sales'));
+    ]) as Assumption[], without('cost_of_sales'), HORIZON.length);
     expect(missing).toHaveLength(2);
+  });
+});
+
+describe('a change has to land inside the months the scenario is about (MEDIUM-1 remediation)', () => {
+  const hire = (startsInMonth: number) => ({
+    kind: 'hiring', headcount: 1, monthlyCostPerPerson: '2000', startsInMonth, cashEffect: 'none',
+  });
+  const twoMonths = HORIZON.slice(0, 2);
+  const withHorizon = (assumptions: unknown[], horizon: HorizonPeriod[]) => applyScenario({
+    assumptions: parseAssumptions(assumptions), basis: BASIS, horizon, forecastBasis: 'strong',
+  });
+
+  it('applies a change that starts inside the horizon', () => {
+    const result = withHorizon([hire(1)], twoMonths);
+    expect(result.unavailable).toHaveLength(0);
+    expect(scenarioOf(result.cells, 'operating_expenses', 'p1')).toBe('5000.00');
+    expect(scenarioOf(result.cells, 'operating_expenses', 'p2')).toBe('5000.00');
+  });
+
+  it('applies a change that starts exactly on the last month of the horizon', () => {
+    const result = withHorizon([hire(2)], twoMonths);
+    expect(result.unavailable).toHaveLength(0);
+    expect(scenarioOf(result.cells, 'operating_expenses', 'p1'), 'untouched before it starts').toBe('3000.00');
+    expect(scenarioOf(result.cells, 'operating_expenses', 'p2'), 'applied on the boundary month').toBe('5000.00');
+  });
+
+  it('refuses a change that would start after the horizon, rather than accepting it and applying it to nothing', () => {
+    // The form's month picker cannot produce this — its options are the real horizon — but the
+    // service can be asked to, and the audit found it silently accepted (MEDIUM-1).
+    const result = withHorizon([hire(3)], twoMonths);
+    expect(result.cells).toHaveLength(0);
+    expect(result.unavailable).toEqual([
+      { kind: 'hiring', reason: 'starts_after_horizon', metricKey: null },
+    ]);
+  });
+
+  it('refuses the whole scenario when one of several changes starts after the horizon', () => {
+    // Mixed applicability is not partially applied: an in-range sales change and an out-of-range
+    // hire produce no figures and name the hire — never a scenario that quietly lost the hire.
+    const result = withHorizon([REVENUE_UP_10, hire(3)], twoMonths);
+    expect(result.cells).toHaveLength(0);
+    expect(result.unavailable).toEqual([
+      { kind: 'hiring', reason: 'starts_after_horizon', metricKey: null },
+    ]);
+  });
+
+  it('treats month three as inside a three-month horizon (the shipped case is unchanged)', () => {
+    const result = withHorizon([hire(3)], HORIZON);
+    expect(result.unavailable).toHaveLength(0);
+    expect(scenarioOf(result.cells, 'operating_expenses', 'p3')).toBe('5000.00');
   });
 });
 

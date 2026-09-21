@@ -275,6 +275,24 @@ export async function latestForecastRunId(
   return (data as { id?: string } | null)?.id ?? null;
 }
 
+/**
+ * The organisation's configured currency (`organizations.base_currency`).
+ *
+ * Every money figure a scenario renders or hands to the analyst is formatted in this, never in a
+ * default and never in anything the browser sent. The forecast's own cells carry the same code, and
+ * the two are expected to agree; the organisation's setting is the one a person can see and change,
+ * so it is the one that wins (remediation of MEDIUM-3, `PHASE_12_REMEDIATION.md`).
+ */
+export async function loadBaseCurrency(
+  db: SupabaseClient, orgId: string, requestId?: string,
+): Promise<string | null> {
+  const { data, error } = await db
+    .from('organizations').select('base_currency').eq('id', orgId).maybeSingle();
+  if (error) throw toMotionError(error, requestId);
+  const code = (data as { base_currency?: string | null } | null)?.base_currency ?? null;
+  return code === null ? null : code.trim();
+}
+
 /** The calculation run the forecast rested on, carried onto the scenario's own bundle. */
 export async function forecastCalculationRunId(
   db: SupabaseClient, orgId: string, forecastRunId: string, requestId?: string,

@@ -82,7 +82,7 @@ const pct = (value: string): Decimal => new Decimal(value).dividedBy(HUNDRED);
  * reaching the reader is a real condition the server checked rather than "something went wrong".
  */
 export function sufficiency(
-  assumptions: readonly Assumption[], basis: ScenarioBasis,
+  assumptions: readonly Assumption[], basis: ScenarioBasis, horizonMonths: number,
 ): ScenarioUnavailable[] {
   const out: ScenarioUnavailable[] = [];
   const has = (key: string): boolean => {
@@ -98,6 +98,19 @@ export function sufficiency(
 
   for (const assumption of ordered(assumptions)) {
     const { kind } = assumption;
+
+    /*
+     * A change has to land inside the months this scenario is about. The horizon is usually three
+     * months but is whatever future `fiscal_periods` rows exist, so `startsInMonth` is checked
+     * against the REAL horizon here and not only against the constant the form knows. A start
+     * exactly on the last month is inside; one month past it would apply to nothing, and an
+     * assumption that applies to nothing must be refused, not carried into a saved scenario as if
+     * it had done something (MEDIUM-1).
+     */
+    if (assumption.startsInMonth > horizonMonths) {
+      need(kind, 'starts_after_horizon', null);
+      continue;
+    }
 
     // Every cost or income change needs the leaf it moves to exist in the forecast at all.
     switch (kind) {
@@ -278,7 +291,7 @@ function key(point: ForecastPoint): string {
  * the scenario from the levels each assumption moved. The cells are the pairing.
  */
 export function applyScenario(input: ApplyInput): ScenarioResult {
-  const unavailable = sufficiency(input.assumptions, input.basis);
+  const unavailable = sufficiency(input.assumptions, input.basis, input.horizon.length);
   if (unavailable.length > 0) {
     return {
       method: SCENARIO_METHOD,

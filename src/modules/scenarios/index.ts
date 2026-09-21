@@ -44,7 +44,8 @@ export {
 } from './domain/presentation';
 
 export {
-  archiveScenario, basisFromForecast, hasScenario, listScenarios, loadScenario, runScenario,
-  type NoScenario, type RunScenarioInput, type ScenarioMetricView, type ScenarioPeriodView,
-  type ScenarioState, type ScenarioSummary, type ScenarioView,
+  archiveScenario, basisFromForecast, forecastWarningsOf, hasScenario, listScenarios, loadScenario,
+  runScenario,
+  type ForecastWarning, type NoScenario, type RunScenarioInput, type ScenarioMetricView,
+  type ScenarioPeriodView, type ScenarioState, type ScenarioSummary, type ScenarioView,
 } from './services';

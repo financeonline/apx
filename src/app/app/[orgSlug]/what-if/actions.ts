@@ -3,8 +3,10 @@
 import { revalidatePath } from 'next/cache';
 import { getAccessContext } from '@/modules/tenancy';
 import { assertCan } from '@/core/permissions';
+import { ValidationError } from '@/core/errors';
 import {
-  ASSUMPTION_KINDS, archiveScenario, hasScenario, runScenario, type AssumptionKind,
+  ASSUMPTION_KINDS, ASSUMPTION_LABEL, UNAVAILABLE_HEADLINE, archiveScenario, hasScenario,
+  runScenario, unavailableText, type AssumptionKind,
 } from '@/modules/scenarios';
 import { done, fail, text } from '@/app/_lib/server-action';
 import type { ActionResult } from '@/components/action-result';
@@ -115,16 +117,33 @@ export async function runScenarioAction(
       name: text(form, 'name'),
       assumptions: assumptionsFrom(form),
     });
-    revalidatePath(`/app/${orgSlug}/what-if`);
+
+    if (hasScenario(state)) {
+      revalidatePath(`/app/${orgSlug}/what-if`);
+      return done('Worked out and saved.');
+    }
 
     /*
-     * "It could not be worked out" is an outcome, not a failure, and it has to be SAID — a tick
-     * beside an unchanged page would leave the reader unable to tell which of the two happened.
-     * The reasons themselves are listed on the page, where there is room for them.
+     * A refusal is an outcome, and it travels back through the error channel on purpose: the
+     * reader must see WHICH change could not be applied and WHY, in the tone that says "this did
+     * not happen", beside the form they just submitted. Nothing was saved, so nothing on the page
+     * changes and the path is not revalidated — the scenario already on the page is the last SAVED
+     * one and is labelled as such, never as the answer to this request. The audit found the earlier
+     * version saying "the reasons are below" in the success tone with no reasons anywhere (HIGH-1,
+     * `PHASE_12_REMEDIATION.md`).
+     *
+     * `ValidationError` is the shape `ActionMessage` already lists item by item. It is built
+     * directly rather than through `fail()`, because `fail()` writes an error-level log line for
+     * what is a normal, expected answer.
      */
-    return hasScenario(state)
-      ? done('Worked out and saved.')
-      : done('This could not be worked out. The reasons are below.');
+    const refusal = new ValidationError(
+      `${UNAVAILABLE_HEADLINE} Nothing was saved.`,
+      state.unavailable.map((item) => ({
+        path: ASSUMPTION_LABEL[item.kind],
+        message: unavailableText(item.reason),
+      })),
+    );
+    return { ok: false, error: refusal.toJSON() };
   } catch (error) {
     return fail(error, { requestId, action: 'scenario.run' });
   }

@@ -1337,6 +1337,18 @@ Documents updated in the same commit: `docs/DATABASE_ARCHITECTURE.md` (two table
 
 One thing this phase did NOT fix, recorded so it is not rediscovered as new: `test/integration/ai-eval-record.test.ts` is intermittently red because the golden organisation's alert SET is not reproducible run to run. Measured on a git worktree of `434a457` with a clean database, it fails there too (1 in 6, against 2 in 6 on this branch), so it is Phase 7/11's and not this one's. A `rule_key` tiebreak on `loadAlerts` was written, measured, found not to fix it, and reverted (`docs/PHASE_12_IMPLEMENTATION.md §16`).
 
-Proven: 81 unit cases (the eight kinds, the cascade, the conflicts, the bounds, determinism and order-independence, every refusal, and every sentence the assumptions list prints); 39 integration cases (the baseline column equal to `forecast_values` to the penny, the identities in the stored rows, the `estimated` constraint refusing anything else, a saved scenario surviving a regenerated forecast, evidence cloned from the forecast, the tool returning exactly what was stored and offering no way to supply an assumption, and the five-role, employee-assignment and cross-tenant boundaries); 2 Playwright journeys with an axe sweep over the form; 158 eval cases including the invented-assumption set.
+Proven: 81 unit cases (the eight kinds, the cascade, the conflicts, the bounds, determinism and order-independence, every refusal, and every sentence the assumptions list prints); 39 integration cases (the baseline column equal to `forecast_values` to the penny, the identities in the stored rows, the `estimated` constraint refusing anything else, a saved scenario surviving a regenerated forecast, evidence cloned from the forecast, the tool returning exactly what was stored and offering no way to supply an assumption, and the five-role, employee-assignment and cross-tenant boundaries); 2 Playwright journeys with an axe sweep over the form; 158 eval cases including the invented-assumption set. (After remediation: 88 unit and 49 integration cases; the journey drives the refusal state twice.)
+
+**Addendum, 2026-09-21 — remediation before Phase 13 (`PHASE_12_REMEDIATION.md`).** An
+independent audit of this phase (`PHASE_12_FINAL_AUDIT.md`) found four things the decision above
+did not deliver in full, none of which changes the decision: a refusal's reasons never reached the
+reader (they now travel through the ordinary `ActionResult` error channel, and the saved scenario
+below the form is labelled as last saved); an assumption starting after a short horizon was silently
+ignored (it is now a sixth refusal reason, `starts_after_horizon`, refused like every other missing
+input); the forecast's basis and warnings were not rendered (they are now carried onto the run at
+save time and shown in the forecast's own words); and tool 19 fell back to GBP for assumption
+amounts (every amount now takes `organizations.base_currency`, carried on the view). The
+deterministic engine, `composeFromLevels`, the tables, the permissions and the evidence path are
+exactly as recorded above.
 
 No earlier ADR was superseded or reversed.

@@ -1,10 +1,13 @@
 import Link from 'next/link';
 import { formatMoney, formatPercent } from '@/core/money';
 import {
-  ASSUMPTION_LABEL, CASH_EFFECT_LABEL, SCENARIO_DISCLAIMER, SCENARIO_HEADLINE_KEYS,
-  assumptionSentence, unavailableText, type ScenarioView,
+  CASH_EFFECT_LABEL, SCENARIO_DISCLAIMER, SCENARIO_HEADLINE_KEYS,
+  assumptionSentence, type ScenarioView,
 } from '@/modules/scenarios';
-import { metricLabel, unavailableText as forecastUnavailableText } from '@/modules/forecast';
+import {
+  BASIS_LABEL, BASIS_TEXT, metricLabel, unavailableText as forecastUnavailableText,
+} from '@/modules/forecast';
+import { DATA_QUALITY_NOTE_TEXT } from '@/components/dashboard';
 import { Badge, Banner, Card, CardBody, CardHeader } from '@/components/ui/surfaces';
 
 /**
@@ -34,7 +37,9 @@ export function ScenarioComparison({
 }) {
   const first = scenario.periods[0];
   const later = scenario.periods.slice(1);
-  const currency = first?.metrics.find((m) => m.currency !== null)?.currency ?? null;
+  // The organisation's configured currency, carried on the view — never a default and never
+  // whatever a cell happened to carry (MEDIUM-3).
+  const currency = scenario.currency;
 
   return (
     <>
@@ -49,6 +54,33 @@ export function ScenarioComparison({
 
       {/* §16: the disclaimer is on the page, not behind a tooltip. */}
       <p className="mt-6 text-sm text-ink-muted">{SCENARIO_DISCLAIMER}</p>
+
+      {/*
+        * §12: how much to lean on the baseline this scenario moved, in the forecast's own three
+        * words and never a percentage, followed by any note the forecast's figures carried. Both
+        * are stored on the run, so a saved scenario keeps disclosing them after the forecast has
+        * been regenerated (MEDIUM-2).
+        */}
+      {scenario.basis === null && scenario.dataQuality.warnings.length === 0 ? null : (
+        <div className="mt-3 text-sm text-ink-muted" data-testid="scenario-basis">
+          {scenario.basis === null ? null : (
+            <p>
+              <span className="text-ink">{BASIS_LABEL[scenario.basis]}</span>
+              {' — '}
+              {BASIS_TEXT[scenario.basis].split('—')[1]?.trim()}
+            </p>
+          )}
+          {scenario.dataQuality.warnings.length === 0 ? null : (
+            <p className="mt-1">
+              The figures this rests on carry a note:{' '}
+              {scenario.dataQuality.warnings
+                .map((code) => DATA_QUALITY_NOTE_TEXT[code] ?? 'some of the figures carry a data-quality warning')
+                .join('; ')}
+              .
+            </p>
+          )}
+        </div>
+      )}
 
       {first === undefined ? null : (
         <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -213,23 +245,3 @@ export function ScenarioComparison({
   );
 }
 
-/** What a refused scenario says: the real condition, and what would fix it (§7). */
-export function ScenarioUnavailableView({
-  unavailable,
-}: {
-  unavailable: ReadonlyArray<{ kind: string; reason: string }>;
-}) {
-  return (
-    <ul className="mt-3 flex flex-col gap-2 text-sm text-ink-muted">
-      {unavailable.map((item, index) => (
-        <li key={`${item.kind}-${index}`}>
-          <span className="text-ink">
-            {ASSUMPTION_LABEL[item.kind as keyof typeof ASSUMPTION_LABEL] ?? 'This change'}
-          </span>
-          {' — '}
-          {unavailableText(item.reason)}
-        </li>
-      ))}
-    </ul>
-  );
-}
