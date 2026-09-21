@@ -68,6 +68,13 @@ const CALLS: ReadonlyArray<{ name: string; input: Record<string, unknown> }> = [
   { name: 'get_actions', input: {} },
   // Phase 11: the corpus needs a real forecast output to build golden forecast cases from (ADR-099).
   { name: 'get_forecast', input: {} },
+  /*
+   * Phase 12 (ADR-100). This organisation has two complete months and MIN_PERIODS is three, so it
+   * has no forecast — and therefore no scenario either. The recording is deliberately of THAT:
+   * what the analyst gets when somebody asks about a what-if nobody has run. The corpus's
+   * adversarial cases prove the model neither invents one nor claims the feature is missing.
+   */
+  { name: 'get_scenario', input: {} },
 ];
 
 export interface Recording {

@@ -1,171 +1,171 @@
 {
-  "promptVersion": "analyst-v3.1",
-  "recordedAt": "2026-09-13T04:22:43.520Z",
+  "promptVersion": "analyst-v3.2",
+  "recordedAt": "2026-09-21T16:29:50.459Z",
   "fiscalYearStartMonth": 1,
   "periods": [
     {
-      "id": "4db14b30-664f-40a5-8aee-376f915dce82",
+      "id": "4d9e90dc-ae7b-45ef-86df-76e52bcdf0fd",
       "label": "Sep 2025",
       "periodStart": "2025-09-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "b1b0c2e1-de86-4189-9169-b834ea260083",
+      "id": "ee2f63dd-9c05-45fe-827c-b052a0ac2ae5",
       "label": "Oct 2025",
       "periodStart": "2025-10-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "73eaba12-51a4-4b26-ae17-69068bfa9359",
+      "id": "99605d62-89d0-4081-8363-4b7ff3ea4762",
       "label": "Nov 2025",
       "periodStart": "2025-11-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "5a84d1ac-f0a8-4d61-822f-c3e4e9e852a2",
+      "id": "38e13c1f-0389-4978-8bf4-68b9b70b5199",
       "label": "Dec 2025",
       "periodStart": "2025-12-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "33624b18-2c4c-4b66-a072-c1f48228048f",
+      "id": "73f76226-a76f-4145-babc-07ca9b3cd42f",
       "label": "Jan 2026",
       "periodStart": "2026-01-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "b6c3006c-7c66-4759-aa83-666059ef6f5c",
+      "id": "12bbecaf-d8df-4b38-9d59-be3c27b25509",
       "label": "Feb 2026",
       "periodStart": "2026-02-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "ad83c128-6e38-4a02-9e0b-a2eb3009da00",
+      "id": "f2b3b7fc-0ef8-49b8-9867-0c91092e2385",
       "label": "Mar 2026",
       "periodStart": "2026-03-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+      "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
       "label": "Apr 2026",
       "periodStart": "2026-04-01",
       "isComplete": true,
       "hasData": true
     },
     {
-      "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+      "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
       "label": "May 2026",
       "periodStart": "2026-05-01",
       "isComplete": true,
       "hasData": true
     },
     {
-      "id": "be03a584-f1c4-4339-b2e7-899afccbc73c",
+      "id": "e1b3989e-4c7e-494d-9a7d-cb75fb780a35",
       "label": "Jun 2026",
       "periodStart": "2026-06-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "5accf045-4771-416d-8ced-d87e129d6683",
+      "id": "de1bf064-fdd1-4eaf-802b-1e6384901ea7",
       "label": "Jul 2026",
       "periodStart": "2026-07-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "2ac67b45-1aba-4be4-8796-11e7be876835",
+      "id": "9ccb2d17-111f-41fc-93de-3591bb568ff9",
       "label": "Aug 2026",
       "periodStart": "2026-08-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "759a2126-2448-42c4-ab5b-cac4aaf3f22c",
+      "id": "9ff41311-0582-404a-944e-5e5aa73a0e45",
       "label": "Sep 2026",
       "periodStart": "2026-09-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "b3ebacff-ae28-4556-9ea6-2c914c3a5558",
+      "id": "0302a4d5-4c7c-4a41-af4c-fc4711951819",
       "label": "Oct 2026",
       "periodStart": "2026-10-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "23806c09-cc22-4737-9921-5b45f82544b2",
+      "id": "c441048a-9e1e-4835-8663-73df2ac398de",
       "label": "Nov 2026",
       "periodStart": "2026-11-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "85bc2bc9-c7f1-4a53-a0cd-f961d36c6efa",
+      "id": "64a38b9e-4f75-4cac-95ff-bd0c786368f7",
       "label": "Dec 2026",
       "periodStart": "2026-12-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "631b7d2d-2438-4941-b3ca-227955a22785",
+      "id": "65b90826-892f-43f4-ade9-b9d30b711125",
       "label": "Jan 2027",
       "periodStart": "2027-01-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "c4235633-8b6e-4e8f-99b8-21cec2c109be",
+      "id": "55e4c5dd-51d5-47db-ab35-ac9249e5bccf",
       "label": "Feb 2027",
       "periodStart": "2027-02-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "f313b182-aec9-417e-a3e6-63ff5a5e091a",
+      "id": "0f8d5b9a-8800-4535-8c92-f2cab4389971",
       "label": "Mar 2027",
       "periodStart": "2027-03-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "40fd5134-9ac8-474c-a153-40a39d36ede6",
+      "id": "d86c1b73-43dd-4327-908f-8575953ec1db",
       "label": "Apr 2027",
       "periodStart": "2027-04-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "51701ffe-46e6-4257-868d-039669c64b71",
+      "id": "9de70bd2-06c4-483d-8a21-d48dd90d3658",
       "label": "May 2027",
       "periodStart": "2027-05-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "a02bc856-858b-4455-8910-26ea90ec6b1d",
+      "id": "9f101a46-df8b-4aec-b152-2023ab5b074e",
       "label": "Jun 2027",
       "periodStart": "2027-06-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "7b53a001-76dc-42da-a39a-53fd64069350",
+      "id": "9c0c62b5-d6da-4a35-9852-bf4946cc660d",
       "label": "Jul 2027",
       "periodStart": "2027-07-01",
       "isComplete": false,
       "hasData": false
     },
     {
-      "id": "e07ad8cc-1ccd-4f43-8f0d-9d02415f47b2",
+      "id": "2de7b75e-2bd8-4bbd-9b4d-232b55d731f9",
       "label": "Aug 2027",
       "periodStart": "2027-08-01",
       "isComplete": false,
@@ -185,7 +185,7 @@
         "ok": true,
         "data": {
           "period": {
-            "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+            "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
             "label": "May 2026"
           },
           "health": {
@@ -209,7 +209,7 @@
             {
               "metric_key": "revenue",
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "value": {
@@ -228,12 +228,12 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "0c73a351-c067-4484-96d2-98f2db0eb63a"
+              "snapshot_id": "8ed1dc7f-2b98-475d-919d-b4af23f36b59"
             },
             {
               "metric_key": "gross_profit",
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "value": {
@@ -252,12 +252,12 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "0736a711-ef53-490a-ac9d-860a196f8097"
+              "snapshot_id": "da5b9dfb-23af-4541-b460-56d2ffe03841"
             },
             {
               "metric_key": "operating_profit",
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "value": {
@@ -276,12 +276,12 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "e2d3cce3-065c-49ac-8071-496f79ac309d"
+              "snapshot_id": "5107df67-5115-4668-a550-ef2afd3f71cd"
             },
             {
               "metric_key": "net_profit",
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "value": {
@@ -300,12 +300,12 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "ead50564-2caa-43fd-842e-2728ebfbdd71"
+              "snapshot_id": "2714926d-cc2d-440a-8c0f-6a2b3a864922"
             },
             {
               "metric_key": "closing_cash",
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "value": {
@@ -324,31 +324,31 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "0491c32e-d58b-4eec-9806-80502b74670c"
+              "snapshot_id": "96c6506b-049a-40fa-afac-71077c24988c"
             }
           ],
           "top_alerts": [
             {
-              "id": "433c039b-ba32-49fe-ae06-1292a81555fd",
+              "id": "c4b10a51-7d43-48d3-9922-dec41a008566",
               "revision_no": 0,
               "rule_key": "expense.spike_category",
               "severity": "high",
               "title": "<data name=\"title\">marketing spending jumped</data>",
               "metric_key": "expense_by_category",
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               }
             },
             {
-              "id": "4144b189-a6ec-4f2d-b96f-f9e88c70c6a4",
+              "id": "2a64591d-4c36-4d60-b83c-2681c8202b84",
               "revision_no": 0,
               "rule_key": "concentration.customer",
               "severity": "high",
               "title": "<data name=\"title\">Acme Trading Ltd is a large share of revenue</data>",
               "metric_key": "customer_concentration_top1",
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               }
             }
@@ -370,7 +370,7 @@
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             }
           ],
@@ -392,7 +392,7 @@
         "data": {
           "metric_key": "revenue",
           "period": {
-            "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+            "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
             "label": "May 2026"
           },
           "value": {
@@ -411,7 +411,7 @@
             "warnings": [],
             "missing": []
           },
-          "snapshot_id": "0c73a351-c067-4484-96d2-98f2db0eb63a",
+          "snapshot_id": "8ed1dc7f-2b98-475d-919d-b4af23f36b59",
           "components": [
             {
               "name": "uncategorised_amount",
@@ -420,7 +420,7 @@
                 "display": "£0",
                 "unit": "money"
               },
-              "snapshot_id": "0c73a351-c067-4484-96d2-98f2db0eb63a"
+              "snapshot_id": "8ed1dc7f-2b98-475d-919d-b4af23f36b59"
             }
           ],
           "variance": {
@@ -436,36 +436,36 @@
                 "unit": "ratio"
               },
               "comparison_period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "basis_differs": false,
-              "snapshot_id": "1c6436a3-a10a-474e-a7e1-cf4c318c8868"
+              "snapshot_id": "731adc1f-e2cd-4ba8-a113-e7b5fa7644b9"
             },
             "same_period_last_year": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "8d12dcd1-c275-40fa-916e-b126ffa162e9"
+              "snapshot_id": "e3380c2d-b4ed-4aa2-afe4-7a59975de5c7"
             },
             "trailing_3m_avg": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "453adebb-0b49-4f83-a31a-abe18e7be499"
+              "snapshot_id": "97ccaa1c-517d-4597-964e-3dac0198cabf"
             }
           }
         },
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             },
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             }
           ],
@@ -487,7 +487,7 @@
         "data": {
           "metric_key": "revenue",
           "period": {
-            "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+            "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
             "label": "Apr 2026"
           },
           "value": {
@@ -506,7 +506,7 @@
             "warnings": [],
             "missing": []
           },
-          "snapshot_id": "5d55b0fb-f028-4083-9d64-363ee92330bd",
+          "snapshot_id": "597663f4-53ec-4f76-8a1d-aa77ef83a8c6",
           "components": [
             {
               "name": "uncategorised_amount",
@@ -515,7 +515,7 @@
                 "display": "£0",
                 "unit": "money"
               },
-              "snapshot_id": "5d55b0fb-f028-4083-9d64-363ee92330bd"
+              "snapshot_id": "597663f4-53ec-4f76-8a1d-aa77ef83a8c6"
             }
           ],
           "variance": {
@@ -523,39 +523,39 @@
               "value": null,
               "pct_change": null,
               "comparison_period": {
-                "id": "ad83c128-6e38-4a02-9e0b-a2eb3009da00",
+                "id": "f2b3b7fc-0ef8-49b8-9867-0c91092e2385",
                 "label": "Mar 2026"
               },
               "basis_differs": false,
-              "snapshot_id": "7f99a36a-0a5d-4072-b93e-586e1bcca171"
+              "snapshot_id": "ffd54d0f-225b-4652-96b4-091219edcf9d"
             },
             "same_period_last_year": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "b4b4c0f5-e56d-461c-9686-9915a0299ae0"
+              "snapshot_id": "60f217cf-e6aa-4729-a10d-78c35daf1bbe"
             },
             "trailing_3m_avg": {
               "value": null,
               "pct_change": null,
               "comparison_period": {
-                "id": "ad83c128-6e38-4a02-9e0b-a2eb3009da00",
+                "id": "f2b3b7fc-0ef8-49b8-9867-0c91092e2385",
                 "label": "Mar 2026"
               },
               "basis_differs": false,
-              "snapshot_id": "2fe3f40f-6f37-4fdc-a452-8dd3b0163830"
+              "snapshot_id": "829acce9-1079-4eaa-a79b-a3a4d3317176"
             }
           }
         },
         "meta": {
           "periods": [
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             },
             {
-              "id": "ad83c128-6e38-4a02-9e0b-a2eb3009da00",
+              "id": "f2b3b7fc-0ef8-49b8-9867-0c91092e2385",
               "label": "Mar 2026"
             }
           ],
@@ -577,7 +577,7 @@
         "data": {
           "metric_key": "gross_profit",
           "period": {
-            "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+            "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
             "label": "May 2026"
           },
           "value": {
@@ -596,7 +596,7 @@
             "warnings": [],
             "missing": []
           },
-          "snapshot_id": "0736a711-ef53-490a-ac9d-860a196f8097",
+          "snapshot_id": "da5b9dfb-23af-4541-b460-56d2ffe03841",
           "components": [
             {
               "name": "revenue",
@@ -605,7 +605,7 @@
                 "display": "£25,000",
                 "unit": "money"
               },
-              "snapshot_id": "0736a711-ef53-490a-ac9d-860a196f8097"
+              "snapshot_id": "da5b9dfb-23af-4541-b460-56d2ffe03841"
             },
             {
               "name": "cost_of_sales",
@@ -614,7 +614,7 @@
                 "display": "£6,000",
                 "unit": "money"
               },
-              "snapshot_id": "0736a711-ef53-490a-ac9d-860a196f8097"
+              "snapshot_id": "da5b9dfb-23af-4541-b460-56d2ffe03841"
             }
           ],
           "variance": {
@@ -630,36 +630,36 @@
                 "unit": "ratio"
               },
               "comparison_period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "basis_differs": false,
-              "snapshot_id": "bbd13f0a-1639-4485-90d4-3f9e066a6628"
+              "snapshot_id": "be1d99e5-2caa-4a39-bf8c-c82518dfa104"
             },
             "same_period_last_year": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "a0c6e203-56b1-4658-972f-169491f60094"
+              "snapshot_id": "5e87f947-1ba1-472e-9684-db686567758b"
             },
             "trailing_3m_avg": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "0c51d8bb-f4ab-4fe3-8ad2-d9844fc8d02a"
+              "snapshot_id": "517e0785-04cd-4da3-9504-8a6713a6a756"
             }
           }
         },
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             },
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             }
           ],
@@ -681,7 +681,7 @@
         "data": {
           "metric_key": "operating_profit",
           "period": {
-            "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+            "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
             "label": "May 2026"
           },
           "value": {
@@ -700,7 +700,7 @@
             "warnings": [],
             "missing": []
           },
-          "snapshot_id": "e2d3cce3-065c-49ac-8071-496f79ac309d",
+          "snapshot_id": "5107df67-5115-4668-a550-ef2afd3f71cd",
           "components": [
             {
               "name": "gross_profit",
@@ -709,7 +709,7 @@
                 "display": "£19,000",
                 "unit": "money"
               },
-              "snapshot_id": "e2d3cce3-065c-49ac-8071-496f79ac309d"
+              "snapshot_id": "5107df67-5115-4668-a550-ef2afd3f71cd"
             },
             {
               "name": "operating_expenses",
@@ -718,7 +718,7 @@
                 "display": "£9,300",
                 "unit": "money"
               },
-              "snapshot_id": "e2d3cce3-065c-49ac-8071-496f79ac309d"
+              "snapshot_id": "5107df67-5115-4668-a550-ef2afd3f71cd"
             }
           ],
           "variance": {
@@ -734,36 +734,36 @@
                 "unit": "ratio"
               },
               "comparison_period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "basis_differs": false,
-              "snapshot_id": "87fdd504-0399-46b8-96b4-42f0f0151589"
+              "snapshot_id": "500922d9-e00b-4cc4-bd25-2751505ceacd"
             },
             "same_period_last_year": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "baed801c-8935-4710-a5d5-a3bb757145b0"
+              "snapshot_id": "4aa7a7ac-a9f6-4c52-b1d9-2a586ecf083a"
             },
             "trailing_3m_avg": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "242680ea-f692-462f-b815-b4405a688570"
+              "snapshot_id": "baaf66fd-8ffd-4ed3-b258-92c7e82f8ba1"
             }
           }
         },
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             },
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             }
           ],
@@ -785,7 +785,7 @@
         "data": {
           "metric_key": "net_profit",
           "period": {
-            "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+            "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
             "label": "May 2026"
           },
           "value": {
@@ -804,7 +804,7 @@
             "warnings": [],
             "missing": []
           },
-          "snapshot_id": "ead50564-2caa-43fd-842e-2728ebfbdd71",
+          "snapshot_id": "2714926d-cc2d-440a-8c0f-6a2b3a864922",
           "components": [
             {
               "name": "tax_expense",
@@ -813,7 +813,7 @@
                 "display": "£0",
                 "unit": "money"
               },
-              "snapshot_id": "ead50564-2caa-43fd-842e-2728ebfbdd71"
+              "snapshot_id": "2714926d-cc2d-440a-8c0f-6a2b3a864922"
             },
             {
               "name": "other_income",
@@ -822,7 +822,7 @@
                 "display": "£0",
                 "unit": "money"
               },
-              "snapshot_id": "ead50564-2caa-43fd-842e-2728ebfbdd71"
+              "snapshot_id": "2714926d-cc2d-440a-8c0f-6a2b3a864922"
             },
             {
               "name": "other_expense",
@@ -831,7 +831,7 @@
                 "display": "£0",
                 "unit": "money"
               },
-              "snapshot_id": "ead50564-2caa-43fd-842e-2728ebfbdd71"
+              "snapshot_id": "2714926d-cc2d-440a-8c0f-6a2b3a864922"
             },
             {
               "name": "interest_expense",
@@ -840,7 +840,7 @@
                 "display": "£0",
                 "unit": "money"
               },
-              "snapshot_id": "ead50564-2caa-43fd-842e-2728ebfbdd71"
+              "snapshot_id": "2714926d-cc2d-440a-8c0f-6a2b3a864922"
             },
             {
               "name": "operating_profit",
@@ -849,7 +849,7 @@
                 "display": "£9,700",
                 "unit": "money"
               },
-              "snapshot_id": "ead50564-2caa-43fd-842e-2728ebfbdd71"
+              "snapshot_id": "2714926d-cc2d-440a-8c0f-6a2b3a864922"
             }
           ],
           "variance": {
@@ -865,36 +865,36 @@
                 "unit": "ratio"
               },
               "comparison_period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "basis_differs": false,
-              "snapshot_id": "5133670b-04b2-47b0-836d-dc0396029279"
+              "snapshot_id": "644bab50-e5ee-4186-b0a0-596237466696"
             },
             "same_period_last_year": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "5beb9189-36aa-4918-9e2b-68917d0b4aad"
+              "snapshot_id": "cec911c0-2084-4f73-aeb4-cb5ebaab4c6a"
             },
             "trailing_3m_avg": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "2455d465-b250-4f36-9021-3104fa970a33"
+              "snapshot_id": "8ce07afd-e9e8-494f-9a8c-3326562d8162"
             }
           }
         },
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             },
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             }
           ],
@@ -916,7 +916,7 @@
         "data": {
           "metric_key": "operating_expenses",
           "period": {
-            "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+            "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
             "label": "May 2026"
           },
           "value": {
@@ -935,7 +935,7 @@
             "warnings": [],
             "missing": []
           },
-          "snapshot_id": "7e94a421-a258-45d8-831f-495480b51491",
+          "snapshot_id": "29796f1f-5423-4d6a-99ba-923fde3aa074",
           "components": [
             {
               "name": "payroll",
@@ -944,7 +944,7 @@
                 "display": "£5,000",
                 "unit": "money"
               },
-              "snapshot_id": "7e94a421-a258-45d8-831f-495480b51491"
+              "snapshot_id": "29796f1f-5423-4d6a-99ba-923fde3aa074"
             },
             {
               "name": "marketing",
@@ -953,7 +953,7 @@
                 "display": "£3,400",
                 "unit": "money"
               },
-              "snapshot_id": "7e94a421-a258-45d8-831f-495480b51491"
+              "snapshot_id": "29796f1f-5423-4d6a-99ba-923fde3aa074"
             },
             {
               "name": "depreciation",
@@ -962,7 +962,7 @@
                 "display": "£0",
                 "unit": "money"
               },
-              "snapshot_id": "7e94a421-a258-45d8-831f-495480b51491"
+              "snapshot_id": "29796f1f-5423-4d6a-99ba-923fde3aa074"
             },
             {
               "name": "operating_expense",
@@ -971,7 +971,7 @@
                 "display": "£900",
                 "unit": "money"
               },
-              "snapshot_id": "7e94a421-a258-45d8-831f-495480b51491"
+              "snapshot_id": "29796f1f-5423-4d6a-99ba-923fde3aa074"
             }
           ],
           "variance": {
@@ -987,36 +987,36 @@
                 "unit": "ratio"
               },
               "comparison_period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "basis_differs": false,
-              "snapshot_id": "a09ff249-f17a-4b64-862c-30a00d5debe4"
+              "snapshot_id": "0a6e108e-0013-4c7b-8d5a-d5bdc7b0af00"
             },
             "same_period_last_year": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "f3f1f5b7-8aa0-4fe6-b23f-d23c5bb471b4"
+              "snapshot_id": "8cc42bc8-edc3-4d0c-90d2-fdc8796a238e"
             },
             "trailing_3m_avg": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "0bf531d7-d453-4f6c-83d5-a4a70b9ce83c"
+              "snapshot_id": "abb78833-423a-4260-bea4-d13a34a99ef9"
             }
           }
         },
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             },
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             }
           ],
@@ -1038,7 +1038,7 @@
         "data": {
           "metric_key": "net_margin",
           "period": {
-            "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+            "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
             "label": "May 2026"
           },
           "value": {
@@ -1057,7 +1057,7 @@
             "warnings": [],
             "missing": []
           },
-          "snapshot_id": "3750b202-2f86-4166-99b9-95a99f189346",
+          "snapshot_id": "0df71956-ec4a-4402-8283-3b39fbe2cd22",
           "components": [
             {
               "name": "revenue",
@@ -1066,7 +1066,7 @@
                 "display": "£25,000",
                 "unit": "money"
               },
-              "snapshot_id": "3750b202-2f86-4166-99b9-95a99f189346"
+              "snapshot_id": "0df71956-ec4a-4402-8283-3b39fbe2cd22"
             },
             {
               "name": "net_profit",
@@ -1075,7 +1075,7 @@
                 "display": "£9,700",
                 "unit": "money"
               },
-              "snapshot_id": "3750b202-2f86-4166-99b9-95a99f189346"
+              "snapshot_id": "0df71956-ec4a-4402-8283-3b39fbe2cd22"
             }
           ],
           "variance": {
@@ -1091,36 +1091,36 @@
                 "unit": "ratio"
               },
               "comparison_period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "basis_differs": false,
-              "snapshot_id": "91f9c7d6-d2eb-4026-9761-80b2d38ca8ab"
+              "snapshot_id": "93376507-dc2d-471a-bc12-7d0cc1bceff6"
             },
             "same_period_last_year": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "a0a09674-7039-4eb9-9953-faff0d0abca2"
+              "snapshot_id": "d8186dc0-e561-447a-ad14-467ec1db8ce6"
             },
             "trailing_3m_avg": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "a7482e6f-2924-4d1c-a8ee-a1b4320fbb40"
+              "snapshot_id": "e96536b4-20bf-476b-98f3-9652c1bd0129"
             }
           }
         },
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             },
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             }
           ],
@@ -1142,7 +1142,7 @@
         "data": {
           "metric_key": "closing_cash",
           "period": {
-            "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+            "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
             "label": "May 2026"
           },
           "value": {
@@ -1161,7 +1161,7 @@
             "warnings": [],
             "missing": []
           },
-          "snapshot_id": "0491c32e-d58b-4eec-9806-80502b74670c",
+          "snapshot_id": "96c6506b-049a-40fa-afac-71077c24988c",
           "components": [
             {
               "name": "opening_cash",
@@ -1170,7 +1170,7 @@
                 "display": "£0",
                 "unit": "money"
               },
-              "snapshot_id": "0491c32e-d58b-4eec-9806-80502b74670c"
+              "snapshot_id": "96c6506b-049a-40fa-afac-71077c24988c"
             },
             {
               "name": "net_cash_movement",
@@ -1179,7 +1179,7 @@
                 "display": "£0",
                 "unit": "money"
               },
-              "snapshot_id": "0491c32e-d58b-4eec-9806-80502b74670c"
+              "snapshot_id": "96c6506b-049a-40fa-afac-71077c24988c"
             }
           ],
           "variance": {
@@ -1191,18 +1191,18 @@
               },
               "pct_change": null,
               "comparison_period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "basis_differs": false,
-              "snapshot_id": "4b3d01cc-67f2-4c85-a4a7-ad0df365ce94"
+              "snapshot_id": "799e1f9a-ebcc-4e37-a106-6a04fb96a6c9"
             },
             "same_period_last_year": {
               "value": null,
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": false,
-              "snapshot_id": "b29768ae-a138-4c12-b487-8eb81218e6a1"
+              "snapshot_id": "2336934e-7423-4495-a5db-1b9e8add3fcf"
             },
             "trailing_3m_avg": {
               "value": {
@@ -1213,18 +1213,18 @@
               "pct_change": null,
               "comparison_period": null,
               "basis_differs": true,
-              "snapshot_id": "7d48eb68-63bd-4a7a-8e26-f3196b8e676d"
+              "snapshot_id": "0c0776a6-0d8d-4efc-8034-d9c0636e695d"
             }
           }
         },
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             },
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             }
           ],
@@ -1249,7 +1249,7 @@
             {
               "metric_key": "revenue",
               "period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026",
                 "start": "2026-04-01",
                 "end": "2026-04-30",
@@ -1271,12 +1271,12 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "5d55b0fb-f028-4083-9d64-363ee92330bd"
+              "snapshot_id": "597663f4-53ec-4f76-8a1d-aa77ef83a8c6"
             },
             {
               "metric_key": "revenue",
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026",
                 "start": "2026-05-01",
                 "end": "2026-05-31",
@@ -1298,7 +1298,7 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "0c73a351-c067-4484-96d2-98f2db0eb63a"
+              "snapshot_id": "8ed1dc7f-2b98-475d-919d-b4af23f36b59"
             }
           ],
           "summary": {
@@ -1337,11 +1337,11 @@
         "meta": {
           "periods": [
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             },
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             }
           ],
@@ -1390,8 +1390,8 @@
                 "unit": "ratio"
               },
               "basis_differs": false,
-              "snapshot_id": "78aed896-90a3-485e-9e5b-edfa40062a52",
-              "change_snapshot_id": "b2bc30c8-e169-4237-92e3-f80c205b35f6"
+              "snapshot_id": "e9a02798-e3c1-4bd7-a5e4-7efb068a5fbf",
+              "change_snapshot_id": "0c719821-ca21-40dc-839d-99b772d311c0"
             },
             {
               "subject": {
@@ -1416,8 +1416,8 @@
               },
               "change_ratio": null,
               "basis_differs": false,
-              "snapshot_id": "8c4c2df4-b3a1-41f1-aa5e-15e20c0a9e61",
-              "change_snapshot_id": "b5e24c4d-e814-47e7-ab7b-ab9e5ae73262"
+              "snapshot_id": "4f35e664-ca57-4b6f-9d9f-621f2de28743",
+              "change_snapshot_id": "49d3e553-a5d4-4af2-9227-2b20f8e24b0d"
             },
             {
               "subject": {
@@ -1446,8 +1446,8 @@
                 "unit": "ratio"
               },
               "basis_differs": false,
-              "snapshot_id": "bd813fe4-6248-47f1-812d-4149a6c9bbb8",
-              "change_snapshot_id": "86e67013-d9b1-4cac-adc7-b08d476058ba"
+              "snapshot_id": "7560a194-307f-4b86-a9c4-ca4eb2c8f34a",
+              "change_snapshot_id": "eb9eb5e3-fdab-493b-b298-8dd03c7736b1"
             },
             {
               "subject": {
@@ -1476,19 +1476,19 @@
                 "unit": "ratio"
               },
               "basis_differs": false,
-              "snapshot_id": "a9dfdf0b-60b5-4c3d-ba88-1ab8aab0623d",
-              "change_snapshot_id": "831b26e6-7912-4fdb-b18f-3ba7c059bb15"
+              "snapshot_id": "3eba76fb-264d-4c40-996c-fa810c87d84b",
+              "change_snapshot_id": "f16b5d15-4f75-4644-9ccc-da29d9700663"
             }
           ]
         },
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             },
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             }
           ],
@@ -1511,11 +1511,11 @@
             {
               "subject": {
                 "type": "counterparty",
-                "id": "b318de02-5120-47b8-b8df-98ccb671dfec",
+                "id": "3acb79cd-cf82-4fc8-91cf-6d19c0bc2c6a",
                 "name": "<data name=\"name\">Acme Trading Ltd</data>"
               },
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "revenue": {
@@ -1528,17 +1528,17 @@
                 "display": "64.0%",
                 "unit": "ratio"
               },
-              "snapshot_id": "3f335a03-b18c-4884-8900-b71e14bf58cd",
-              "share_snapshot_id": "f47cd4f3-d9d2-474c-8068-4ba618651704"
+              "snapshot_id": "a161f4fc-338c-4d63-a5f7-5fc878e95187",
+              "share_snapshot_id": "e668110a-a6d3-4446-90bb-7d11dd646cdb"
             },
             {
               "subject": {
                 "type": "counterparty",
-                "id": "acedb07a-26c2-4ee8-9a4b-5958331f14e3",
+                "id": "3d6fdce7-b803-4ce0-8bbf-7b4939da8812",
                 "name": "<data name=\"name\">Beta Retail</data>"
               },
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "revenue": {
@@ -1551,8 +1551,8 @@
                 "display": "36.0%",
                 "unit": "ratio"
               },
-              "snapshot_id": "7dbc6840-b483-4988-8964-92d6ebf0300a",
-              "share_snapshot_id": "566bc709-aa95-48f6-b3f9-0c11e87583c5"
+              "snapshot_id": "cf93f7f2-a705-4e60-a787-259b772af90b",
+              "share_snapshot_id": "9c16ad83-3ec9-4a59-8ab4-c985bc4c8e76"
             },
             {
               "subject": {
@@ -1561,7 +1561,7 @@
                 "name": "<data name=\"name\">Unattributed</data>"
               },
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "revenue": {
@@ -1574,8 +1574,8 @@
                 "display": "0.0%",
                 "unit": "ratio"
               },
-              "snapshot_id": "ad6d3eeb-0df4-4b51-81ba-c4c322fd94cc",
-              "share_snapshot_id": "41433695-0005-4edd-a947-e02a4a2f11d7"
+              "snapshot_id": "67d426ac-f656-475c-a4a5-9eed93365bd2",
+              "share_snapshot_id": "e3e55073-cbad-480f-beae-fda4273a4fef"
             }
           ],
           "concentration": {
@@ -1585,7 +1585,7 @@
                 "display": "64.0%",
                 "unit": "ratio"
               },
-              "snapshot_id": "1446ecbc-4cab-46c0-976c-26fc13b4c113"
+              "snapshot_id": "22f455a7-c518-4317-97f5-74817ddbd910"
             },
             "top5": {
               "value": {
@@ -1593,7 +1593,7 @@
                 "display": "100.0%",
                 "unit": "ratio"
               },
-              "snapshot_id": "71ad1f6b-c260-4494-85ec-d028af09ed5c"
+              "snapshot_id": "4915f245-839f-4290-9236-def10034fe24"
             },
             "hhi": {
               "value": {
@@ -1601,7 +1601,7 @@
                 "display": "53.9%",
                 "unit": "ratio"
               },
-              "snapshot_id": "8836c784-67a3-43b9-b4e0-553999055df2"
+              "snapshot_id": "5850b6c3-6cfc-498a-8488-b8a11093c660"
             }
           },
           "note": "Contribution is revenue contribution in MOTION today; cost allocation per customer is not available yet."
@@ -1609,7 +1609,7 @@
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             }
           ],
@@ -1631,7 +1631,7 @@
           "periods": [
             {
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "opening_cash": {
@@ -1643,7 +1643,7 @@
                 },
                 "basis": "none",
                 "assurance_level": "verified",
-                "snapshot_id": "cc0c88f8-b5e2-44f2-9a2c-3dc2c1bab5ed"
+                "snapshot_id": "3a5aa1b7-1e12-4321-9e50-4e31545859ff"
               },
               "cash_inflows": {
                 "metric_key": "cash_inflows",
@@ -1654,7 +1654,7 @@
                 },
                 "basis": "ledger",
                 "assurance_level": "calculated",
-                "snapshot_id": "93d67a48-8751-4b19-8ab5-411e3607f6c0"
+                "snapshot_id": "0e5b685e-922d-4191-8df1-11720e2b6862"
               },
               "cash_outflows": {
                 "metric_key": "cash_outflows",
@@ -1665,7 +1665,7 @@
                 },
                 "basis": "ledger",
                 "assurance_level": "calculated",
-                "snapshot_id": "281b7dc1-54da-4cc5-ab2e-a1c02a16627e"
+                "snapshot_id": "cce37518-3bfc-40b4-84b0-3b6848b89ff7"
               },
               "net_cash_movement": {
                 "metric_key": "net_cash_movement",
@@ -1676,7 +1676,7 @@
                 },
                 "basis": "ledger",
                 "assurance_level": "calculated",
-                "snapshot_id": "3da0633c-9c7e-4822-a4fb-c51b3b835b04"
+                "snapshot_id": "d233a0b4-1f27-4e5b-85bd-a10a278b722e"
               },
               "closing_cash": {
                 "metric_key": "closing_cash",
@@ -1687,14 +1687,14 @@
                 },
                 "basis": "ledger",
                 "assurance_level": "calculated",
-                "snapshot_id": "0491c32e-d58b-4eec-9806-80502b74670c"
+                "snapshot_id": "96c6506b-049a-40fa-afac-71077c24988c"
               },
               "cash_runway_months": {
                 "metric_key": "cash_runway_months",
                 "value": null,
                 "basis": "ledger",
                 "assurance_level": "calculated",
-                "snapshot_id": "55ffce7b-fe44-45a8-9b29-7690af016b9a"
+                "snapshot_id": "a4a1a50f-cf4e-4035-9424-e9762cc29ea8"
               }
             }
           ],
@@ -1717,7 +1717,7 @@
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             }
           ],
@@ -1770,7 +1770,7 @@
         "data": {
           "alerts": [
             {
-              "id": "433c039b-ba32-49fe-ae06-1292a81555fd",
+              "id": "c4b10a51-7d43-48d3-9922-dec41a008566",
               "revision_no": 0,
               "rule_key": "expense.spike_category",
               "severity": "high",
@@ -1797,15 +1797,15 @@
               },
               "metric_key": "expense_by_category",
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "recommended_next_step": "<data name=\"next_step\">Review the largest marketing transactions and confirm they are expected.</data>",
-              "evidence_bundle_id": "ec7eff04-1884-4575-a0aa-db1592253b3e",
+              "evidence_bundle_id": "6a37b27e-9aee-49d0-9c68-043405815967",
               "subject": null
             },
             {
-              "id": "4144b189-a6ec-4f2d-b96f-f9e88c70c6a4",
+              "id": "2a64591d-4c36-4d60-b83c-2681c8202b84",
               "revision_no": 0,
               "rule_key": "concentration.customer",
               "severity": "high",
@@ -1833,14 +1833,14 @@
               },
               "metric_key": "customer_concentration_top1",
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "recommended_next_step": "<data name=\"next_step\">Reduce reliance on Acme Trading Ltd: protect the account and grow the next tier.</data>",
-              "evidence_bundle_id": "c305ac29-ca76-42bd-b7be-ad8950a0451c",
+              "evidence_bundle_id": "7bd12835-6d3d-437a-8130-d352df0eadaa",
               "subject": {
                 "type": "counterparty",
-                "id": "b318de02-5120-47b8-b8df-98ccb671dfec",
+                "id": "3acb79cd-cf82-4fc8-91cf-6d19c0bc2c6a",
                 "name": "<data name=\"name\"></data>"
               }
             }
@@ -1849,7 +1849,7 @@
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             }
           ],
@@ -1869,7 +1869,7 @@
         "ok": true,
         "data": {
           "period": {
-            "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+            "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
             "label": "May 2026"
           },
           "score": {
@@ -1919,7 +1919,7 @@
                     }
                   },
                   "snapshot_ids": [
-                    "3750b202-2f86-4166-99b9-95a99f189346"
+                    "0df71956-ec4a-4402-8283-3b39fbe2cd22"
                   ]
                 }
               ],
@@ -1932,7 +1932,7 @@
                     "display": "£0",
                     "unit": "money"
                   },
-                  "snapshot_id": "3750b202-2f86-4166-99b9-95a99f189346"
+                  "snapshot_id": "0df71956-ec4a-4402-8283-3b39fbe2cd22"
                 },
                 {
                   "metric_key": "gross_margin",
@@ -1941,12 +1941,12 @@
                     "display": "£1",
                     "unit": "money"
                   },
-                  "snapshot_id": "ee18acb5-9c20-4401-85e2-023cb36d064c"
+                  "snapshot_id": "9830d2fb-4460-4b3e-9c90-099595bdaf16"
                 },
                 {
                   "metric_key": "gross_margin.variance.trailing_3m_avg",
                   "value": null,
-                  "snapshot_id": "771936d7-50ed-46f3-acf0-29565d5dc8e4"
+                  "snapshot_id": "8bbccb74-6cf0-4490-8918-75e4166d516c"
                 },
                 {
                   "metric_key": "net_profit.variance.prev_period",
@@ -1955,7 +1955,7 @@
                     "display": "£3,300",
                     "unit": "money"
                   },
-                  "snapshot_id": "5133670b-04b2-47b0-836d-dc0396029279"
+                  "snapshot_id": "644bab50-e5ee-4186-b0a0-596237466696"
                 },
                 {
                   "metric_key": "net_profit",
@@ -1964,7 +1964,7 @@
                     "display": "£9,700",
                     "unit": "money"
                   },
-                  "snapshot_id": "ead50564-2caa-43fd-842e-2728ebfbdd71"
+                  "snapshot_id": "2714926d-cc2d-440a-8c0f-6a2b3a864922"
                 }
               ]
             },
@@ -1994,7 +1994,7 @@
                     }
                   },
                   "snapshot_ids": [
-                    "3da0633c-9c7e-4822-a4fb-c51b3b835b04"
+                    "d233a0b4-1f27-4e5b-85bd-a10a278b722e"
                   ]
                 }
               ],
@@ -2006,7 +2006,7 @@
                     "display": "£0",
                     "unit": "money"
                   },
-                  "snapshot_id": "0491c32e-d58b-4eec-9806-80502b74670c"
+                  "snapshot_id": "96c6506b-049a-40fa-afac-71077c24988c"
                 },
                 {
                   "metric_key": "net_cash_movement",
@@ -2015,12 +2015,12 @@
                     "display": "£0",
                     "unit": "money"
                   },
-                  "snapshot_id": "3da0633c-9c7e-4822-a4fb-c51b3b835b04"
+                  "snapshot_id": "d233a0b4-1f27-4e5b-85bd-a10a278b722e"
                 },
                 {
                   "metric_key": "cash_runway_months",
                   "value": null,
-                  "snapshot_id": "55ffce7b-fe44-45a8-9b29-7690af016b9a"
+                  "snapshot_id": "a4a1a50f-cf4e-4035-9424-e9762cc29ea8"
                 },
                 {
                   "metric_key": "cash_outflows",
@@ -2029,7 +2029,7 @@
                     "display": "£0",
                     "unit": "money"
                   },
-                  "snapshot_id": "281b7dc1-54da-4cc5-ab2e-a1c02a16627e"
+                  "snapshot_id": "cce37518-3bfc-40b4-84b0-3b6848b89ff7"
                 }
               ]
             },
@@ -2055,7 +2055,7 @@
                     "comparison": "<data name=\"comparison\">last month</data>"
                   },
                   "snapshot_ids": [
-                    "f117e9f5-73b8-4707-9790-f1071c08ffc3"
+                    "c550ccf8-5723-4ff7-8603-e21798e70953"
                   ]
                 }
               ],
@@ -2068,7 +2068,7 @@
                     "display": "£25,000",
                     "unit": "money"
                   },
-                  "snapshot_id": "0c73a351-c067-4484-96d2-98f2db0eb63a"
+                  "snapshot_id": "8ed1dc7f-2b98-475d-919d-b4af23f36b59"
                 },
                 {
                   "metric_key": "revenue_growth_mom",
@@ -2077,7 +2077,7 @@
                     "display": "£0",
                     "unit": "money"
                   },
-                  "snapshot_id": "f117e9f5-73b8-4707-9790-f1071c08ffc3"
+                  "snapshot_id": "c550ccf8-5723-4ff7-8603-e21798e70953"
                 },
                 {
                   "metric_key": "customer_concentration_top1",
@@ -2086,7 +2086,7 @@
                     "display": "£1",
                     "unit": "money"
                   },
-                  "snapshot_id": "1446ecbc-4cab-46c0-976c-26fc13b4c113"
+                  "snapshot_id": "22f455a7-c518-4317-97f5-74817ddbd910"
                 }
               ]
             },
@@ -2113,7 +2113,7 @@
                     "category": "<data name=\"category\">marketing</data>"
                   },
                   "snapshot_ids": [
-                    "b2bc30c8-e169-4237-92e3-f80c205b35f6"
+                    "0c719821-ca21-40dc-839d-99b772d311c0"
                   ]
                 }
               ],
@@ -2125,7 +2125,7 @@
                     "display": "£9,300",
                     "unit": "money"
                   },
-                  "snapshot_id": "7e94a421-a258-45d8-831f-495480b51491"
+                  "snapshot_id": "29796f1f-5423-4d6a-99ba-923fde3aa074"
                 },
                 {
                   "metric_key": "revenue",
@@ -2134,7 +2134,7 @@
                     "display": "£25,000",
                     "unit": "money"
                   },
-                  "snapshot_id": "0c73a351-c067-4484-96d2-98f2db0eb63a"
+                  "snapshot_id": "8ed1dc7f-2b98-475d-919d-b4af23f36b59"
                 },
                 {
                   "metric_key": "operating_expenses.variance.prev_period",
@@ -2143,7 +2143,7 @@
                     "display": "£3,100",
                     "unit": "money"
                   },
-                  "snapshot_id": "a09ff249-f17a-4b64-862c-30a00d5debe4"
+                  "snapshot_id": "0a6e108e-0013-4c7b-8d5a-d5bdc7b0af00"
                 },
                 {
                   "metric_key": "revenue.variance.prev_period",
@@ -2152,7 +2152,7 @@
                     "display": "£7,000",
                     "unit": "money"
                   },
-                  "snapshot_id": "1c6436a3-a10a-474e-a7e1-cf4c318c8868"
+                  "snapshot_id": "731adc1f-e2cd-4ba8-a113-e7b5fa7644b9"
                 }
               ]
             },
@@ -2182,7 +2182,7 @@
                     }
                   },
                   "snapshot_ids": [
-                    "1446ecbc-4cab-46c0-976c-26fc13b4c113"
+                    "22f455a7-c518-4317-97f5-74817ddbd910"
                   ]
                 }
               ],
@@ -2194,7 +2194,7 @@
                     "display": "£1",
                     "unit": "money"
                   },
-                  "snapshot_id": "1446ecbc-4cab-46c0-976c-26fc13b4c113"
+                  "snapshot_id": "22f455a7-c518-4317-97f5-74817ddbd910"
                 },
                 {
                   "metric_key": "customer_concentration_top5",
@@ -2203,7 +2203,7 @@
                     "display": "£1",
                     "unit": "money"
                   },
-                  "snapshot_id": "71ad1f6b-c260-4494-85ec-d028af09ed5c"
+                  "snapshot_id": "4915f245-839f-4290-9236-def10034fe24"
                 },
                 {
                   "metric_key": "revenue_concentration_hhi",
@@ -2212,7 +2212,7 @@
                     "display": "£1",
                     "unit": "money"
                   },
-                  "snapshot_id": "8836c784-67a3-43b9-b4e0-553999055df2"
+                  "snapshot_id": "5850b6c3-6cfc-498a-8488-b8a11093c660"
                 },
                 {
                   "metric_key": "receivables_days",
@@ -2245,7 +2245,7 @@
                     "display": "£0",
                     "unit": "money"
                   },
-                  "snapshot_id": "0491c32e-d58b-4eec-9806-80502b74670c"
+                  "snapshot_id": "96c6506b-049a-40fa-afac-71077c24988c"
                 },
                 {
                   "metric_key": "cash_inflows",
@@ -2254,7 +2254,7 @@
                     "display": "£0",
                     "unit": "money"
                   },
-                  "snapshot_id": "93d67a48-8751-4b19-8ab5-411e3607f6c0"
+                  "snapshot_id": "0e5b685e-922d-4191-8df1-11720e2b6862"
                 },
                 {
                   "metric_key": "cash_outflows",
@@ -2263,17 +2263,17 @@
                     "display": "£0",
                     "unit": "money"
                   },
-                  "snapshot_id": "281b7dc1-54da-4cc5-ab2e-a1c02a16627e"
+                  "snapshot_id": "cce37518-3bfc-40b4-84b0-3b6848b89ff7"
                 }
               ]
             }
           ],
-          "evidence_bundle_id": "3ac71b83-4fb8-4e58-b715-b5b56ade8f24"
+          "evidence_bundle_id": "f466ade2-0f67-4afa-b9ec-0839a1d85f65"
         },
         "meta": {
           "periods": [
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             }
           ],
@@ -2293,7 +2293,7 @@
           "months": [
             {
               "period": {
-                "id": "4db14b30-664f-40a5-8aee-376f915dce82",
+                "id": "4d9e90dc-ae7b-45ef-86df-76e52bcdf0fd",
                 "label": "Sep 2025"
               },
               "is_complete": false,
@@ -2308,7 +2308,7 @@
             },
             {
               "period": {
-                "id": "b1b0c2e1-de86-4189-9169-b834ea260083",
+                "id": "ee2f63dd-9c05-45fe-827c-b052a0ac2ae5",
                 "label": "Oct 2025"
               },
               "is_complete": false,
@@ -2323,7 +2323,7 @@
             },
             {
               "period": {
-                "id": "73eaba12-51a4-4b26-ae17-69068bfa9359",
+                "id": "99605d62-89d0-4081-8363-4b7ff3ea4762",
                 "label": "Nov 2025"
               },
               "is_complete": false,
@@ -2338,7 +2338,7 @@
             },
             {
               "period": {
-                "id": "5a84d1ac-f0a8-4d61-822f-c3e4e9e852a2",
+                "id": "38e13c1f-0389-4978-8bf4-68b9b70b5199",
                 "label": "Dec 2025"
               },
               "is_complete": false,
@@ -2353,7 +2353,7 @@
             },
             {
               "period": {
-                "id": "33624b18-2c4c-4b66-a072-c1f48228048f",
+                "id": "73f76226-a76f-4145-babc-07ca9b3cd42f",
                 "label": "Jan 2026"
               },
               "is_complete": false,
@@ -2368,7 +2368,7 @@
             },
             {
               "period": {
-                "id": "b6c3006c-7c66-4759-aa83-666059ef6f5c",
+                "id": "12bbecaf-d8df-4b38-9d59-be3c27b25509",
                 "label": "Feb 2026"
               },
               "is_complete": false,
@@ -2383,7 +2383,7 @@
             },
             {
               "period": {
-                "id": "ad83c128-6e38-4a02-9e0b-a2eb3009da00",
+                "id": "f2b3b7fc-0ef8-49b8-9867-0c91092e2385",
                 "label": "Mar 2026"
               },
               "is_complete": false,
@@ -2398,7 +2398,7 @@
             },
             {
               "period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "is_complete": true,
@@ -2413,7 +2413,7 @@
             },
             {
               "period": {
-                "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+                "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
                 "label": "May 2026"
               },
               "is_complete": true,
@@ -2428,7 +2428,7 @@
             },
             {
               "period": {
-                "id": "be03a584-f1c4-4339-b2e7-899afccbc73c",
+                "id": "e1b3989e-4c7e-494d-9a7d-cb75fb780a35",
                 "label": "Jun 2026"
               },
               "is_complete": false,
@@ -2443,7 +2443,7 @@
             },
             {
               "period": {
-                "id": "5accf045-4771-416d-8ced-d87e129d6683",
+                "id": "de1bf064-fdd1-4eaf-802b-1e6384901ea7",
                 "label": "Jul 2026"
               },
               "is_complete": false,
@@ -2458,7 +2458,7 @@
             },
             {
               "period": {
-                "id": "2ac67b45-1aba-4be4-8796-11e7be876835",
+                "id": "9ccb2d17-111f-41fc-93de-3591bb568ff9",
                 "label": "Aug 2026"
               },
               "is_complete": false,
@@ -2473,7 +2473,7 @@
             },
             {
               "period": {
-                "id": "759a2126-2448-42c4-ab5b-cac4aaf3f22c",
+                "id": "9ff41311-0582-404a-944e-5e5aa73a0e45",
                 "label": "Sep 2026"
               },
               "is_complete": false,
@@ -2488,7 +2488,7 @@
             },
             {
               "period": {
-                "id": "b3ebacff-ae28-4556-9ea6-2c914c3a5558",
+                "id": "0302a4d5-4c7c-4a41-af4c-fc4711951819",
                 "label": "Oct 2026"
               },
               "is_complete": false,
@@ -2503,7 +2503,7 @@
             },
             {
               "period": {
-                "id": "23806c09-cc22-4737-9921-5b45f82544b2",
+                "id": "c441048a-9e1e-4835-8663-73df2ac398de",
                 "label": "Nov 2026"
               },
               "is_complete": false,
@@ -2518,7 +2518,7 @@
             },
             {
               "period": {
-                "id": "85bc2bc9-c7f1-4a53-a0cd-f961d36c6efa",
+                "id": "64a38b9e-4f75-4cac-95ff-bd0c786368f7",
                 "label": "Dec 2026"
               },
               "is_complete": false,
@@ -2533,7 +2533,7 @@
             },
             {
               "period": {
-                "id": "631b7d2d-2438-4941-b3ca-227955a22785",
+                "id": "65b90826-892f-43f4-ade9-b9d30b711125",
                 "label": "Jan 2027"
               },
               "is_complete": false,
@@ -2548,7 +2548,7 @@
             },
             {
               "period": {
-                "id": "c4235633-8b6e-4e8f-99b8-21cec2c109be",
+                "id": "55e4c5dd-51d5-47db-ab35-ac9249e5bccf",
                 "label": "Feb 2027"
               },
               "is_complete": false,
@@ -2563,7 +2563,7 @@
             },
             {
               "period": {
-                "id": "f313b182-aec9-417e-a3e6-63ff5a5e091a",
+                "id": "0f8d5b9a-8800-4535-8c92-f2cab4389971",
                 "label": "Mar 2027"
               },
               "is_complete": false,
@@ -2578,7 +2578,7 @@
             },
             {
               "period": {
-                "id": "40fd5134-9ac8-474c-a153-40a39d36ede6",
+                "id": "d86c1b73-43dd-4327-908f-8575953ec1db",
                 "label": "Apr 2027"
               },
               "is_complete": false,
@@ -2593,7 +2593,7 @@
             },
             {
               "period": {
-                "id": "51701ffe-46e6-4257-868d-039669c64b71",
+                "id": "9de70bd2-06c4-483d-8a21-d48dd90d3658",
                 "label": "May 2027"
               },
               "is_complete": false,
@@ -2608,7 +2608,7 @@
             },
             {
               "period": {
-                "id": "a02bc856-858b-4455-8910-26ea90ec6b1d",
+                "id": "9f101a46-df8b-4aec-b152-2023ab5b074e",
                 "label": "Jun 2027"
               },
               "is_complete": false,
@@ -2623,7 +2623,7 @@
             },
             {
               "period": {
-                "id": "7b53a001-76dc-42da-a39a-53fd64069350",
+                "id": "9c0c62b5-d6da-4a35-9852-bf4946cc660d",
                 "label": "Jul 2027"
               },
               "is_complete": false,
@@ -2638,7 +2638,7 @@
             },
             {
               "period": {
-                "id": "e07ad8cc-1ccd-4f43-8f0d-9d02415f47b2",
+                "id": "2de7b75e-2bd8-4bbd-9b4d-232b55d731f9",
                 "label": "Aug 2027"
               },
               "is_complete": false,
@@ -2653,106 +2653,106 @@
             }
           ],
           "latest_complete": {
-            "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+            "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
             "label": "May 2026"
           }
         },
         "meta": {
           "periods": [
             {
-              "id": "4db14b30-664f-40a5-8aee-376f915dce82",
+              "id": "4d9e90dc-ae7b-45ef-86df-76e52bcdf0fd",
               "label": "Sep 2025"
             },
             {
-              "id": "b1b0c2e1-de86-4189-9169-b834ea260083",
+              "id": "ee2f63dd-9c05-45fe-827c-b052a0ac2ae5",
               "label": "Oct 2025"
             },
             {
-              "id": "73eaba12-51a4-4b26-ae17-69068bfa9359",
+              "id": "99605d62-89d0-4081-8363-4b7ff3ea4762",
               "label": "Nov 2025"
             },
             {
-              "id": "5a84d1ac-f0a8-4d61-822f-c3e4e9e852a2",
+              "id": "38e13c1f-0389-4978-8bf4-68b9b70b5199",
               "label": "Dec 2025"
             },
             {
-              "id": "33624b18-2c4c-4b66-a072-c1f48228048f",
+              "id": "73f76226-a76f-4145-babc-07ca9b3cd42f",
               "label": "Jan 2026"
             },
             {
-              "id": "b6c3006c-7c66-4759-aa83-666059ef6f5c",
+              "id": "12bbecaf-d8df-4b38-9d59-be3c27b25509",
               "label": "Feb 2026"
             },
             {
-              "id": "ad83c128-6e38-4a02-9e0b-a2eb3009da00",
+              "id": "f2b3b7fc-0ef8-49b8-9867-0c91092e2385",
               "label": "Mar 2026"
             },
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             },
             {
-              "id": "84204ed6-85db-4fa5-91cb-7b8f6cdf651f",
+              "id": "d46bce2a-ba7d-4592-8371-b8d76734f6be",
               "label": "May 2026"
             },
             {
-              "id": "be03a584-f1c4-4339-b2e7-899afccbc73c",
+              "id": "e1b3989e-4c7e-494d-9a7d-cb75fb780a35",
               "label": "Jun 2026"
             },
             {
-              "id": "5accf045-4771-416d-8ced-d87e129d6683",
+              "id": "de1bf064-fdd1-4eaf-802b-1e6384901ea7",
               "label": "Jul 2026"
             },
             {
-              "id": "2ac67b45-1aba-4be4-8796-11e7be876835",
+              "id": "9ccb2d17-111f-41fc-93de-3591bb568ff9",
               "label": "Aug 2026"
             },
             {
-              "id": "759a2126-2448-42c4-ab5b-cac4aaf3f22c",
+              "id": "9ff41311-0582-404a-944e-5e5aa73a0e45",
               "label": "Sep 2026"
             },
             {
-              "id": "b3ebacff-ae28-4556-9ea6-2c914c3a5558",
+              "id": "0302a4d5-4c7c-4a41-af4c-fc4711951819",
               "label": "Oct 2026"
             },
             {
-              "id": "23806c09-cc22-4737-9921-5b45f82544b2",
+              "id": "c441048a-9e1e-4835-8663-73df2ac398de",
               "label": "Nov 2026"
             },
             {
-              "id": "85bc2bc9-c7f1-4a53-a0cd-f961d36c6efa",
+              "id": "64a38b9e-4f75-4cac-95ff-bd0c786368f7",
               "label": "Dec 2026"
             },
             {
-              "id": "631b7d2d-2438-4941-b3ca-227955a22785",
+              "id": "65b90826-892f-43f4-ade9-b9d30b711125",
               "label": "Jan 2027"
             },
             {
-              "id": "c4235633-8b6e-4e8f-99b8-21cec2c109be",
+              "id": "55e4c5dd-51d5-47db-ab35-ac9249e5bccf",
               "label": "Feb 2027"
             },
             {
-              "id": "f313b182-aec9-417e-a3e6-63ff5a5e091a",
+              "id": "0f8d5b9a-8800-4535-8c92-f2cab4389971",
               "label": "Mar 2027"
             },
             {
-              "id": "40fd5134-9ac8-474c-a153-40a39d36ede6",
+              "id": "d86c1b73-43dd-4327-908f-8575953ec1db",
               "label": "Apr 2027"
             },
             {
-              "id": "51701ffe-46e6-4257-868d-039669c64b71",
+              "id": "9de70bd2-06c4-483d-8a21-d48dd90d3658",
               "label": "May 2027"
             },
             {
-              "id": "a02bc856-858b-4455-8910-26ea90ec6b1d",
+              "id": "9f101a46-df8b-4aec-b152-2023ab5b074e",
               "label": "Jun 2027"
             },
             {
-              "id": "7b53a001-76dc-42da-a39a-53fd64069350",
+              "id": "9c0c62b5-d6da-4a35-9852-bf4946cc660d",
               "label": "Jul 2027"
             },
             {
-              "id": "e07ad8cc-1ccd-4f43-8f0d-9d02415f47b2",
+              "id": "2de7b75e-2bd8-4bbd-9b4d-232b55d731f9",
               "label": "Aug 2027"
             }
           ],
@@ -2775,11 +2775,11 @@
             {
               "subject": {
                 "type": "counterparty",
-                "id": "b318de02-5120-47b8-b8df-98ccb671dfec",
+                "id": "3acb79cd-cf82-4fc8-91cf-6d19c0bc2c6a",
                 "name": "<data name=\"name\">Acme Trading Ltd</data>"
               },
               "period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "revenue": {
@@ -2792,17 +2792,17 @@
                 "display": "66.7%",
                 "unit": "ratio"
               },
-              "snapshot_id": "3ea0c83f-f8e8-4115-9c54-d242e2c839cb",
-              "share_snapshot_id": "40348d69-b53e-42c4-9387-35e4b4e15403"
+              "snapshot_id": "3ba7b06d-d1f4-480c-b978-01b0d5be2b4f",
+              "share_snapshot_id": "6b59479c-477b-471d-a94b-3fba4c71387b"
             },
             {
               "subject": {
                 "type": "counterparty",
-                "id": "acedb07a-26c2-4ee8-9a4b-5958331f14e3",
+                "id": "3d6fdce7-b803-4ce0-8bbf-7b4939da8812",
                 "name": "<data name=\"name\">Beta Retail</data>"
               },
               "period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "revenue": {
@@ -2815,8 +2815,8 @@
                 "display": "33.3%",
                 "unit": "ratio"
               },
-              "snapshot_id": "bef32c58-3516-4815-999a-266fd1cd54e0",
-              "share_snapshot_id": "0c8dcf20-d2d4-4312-99e9-72299fa2a646"
+              "snapshot_id": "d38dfb22-98cd-44a9-801f-e66938615469",
+              "share_snapshot_id": "6c1a9ccd-df7e-4411-8431-891bcea77306"
             },
             {
               "subject": {
@@ -2825,7 +2825,7 @@
                 "name": "<data name=\"name\">Unattributed</data>"
               },
               "period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "revenue": {
@@ -2838,8 +2838,8 @@
                 "display": "0.0%",
                 "unit": "ratio"
               },
-              "snapshot_id": "07660f69-1437-47ed-942c-d5114b0a577a",
-              "share_snapshot_id": "8de526ef-70b8-4cbc-a2a9-f52c6b59a04f"
+              "snapshot_id": "d65852b3-7fc6-4b39-90e0-b5657c6c468b",
+              "share_snapshot_id": "dab9877b-c823-4f53-8bd9-1f8adbcd9929"
             }
           ],
           "concentration": {
@@ -2849,7 +2849,7 @@
                 "display": "66.7%",
                 "unit": "ratio"
               },
-              "snapshot_id": "5e68500c-2b0b-497e-95a7-5c8310a24456"
+              "snapshot_id": "223676da-a54b-4f08-9132-2c8353b36fc2"
             },
             "top5": {
               "value": {
@@ -2857,7 +2857,7 @@
                 "display": "100.0%",
                 "unit": "ratio"
               },
-              "snapshot_id": "2d3adfb4-b9fc-4976-b935-432446fccd9c"
+              "snapshot_id": "aa8c33ed-fae5-4ed2-b046-16d911aa1232"
             },
             "hhi": {
               "value": {
@@ -2865,7 +2865,7 @@
                 "display": "55.6%",
                 "unit": "ratio"
               },
-              "snapshot_id": "64eb3cfd-f7db-4d94-90a7-22be4277c684"
+              "snapshot_id": "ee621270-d99b-410d-b37d-1808cd0ca8df"
             }
           },
           "note": "Contribution is revenue contribution in MOTION today; cost allocation per customer is not available yet."
@@ -2873,7 +2873,7 @@
         "meta": {
           "periods": [
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             }
           ],
@@ -2893,7 +2893,7 @@
         "ok": true,
         "data": {
           "period": {
-            "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+            "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
             "label": "Apr 2026"
           },
           "health": {
@@ -2917,7 +2917,7 @@
             {
               "metric_key": "revenue",
               "period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "value": {
@@ -2936,12 +2936,12 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "5d55b0fb-f028-4083-9d64-363ee92330bd"
+              "snapshot_id": "597663f4-53ec-4f76-8a1d-aa77ef83a8c6"
             },
             {
               "metric_key": "gross_profit",
               "period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "value": {
@@ -2960,12 +2960,12 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "5958524f-9d57-433b-bc1a-c11b0db72bc9"
+              "snapshot_id": "2017ce0d-1109-47b5-84f6-0f959e239d43"
             },
             {
               "metric_key": "operating_profit",
               "period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "value": {
@@ -2984,12 +2984,12 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "a8692a7b-cbb3-4704-a12c-5b501c5f63d8"
+              "snapshot_id": "704e7edb-56b6-4e8d-ae22-ada249ff5ed4"
             },
             {
               "metric_key": "net_profit",
               "period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "value": {
@@ -3008,12 +3008,12 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "a19e186a-8fa5-4c07-954d-b79981b412b2"
+              "snapshot_id": "a1cdc515-fcb4-4f81-b6e1-3fd09f89135c"
             },
             {
               "metric_key": "closing_cash",
               "period": {
-                "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+                "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
                 "label": "Apr 2026"
               },
               "value": {
@@ -3032,7 +3032,7 @@
                 "warnings": [],
                 "missing": []
               },
-              "snapshot_id": "de3f724b-4455-4a3c-9cf7-56512c406115"
+              "snapshot_id": "cd5c6fb0-ae8a-47e6-a131-eb93f1ca3ae5"
             }
           ],
           "top_alerts": [],
@@ -3053,7 +3053,7 @@
         "meta": {
           "periods": [
             {
-              "id": "e18246e8-69a5-4344-a2a4-b9c01e0f3ed3",
+              "id": "803a2ce4-ff0d-4273-abb5-58ffe19f6acf",
               "label": "Apr 2026"
             }
           ],
@@ -3094,6 +3094,21 @@
         "data": {
           "code": "NO_DATA",
           "message": "No forecast has been worked out for this organisation yet."
+        }
+      }
+    },
+    {
+      "seq": 23,
+      "name": "get_scenario",
+      "input": {},
+      "result": {
+        "seq": 23,
+        "name": "get_scenario",
+        "ok": false,
+        "data": {
+          "code": "NO_DATA",
+          "message": "No what-if scenario has been saved for this organisation yet.",
+          "hint": "Scenarios are worked out on the What-if page; this tool only reads saved ones."
         }
       }
     }

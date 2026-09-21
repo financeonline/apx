@@ -31,7 +31,7 @@ export const ANALYST_MAX_TOKENS = 1500;
 const MODEL_TIMEOUT_MS = 30_000;
 
 /** Bumped whenever the system prompt, the tool schemas or the model changes (§11, §12). */
-export const PROMPT_VERSION = 'analyst-v3.1';
+export const PROMPT_VERSION = 'analyst-v3.2';
 
 export interface ModelCall {
   readonly system: readonly { readonly text: string; readonly cached: boolean }[];

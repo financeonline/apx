@@ -162,6 +162,15 @@ export default async function ForecastPage({
 
       <HowItWasWorkedOut state={state} orgSlug={orgSlug} />
 
+      {/* Phase 12 (ADR-100): the forecast is what a what-if changes, so this is where it is offered. */}
+      <p className="mt-6 text-sm text-ink-muted">
+        Wondering what would happen if something changed?{' '}
+        <Link href={`/app/${orgSlug}/what-if`} className="text-accent underline underline-offset-2">
+          Try a what-if
+        </Link>
+        .
+      </p>
+
       <div className="mt-6">
         <RegenerateControl orgSlug={orgSlug} label="Work it out again" />
       </div>

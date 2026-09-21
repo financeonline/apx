@@ -72,6 +72,7 @@ Global header (all tenant pages): organisation switcher (left), period picker (c
 | Parent | Sub-navigation | Routes |
 |---|---|---|
 | Money | Tabs: Profit & loss · Cash · Bank activity · Owed to you · You owe | `/money/profit-and-loss`, `/money/cash`, `/money/banking`, `/money/receivables`, `/money/payables` (`/money` redirects to Profit & loss) |
+| Money (continued) | Two forward-looking pages reached from the Money index, not from the sidebar — §3.1's seven items are fixed and ADR-037 created the Data menu specifically to keep them there (ADR-099, ADR-100) | `/forecast` (what the finished months suggest the next three will look like), `/what-if` and `/what-if/[scenarioId]` (the same three months with stated changes applied) |
 | Settings | Sub-pages: Organisation (name, fiscal year, currency, timezone) · Team · Audit log · Billing (feature flag) · Danger zone | `/settings`, `/settings/team`, `/settings/audit`, `/settings/billing`, `/settings/danger` |
 | Data (header menu, not a sidebar item) | Add data · Imports · Documents · Accounts | `/data/imports/new`, `/data/imports`, `/data/imports/[batchId]`, `/data/documents`, `/data/documents/[documentId]`, `/data/accounts` |
 | Reports | List → Monthly report for a period | `/reports`, `/reports/monthly/[period]` |

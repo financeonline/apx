@@ -67,6 +67,17 @@ test.describe.serial('what each caller is told when a page says no', () => {
       await expect(page.getByText(/something went wrong on our side/i)).toHaveCount(0);
       await expect(page.getByText(/reference for support/i)).toHaveCount(0);
     }
+
+    /*
+     * What-if is the other shape of the same rule (RBAC_MATRIX.md §5, ADR-100): a client MAY read
+     * scenarios — they are statements about figures a client already sees — but may not work one
+     * out. So the page answers 200 and the control is HIDDEN, not disabled. (This organisation has
+     * no forecast, so the page is on its empty state; the sentence naming who CAN work one out is
+     * on the branch that needs a forecast, and the refusal itself is proven against every role in
+     * `test/integration/scenarios.test.ts`.)
+     */
+    expect((await page.goto(`/app/${org.slug}/what-if`))?.status()).toBe(200);
+    await expect(page.getByRole('button', { name: /^work it out$/i })).toHaveCount(0);
   });
 
   test('an owner is not refused the same pages', async ({ page }) => {

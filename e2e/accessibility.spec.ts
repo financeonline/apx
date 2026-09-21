@@ -38,6 +38,13 @@ const ROUTES = [
   { name: 'Accounts', path: () => `/app/${slug()}/data/accounts` },
   { name: 'Imports', path: () => `/app/${slug()}/data/imports` },
   { name: 'Add data', path: () => `/app/${slug()}/data/imports/new` },
+  /*
+   * The seeded organisation has no forecast — forecasts are worked out on demand — so what this
+   * checks is the page's empty state and shell. The eight-question FORM, which is the densest
+   * set of controls in the product, is checked by axe inside journey 12, where it renders
+   * (Phase 12, ADR-100).
+   */
+  { name: 'What if', path: () => `/app/${slug()}/what-if` },
 ];
 
 test.describe('axe-core: zero serious or critical violations', () => {

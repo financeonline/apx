@@ -1,0 +1,166 @@
+import Link from 'next/link';
+import { getAccessContext } from '@/modules/tenancy';
+import { can } from '@/core/permissions';
+import { hasForecast, loadForecast } from '@/modules/forecast';
+import {
+  ASSUMPTION_NOTE, ASSUMPTION_QUESTION, CASH_EFFECT_LABEL, CASH_ONLY_KINDS,
+  DEFAULT_CASH_EFFECT, UNAVAILABLE_HEADLINE, hasScenario, listScenarios, loadScenario,
+} from '@/modules/scenarios';
+import { Card, CardBody, CardHeader, EmptyState, PageHeader } from '@/components/ui/surfaces';
+import { requirePermission } from '@/app/_lib/authz';
+import { ScenarioComparison, ScenarioUnavailableView } from './comparison';
+import { ScenarioForm } from './scenario-form';
+import { ArchiveControl } from './archive-control';
+
+export const dynamic = 'force-dynamic';
+
+/**
+ * What-if (REQ-SC-01…10; ADR-100).
+ *
+ * One question, asked plainly: what would you like to change? Then one answer, in the same six
+ * figures Home and the forecast already use, with the assumptions printed beneath it.
+ *
+ * **A scenario needs a forecast**, because a comparison needs something to compare against. An
+ * organisation without one is told so and sent to the page that makes one, rather than being shown
+ * an empty form that would fail at the end.
+ *
+ * Nothing here computes. Every figure is a `scenario_values` row the deterministic engine produced
+ * from the deterministic forecast, and every assumption beside it is one somebody typed.
+ */
+export default async function WhatIfPage({
+  params,
+}: {
+  params: Promise<{ orgSlug: string }>;
+}) {
+  const { orgSlug } = await params;
+  const ctx = await getAccessContext(orgSlug);
+  requirePermission(ctx, 'dashboard.view');
+
+  const [forecast, latest, saved] = await Promise.all([
+    loadForecast(ctx),
+    loadScenario(ctx),
+    listScenarios(ctx),
+  ]);
+  const mayRun = can(ctx, 'intelligence.recompute');
+
+  if (!hasForecast(forecast) || forecast.periods.length === 0) {
+    return (
+      <>
+        <PageHeader eyebrow="What if" title="What if things change?" />
+        <EmptyState
+          title="There is nothing to compare against yet"
+          actionHref={`/app/${orgSlug}/forecast`}
+          actionLabel="Go to the forecast"
+        >
+          A what-if works by changing what MOTION already expects, so it needs a forecast first. Work
+          one out and this page will be ready.
+        </EmptyState>
+      </>
+    );
+  }
+
+  const months = forecast.periods.map((period, index) => ({
+    value: index + 1,
+    label: period.periodLabel,
+  }));
+
+  /*
+   * The order the questions are asked in: the two that move sales first, because that is what a
+   * business owner asks about first, then costs, then borrowing. Every word the form renders is
+   * built here — a client component cannot import this module without pulling the server-only
+   * write path into the browser bundle.
+   */
+  const rows = ([
+    'revenue_change', 'pricing_change', 'payroll_change', 'hiring',
+    'supplier_cost_change', 'marketing_change', 'debt_drawdown', 'debt_repayment',
+  ] as const).map((kind) => ({
+    kind,
+    question: ASSUMPTION_QUESTION[kind],
+    note: ASSUMPTION_NOTE[kind],
+    cashFixed: CASH_ONLY_KINDS.has(kind),
+    defaultCashEffect: DEFAULT_CASH_EFFECT[kind],
+  }));
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="What if"
+        title="What if things change?"
+        description={`Against what MOTION expects for ${months.map((m) => m.label).join(', ')}.`}
+      />
+
+      {mayRun ? (
+        <Card className="mt-6">
+          <CardHeader
+            title="What would you like to change?"
+            description="Tick the ones you want to try. Everything else stays as MOTION expects it."
+          />
+          <CardBody>
+            <ScenarioForm
+              orgSlug={orgSlug}
+              months={months}
+              rows={rows}
+              copy={{
+                cashSameMonth: CASH_EFFECT_LABEL.same_month,
+                cashNone: CASH_EFFECT_LABEL.none,
+              }}
+            />
+          </CardBody>
+        </Card>
+      ) : (
+        <p className="mt-6 text-sm text-ink-muted">
+          You can read the scenarios your team has saved. Working a new one out is done by an owner
+          or an administrator.
+        </p>
+      )}
+
+      {hasScenario(latest) ? (
+        <>
+          <h2 className="mt-10 font-serif text-xl text-ink">{latest.name}</h2>
+          <ScenarioComparison scenario={latest} orgSlug={orgSlug} />
+          {mayRun ? (
+            <div className="mt-4">
+              <ArchiveControl orgSlug={orgSlug} scenarioId={latest.runId} archived={false} />
+            </div>
+          ) : null}
+        </>
+      ) : latest.unavailable.length > 0 ? (
+        <Card className="mt-6">
+          <CardHeader title={UNAVAILABLE_HEADLINE} />
+          <CardBody>
+            <ScenarioUnavailableView unavailable={latest.unavailable} />
+          </CardBody>
+        </Card>
+      ) : (
+        <p className="mt-6 text-sm text-ink-muted">
+          No scenario has been worked out yet.
+        </p>
+      )}
+
+      {saved.length <= 1 ? null : (
+        <Card className="mt-10">
+          <CardHeader title="Saved scenarios" description="What you have tried before." />
+          <CardBody>
+            <ul className="flex flex-col gap-3 text-sm">
+              {saved.map((scenario) => (
+                <li key={scenario.runId} className="flex flex-wrap items-baseline justify-between gap-3">
+                  <Link
+                    href={`/app/${orgSlug}/what-if/${scenario.runId}`}
+                    className="text-accent underline underline-offset-2"
+                  >
+                    {scenario.name}
+                  </Link>
+                  <span className="text-ink-muted">
+                    {new Date(scenario.createdAt).toLocaleDateString('en-GB', {
+                      day: 'numeric', month: 'short', year: 'numeric',
+                    })}
+                  </span>
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
+      )}
+    </>
+  );
+}

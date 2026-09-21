@@ -86,6 +86,25 @@ export default async function MoneyPage({
         </CardBody>
       </Card>
 
+      {/*
+        * What-if, beside the forecast it changes and for the same reason (ADR-100): §3.1 fixes the
+        * primary navigation at seven items, and a scenario is a statement about the same months the
+        * rest of Money is about.
+        */}
+      <Card className="mb-4">
+        <CardBody>
+          <h2 className="text-base">
+            <Link href={`/app/${orgSlug}/what-if`} className="underline underline-offset-2">
+              What if things change?
+            </Link>
+          </h2>
+          <p className="mt-1 text-sm text-ink-muted">
+            Change one thing — sales, wages, a new hire, a loan — and see what it would do to your
+            profit and your cash.
+          </p>
+        </CardBody>
+      </Card>
+
       <ul className="flex flex-col gap-4">
         {links.map((link) => (
           <li key={link.href}>

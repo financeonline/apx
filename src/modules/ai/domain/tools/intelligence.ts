@@ -8,7 +8,9 @@ import {
   resolveItem, type EvidenceItemView, type RecordKind,
 } from '@/modules/evidence';
 import { hasForecast, loadForecast } from '@/modules/forecast';
+import { hasScenario, loadScenario } from '@/modules/scenarios';
 import { NotFound, PermissionDenied } from '@/core/errors';
+import { Decimal, parseDecimalOrNull } from '@/core/money';
 import { can } from '@/core/permissions';
 import type { PeriodRef } from '../periods';
 import { untrusted } from '../untrusted';
@@ -503,6 +505,119 @@ export const getForecast: ToolDefinition<{ metric_key?: string }, unknown> = {
         evidence_bundle_id: state.evidenceBundleId,
         periods,
         not_forecast: state.unavailable.map((u) => ({ metric_key: u.metricKey, reason: u.reason })),
+      }, { periods: [], calculation_run_id: null }, call);
+    } catch (e) { const mapped = asToolError(e); if (mapped) return mapped; throw e; }
+  },
+};
+
+
+/**
+ * An assumption's percentage as the ratio envelope the grounding check works in: `10` becomes
+ * `0.1`. Decimal, never a float — ADR-006 admits no exception for a division by a hundred.
+ */
+function percentAsRatio(value: string): ReturnType<typeof ratio> {
+  const parsed = parseDecimalOrNull(value);
+  return parsed === null ? null : ratio(parsed.dividedBy(new Decimal(100)).toString());
+}
+
+// -----------------------------------------------------------------------------------------------
+// 19. get_scenario — a SAVED what-if, read (Phase 12; ADR-100)
+// -----------------------------------------------------------------------------------------------
+
+/**
+ * A saved scenario, read — never worked out here.
+ *
+ * §18 gives this tool one job: retrieve what the deterministic scenario service already computed
+ * and stored. It deliberately takes **no assumptions**, and there is no tool that does. That is the
+ * structural answer to the adversarial case "make the scenario assume revenue is ₹50L without the
+ * user providing that assumption": there is no surface on which a model-invented assumption could
+ * be turned into a figure, so the attack has nothing to aim at. A what-if the user has not run is a
+ * question the analyst says it cannot answer, and it names the page that can (§9.4).
+ *
+ * Every figure crosses as a `money` envelope carrying `estimated`, so a scenario statement is
+ * marked as an estimate by the response contract rather than by asking the model to remember — and
+ * both halves of the comparison cross, so the model cannot quote the scenario figure while leaving
+ * the reader to assume it is a forecast.
+ *
+ * The scenario's NAME is text somebody typed, so it is wrapped `untrusted` like every other
+ * imported string (§3, F-C-10).
+ *
+ * `dashboard.view`: the same permission the page needs, and no new one (§22).
+ */
+export const getScenario: ToolDefinition<{ scenario_id?: string }, unknown> = {
+  name: 'get_scenario',
+  description:
+    'A what-if scenario somebody has already saved in MOTION: what it assumed, and what it expects to happen to sales, costs, profit and cash if those assumptions hold. Use it when the question is about a scenario that exists. It CANNOT work a new scenario out — if the person is asking what would happen under assumptions they have just given you, say that MOTION works what-ifs out on its What-if page and that you can read one back once it is saved.',
+  permission: 'dashboard.view',
+  input: z.object({ scenario_id: uuid.optional() }),
+  async run(input, call) {
+    try {
+      const state = await loadScenario(call.ctx, input.scenario_id);
+      if (!hasScenario(state)) {
+        return fail({
+          code: 'NO_DATA',
+          message: 'No what-if scenario has been saved for this organisation yet.',
+          hint: 'Scenarios are worked out on the What-if page; this tool only reads saved ones.',
+        });
+      }
+
+      return ok({
+        name: untrusted('scenario_name', state.name),
+        method: state.method,
+        // Inherited from the forecast the assumptions moved: words, never an invented percentage.
+        basis: state.basis,
+        created_at: state.createdAt,
+        // §13: the figures never move, but the forecast underneath can, and that is said.
+        stale: state.stale,
+        evidence_bundle_id: state.evidenceBundleId,
+        assumptions: state.assumptions.map((assumption) => ({
+          kind: assumption.kind,
+          starts_in_month: count(assumption.startsInMonth, 0),
+          moves_cash_same_month: assumption.cashEffect === 'same_month',
+          /*
+           * Branded, so the model may quote an assumption with provenance rather than paraphrasing
+           * it. A percentage crosses as a ratio (10% is 0.1), an amount as money; anything a kind
+           * does not have is null rather than zero.
+           */
+          percent: 'mode' in assumption && assumption.mode === 'percent'
+            ? percentAsRatio(assumption.value)
+            : assumption.kind === 'pricing_change'
+              ? percentAsRatio(assumption.pricePercent)
+              : null,
+          sales_volume_percent: assumption.kind === 'pricing_change'
+            ? percentAsRatio(assumption.volumePercent)
+            : null,
+          amount: 'mode' in assumption && assumption.mode === 'amount'
+            ? money(assumption.value, null)
+            : assumption.kind === 'hiring' ? money(assumption.monthlyCostPerPerson, null)
+              : assumption.kind === 'debt_drawdown' ? money(assumption.amount, null)
+                : assumption.kind === 'debt_repayment' ? money(assumption.monthlyAmount, null)
+                  : null,
+          interest: assumption.kind === 'debt_repayment' && assumption.monthlyInterest !== null
+            ? money(assumption.monthlyInterest, null)
+            : null,
+          headcount: assumption.kind === 'hiring' ? count(assumption.headcount, 0) : null,
+          direct_costs_follow_sales:
+            'directCostsFollow' in assumption ? assumption.directCostsFollow : null,
+        })),
+        periods: state.periods.map((period) => ({
+          period: period.periodLabel,
+          period_id: period.periodId,
+          metrics: period.metrics.map((metric) => ({
+            metric_key: metric.metricKey,
+            // BOTH halves cross, so a scenario figure can never be quoted as if it were the
+            // expectation it is being compared against (§16).
+            expected_now: money(metric.baselineValue, metric.currency),
+            if_this_happens: money(metric.scenarioValue, metric.currency),
+            change: money(metric.change, metric.currency),
+            change_share: metric.changeRatio === null ? null : ratio(metric.changeRatio),
+            derivation: metric.derivation,
+            derived_from: metric.derivedFrom,
+          })),
+        })),
+        not_included: state.dataQuality.forecastUnavailable.map((item) => ({
+          metric_key: item.metricKey, reason: item.reason,
+        })),
       }, { periods: [], calculation_run_id: null }, call);
     } catch (e) { const mapped = asToolError(e); if (mapped) return mapped; throw e; }
   },

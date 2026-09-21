@@ -60,6 +60,24 @@ export interface ComposeInput {
   readonly lastActualClosingCash: string | null;
 }
 
+/** A leaf level per metric key for one horizon month. `null`/absent means "no level to speak of". */
+export type LeafLevels = Readonly<Record<string, string | null>>;
+
+export interface LevelComposeInput {
+  readonly horizon: readonly HorizonPeriod[];
+  /**
+   * The leaf levels that apply to horizon month `index` (0-based).
+   *
+   * A forecast hands back the same levels every month — a baseline is a level, not a path. A
+   * SCENARIO hands back different levels per month, because an assumption can start in month two
+   * (Phase 12, ADR-100). Taking a function of the index rather than one flat record is the whole
+   * difference between the two callers, and it keeps the identities and the cash chain in ONE
+   * place instead of two that would drift.
+   */
+  readonly levelsAt: (index: number) => LeafLevels;
+  readonly lastActualClosingCash: string | null;
+}
+
 const money = (value: Decimal): string => toMoneyString(value.toDecimalPlaces(2));
 
 function point(
@@ -78,31 +96,31 @@ function point(
   };
 }
 
-export function composeForecast(input: ComposeInput): ForecastResult {
-  const baselines: Record<string, Baseline> = {};
-  const unavailable: Unforecastable[] = [];
-
-  for (const key of FORECAST_LEAVES) {
-    const points = input.history[key] ?? [];
-    const verdict = selectWindow(points);
-    if (!verdict.ok) {
-      unavailable.push({ metricKey: key, reason: verdict.reason, periodsFound: verdict.periodsFound });
-      continue;
-    }
-    baselines[key] = buildBaseline(key, verdict.window);
-  }
-
-  const level = (key: string): Decimal | null => {
-    const baseline = baselines[key];
-    return baseline === undefined ? null : parseDecimalOrNull(baseline.value);
-  };
-
+/**
+ * Leaf levels → the figures MOTION speaks about, month by month.
+ *
+ * Extracted from `composeForecast` in Phase 12 (ADR-100) so the scenario engine composes through
+ * THE SAME identities and THE SAME cash chain rather than a second copy of them. A scenario that
+ * derived operating profit its own way would eventually disagree with the forecast it is being
+ * compared against, and a comparison whose two halves were computed differently is not a
+ * comparison. Nothing about the forecast's behaviour changed: `composeForecast` calls this with the
+ * same level every month, which is exactly what it did inline before.
+ *
+ * Pure.
+ */
+export function composeFromLevels(input: LevelComposeInput): ForecastPoint[] {
   const out: ForecastPoint[] = [];
   let carriedCash = input.lastActualClosingCash === null
     ? null
     : parseDecimalOrNull(input.lastActualClosingCash);
 
-  for (const period of input.horizon) {
+  for (const [index, period] of input.horizon.entries()) {
+    const levels = input.levelsAt(index);
+    const level = (key: string): Decimal | null => {
+      const value = levels[key];
+      return value === undefined || value === null ? null : parseDecimalOrNull(value);
+    };
+
     const revenue = level('revenue');
     const costOfSales = level('cost_of_sales');
     const opex = level('operating_expenses');
@@ -148,6 +166,33 @@ export function composeForecast(input: ComposeInput): ForecastResult {
       }
     }
   }
+
+  return out;
+}
+
+export function composeForecast(input: ComposeInput): ForecastResult {
+  const baselines: Record<string, Baseline> = {};
+  const unavailable: Unforecastable[] = [];
+
+  for (const key of FORECAST_LEAVES) {
+    const points = input.history[key] ?? [];
+    const verdict = selectWindow(points);
+    if (!verdict.ok) {
+      unavailable.push({ metricKey: key, reason: verdict.reason, periodsFound: verdict.periodsFound });
+      continue;
+    }
+    baselines[key] = buildBaseline(key, verdict.window);
+  }
+
+  // A baseline is a LEVEL, so every month of the horizon gets the same one (§2, "level, not trend").
+  const levels: Record<string, string | null> = {};
+  for (const key of FORECAST_LEAVES) levels[key] = baselines[key]?.value ?? null;
+
+  const out = composeFromLevels({
+    horizon: input.horizon,
+    levelsAt: () => levels,
+    lastActualClosingCash: input.lastActualClosingCash,
+  });
 
   /*
    * `closing_cash` is the one metric that can be unavailable for a reason the baselines do not

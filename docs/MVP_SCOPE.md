@@ -89,7 +89,7 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 | Capability | SOW ref | Phase | Notes |
 |---|---|---|---|
 | Forecasting (revenue, expenses, profit, cash, AR/AP) | §14, Phase 11 | 11 | Reserved metric keys `forecast_*`, `budget_variance_*` |
-| What-if scenarios, saved scenarios | §14, Phase 12 | 12 | AI questions "what happens if…" and "can we afford…" answer "not yet" in MVP |
+| What-if scenarios, saved scenarios | §14, Phase 12 | 12 | **Built post-MVP in Phase 12 (ADR-100)**: `scenario_runs`/`scenario_values`, `/what-if`, AI tool 19. The analyst READS a saved scenario and still refuses to work a new one out; "can we afford…" is still answered "not yet" |
 | Budget import and budget variance | §7 | 11 | CD-27 |
 | Bank reconciliation (matching), liquidity ratios, live bank feeds | §15, Phase 13 | 13 | CD-20, CD-21 |
 | Commercial Intelligence / CRM, pipeline, products, campaigns, channels, CAC, conversion | §16, Phase 14 | 14 | `counterparties` is the seam |

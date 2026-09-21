@@ -9,7 +9,8 @@ export {
 } from './domain/baseline';
 
 export {
-  FORECAST_LEAVES, FORECAST_METRICS, composeForecast, type ComposeInput,
+  FORECAST_LEAVES, FORECAST_METRICS, composeForecast, composeFromLevels,
+  type ComposeInput, type LeafLevels, type LevelComposeInput,
 } from './domain/compose';
 
 export type {

@@ -36,6 +36,9 @@ Next.js App Router. Three route families, each with its own root layout and shel
 /app/[orgSlug]/money/banking
 /app/[orgSlug]/money/receivables
 /app/[orgSlug]/money/payables
+/app/[orgSlug]/forecast
+/app/[orgSlug]/what-if
+/app/[orgSlug]/what-if/[scenarioId]
 /app/[orgSlug]/customers
 /app/[orgSlug]/customers/[counterpartyId]
 /app/[orgSlug]/actions
@@ -112,6 +115,8 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 | `/money/cash` | Opening/closing cash, movement, runway | all | `financials.view`, `banking.view` | — | Server | `financialEngine.getCash(period)` | No bank data → prompt to import a statement or enter opening balance (CD-06) |
 | `/money/banking` | Bank accounts, transactions, categorisation, recurring, transfers | all (edit needs `banking.reconcile`) | `banking.view` | — | Server list; client table | `banking.listAccounts`, `banking.listTransactions(filters)`, `banking.listRecurring` | No accounts → add account / import statement |
 | `/money/receivables`, `/money/payables` | Aging, overdue, days | all | `financials.view` | — | Server | `financialEngine.getReceivables/Payables(period)` | No invoices → basis note (CD-07) |
+| `/forecast` | What the finished months suggest the next three will look like (Phase 11, ADR-099) | all | `dashboard.view` | — | Server | `forecast.loadForecast`, `forecast.generateForecast` (action) | Too little history → the sufficiency reason, and no figure |
+| `/what-if`, `/what-if/[scenarioId]` | The same three months with stated changes applied: BASELINE beside SCENARIO, assumptions on the page (Phase 12, ADR-100) | all may READ; working one out and archiving need `intelligence.recompute`, so a client sees no form | `dashboard.view` | — | Server page; client form | `scenarios.loadScenario`, `scenarios.listScenarios`, `scenarios.runScenario` / `scenarios.archiveScenario` (actions) | No forecast → sent to `/forecast`; an assumption MOTION cannot apply → the condition that stopped it, and nothing saved; a scenario id from another organisation → 404 |
 | `/customers` | Revenue by customer, concentration | all | `customers.view` | — | Server | `financialEngine.getCustomerRevenue(period)`, `counterparties.list(kind=customer)` | No customer data → explains sales invoice import |
 | `/customers/[counterpartyId]` | One counterparty: revenue trend, invoices, transactions, actions | all (edit needs `customers.edit`) | `customers.view` | — | Server | `counterparties.get`, `invoices.listFor`, `financialEngine.getCustomerTrend` | Cross-org id → 404 |
 | `/actions` | Action Centre list, filters | all | `actions.view` | — | Server; client filters | `actions.list` | None → "No actions yet" with create (if `actions.create`) |

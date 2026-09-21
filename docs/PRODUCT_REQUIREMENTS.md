@@ -226,7 +226,7 @@ MVP column values:
 | REQ-AI-10 | Supported question: What risks require attention? | SOW §10 | SOW requirement | MVP | get_alerts, get_health_score | — |
 | REQ-AI-11 | Supported question: What should management focus on? | SOW §10 | SOW requirement | MVP | get_alerts, get_actions | — |
 | REQ-AI-12 | Supported question: Can the business afford a proposed expenditure? | SOW §10 | SOW requirement | MVP-limited: answers with current cash, runway and commitments, states that scenario modelling is not yet available | get_cash_analysis | — |
-| REQ-AI-13 | Supported question: What happens if revenue or costs change? | SOW §10 | SOW requirement | Post-MVP (P12); MVP answers "not available yet" with nearest facts | Scenarios | — |
+| REQ-AI-13 | Supported question: What happens if revenue or costs change? | SOW §10 | SOW requirement | **Delivered (P12, ADR-100)**: the analyst READS a saved scenario through tool 19; working a new one out is the deterministic engine's job and the analyst refuses it by name, pointing at the What-if page | Scenarios | — |
 | REQ-AI-14 | Standard response structure: Direct answer, Key findings, Causes/drivers, Risks, Opportunities, Recommended actions, Confidence/data-quality notes, Evidence and source trail. | SOW §10 | SOW requirement | MVP | `ai_messages.structured_response` | — |
 | REQ-AI-15 | The AI shall never invent financial figures, transactions or source records. | SOW §11, §23 | SOW requirement | MVP | Numeric grounding check (ADR-010) | — |
 | REQ-AI-16 | The AI shall not present estimates as verified facts. | SOW §11 | SOW requirement | MVP | `assurance_level` propagated in tool outputs | — |
@@ -287,16 +287,16 @@ MVP column values:
 
 | ID | Requirement | SOW § | Type | MVP | Dependencies | Open question |
 |---|---|---|---|---|---|---|
-| REQ-SC-01 | What-If Scenarios: user-defined assumptions and baseline-vs-scenario analysis. | SOW §3, §14 | SOW requirement | Post-MVP (P12) | REQ-FC-01 | — |
-| REQ-SC-02 | Scenario change: revenue increases/decreases. | SOW §14 | SOW requirement | Post-MVP (P12) | — | — |
-| REQ-SC-03 | Scenario change: payroll changes. | SOW §14 | SOW requirement | Post-MVP (P12) | standard category `payroll` | — |
-| REQ-SC-04 | Scenario change: supplier cost changes. | SOW §14 | SOW requirement | Post-MVP (P12) | — | — |
-| REQ-SC-05 | Scenario change: marketing spend changes. | SOW §14 | SOW requirement | Post-MVP (P12) | standard category `marketing` | — |
-| REQ-SC-06 | Scenario change: hiring. | SOW §14 | SOW requirement | Post-MVP (P12) | — | — |
-| REQ-SC-07 | Scenario change: pricing changes. | SOW §14 | SOW requirement | Post-MVP (P12) | — | — |
-| REQ-SC-08 | Scenario change: debt and repayment assumptions. | SOW §14 | SOW requirement | Post-MVP (P12) | — | — |
-| REQ-SC-09 | Outputs shall show BASELINE versus SCENARIO and clearly expose assumptions. | SOW §14 | SOW requirement | Post-MVP (P12) | — | — |
-| REQ-SC-10 | What-if scenario engine and saved scenarios. | SOW §21 | SOW requirement | Post-MVP (P12) | — | — |
+| REQ-SC-01 | What-If Scenarios: user-defined assumptions and baseline-vs-scenario analysis. | SOW §3, §14 | SOW requirement | **Delivered (P12, ADR-100)** | REQ-FC-01 | — |
+| REQ-SC-02 | Scenario change: revenue increases/decreases. | SOW §14 | SOW requirement | **Delivered (P12, ADR-100)** | — | — |
+| REQ-SC-03 | Scenario change: payroll changes. | SOW §14 | SOW requirement | **Delivered (P12, ADR-100)** | standard category `payroll` | — |
+| REQ-SC-04 | Scenario change: supplier cost changes. | SOW §14 | SOW requirement | **Delivered (P12, ADR-100)** | — | — |
+| REQ-SC-05 | Scenario change: marketing spend changes. | SOW §14 | SOW requirement | **Delivered (P12, ADR-100)** | standard category `marketing` | — |
+| REQ-SC-06 | Scenario change: hiring. | SOW §14 | SOW requirement | **Delivered (P12, ADR-100)** | — | — |
+| REQ-SC-07 | Scenario change: pricing changes. | SOW §14 | SOW requirement | **Delivered (P12, ADR-100)** | — | — |
+| REQ-SC-08 | Scenario change: debt and repayment assumptions. | SOW §14 | SOW requirement | **Delivered (P12, ADR-100)** | — | — |
+| REQ-SC-09 | Outputs shall show BASELINE versus SCENARIO and clearly expose assumptions. | SOW §14 | SOW requirement | **Delivered (P12, ADR-100)** | — | — |
+| REQ-SC-10 | What-if scenario engine and saved scenarios. | SOW §21 | SOW requirement | **Delivered (P12, ADR-100)** | — | — |
 
 ## 16. Commercial Intelligence
 

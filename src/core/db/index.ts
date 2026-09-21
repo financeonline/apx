@@ -27,6 +27,7 @@ export {
   finishCalculationRun,
   setPeriodCompleteness,
   finishForecast,
+  finishScenario,
   finishHealth,
   persistAlerts,
   aggregatePeriods,

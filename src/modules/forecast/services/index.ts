@@ -41,6 +41,14 @@ export interface ForecastMetricView {
 export interface ForecastPeriodView {
   readonly periodId: string;
   readonly periodLabel: string;
+  /**
+   * The first day of the month, which is what the ordering is actually by.
+   *
+   * Carried on the view from Phase 12 (ADR-100) because the scenario engine composes over the same
+   * horizon and needs the real period rows; without it a second reader would have to query
+   * `fiscal_periods` again for something this loader already has in hand.
+   */
+  readonly periodStart: string;
   readonly metrics: readonly ForecastMetricView[];
 }
 
@@ -288,6 +296,7 @@ export async function loadForecast(ctx: AccessContext): Promise<ForecastState> {
     .map(([periodId, metrics]) => ({
       periodId,
       periodLabel: labels.get(periodId) ?? '',
+      periodStart: starts.get(periodId) ?? '',
       metrics: [...metrics].sort((a, b) => a.metricKey.localeCompare(b.metricKey)),
     }))
     .sort((a, b) => (starts.get(a.periodId) ?? '').localeCompare(starts.get(b.periodId) ?? ''));

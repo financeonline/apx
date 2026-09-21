@@ -47,8 +47,11 @@ financial-engine → tenancy (periods), banking (read), audit
 health       → financial-engine
 alerts       → financial-engine, health, banking, evidence, audit
 evidence     → financial-engine, banking, documents, imports (read)
-ai           → financial-engine, health, alerts, evidence, banking, actions, documents, audit
+ai           → financial-engine, health, alerts, evidence, banking, actions, documents, forecast,
+               scenarios, audit    -- read-only in both of the last two (ADR-099, ADR-100)
 actions      → evidence, tenancy, audit
+forecast     → financial-engine (read), tenancy, evidence (read), audit
+scenarios    → forecast, tenancy, evidence (read), audit    -- the forecast IS the baseline (ADR-100)
 reporting    → financial-engine, health, alerts, actions, evidence
 portfolio    → tenancy, health, alerts, imports (read-only aggregate projections, ADR-038.13)
 audit        → (none)

@@ -597,6 +597,29 @@ export async function finishForecast(input: {
   });
 }
 
+/**
+ * A what-if scenario, written whole with its evidence (Phase 12, ADR-100).
+ *
+ * The assumptions are the user's intent, but the FIGURES are what the deterministic engine worked
+ * out — a server-observed fact, in exactly the sense a grounded AI answer is one. `api.*` is
+ * granted to `authenticated`, so a browser that could reach a scenario-writing `api.*` function
+ * could publish any number it liked under MOTION's name; this goes through `api_server`, and the
+ * human actor is re-validated in SQL against `intelligence.recompute`.
+ */
+export async function finishScenario(input: {
+  actor: string;
+  organizationId: string;
+  run: Record<string, unknown>;
+  values: ReadonlyArray<Record<string, unknown>>;
+}): Promise<string> {
+  return serverRpc<string>('finish_scenario', {
+    p_actor: input.actor,
+    p_org: input.organizationId,
+    p_input: input.run,
+    p_values: input.values,
+  });
+}
+
 export async function persistAlerts(
   input: Record<string, unknown>,
 ): Promise<Record<string, number>> {

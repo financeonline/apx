@@ -148,6 +148,7 @@ const INPUTS: Record<string, () => unknown> = {
   get_record_evidence: () => ({ record_type: 'ledger_entry', record_id: aLedgerEntryId }),
   get_document_evidence: () => ({ document_id: ledgerDocumentId }),
   get_forecast: () => ({}),
+  get_scenario: () => ({}),
 };
 
 function snapshotOf(metricKey: string): string {
@@ -158,11 +159,12 @@ function snapshotOf(metricKey: string): string {
 }
 
 describe('the registry is closed and complete', () => {
-  it('has exactly the eighteen tools §3 names, each with a permission and a schema', () => {
+  it('has exactly the nineteen tools §3 names, each with a permission and a schema', () => {
     // Fifteen through Phase 8; the two evidence tools in Phase 9 (ADR-097); `get_forecast` in
-    // Phase 11 (ADR-099). The count is asserted so a tool cannot be added without editing this test.
-    expect(TOOL_NAMES).toHaveLength(18);
-    expect(new Set(TOOL_NAMES).size).toBe(18);
+    // Phase 11 (ADR-099); `get_scenario` in Phase 12 (ADR-100). The count is asserted so a tool
+    // cannot be added without editing this test.
+    expect(TOOL_NAMES).toHaveLength(19);
+    expect(new Set(TOOL_NAMES).size).toBe(19);
     for (const tool of TOOLS) {
       expect(tool.permission, `${tool.name} has a permission`).toBeTruthy();
       expect(tool.description.length, `${tool.name} tells the model when to use it`).toBeGreaterThan(40);
