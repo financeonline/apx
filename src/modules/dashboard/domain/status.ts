@@ -86,10 +86,12 @@ export function statusFor(input: {
 const MISSING_REASONS: Readonly<Record<string, string>> = {
   no_source_covers_period: 'We do not have data covering this month yet.',
   no_opening_cash: 'We need the opening bank balance before we can show your cash.',
+  no_bank_accounts: 'Add a bank account and upload its statements to see your cash.',
   no_opening_balance: 'We need an opening balance for this account first.',
   no_prior_trial_balance: 'The previous month’s figures are missing, so this cannot be worked out.',
   stale_invoice_data: 'Your invoice list is too old to answer this for this month.',
   no_cost_of_sales_accounts: 'You have no direct-cost accounts, so this does not apply.',
+  cost_of_sales_in_other_source: 'Your purchase invoices show direct costs, but the source this month’s figures come from does not, so this cannot be established.',
   comparison_period_missing: 'There is no earlier month to compare with.',
   comparison_is_zero: 'The month being compared with was zero, so a percentage would not mean anything.',
   insufficient_history: 'We need a few more months of data for this.',

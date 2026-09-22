@@ -194,6 +194,30 @@ function invoiceAccountAmounts(
     .sort((a, b) => a.accountId.localeCompare(b.accountId));
 }
 
+/**
+ * Which suppliers' purchases went into each category this period — the invoice basis's answer to
+ * "what rows are behind this expense figure" (ADR-104). Built from the same cells and the same
+ * category rule as the fold, so the descriptor re-selects exactly what the figure summed.
+ */
+function invoiceCounterpartiesByCategory(
+  cells: readonly AggregateCell[],
+  periodId: string,
+  accounts: EngineContext['accounts'],
+  counterparties: ReadonlyMap<string, CounterpartyRef>,
+): ReadonlyMap<StandardCategory, readonly string[]> {
+  const byCategory = new Map<StandardCategory, Set<string>>();
+  for (const cell of cells) {
+    if (cell.periodId !== periodId || cell.source !== 'invoices' || cell.counterpartyId === null) continue;
+    if (cell.invoiceType !== 'purchase' && cell.invoiceType !== 'purchase_credit_note') continue;
+    const home = homeAccountFor(accounts, invoiceCategoryOf(cell, counterparties));
+    if (home === null) continue;
+    const set = byCategory.get(home.category) ?? new Set<string>();
+    set.add(cell.counterpartyId);
+    byCategory.set(home.category, set);
+  }
+  return new Map([...byCategory.entries()].map(([category, ids]) => [category, [...ids].sort()]));
+}
+
 /** §3's VAT-fallback counts for the period: rows that had no tax to remove from a gross total. */
 function invoiceVatExposure(
   cells: readonly AggregateCell[],
@@ -329,7 +353,17 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
     basis: pnlBasis,
     currency: context.settings.baseCurrency,
     accounts: context.accounts,
-    costOfSalesEverUsed: context.costOfSalesEverUsed,
+    /*
+     * ADR-104: invoice evidence of cost of sales counts only when the invoices ARE the basis. On a
+     * ledger or balance basis it is a fact about a source this figure is not reading, and the
+     * figure reports that mismatch rather than a zero the ledger never stated.
+     */
+    costOfSalesEverUsed: context.costOfSalesEverUsed
+      || (pnlSource === 'invoices' && context.costOfSalesInInvoices),
+    costOfSalesInOtherSource: pnlSource !== 'invoices' && !context.costOfSalesEverUsed && context.costOfSalesInInvoices,
+    invoiceCounterparties: pnlSource === 'invoices'
+      ? invoiceCounterpartiesByCategory(cells, period.id, context.accounts, byCounterparty)
+      : undefined,
     accountAmounts: pnlSource === 'invoices'
       ? invoiceAccountAmounts(cells, period.id, context.accounts, byCounterparty)
       : pnlSource

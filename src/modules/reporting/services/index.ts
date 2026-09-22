@@ -87,14 +87,23 @@ export async function buildMonthlyReport(input: {
   const { db, orgId, orgSlug, periodId } = input;
   const ctx = { db, requestId: input.requestId } as { db: AccessContext['db']; requestId?: string };
 
-  const periods = await loadPeriods(ctx.db, orgId, ctx.requestId);
+  const [periods, withData] = await Promise.all([
+    loadPeriods(ctx.db, orgId, ctx.requestId),
+    loadPeriodsWithData(ctx.db, orgId, ctx.requestId),
+  ]);
   const period = periods.find((candidate) => candidate.id === periodId) ?? null;
   // Cross-organisation or invented: NOT FOUND, never FORBIDDEN (SECURITY_MODEL.md §14).
   if (period === null) return null;
   if (!period.isComplete) return null;
 
+  /*
+   * The comparison month is the previous month WITH DATA, which is Home's rule (§4: a month with
+   * no figure is a gap, not a zero). Comparing with the previous calendar month whatever it holds
+   * agreed with Home only while every month carried a value — which, until ADR-104, an empty cash
+   * family guaranteed by writing zeros nobody knew.
+   */
   const previous = periods
-    .filter((candidate) => candidate.periodStart < period.periodStart)[0] ?? null;
+    .filter((candidate) => candidate.periodStart < period.periodStart && withData.has(candidate.id))[0] ?? null;
 
   const [snapshots, health, alertsPage, actions, lastData, run] = await Promise.all([
     loadPeriodSnapshots(ctx.db, orgId, period.id, ctx.requestId),

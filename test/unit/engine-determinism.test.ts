@@ -67,6 +67,7 @@ const context = (over: Partial<EngineContext> = {}): EngineContext => ({
     taxableCategories: ['revenue', 'cost_of_sales', 'operating_expense', 'marketing'],
   },
   costOfSalesEverUsed: true,
+  costOfSalesInInvoices: false,
   accounts: ACCOUNTS,
   counterparties: [],
   bankAccounts: [],
@@ -245,6 +246,7 @@ const repository = vi.hoisted(() => ({
   loadFingerprintSources: vi.fn(),
   loadFirstPeriodWithData: vi.fn(),
   loadCostOfSalesEverUsed: vi.fn(),
+  loadCostOfSalesInInvoices: vi.fn(),
   loadCurrentObservations: vi.fn(),
   loadAggregates: vi.fn(),
   loadTransferLegs: vi.fn(),
@@ -283,6 +285,7 @@ describe('a run reads the ledger at one instant, and that instant is the databas
     });
     repository.loadFirstPeriodWithData.mockResolvedValue(null);
     repository.loadCostOfSalesEverUsed.mockResolvedValue(true);
+    repository.loadCostOfSalesInInvoices.mockResolvedValue(false);
     repository.loadCurrentObservations.mockResolvedValue([]);
     repository.loadAggregates.mockResolvedValue([]);
     repository.loadTransferLegs.mockResolvedValue([]);

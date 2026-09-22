@@ -165,7 +165,10 @@ export async function runCalculation(
 
   // §3.1's "never used" is a fact about the ORGANISATION, so it is resolved once here rather than
   // re-derived per period from that period's rows (ADR-063).
-  const costOfSalesEverUsed = await repo.loadCostOfSalesEverUsed(scoped, orgId);
+  const [costOfSalesEverUsed, costOfSalesInInvoices] = await Promise.all([
+    repo.loadCostOfSalesEverUsed(scoped, orgId),
+    repo.loadCostOfSalesInInvoices(scoped, orgId),
+  ]);
 
   const currentPeriod = allPeriods.find(
     (p) => p.periodStart <= request.asOf && p.periodEnd >= request.asOf,
@@ -285,6 +288,7 @@ export async function runCalculation(
         settings,
         accounts,
         costOfSalesEverUsed,
+        costOfSalesInInvoices,
         counterparties,
         bankAccounts,
         periods: window,

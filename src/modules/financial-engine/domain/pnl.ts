@@ -102,6 +102,19 @@ export interface PnlInput {
   readonly accountAmounts: readonly AccountAmount[];
   readonly uncategorised: UncategorisedExposure;
   readonly invoiceVat?: InvoiceVatExposure | null;
+  /**
+   * Invoice basis only: the counterparties whose purchase invoices were folded into each category
+   * this period. An invoice has no account, so an expense figure's evidence cannot be scoped by
+   * `account_ids` the way a ledger figure's is — it is scoped by the suppliers that make it up
+   * (ADR-104). Without this, every expense figure re-selected every purchase in the period.
+   */
+  readonly invoiceCounterparties?: ReadonlyMap<StandardCategory, readonly string[]>;
+  /**
+   * Cost of sales exists in a source the chosen basis is not reading (purchase invoices from a
+   * cost-of-sales supplier, while the P&L comes from a ledger that states none). The figure is
+   * unavailable with THAT reason, not a zero and not "no such accounts" (ADR-104).
+   */
+  readonly costOfSalesInOtherSource?: boolean;
 }
 
 /**
@@ -245,15 +258,32 @@ function leafEvidence(
   const asOf = { calculation_run_id: ctx.calculationRunId, aggregated_at: ctx.aggregatedAt };
   const period_ids = [input.period.id];
   if (table === 'invoices') {
+    if (side === 'income') {
+      // Sales and their credit notes ARE the revenue figure: the type filter reconciles exactly.
+      return {
+        kind: 'leaf',
+        descriptor: { v: 1, table, filters: { period_ids, invoice_types: [...SALES_INVOICE_TYPES] }, as_of: asOf },
+      };
+    }
+    /*
+     * An expense figure on the invoice basis is the purchases of the suppliers whose default
+     * category is that figure's — the same rule the fold applied — so the descriptor names those
+     * suppliers. A figure nobody's purchases went into gets no descriptor: one that re-selected
+     * every purchase in the period would reconcile to the wrong number, which is worse than none.
+     */
+    const categories = new Set(
+      input.accounts.filter((a) => accountIds.includes(a.id)).map((a) => a.standardCategory),
+    );
+    const counterparties = [...new Set(
+      [...categories].flatMap((category) => [...(input.invoiceCounterparties?.get(category) ?? [])]),
+    )].sort();
+    if (counterparties.length === 0) return null;
     return {
       kind: 'leaf',
       descriptor: {
         v: 1,
         table,
-        filters: {
-          period_ids,
-          invoice_types: side === 'income' ? [...SALES_INVOICE_TYPES] : [...PURCHASE_INVOICE_TYPES],
-        },
+        filters: { period_ids, invoice_types: [...PURCHASE_INVOICE_TYPES], counterparty_ids: counterparties },
         as_of: asOf,
       },
     };
@@ -686,7 +716,12 @@ function buildCostOfSales(b: Builder): Figure {
     ? coveredTotal(b, 'cost_of_sales')
     : {
       value: null,
-      quality: { ...b.baseQuality, missing: ['no_cost_of_sales_accounts'] },
+      // ADR-104: when the organisation's purchase invoices DO carry cost of sales but the chosen
+      // basis does not, the reason is that mismatch — not the absence of an account.
+      quality: {
+        ...b.baseQuality,
+        missing: [b.input.costOfSalesInOtherSource ? 'cost_of_sales_in_other_source' : 'no_cost_of_sales_accounts'],
+      },
       assurance: b.baseAssurance,
     };
   push(b, {
@@ -707,9 +742,11 @@ function buildCostOfSales(b: Builder): Figure {
 }
 
 /** True when cost of sales is NULL specifically because the organization has no such account. */
+const COST_OF_SALES_ABSENT_CODES: readonly DataQualityMissing[] = ['no_cost_of_sales_accounts', 'cost_of_sales_in_other_source'];
+
 function costOfSalesAbsentByDesign(costOfSales: Figure): boolean {
   return costOfSales.value === null
-    && costOfSales.quality.missing.includes('no_cost_of_sales_accounts');
+    && costOfSales.quality.missing.some((m) => COST_OF_SALES_ABSENT_CODES.includes(m));
 }
 
 function buildGrossProfit(b: Builder, revenue: Figure, costOfSales: Figure): Figure {
@@ -727,7 +764,7 @@ function buildGrossProfit(b: Builder, revenue: Figure, costOfSales: Figure): Fig
       quality: {
         ...merged,
         warnings: uniqueInOrder([...merged.warnings, 'no_cost_of_sales']),
-        missing: merged.missing.filter((m) => m !== 'no_cost_of_sales_accounts'),
+        missing: merged.missing.filter((m) => !COST_OF_SALES_ABSENT_CODES.includes(m)),
       },
       assurance,
     };

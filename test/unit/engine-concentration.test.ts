@@ -78,6 +78,7 @@ function context(counterparties: readonly CounterpartyRef[]): EngineContext {
       taxableCategories: [],
     },
     costOfSalesEverUsed: true,
+    costOfSalesInInvoices: false,
   accounts: [],
     counterparties,
     bankAccounts: [],

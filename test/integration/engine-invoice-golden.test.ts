@@ -23,10 +23,15 @@ const DOMAIN = `${RUN}.invoice.itest`;
 const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 
 let owner: string;
+let ownerTwo: string;
 let orgA: string;
 let orgB: string;
+let orgC: string;
+let orgD: string;
 let augA: string;
 let augB: string;
+let augC: string;
+let parts: string;
 let acme: string;
 let beta: string;
 
@@ -96,13 +101,17 @@ const customerRevenue = (org: string, period: string): Array<{ id: string | null
 
 beforeAll(async () => {
   owner = createAuthUser(`owner@${DOMAIN}`);
-  const create = async (name: string): Promise<string> => {
-    const r = await clientFor(owner).schema('api').rpc('create_organization', { p_name: name });
+  ownerTwo = createAuthUser(`owner-two@${DOMAIN}`);
+  // `create_organization` is throttled per person, so four golden organisations take two owners.
+  const create = async (by: string, name: string): Promise<string> => {
+    const r = await clientFor(by).schema('api').rpc('create_organization', { p_name: name });
     if (r.error) throw new Error(r.error.message);
     return r.data as unknown as string;
   };
-  orgA = await create(`ITest Invoice A ${RUN}`);
-  orgB = await create(`ITest Invoice B ${RUN}`);
+  orgA = await create(owner, `ITest Invoice A ${RUN}`);
+  orgB = await create(owner, `ITest Invoice B ${RUN}`);
+  orgC = await create(ownerTwo, `ITest Invoice C ${RUN}`);
+  orgD = await create(ownerTwo, `ITest Invoice D ${RUN}`);
 
   const counterparty = (org: string, name: string, kind: string, category: string | null): string =>
     one(`insert into public.counterparties (organization_id, name, kind, default_expense_category)
@@ -125,7 +134,7 @@ beforeAll(async () => {
    */
   acme = counterparty(orgA, 'Acme Ltd', 'customer', null);
   beta = counterparty(orgA, 'Beta plc', 'customer', null);
-  const parts = counterparty(orgA, 'Parts Co', 'supplier', 'cost_of_sales');
+  parts = counterparty(orgA, 'Parts Co', 'supplier', 'cost_of_sales');
   seedInvoices(orgA, [
     { type: 'sales', counterparty: acme, number: 'A-001', date: '2026-08-05', subtotal: '6000.00', tax: '1200.00', total: '7200.00' },
     { type: 'sales_credit_note', counterparty: acme, number: 'A-C01', date: '2026-08-19', subtotal: '500.00', tax: '100.00', total: '600.00' },
@@ -173,14 +182,43 @@ beforeAll(async () => {
             'RENT PAYMENT', 'RENT PAYMENT', 8800.00, 'accepted', 'verified',
             '${opexAccount}', 'rule', null)`);
 
+  /*
+   * Organisation C — a GENERAL LEDGER covering August that states revenue and no cost of sales,
+   * plus purchase invoices from a cost-of-sales supplier the ledger does not contain. The ledger is
+   * the P&L basis; the invoices are evidence it is not reading (ADR-104).
+   */
+  const glCustomer = counterparty(orgC, 'GL Customer', 'customer', null);
+  const glStock = counterparty(orgC, 'GL Stock', 'supplier', 'cost_of_sales');
+  const glDoc = one(`insert into public.source_documents
+      (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
+    values ('${orgC}', '${orgC}/golden/gl.csv', 'gl.csv', 'text/csv', 10, digest('${orgC}gl', 'sha256'), 'ready', 'general_ledger') returning id`);
+  const glBatch = one(`insert into public.import_batches
+      (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at)
+    values ('${orgC}', '${glDoc}', 'general_ledger', 'ledger_entries', 'committed', 'csv', '2026-08-01', '2026-08-31', now()) returning id`);
+  const glRevenue = one(`select id from public.accounts where organization_id = '${orgC}' and standard_category = 'revenue' and is_system`);
+  const glRow = one(`insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
+    values ('${orgC}', '${glBatch}', 1, 'csv:row:1', '{}'::jsonb, '{}'::jsonb, 'committed') returning id`);
+  const glEntry = one(`insert into public.ledger_entries
+      (organization_id, entry_date, account_id, direction, amount, period_id, record_status, source_document_id, import_batch_id, import_row_id, source_ref, counterparty_id)
+    values ('${orgC}', '2026-08-31', '${glRevenue}', 'credit', 9000.00, '00000000-0000-0000-0000-000000000000', 'accepted', '${glDoc}', '${glBatch}', '${glRow}', 'csv:row:1', '${glCustomer}') returning id`);
+  adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id)
+            values ('${orgC}', 'ledger_entries', '${glEntry}', 'accepted', '${glBatch}')`);
+  seedInvoices(orgC, [
+    { type: 'purchase', counterparty: glStock, number: 'GP-1', date: '2026-08-10', subtotal: '2500.00', tax: '500.00', total: '3000.00' },
+  ]);
+
+  // Organisation D — nothing at all: no accounts, no invoices, no statements.
+
   await calculate(orgA);
   await calculate(orgB);
-  augA = one(`select id from public.fiscal_periods where organization_id = '${orgA}' and period_start = '2026-08-01'`);
-  augB = one(`select id from public.fiscal_periods where organization_id = '${orgB}' and period_start = '2026-08-01'`);
+  await calculate(orgC);
+  await calculate(orgD);
+  const aug = (org: string) => one(`select id from public.fiscal_periods where organization_id = '${org}' and period_start = '2026-08-01'`);
+  augA = aug(orgA); augB = aug(orgB); augC = aug(orgC);
 }, 300_000);
 
 afterAll(() => {
-  adminSql(`delete from public.organizations where id in ('${orgA}', '${orgB}');
+  adminSql(`delete from public.organizations where id in ('${orgA}', '${orgB}', '${orgC}', '${orgD}');
             delete from auth.users where email like '%@${DOMAIN}';`);
 });
 
@@ -246,5 +284,58 @@ describe('golden: invoices outrank bank for the P&L, and cash stays the bank’s
   it('reconciles the customer family to the same revenue', () => {
     const total = customerRevenue(orgB, augB).reduce((acc, r) => acc.plus(r.value), new Decimal(0));
     expect(total.toFixed(2)).toBe('4000.00');
+  });
+});
+
+describe('golden: cash is unavailable where nothing can establish it (ADR-104)', () => {
+  const cashKeys = ['closing_cash', 'opening_cash', 'cash_inflows', 'cash_outflows', 'net_cash_movement'];
+
+  it('an invoice-only organisation has no cash figure, not a zero one, and says why', () => {
+    for (const key of cashKeys) {
+      expect(metric(orgA, augA, key), key).toBeNull();
+      expect(snapshotField(orgA, augA, key, 'data_quality'), key).toMatch(/no_bank_accounts/);
+      expect(snapshotField(orgA, augA, key, 'basis'), key).toBe('none');
+    }
+    // The P&L that was independently verified is untouched by the cash rule.
+    expect(money(metric(orgA, augA, 'revenue'))).toBe('8550.00');
+    expect(money(metric(orgA, augA, 'gross_profit'))).toBe('7650.00');
+  });
+
+  it('a bank organisation still has its cash, from the bank, with revenue from the invoices', () => {
+    expect(money(metric(orgB, augB, 'closing_cash'))).toBe('8800.00');
+    expect(snapshotField(orgB, augB, 'closing_cash', 'basis')).toBe('bank');
+    expect(money(metric(orgB, augB, 'revenue'))).toBe('4000.00');
+  });
+
+  it('an organisation with nothing at all writes no zero anywhere', () => {
+    const zeros = adminSql(`select c.metric_key || '=' || s.value::text
+       from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
+      where c.organization_id = '${orgD}' and s.value is not null`);
+    expect(zeros, 'no metric carries a value on an organisation with no data').toBe('');
+  });
+});
+
+describe('golden: evidence on the invoice basis reconciles to the figure it hangs off (ADR-104)', () => {
+  it('cost of sales names the cost-of-sales supplier, not every purchase in the month', () => {
+    const descriptor = JSON.parse(snapshotField(orgA, augA, 'cost_of_sales', 'evidence_query')) as { descriptor: { filters: Record<string, unknown> } };
+    expect(descriptor.descriptor.filters).toEqual({
+      period_ids: [augA], invoice_types: ['purchase', 'purchase_credit_note'], counterparty_ids: [parts],
+    });
+  });
+
+  it('revenue stays on the sales types, which are exactly the figure', () => {
+    const descriptor = JSON.parse(snapshotField(orgA, augA, 'revenue', 'evidence_query')) as { descriptor: { filters: Record<string, unknown> } };
+    expect(descriptor.descriptor.filters).toEqual({ period_ids: [augA], invoice_types: ['sales', 'sales_credit_note'] });
+  });
+});
+
+describe('golden: cost of sales that lives only in invoices is not a zero on the ledger basis (ADR-104)', () => {
+  it('reports cost of sales as unavailable with the reason, and no gross margin', () => {
+    expect(snapshotField(orgC, augC, 'revenue', 'basis')).toBe('ledger');
+    expect(money(metric(orgC, augC, 'revenue'))).toBe('9000.00');
+    expect(metric(orgC, augC, 'cost_of_sales')).toBeNull();
+    expect(snapshotField(orgC, augC, 'cost_of_sales', 'data_quality')).toMatch(/cost_of_sales_in_other_source/);
+    expect(metric(orgC, augC, 'gross_margin')).toBeNull();
+    expect(snapshotField(orgC, augC, 'gross_profit', 'data_quality')).toMatch(/no_cost_of_sales/);
   });
 });

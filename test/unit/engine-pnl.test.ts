@@ -67,6 +67,7 @@ const CONTEXT: EngineContext = {
   },
   accounts: [],
   costOfSalesEverUsed: true,
+  costOfSalesInInvoices: false,
   counterparties: [],
   bankAccounts: [],
   periods: [PERIOD],
@@ -534,9 +535,11 @@ describe('expense_by_account is only written where accounts exist (§3.1)', () =
     });
   });
 
-  it('points an invoice-basis descriptor at invoice types', () => {
+  it('points an invoice-basis descriptor at invoice types, and an expense figure at its suppliers (ADR-104)', () => {
     const results = run(scenario(FULL_MONTH, {
       basis: { basis: 'invoices', assurance: 'verified', warnings: [], proxy: false },
+      // An invoice has no account, so an expense figure is scoped by the suppliers that make it up.
+      invoiceCounterparties: new Map([['cost_of_sales', ['00000000-0000-4000-8000-000000000501']]]),
     }));
     const descriptor = pick(results, 'revenue').evidenceQuery;
     expect(descriptor).toEqual({
@@ -549,8 +552,16 @@ describe('expense_by_account is only written where accounts exist (§3.1)', () =
       },
     });
     expect(pick(results, 'cost_of_sales').evidenceQuery).toMatchObject({
-      descriptor: { filters: { invoice_types: ['purchase', 'purchase_credit_note'] } },
+      descriptor: { filters: {
+        invoice_types: ['purchase', 'purchase_credit_note'],
+        counterparty_ids: ['00000000-0000-4000-8000-000000000501'],
+      } },
     });
+    // A figure no supplier's purchases went into gets no descriptor rather than every purchase.
+    const withoutSuppliers = run(scenario(FULL_MONTH, {
+      basis: { basis: 'invoices', assurance: 'verified', warnings: [], proxy: false },
+    }));
+    expect(pick(withoutSuppliers, 'cost_of_sales').evidenceQuery).toBeNull();
   });
 });
 

@@ -150,7 +150,8 @@ export function buildHeadlineCards(input: {
   // "profit after direct costs" equal to sales would read as a 100% margin.
   const grossProfit = byKey.get('gross_profit');
   const hidesGrossProfit = !grossProfit
-    || grossProfit.dataQuality.missing.includes('no_cost_of_sales_accounts');
+    || grossProfit.dataQuality.missing.includes('no_cost_of_sales_accounts')
+    || grossProfit.dataQuality.missing.includes('cost_of_sales_in_other_source');
 
   // The bank-only variant (ADR-035): the organisation has bank data and NO P&L source at all.
   //

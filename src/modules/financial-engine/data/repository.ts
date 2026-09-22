@@ -294,12 +294,21 @@ export async function loadCostOfSalesEverUsed(
     if ((data ?? []).length > 0) return true;
   }
 
-  /*
-   * The invoice source carries figures too, and carries them without an account (§2.1): a purchase
-   * from a supplier whose `default_expense_category` is `cost_of_sales` IS the system account
-   * carrying a figure, and asking only the two account-bearing tables told an invoice-only business
-   * that it does not track cost of sales — so `gross_profit` silently became revenue (ADR-103).
-   */
+  return false;
+}
+
+/**
+ * Do purchase invoices from a supplier whose `default_expense_category` is `cost_of_sales` exist?
+ *
+ * The invoice source carries figures without an account (§2.1), so the account-bearing check above
+ * cannot see them. Kept SEPARATE from `loadCostOfSalesEverUsed` on purpose (ADR-104): it counts as
+ * "ever used" only when the invoices are the P&L basis. On a ledger basis it is evidence the chosen
+ * source is not reading — and the P&L then says `cost_of_sales_in_other_source` rather than
+ * turning a line the ledger never stated into a zero and a 100% margin.
+ */
+export async function loadCostOfSalesInInvoices(
+  scoped: SupabaseClient, orgId: string,
+): Promise<boolean> {
   const { data: suppliers, error: suppliersError } = await scoped
     .from('counterparties')
     .select('id')

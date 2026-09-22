@@ -101,7 +101,6 @@ export function buildCorpus(recording: Recording = loadRecording()): EvalCase[] 
   const opex = fig(7, 'value');
   const opexChange = fig(7, 'variance.prev_period.value');
   const margin = fig(8, 'value');
-  const cash = fig(9, 'value');
   const expenseRows = (callsBySeq.get(11)!.result.data as { rows: Array<{ subject: { id: string } }> }).rows;
   const rowOf = (id: string) => expenseRows.findIndex((r) => r.subject.id === id);
   const mkt = fig(11, `rows[${rowOf('marketing')}].current`);
@@ -206,13 +205,22 @@ export function buildCorpus(recording: Recording = loadRecording()): EvalCase[] 
       expect: { metricKeys: ['net_margin', 'gross_profit'], numbers: [margin.text, gp.text] },
     },
     {
+      /*
+       * The recorded organisation has a ledger and no bank account. Until ADR-104 the engine handed
+       * the analyst `closing_cash = £0` for it, and this golden repeated the zero as a fact. The
+       * honest answer — and now the only one the tools support — is that cash cannot be established
+       * without a bank account. No figure is quoted, and none may appear.
+       */
       key: 'cash', category: 'Why is cash falling?', question: 'How is our cash?', seqs: [9, 2],
       answer: cited(answer(
-        stmt(`Cash was ${cash.text} at the end of ${MAY}.`, 'deterministic_calculation', [cash]),
-        { confidence: { data_quality_notes: [{ code: 'no_source_covers_period', period: MAY }] },
-          unsupported: [{ topic: 'bank movements', reason: 'no_data' }] },
+        // The NULL snapshot is the evidence: it is what says, with its reason, that there is no cash to show.
+        stmt(`We cannot show your cash for ${MAY}: no bank account has been added yet, so there is no statement to establish it from.`, 'inference', [], MAY,
+          [{ type: 'metric_snapshot', id: (callsBySeq.get(9)!.result as { data?: { snapshot_id?: string } }).data?.snapshot_id ?? '' }]),
+        { key_findings: [stmt(`Sales were ${rev.text} in ${MAY}.`, 'deterministic_calculation', [rev])],
+          confidence: { data_quality_notes: [{ code: 'no_bank_accounts', period: MAY }] },
+          unsupported: [{ topic: 'cash and bank movements', reason: 'no_data' }] },
       )),
-      expect: { metricKeys: ['closing_cash'], numbers: [cash.text] },
+      expect: { metricKeys: ['closing_cash'], numbers: [rev.text], absent: ['£0'] },
     },
   ];
 

@@ -45,6 +45,7 @@ import type {
   LeafDescriptor,
   MetricBasis,
   MetricResult,
+  MetricUnit,
   PeriodRef,
 } from './types';
 
@@ -510,6 +511,44 @@ export function computeCash(
     const warnings: DataQualityWarning[] = [...input.basis.warnings];
     if (coverageRatio < 1) warnings.push('bank_coverage_partial');
     if (input.unreconciledStatement === true) warnings.push('unreconciled_statement');
+
+    /*
+     * §1.5, §2.3, ADR-104: an organisation with no cash-like bank account has no source from which
+     * cash can be established. A sum over zero accounts is not a known zero — it is nothing — and
+     * writing it as 0.00 with completeness 1 told a business whose statements were simply never
+     * uploaded that it had no money. Every metric of the family is NULL with `no_bank_accounts`,
+     * and a later period inherits it through the carried opening exactly as `no_opening_cash` does.
+     * An account that has since been closed still counts for the months a statement covered it.
+     */
+    if (activeCashLikeIds.length === 0 && coveredCashLike.length === 0) {
+      const missing: DataQualityMissing[] = ['no_bank_accounts'];
+      const quality = metricQuality(0, warnings, missing, input.basis.proxy);
+      const unavailable = (key: string, unit: MetricUnit, evidenceQuery: EvidenceQuery | null): MetricResult => ({
+        key, value: null, unit, basis: 'none', assurance: input.basis.assurance,
+        dimensionType: 'none', dimensionId: null, currency: unit === 'money' ? currency : null,
+        components: { bank_accounts: 0, covered_bank_account_ids: [] },
+        dataQuality: quality, evidenceQuery,
+      });
+      perPeriod.push({
+        state: {
+          period, netMovement: new Decimal(0), closing: null, closingBasis: 'none',
+          closingAssurance: input.basis.assurance, closingMissing: missing, completeness: 0, warnings,
+        },
+        metrics: [
+          unavailable('cash_inflows', 'money', null),
+          unavailable('cash_outflows', 'money', null),
+          unavailable('net_cash_movement', 'money', null),
+          unavailable('opening_cash', 'money', null),
+          unavailable('closing_cash', 'money', null),
+        ],
+      });
+      previousClosing = null;
+      previousBasis = 'none';
+      previousAssurance = input.basis.assurance;
+      previousMissing = missing;
+      isFirstPeriod = false;
+      continue;
+    }
 
     const totals = totalMovements(input.movements, accountTypeById);
     if (totals.unpairedCandidates > 0) warnings.push('unpaired_transfer_candidate');

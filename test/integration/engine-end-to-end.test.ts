@@ -128,6 +128,7 @@ function contextFor(): EngineContext {
     calculationRunId: 'run-e2e',
     aggregatedAt: '2026-06-01T00:00:00.000Z',
     costOfSalesEverUsed: true,
+    costOfSalesInInvoices: false,
     asOf: '2026-06-15',
     engineVersion: ENGINE_VERSION,
     settings: {

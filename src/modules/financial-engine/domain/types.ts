@@ -53,6 +53,10 @@ export const DATA_QUALITY_MISSING = [
   'comparison_is_zero', 'insufficient_history', 'no_counterparty_data',
   'uncategorised_amounts_exceed_threshold', 'no_due_dates', 'open_items_only',
   'partial_month',
+  /** No cash-like bank account exists, so nothing can establish cash (ADR-104). */
+  'no_bank_accounts',
+  /** Cost of sales exists in a source the chosen P&L basis is not reading (ADR-104). */
+  'cost_of_sales_in_other_source',
 ] as const;
 export type DataQualityMissing = (typeof DATA_QUALITY_MISSING)[number];
 
@@ -295,6 +299,13 @@ export interface EngineContext {
    * month say the business does not track cost of sales at all (ADR-063).
    */
   readonly costOfSalesEverUsed: boolean;
+  /**
+   * Purchase invoices from a supplier whose `default_expense_category` is `cost_of_sales` exist.
+   * Counts as "cost of sales ever used" ONLY on the invoice basis: on a ledger or balance basis it
+   * is evidence the chosen source is not reading, and the figure says so rather than turning
+   * an unstated line into a zero (ADR-104).
+   */
+  readonly costOfSalesInInvoices: boolean;
   readonly counterparties: readonly CounterpartyRef[];
   readonly bankAccounts: readonly BankAccountRef[];
   readonly periods: readonly PeriodRef[];

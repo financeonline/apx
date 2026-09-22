@@ -295,9 +295,14 @@ function customerAmounts(
   if (customers.total.lessThan(0)) warnings.push('negative_revenue');
 
   const rows: MetricResult[] = [];
+  /*
+   * The synthetic Unattributed row exists to keep Σ customer_revenue + unattributed = revenue exact
+   * (§3.5). When no source covers the family there is no revenue for it to reconcile against, and
+   * writing it as 0.00 would be a known zero nobody knows (§1.5, ADR-104) — so it is not written.
+   */
   const entries: Array<{ id: string | null; amount: Decimal }> = [
     ...customers.attributed,
-    { id: null, amount: customers.unattributed },
+    ...(input.basis.basis === 'none' ? [] : [{ id: null, amount: customers.unattributed }]),
   ];
 
   for (const entry of entries) {
@@ -382,7 +387,7 @@ function supplierAmounts(
   const warnings = input.basis.warnings;
   const entries: Array<{ id: string | null; amount: Decimal }> = [
     ...suppliers.attributed,
-    { id: null, amount: suppliers.unattributed },
+    ...(input.basis.basis === 'none' ? [] : [{ id: null, amount: suppliers.unattributed }]),
   ];
 
   return entries.map((entry) => ({

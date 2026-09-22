@@ -137,3 +137,8 @@ The full gate suite on a clean database (`supabase db reset`) is recorded in the
 3. Attribution remains single-touch (earliest won opportunity), including after a merge.
 4. A merged-away counterparty's own page shows the survivor's figures; it does not redirect.
 5. The eval corpus is recorded, not live.
+
+## 14. Follow-up
+
+The independent re-audit of 55acbeb (`PHASE_14_REMEDIATION_AUDIT.md`) verified this remediation and found three further items — a latent cash zero for organisations with no bank account, over-broad evidence on invoice-basis expense figures, and a silent 100% gross margin on the ledger basis — which are closed in `PHASE_14_FINAL_REMEDIATION_AUDIT.md` (ADR-104).
+

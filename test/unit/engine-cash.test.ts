@@ -96,6 +96,7 @@ function context(overrides: Partial<EngineContext> = {}): EngineContext {
     },
     accounts: [],
     costOfSalesEverUsed: true,
+    costOfSalesInInvoices: false,
     counterparties: [],
     bankAccounts: [bankAccount(CURRENT, 'current'), bankAccount(SAVINGS, 'savings')],
     periods: [],
@@ -464,12 +465,60 @@ describe('opening cash (CD-06, ADR-027.3)', () => {
     expect(metric(results, 0, 'opening_cash').dataQuality.missing).toEqual(['no_opening_cash']);
   });
 
-  it('reports zero opening cash for an organization with no cash-like accounts at all', () => {
-    // Zero here is knowledge, not a gap: there is nothing to have a balance (§1.5).
-    const ctx = context({ bankAccounts: [bankAccount(CARD, 'credit_card')] });
-    const results = computeCash(ctx, [periodInput(0, [], { coveredBankAccountIds: [] })]);
-    expect(metric(results, 0, 'opening_cash').value).toBe('0.00');
-    expect(metric(results, 0, 'opening_cash').dataQuality.missing).toEqual([]);
+  /*
+   * ADR-104. This case used to assert 0.00 "because there is nothing to have a balance". That was
+   * the defect: a sum over zero accounts is not knowledge, and a business whose statements were
+   * never uploaded was told, with completeness 1, that it had no money. Nothing can establish cash
+   * without a cash-like account, so the whole family is unavailable with the reason.
+   */
+  it('reports cash as unavailable, not zero, for an organization with no cash-like account at all', () => {
+    for (const bankAccounts of [[], [bankAccount(CARD, 'credit_card')]]) {
+      const ctx = context({ bankAccounts });
+      const results = computeCash(ctx, [
+        periodInput(0, [], { coveredBankAccountIds: [], basis: { basis: 'none', assurance: 'calculated', warnings: [], proxy: false } }),
+        periodInput(1, [], { coveredBankAccountIds: [], basis: { basis: 'none', assurance: 'calculated', warnings: [], proxy: false } }),
+      ]);
+      for (const key of ['opening_cash', 'closing_cash', 'cash_inflows', 'cash_outflows', 'net_cash_movement']) {
+        for (const index of [0, 1]) {
+          const m = metric(results, index, key);
+          expect(m.value, `${key} in period ${index}`).toBeNull();
+          expect(m.dataQuality.missing, key).toContain('no_bank_accounts');
+          expect(m.dataQuality.completeness, key).toBe(0);
+          expect(m.basis, key).toBe('none');
+        }
+      }
+      expect(metric(results, 1, 'cash_runway_months').value).toBeNull();
+    }
+  });
+
+  it('still computes the months a since-closed account was covered for', () => {
+    // The account is inactive today, but August's statement covered it: that month has a source.
+    const ctx = context({ bankAccounts: [bankAccount(CURRENT, 'current', { isActive: false })] });
+    const results = computeCash(ctx, [
+      periodInput(0, [cell({ periodId: period(0).id, bankAccountId: CURRENT, inflow: '250.00' })], {
+        coveredBankAccountIds: [CURRENT], openingCandidates: [statementOpening(CURRENT, '1000.00')],
+      }),
+    ]);
+    expect(metric(results, 0, 'closing_cash').value).toBe('1250.00');
+  });
+
+  it('aggregates valid balances across several accounts, and refuses when one is missing', () => {
+    const ctx = context();
+    const both = computeCash(ctx, [
+      periodInput(0, [
+        cell({ periodId: period(0).id, bankAccountId: CURRENT, inflow: '100.00' }),
+        cell({ periodId: period(0).id, bankAccountId: SAVINGS, outflow: '40.00' }),
+      ], { openingCandidates: [statementOpening(CURRENT, '1000.00'), statementOpening(SAVINGS, '500.00')] }),
+    ]);
+    expect(metric(both, 0, 'opening_cash').value).toBe('1500.00');
+    expect(metric(both, 0, 'closing_cash').value).toBe('1560.00');
+    expect(metric(both, 0, 'closing_cash').dataQuality.missing).toEqual([]);
+
+    const oneMissing = computeCash(ctx, [
+      periodInput(0, [], { openingCandidates: [statementOpening(CURRENT, '1000.00')] }),
+    ]);
+    expect(metric(oneMissing, 0, 'closing_cash').value).toBeNull();
+    expect(metric(oneMissing, 0, 'closing_cash').dataQuality.missing).toContain('no_opening_cash');
   });
 });
 

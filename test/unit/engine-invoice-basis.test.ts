@@ -52,6 +52,7 @@ const context = (over: Partial<EngineContext> = {}): EngineContext => ({
     taxableCategories: ['revenue', 'cost_of_sales', 'operating_expense', 'marketing'],
   },
   costOfSalesEverUsed: true,
+  costOfSalesInInvoices: false,
   accounts: CHART,
   counterparties: [],
   bankAccounts: [],
@@ -221,10 +222,120 @@ describe('a chart missing the category still reports the money', () => {
       context: context({
         accounts: chartWithoutCostOfSales,
         costOfSalesEverUsed: false,
+        costOfSalesInInvoices: false,
         counterparties: [customer('cp-beta'), supplier('cp-parts', 'cost_of_sales')],
       }),
     });
     expect(valueOf(results, 'revenue')).toBe('3000.00');
     expect(find(results, 'revenue')!.dataQuality.warnings).toContain('uncategorised_amounts');
+  });
+});
+
+describe('evidence on the invoice basis re-selects the rows behind THAT figure (ADR-104)', () => {
+  /*
+   * Two suppliers in two categories. Before ADR-104 every expense figure carried the same
+   * descriptor — "all purchases this period" — so drilling into cost of sales listed marketing too.
+   */
+  const results = composePeriod({
+    period: may,
+    coverage: invoiceCoverage(),
+    cells: [
+      invoiceCell('sales', 'cp-beta', '10000.00'),
+      invoiceCell('purchase', 'cp-stock', '3000.00'),
+      invoiceCell('purchase', 'cp-ads', '1000.00'),
+    ],
+    transferLegs: [],
+    context: context({
+      accounts: [...CHART, account('a-mkt', 'marketing', 'expense')],
+      counterparties: [customer('cp-beta'), supplier('cp-stock', 'cost_of_sales'), supplier('cp-ads', 'marketing')],
+    }),
+  });
+  const descriptorOf = (key: string, dimensionKey: string | null = null) => {
+    const row = results.find((r) => r.key === key && (dimensionKey === null ? r.dimensionType === 'none' : r.dimensionKey === dimensionKey));
+    const q = row?.evidenceQuery;
+    return q && q.kind === 'leaf' ? q.descriptor.filters : q ?? null;
+  };
+
+  it('names only the cost-of-sales suppliers behind cost of sales', () => {
+    expect(descriptorOf('cost_of_sales')).toEqual({
+      period_ids: [may.id], invoice_types: ['purchase', 'purchase_credit_note'], counterparty_ids: ['cp-stock'],
+    });
+  });
+
+  it('names only the marketing suppliers behind the marketing category', () => {
+    expect(descriptorOf('expense_by_category', 'marketing')).toMatchObject({ counterparty_ids: ['cp-ads'] });
+    expect(descriptorOf('operating_expenses')).toMatchObject({ counterparty_ids: ['cp-ads'] });
+  });
+
+  it('leaves revenue on the sales types, which are exactly the figure', () => {
+    expect(descriptorOf('revenue')).toEqual({ period_ids: [may.id], invoice_types: ['sales', 'sales_credit_note'] });
+  });
+
+  it('gives a figure nobody’s purchases went into no descriptor rather than one that re-selects every purchase', () => {
+    const onlySales = composePeriod({
+      period: may, coverage: invoiceCoverage(), transferLegs: [],
+      cells: [invoiceCell('sales', 'cp-beta', '10000.00')],
+      context: context({ counterparties: [customer('cp-beta')], costOfSalesEverUsed: true }),
+    });
+    const cos = onlySales.find((r) => r.key === 'cost_of_sales' && r.dimensionType === 'none')!;
+    expect(cos.value).toBe('0.00');
+    expect(cos.evidenceQuery).toBeNull();
+  });
+});
+
+describe('cost of sales that lives only in invoices does not become a zero on another basis (ADR-104)', () => {
+  const ledgerCoverage = () => computeCoverage({
+    period: may,
+    batches: [{
+      id: 'b-gl', targetTable: 'ledger_entries', balanceKind: null, balanceBasis: null,
+      bankAccountId: null, invoiceListKind: null,
+      periodStart: '2026-05-01', periodEnd: '2026-05-31', committedAt: '2026-06-02T00:00:00Z',
+    }],
+    bankAccounts: [], rowCounts: { ledger: 1 }, asOf: '2026-06-15',
+  });
+  const ledgerRevenue: AggregateCell = {
+    periodId: may.id, source: 'ledger', standardCategory: 'revenue', accountId: 'a-rev',
+    counterpartyId: null, bankAccountId: null, balanceKind: null, balanceBasis: null,
+    invoiceType: null, transferKind: null, unpairedTransferCandidate: false,
+    debit: '0', credit: '9000.00', amount: '-9000.00', rowCount: 1, fallbackRows: 0,
+    minDate: '2026-05-31', maxDate: '2026-05-31',
+  };
+
+  it('on the ledger basis, reports cost of sales as unavailable with the reason, and no 100% margin', () => {
+    const results = composePeriod({
+      period: may, coverage: ledgerCoverage(), transferLegs: [],
+      cells: [ledgerRevenue, invoiceCell('purchase', 'cp-stock', '2500.00')],
+      context: context({
+        costOfSalesEverUsed: false, costOfSalesInInvoices: true,
+        counterparties: [supplier('cp-stock', 'cost_of_sales')],
+      }),
+    });
+    const cos = find(results, 'cost_of_sales')!;
+    expect(cos.value).toBeNull();
+    expect(cos.dataQuality.missing).toEqual(['cost_of_sales_in_other_source']);
+    expect(valueOf(results, 'gross_margin')).toBeNull();
+    expect(find(results, 'gross_profit')!.dataQuality.warnings).toContain('no_cost_of_sales');
+  });
+
+  it('on the invoice basis, the same evidence IS the cost of sales', () => {
+    const results = composePeriod({
+      period: may, coverage: invoiceCoverage(), transferLegs: [],
+      cells: [invoiceCell('sales', 'cp-beta', '9000.00'), invoiceCell('purchase', 'cp-stock', '2500.00')],
+      context: context({
+        costOfSalesEverUsed: false, costOfSalesInInvoices: true,
+        counterparties: [customer('cp-beta'), supplier('cp-stock', 'cost_of_sales')],
+      }),
+    });
+    expect(valueOf(results, 'cost_of_sales')).toBe('2500.00');
+    expect(valueOf(results, 'gross_profit')).toBe('6500.00');
+  });
+
+  it('with no cost-of-sales evidence anywhere, still says there are no such accounts', () => {
+    const results = composePeriod({
+      period: may, coverage: ledgerCoverage(), transferLegs: [],
+      cells: [ledgerRevenue],
+      context: context({ costOfSalesEverUsed: false, costOfSalesInInvoices: false }),
+    });
+    expect(find(results, 'cost_of_sales')!.dataQuality.missing).toEqual(['no_cost_of_sales_accounts']);
   });
 });

@@ -70,6 +70,7 @@ function context(overrides: Partial<EngineContext['settings']> = {}): EngineCont
     },
     accounts: [],
     costOfSalesEverUsed: true,
+    costOfSalesInInvoices: false,
     counterparties: [],
     bankAccounts: [],
     periods: [],
