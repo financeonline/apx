@@ -55,7 +55,7 @@ Desktop: left sidebar. Mobile: bottom tab bar (§10). The order is fixed and mat
 | Home | `/app/[orgSlug]/home` | Answer "how are we doing" in ten seconds | Your health score, headline numbers, top risks and what needs doing | All roles (`dashboard.view`) |
 | Insights | `/app/[orgSlug]/insights` | What changed, why, and open alerts | Biggest changes this period, alerts, and the reasons behind them | All roles (`financials.view`) |
 | Money | `/app/[orgSlug]/money` | The numbers in detail | Profit and loss, cash, bank activity, who owes you and who you owe | All roles (`financials.view`, `banking.view`) |
-| Customers | `/app/[orgSlug]/customers` | Who the business depends on | Revenue by customer, concentration, overdue balances | All roles (`customers.view`) |
+| Customers | `/app/[orgSlug]/customers` | Where the money comes from | Commercial overview (Phase 14): revenue, top customers, top products, marketing, pipeline, concentration, revenue by customer | All roles (`customers.view`) |
 | Actions | `/app/[orgSlug]/actions` | Turn insight into work | Tasks assigned to people, with due dates and outcomes | All roles (`actions.view`) |
 | Reports | `/app/[orgSlug]/reports` | Something to print or send | The Monthly Management Report | All roles (`reports.view`) |
 | AI Analyst | `/app/[orgSlug]/analyst` | Ask questions in plain English | Answers with evidence, drawn only from your validated numbers | All roles (`ai.use`) |
@@ -71,8 +71,9 @@ Global header (all tenant pages): organisation switcher (left), period picker (c
 
 | Parent | Sub-navigation | Routes |
 |---|---|---|
-| Money | Tabs: Profit & loss · Cash · Bank activity · Owed to you · You owe | `/money/profit-and-loss`, `/money/cash`, `/money/banking`, `/money/receivables`, `/money/payables` (`/money` redirects to Profit & loss) |
+| Money | Tabs: Profit & loss · Cash · Banking · Owed to you · You owe | `/money/profit-and-loss`, `/money/cash`, `/money/banking` (Phase 13: overview → `/money/banking/transactions` → `/money/banking/transactions/[transactionId]`), `/money/receivables`, `/money/payables` (`/money` redirects to Profit & loss) |
 | Money (continued) | Two forward-looking pages reached from the Money index, not from the sidebar — §3.1's seven items are fixed and ADR-037 created the Data menu specifically to keep them there (ADR-099, ADR-100) | `/forecast` (what the finished months suggest the next three will look like), `/what-if` and `/what-if/[scenarioId]` (the same three months with stated changes applied) |
+| Customers | Tabs: Customers · Products · Sales · Marketing (Phase 14, ADR-102); forms for `customers.edit` only, at the foot of each tab; the invoice-line split under a disclosure on the customer page | `/customers`, `/customers/[counterpartyId]`, `/customers/products`, `/customers/products/[productId]`, `/customers/sales`, `/customers/marketing`, `/customers/marketing/[campaignId]` |
 | Settings | Sub-pages: Organisation (name, fiscal year, currency, timezone) · Team · Audit log · Billing (feature flag) · Danger zone | `/settings`, `/settings/team`, `/settings/audit`, `/settings/billing`, `/settings/danger` |
 | Data (header menu, not a sidebar item) | Add data · Imports · Documents · Accounts | `/data/imports/new`, `/data/imports`, `/data/imports/[batchId]`, `/data/documents`, `/data/documents/[documentId]`, `/data/accounts` |
 | Reports | List → Monthly report for a period | `/reports`, `/reports/monthly/[period]` |

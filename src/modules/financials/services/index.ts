@@ -91,7 +91,7 @@ export async function createBankAccount(
       bank_name: parsed.bankName,
       account_number_masked: parsed.accountNumberMasked ?? null,
       sort_code_masked: parsed.sortCodeMasked ?? null,
-      currency: parsed.currency,
+      currency: parsed.currency ?? null,
       account_type: parsed.accountType,
       ledger_account_id: parsed.ledgerAccountId ?? null,
     },

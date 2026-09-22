@@ -75,6 +75,17 @@ const CALLS: ReadonlyArray<{ name: string; input: Record<string, unknown> }> = [
    * adversarial cases prove the model neither invents one nor claims the feature is missing.
    */
   { name: 'get_scenario', input: {} },
+  // Phase 13 (ADR-101): the banking tools, against an organisation with no bank account — the
+  // honest NO_DATA the corpus's banking cases are built on. Appended, so earlier seqs stand.
+  { name: 'get_bank_accounts', input: { period: 'May 2026' } },
+  { name: 'get_recurring_payments', input: {} },
+  { name: 'get_unusual_transactions', input: { period: 'May 2026' } },
+  { name: 'get_bank_categories', input: { period: 'May 2026' } },
+  // Phase 14 (ADR-102): the commercial tools, against an organisation that has recorded no products,
+  // campaigns or opportunities — the honest NO_DATA the corpus's attribution cases are built on.
+  { name: 'get_product_contribution', input: { period: 'May 2026' } },
+  { name: 'get_campaign_performance', input: { period: 'May 2026' } },
+  { name: 'get_sales_pipeline', input: { period: 'May 2026' } },
 ];
 
 export interface Recording {

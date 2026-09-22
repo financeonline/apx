@@ -67,14 +67,14 @@ const ledgerCell = (
   counterpartyId: null, bankAccountId: null, balanceKind: null, balanceBasis: null,
   invoiceType: null, transferKind: null, unpairedTransferCandidate: false,
   debit, credit, amount: String(Number(debit) - Number(credit)),
-  rowCount, minDate: '2026-05-01', maxDate: '2026-05-31',
+  rowCount, minDate: '2026-05-01', maxDate: '2026-05-31', fallbackRows: 0,
 });
 
 const bankCell = (over: Partial<AggregateCell> = {}): AggregateCell => ({
   periodId: may.id, source: 'bank', standardCategory: null, accountId: null,
   counterpartyId: null, bankAccountId: 'ba-current', balanceKind: null, balanceBasis: null,
   invoiceType: null, transferKind: 'none', unpairedTransferCandidate: false,
-  debit: '0', credit: '0', amount: '0', rowCount: 1,
+  debit: '0', credit: '0', amount: '0', rowCount: 1, fallbackRows: 0,
   minDate: '2026-05-01', maxDate: '2026-05-31', ...over,
 });
 

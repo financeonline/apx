@@ -34,6 +34,8 @@ Next.js App Router. Three route families, each with its own root layout and shel
 /app/[orgSlug]/money/profit-and-loss
 /app/[orgSlug]/money/cash
 /app/[orgSlug]/money/banking
+/app/[orgSlug]/money/banking/transactions
+/app/[orgSlug]/money/banking/transactions/[transactionId]
 /app/[orgSlug]/money/receivables
 /app/[orgSlug]/money/payables
 /app/[orgSlug]/forecast
@@ -41,6 +43,11 @@ Next.js App Router. Three route families, each with its own root layout and shel
 /app/[orgSlug]/what-if/[scenarioId]
 /app/[orgSlug]/customers
 /app/[orgSlug]/customers/[counterpartyId]
+/app/[orgSlug]/customers/products
+/app/[orgSlug]/customers/products/[productId]
+/app/[orgSlug]/customers/sales
+/app/[orgSlug]/customers/marketing
+/app/[orgSlug]/customers/marketing/[campaignId]
 /app/[orgSlug]/actions
 /app/[orgSlug]/actions/[actionId]
 /app/[orgSlug]/reports
@@ -113,12 +120,17 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 | `/insights` | What changed and why: variances, alerts, movements | all | `dashboard.view`, `financials.view` | — | Server | `alerts.list`, `financialEngine.getVariances(period)`, `financialEngine.getExpenseChanges` | No periods with 2 months → "Need two months to compare" |
 | `/money/profit-and-loss` | P&L by standard category, drill to accounts | all | `financials.view` | — | Server | `financialEngine.getPnl(period)`, `expense_by_category`, `expense_by_account` | No P&L data → explains which imports produce a P&L |
 | `/money/cash` | Opening/closing cash, movement, runway | all | `financials.view`, `banking.view` | — | Server | `financialEngine.getCash(period)` | No bank data → prompt to import a statement or enter opening balance (CD-06) |
-| `/money/banking` | Bank accounts, transactions, categorisation, recurring, transfers | all (edit needs `banking.reconcile`) | `banking.view` | — | Server list; client table | `banking.listAccounts`, `banking.listTransactions(filters)`, `banking.listRecurring` | No accounts → add account / import statement |
+| `/money/banking` | Banking Intelligence (Phase 13, ADR-101): cash available, money in/out/net, things to notice, accounts with statement balances and freshness, regular payments, where money went, liquidity indicators, reconciliation; add-account form for `financials.edit`. Always states the data is imported statements, never a connection | all (edit needs `banking.reconcile`; add account needs `financials.edit`) | `banking.view` | — | Server | `dashboard.loadBankingOverview` → `metric_current` + `api.bank_period_summary` | No accounts → add-account form; no statement → prompt to import |
+| `/money/banking/transactions` | One month of statement lines, paged (200) and filtered on the server (money in/out, uncategorised, transfers, transfer look-alikes, one account, one recurring group) | all | `banking.view` | — | Server | `dashboard.loadBankTransactionsPage` | No rows → sentence |
+| `/money/banking/transactions/[transactionId]` | One statement line: date, description, amount, in/out, account, category and who set it, transfer state, whether it counts, printed balance, statement reconciliation, link to its record page; categorise + pair/unpair forms for `banking.reconcile` | all (edit needs `banking.reconcile`) | `banking.view` | — | Server; two client forms | `dashboard.loadBankTransactionDetail`; actions → `api.override_bank_category`, `api.mark_transfer` | Cross-org or malformed id → 404 |
 | `/money/receivables`, `/money/payables` | Aging, overdue, days | all | `financials.view` | — | Server | `financialEngine.getReceivables/Payables(period)` | No invoices → basis note (CD-07) |
 | `/forecast` | What the finished months suggest the next three will look like (Phase 11, ADR-099) | all | `dashboard.view` | — | Server | `forecast.loadForecast`, `forecast.generateForecast` (action) | Too little history → the sufficiency reason, and no figure |
 | `/what-if`, `/what-if/[scenarioId]` | The same three months with stated changes applied: BASELINE beside SCENARIO, assumptions on the page (Phase 12, ADR-100) | all may READ; working one out and archiving need `intelligence.recompute`, so a client sees no form | `dashboard.view` | — | Server page; client form | `scenarios.loadScenario`, `scenarios.listScenarios`, `scenarios.runScenario` / `scenarios.archiveScenario` (actions) | No forecast → sent to `/forecast`; an assumption MOTION cannot apply → the condition that stopped it, and nothing saved; a scenario id from another organisation → 404 |
-| `/customers` | Revenue by customer, concentration | all | `customers.view` | — | Server | `financialEngine.getCustomerRevenue(period)`, `counterparties.list(kind=customer)` | No customer data → explains sales invoice import |
-| `/customers/[counterpartyId]` | One counterparty: revenue trend, invoices, transactions, actions | all (edit needs `customers.edit`) | `customers.view` | — | Server | `counterparties.get`, `invoices.listFor`, `financialEngine.getCustomerTrend` | Cross-org id → 404 |
+| `/customers` | Commercial overview (Phase 14, ADR-102): revenue, top customers with the contribution note, top products, marketing (spend, credited revenue), pipeline, concentration + trend, then revenue by customer; tabs Customers · Products · Sales · Marketing | all | `customers.view` | — | Server | `dashboard.loadCustomers`, `dashboard.loadCommercialOverview` | No customer data → explains sales invoice import |
+| `/customers/products`, `/customers/products/[productId]` | Revenue by product from attributed lines, cost/contribution only with cost lines, unattributed remainder; product: month figures, trend, customer mix, lines with record links; add-product form for `customers.edit` | all | `customers.view` | — | Server | `dashboard.loadProducts`, `dashboard.loadProductDetail` | None → how to add; foreign/malformed id → 404 |
+| `/customers/sales` | Pipeline by stage, conversion with named cohort, won vs engine revenue by month, opportunities; add/move-stage forms for `customers.edit` | all | `customers.view` | — | Server + client forms | `dashboard.loadSales` | None → how to add |
+| `/customers/marketing`, `/customers/marketing/[campaignId]` | Campaigns: spend, customers won, revenue credited through won opportunities, cost per customer with its note; channels; campaign: month by month, customers won, conversion, opportunities; channel/campaign/spend forms for `customers.edit` | all | `customers.view` | — | Server + client forms | `dashboard.loadMarketing`, `dashboard.loadCampaignDetail` | None → how to add; foreign id → 404 |
+| `/customers/[counterpartyId]` | One counterparty: revenue, share and contribution (with the CD-08 note), what they buy, how they were won, revenue trend, invoices with their line split (split form for `customers.edit`) | all (edit needs `customers.edit`) | `customers.view` | — | Server + client form | `dashboard.loadCustomerDetail`, `dashboard.loadCustomerCommercial` | Cross-org id → 404 |
 | `/actions` | Action Centre list, filters | all | `actions.view` | — | Server; client filters | `actions.list` | None → "No actions yet" with create (if `actions.create`) |
 | `/actions/[actionId]` | Detail, status, outcome, evidence | all | `actions.view` (+`actions.update_own` / `actions.assign`) | — | Server + client form | `actions.get`, `evidence.getBundle` | Cross-org → 404 |
 | `/reports` | Report list (MVP: monthly) | all | `reports.view` | — | Server | `reporting.listAvailable` | No closed month → "First report available after month end" |

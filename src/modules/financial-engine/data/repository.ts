@@ -58,6 +58,7 @@ export async function loadAggregates(
     credit: String(r.credit ?? '0'),
     amount: String(r.amount ?? '0'),
     rowCount: Number(r.row_count ?? 0),
+    fallbackRows: Number(r.fallback_rows ?? 0),
     minDate: r.min_date as string | null,
     maxDate: r.max_date as string | null,
   }));
@@ -149,7 +150,7 @@ export async function loadCounterparties(
 ): Promise<CounterpartyRef[]> {
   const { data, error } = await scoped
     .from('counterparties')
-    .select('id, name, kind, merged_into_id')
+    .select('id, name, kind, merged_into_id, default_expense_category')
     .eq('organization_id', orgId);
 
   return unwrap(data, error).map((r) => ({
@@ -157,6 +158,7 @@ export async function loadCounterparties(
     name: r.name as string,
     kind: r.kind as CounterpartyRef['kind'],
     mergedIntoId: r.merged_into_id as string | null,
+    defaultExpenseCategory: (r.default_expense_category as CounterpartyRef['defaultExpenseCategory']) ?? null,
   }));
 }
 
@@ -291,7 +293,34 @@ export async function loadCostOfSalesEverUsed(
     if (error) throw toMotionError(error);
     if ((data ?? []).length > 0) return true;
   }
-  return false;
+
+  /*
+   * The invoice source carries figures too, and carries them without an account (§2.1): a purchase
+   * from a supplier whose `default_expense_category` is `cost_of_sales` IS the system account
+   * carrying a figure, and asking only the two account-bearing tables told an invoice-only business
+   * that it does not track cost of sales — so `gross_profit` silently became revenue (ADR-103).
+   */
+  const { data: suppliers, error: suppliersError } = await scoped
+    .from('counterparties')
+    .select('id')
+    .eq('organization_id', orgId)
+    .eq('default_expense_category', 'cost_of_sales');
+  if (suppliersError) throw toMotionError(suppliersError);
+  const supplierIds = (suppliers ?? []).map((c) => c.id as string);
+  if (supplierIds.length === 0) return false;
+
+  const { data: purchases, error: purchasesError } = await scoped
+    .from('invoices')
+    .select('id')
+    .eq('organization_id', orgId)
+    .eq('record_status', 'accepted')
+    .is('superseded_by', null)
+    .neq('status', 'void')
+    .in('invoice_type', ['purchase', 'purchase_credit_note'])
+    .in('counterparty_id', supplierIds)
+    .limit(1);
+  if (purchasesError) throw toMotionError(purchasesError);
+  return (purchases ?? []).length > 0;
 }
 
 /**

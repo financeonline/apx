@@ -2,7 +2,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  aggregationInstant, enqueueServerJob, finishCalculationRun, finishChunk, finishHealth,
+  aggregationInstant, applyBankingPass, enqueueServerJob, finishCalculationRun, finishChunk, finishHealth,
   setPeriodCompleteness, startCalculationRun,
 } from '@/core/db';
 import {
@@ -11,6 +11,7 @@ import {
   type PeriodCoverage, type PeriodRef,
 } from '@/modules/financial-engine';
 import { healthStep } from '@/modules/health';
+import { bankingStep } from '@/modules/banking';
 import type { ClaimedJob, JobOutcome } from '../domain/types';
 
 /**
@@ -133,6 +134,8 @@ export async function runCalculationJob(
     // The health step reads the snapshots this chunk just committed (§7.4 pins their ids), so it
     // takes the same scoped client and nothing else.
     scoreHealth: healthStep({ scoped, finishHealth }),
+    // Phase 13 (ADR-101): the banking rules run first, through the same scoped client.
+    bankingPass: bankingStep({ scoped, applyBankingPass }),
   }, {
     organizationId: orgId,
     trigger,

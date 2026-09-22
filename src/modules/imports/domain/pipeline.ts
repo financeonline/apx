@@ -286,6 +286,20 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     }
   }
 
+  /*
+   * Currency (Phase 13, ADR-101). A file with no currency column used to reach commit with none,
+   * and the insert's fallback stamped the row 'GBP' whatever the organisation reports in — an INR
+   * statement stored as pounds. The row is stamped with the organisation's currency HERE, where the
+   * base currency is known, so nothing downstream has to guess; a file that does name a currency
+   * keeps it, upper-cased, and IMP-CUR-007 below still refuses one that differs.
+   */
+  for (const s of staged) {
+    if (s.nonTabular) continue;
+    const named = s.mapped.currency;
+    s.mapped.currency = named === undefined || named === null || named.trim() === ''
+      ? input.baseCurrency.toUpperCase()
+      : named.trim().toUpperCase();
+  }
   const hiddenRows = new Set(staged.filter((s) => s.hidden).map((s) => s.rowNumber));
 
   const validationCtx = {

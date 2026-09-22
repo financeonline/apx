@@ -5,13 +5,13 @@ import { can } from '@/core/permissions';
 /**
  * The Money section shell (UX_ARCHITECTURE.md §3.2, ROUTE_ARCHITECTURE.md §9).
  *
- * Five tabs in the fixed order §3.2 gives them. Bank activity is absent — not disabled — for a role
+ * Five tabs in the fixed order §3.2 gives them. Banking is absent — not disabled — for a role
  * without `banking.view` (RBAC §5, §7.4).
  */
 const TABS = [
   { slug: 'profit-and-loss', label: 'Profit & loss', permission: 'financials.view' },
   { slug: 'cash', label: 'Cash', permission: 'financials.view' },
-  { slug: 'banking', label: 'Bank activity', permission: 'banking.view' },
+  { slug: 'banking', label: 'Banking', permission: 'banking.view' },
   { slug: 'receivables', label: 'Owed to you', permission: 'financials.view' },
   { slug: 'payables', label: 'You owe', permission: 'financials.view' },
 ] as const;

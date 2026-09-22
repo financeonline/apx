@@ -136,23 +136,23 @@ MVP column values:
 | REQ-FD-06 | One base currency per organization; every amount column stores a currency code. | SOW §7 | Architectural | MVP-limited: single currency | CD-10, ADR-006 | CD-10 |
 | REQ-FD-07 | Calendar months are the atomic period; fiscal-year start month is configurable. | SOW §7, §12 | Architectural | MVP | ADR-007 | CD-09 |
 | REQ-FD-08 | MOTION sits above existing accounting and business systems rather than replacing every specialist system. | SOW §1 | SOW requirement | MVP (principle) | — | — |
-| REQ-FD-09 | Invoice line items and products/services are captured for product contribution. | SOW §7, §16 | SOW requirement | Post-MVP (P14) | `invoice_lines` | CD-08 |
+| REQ-FD-09 | Invoice line items and products/services are captured for product contribution. | SOW §7, §16 | SOW requirement | **Built (P14)**: `products`, `invoice_lines` (Σ ≤ invoice net), split form on the customer page | `invoice_lines` | CD-08, ADR-102 |
 
 ## 7. Banking
 
 | ID | Requirement | SOW § | Type | MVP | Dependencies | Open question |
 |---|---|---|---|---|---|---|
-| REQ-BK-01 | Bank account overview. | SOW §15 | SOW requirement | MVP | `bank_accounts` | — |
-| REQ-BK-02 | Balances and cash trends. | SOW §15 | SOW requirement | MVP | `closing_cash`, `opening_cash` | CD-06 |
+| REQ-BK-01 | Bank account overview. | SOW §15 | SOW requirement | **Built (P13)**: `/money/banking` accounts with statement balance, in/out/net, freshness, reconciliation; add-account form | `bank_accounts`, `api.bank_period_summary` | ADR-101 |
+| REQ-BK-02 | Balances and cash trends. | SOW §15 | SOW requirement | **Built (P13)**: engine cash figures + statement balances as facts; three-month trend | `closing_cash`, `opening_cash` | CD-06, ADR-101 |
 | REQ-BK-03 | Inflows and outflows. | SOW §15 | SOW requirement | MVP | `cash_inflows`, `cash_outflows`; transfers excluded | CD-28 |
-| REQ-BK-04 | Transaction categorisation. | SOW §15 | SOW requirement | MVP | `bank_transactions.category_account_id`, rule-based with user override | — |
-| REQ-BK-05 | Recurring payments. | SOW §15 | SOW requirement | MVP | `recurring_payment_groups` | — |
-| REQ-BK-06 | Unusual transaction detection. | SOW §15, §13 | SOW requirement | MVP | Alert rules (REQ-AL-03) | — |
-| REQ-BK-07 | Liquidity indicators. | SOW §8, §15 | SOW requirement | MVP-limited: closing cash and `cash_runway_months`; ratios post-MVP | CD-20 | — |
-| REQ-BK-08 | Reconciliation status. | SOW §15 | SOW requirement | MVP-limited: coverage status (bank vs ledger presence and net-movement difference); transaction matching Post-MVP (P13) | CD-20 | CD-20 |
-| REQ-BK-09 | Bank transaction drill-down to source data. | SOW §15 | SOW requirement | MVP | `source_ref`, evidence UI | — |
-| REQ-BK-10 | Live bank connectivity shall be implemented only through supported secure integrations; the system shall not claim live connectivity where none exists. | SOW §15 | SOW requirement | Post-MVP (P13); MVP UI shows "last statement imported" | CD-21 | — |
-| REQ-BK-11 | Banking intelligence includes cash movement, recurring payments, anomalies and reconciliation (module scope). | SOW §3 | SOW requirement | MVP-limited per REQ-BK-08 | — | — |
+| REQ-BK-04 | Transaction categorisation. | SOW §15 | SOW requirement | **Built (P13)**: the keyword ladder now RUNS inside every calculation (banking pass); user override on the transaction page | `bank_transactions.category_account_id`, `category_history` | ADR-101 |
+| REQ-BK-05 | Recurring payments. | SOW §15 | SOW requirement | **Built (P13)**: detected by the pass, listed on `/money/banking` and through tool 21 | `recurring_payment_groups` | ADR-101 |
+| REQ-BK-06 | Unusual transaction detection. | SOW §15, §13 | SOW requirement | **Built (P13)**: the deterministic alert rules surface under "Things to notice" and tool 22, with transfer look-alikes | Alert rules (REQ-AL-03) | ADR-101 |
+| REQ-BK-07 | Liquidity indicators. | SOW §8, §15 | SOW requirement | **Built (P13)**, limited by design: cash available, runway, net movement, three-month trend, cash concentration across accounts; each says "not enough data" rather than guessing; no invented ratios | CD-20 | ADR-101 |
+| REQ-BK-08 | Reconciliation status. | SOW §15 | SOW requirement | **Built (P13)** as CD-20 defines it: per account and month from the statement batch (reconciled / does not reconcile / not checked / no statement) and the engine's statement cross-check at organisation level. Line-by-line matching to ledger entries remains post-MVP | CD-20 | CD-20, ADR-101 |
+| REQ-BK-09 | Bank transaction drill-down to source data. | SOW §15 | SOW requirement | **Built (P13)**: figure → drawer → rows; transaction page → record page → statement (`documents.view`) | `source_ref`, evidence UI | ADR-101 |
+| REQ-BK-10 | Live bank connectivity shall be implemented only through supported secure integrations; the system shall not claim live connectivity where none exists. | SOW §15 | SOW requirement | **Honoured (P13)**: no provider exists; every banking page and tool states "imported statements, not connected" with the last import date; the vocabulary of a connection is tested absent | CD-21 | ADR-101 |
+| REQ-BK-11 | Banking intelligence includes cash movement, recurring payments, anomalies and reconciliation (module scope). | SOW §3 | SOW requirement | **Built (P13)** per REQ-BK-01…09 | — | ADR-101 |
 
 ## 8. Calculations
 
@@ -168,7 +168,7 @@ MVP column values:
 | REQ-CA-08 | Receivables and payables. | SOW §7 | SOW requirement | MVP | `receivables`, `payables`, `*_days`, `*_overdue` | CD-07 |
 | REQ-CA-09 | Working capital. | SOW §7 | SOW requirement | MVP | `working_capital` | — |
 | REQ-CA-10 | Contribution margin. | SOW §7 | SOW requirement | MVP | `contribution_margin`, `contribution_margin_ratio` | CD-05 |
-| REQ-CA-11 | Customer/product/service contribution where data supports it. | SOW §7 | SOW requirement | MVP-limited: customer revenue contribution only; product/service Post-MVP (P14) | `customer_revenue`, `customer_contribution` | CD-08 |
+| REQ-CA-11 | Customer/product/service contribution where data supports it. | SOW §7 | SOW requirement | **Built (P14)**: product/service contribution from sales and purchase lines, "unavailable" without a cost line; customer contribution remains the engine's (revenue less recorded customer costs) | `customer_revenue`, `customer_contribution`, `api.product_period_summary` | CD-08, ADR-102 |
 | REQ-CA-12 | Revenue, cost and customer concentration. | SOW §7 | SOW requirement | MVP | `customer_concentration_top1/top5`, `revenue_concentration_hhi`, `supplier_concentration_top1/top5` | — |
 | REQ-CA-13 | Period-over-period variance. | SOW §7 | SOW requirement | MVP | `{base}.variance.{prev_period\|same_period_last_year\|trailing_3m_avg}` | — |
 | REQ-CA-14 | Budget/forecast variance where applicable. | SOW §7 | SOW requirement | Post-MVP (P11) | `budget_variance.*`, `forecast.*` reserved | CD-27 |
@@ -221,7 +221,7 @@ MVP column values:
 | REQ-AI-05 | Supported question: Which expenses increased the most? | SOW §10 | SOW requirement | MVP | get_expense_changes | — |
 | REQ-AI-06 | Supported question: Which customers are most profitable? | SOW §10 | SOW requirement | MVP-limited: answered as revenue contribution with an explicit caveat | get_customer_profitability; CD-08 | CD-08 |
 | REQ-AI-07 | Supported question: Where is the business losing money? | SOW §10 | SOW requirement | MVP | get_expense_changes, get_metric | — |
-| REQ-AI-08 | Supported question: Which products/services have the strongest contribution? | SOW §10 | SOW requirement | Post-MVP (P14); MVP answers "not available yet" | REQ-FD-09 | — |
+| REQ-AI-08 | Supported question: Which products/services have the strongest contribution? | SOW §10 | SOW requirement | **Built (P14)**: tool 24 `get_product_contribution` | REQ-FD-09 | ADR-102 |
 | REQ-AI-09 | Supported question: What changed this month? | SOW §10 | SOW requirement | MVP | get_business_summary | — |
 | REQ-AI-10 | Supported question: What risks require attention? | SOW §10 | SOW requirement | MVP | get_alerts, get_health_score | — |
 | REQ-AI-11 | Supported question: What should management focus on? | SOW §10 | SOW requirement | MVP | get_alerts, get_actions | — |
@@ -302,18 +302,18 @@ MVP column values:
 
 | ID | Requirement | SOW § | Type | MVP | Dependencies | Open question |
 |---|---|---|---|---|---|---|
-| REQ-CI-01 | Commercial intelligence shall connect commercial activity with financial outcomes: Traffic → Lead → Opportunity → Customer → Revenue → Cost → Contribution. | SOW §16 | SOW requirement | Post-MVP (P14) | `counterparties` seam | CD-01 |
-| REQ-CI-02 | CRM and customer records. | SOW §3, §16 | SOW requirement | Post-MVP (P14); MVP has counterparty records only | — | CD-01 |
-| REQ-CI-03 | Sales pipeline. | SOW §16 | SOW requirement | Post-MVP (P14) | — | — |
-| REQ-CI-04 | Products/services. | SOW §16 | SOW requirement | Post-MVP (P14) | REQ-FD-09 | — |
-| REQ-CI-05 | Marketing campaigns. | SOW §16 | SOW requirement | Post-MVP (P14) | — | — |
-| REQ-CI-06 | Marketing channels. | SOW §16 | SOW requirement | Post-MVP (P14) | — | — |
-| REQ-CI-07 | Customer profitability. | SOW §16 | SOW requirement | Post-MVP (P14); MVP revenue contribution only | CD-08 | CD-08 |
-| REQ-CI-08 | Campaign profitability. | SOW §16 | SOW requirement | Post-MVP (P14) | — | — |
-| REQ-CI-09 | Acquisition cost. | SOW §16 | SOW requirement | Post-MVP (P14) | — | — |
-| REQ-CI-10 | Conversion. | SOW §16 | SOW requirement | Post-MVP (P14) | — | — |
-| REQ-CI-11 | Customer concentration (commercial view). | SOW §16 | SOW requirement | MVP metric exists (REQ-CA-12); commercial view Post-MVP (P14) | — | — |
-| REQ-CI-12 | Sales performance. | SOW §16 | SOW requirement | Post-MVP (P14) | — | — |
+| REQ-CI-01 | Commercial intelligence shall connect commercial activity with financial outcomes: Traffic → Lead → Opportunity → Customer → Revenue → Cost → Contribution. | SOW §16 | SOW requirement | **Built (P14)** (lead onward; traffic has no source yet) | `counterparties` seam, `opportunities`, `campaigns`, `invoice_lines` | CD-01, ADR-102 |
+| REQ-CI-02 | CRM and customer records. | SOW §3, §16 | SOW requirement | **Built (P14, minimal)**: counterparties remain the record; products bought, win path and opportunities added to the customer page; not a CRM replacement (REQ-CI-14) | `counterparties` | CD-01, ADR-102 |
+| REQ-CI-03 | Sales pipeline. | SOW §16 | SOW requirement | **Built (P14)**: `/customers/sales`, five stages, tool 26 | `opportunities` | ADR-102 |
+| REQ-CI-04 | Products/services. | SOW §16 | SOW requirement | **Built (P14)**: `/customers/products` | `products` | ADR-102 |
+| REQ-CI-05 | Marketing campaigns. | SOW §16 | SOW requirement | **Built (P14)**: `/customers/marketing`, monthly spend | `campaigns`, `campaign_spend` | ADR-102 |
+| REQ-CI-06 | Marketing channels. | SOW §16 | SOW requirement | **Built (P14)** | `marketing_channels` | ADR-102 |
+| REQ-CI-07 | Customer profitability. | SOW §16 | SOW requirement | **Built-limited (P14)**: the engine's `customer_contribution` on the customer page with the CD-08 note; equals revenue until customer costs are recorded | CD-08 | CD-08, ADR-102 |
+| REQ-CI-08 | Campaign profitability. | SOW §16 | SOW requirement | **Built (P14)**: credited revenue less spend, labelled as such | `campaign_spend` | ADR-102 |
+| REQ-CI-09 | Acquisition cost. | SOW §16 | SOW requirement | **Built (P14)**: campaign spend ÷ customers won through it in the window, both named; null with reason otherwise | — | ADR-102 |
+| REQ-CI-10 | Conversion. | SOW §16 | SOW requirement | **Built (P14)**: cohort created in the window; both denominators named | — | ADR-102 |
+| REQ-CI-11 | Customer concentration (commercial view). | SOW §16 | SOW requirement | **Built (P14)**: overview shows top-1/top-5 and the twelve-month top-5 trend, measured not judged | REQ-CA-12 | ADR-102 |
+| REQ-CI-12 | Sales performance. | SOW §16 | SOW requirement | **Built (P14)**: won/lost/won value by month beside engine revenue | — | ADR-102 |
 | REQ-CI-13 | Marketing Analysis: analyse, monitor and report on marketing performance of current activities and spend; review market opportunities and advise on measures to improve marketing strategy. | SOW §3 | SOW requirement | Post-MVP (P14), requires mini-SOW | CD-26 | CD-01, CD-26 |
 | REQ-CI-14 | Full CRM replacement and advanced attribution are post-MVP expansion. | SOW §22 | SOW requirement | Post-MVP (P14+) | — | — |
 

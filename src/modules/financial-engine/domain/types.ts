@@ -181,6 +181,11 @@ export interface AggregateCell {
   readonly credit: string;
   readonly amount: string;
   readonly rowCount: number;
+  /**
+   * Contributing rows whose net-of-tax amount had to fall back to `total_amount` (§3). Only the
+   * invoice source can be non-zero: it is how the VAT-inclusive signal reaches the figure.
+   */
+  readonly fallbackRows: number;
   readonly minDate: string | null;
   readonly maxDate: string | null;
 }
@@ -209,6 +214,12 @@ export interface CounterpartyRef {
   readonly name: string;
   readonly kind: 'customer' | 'supplier' | 'both' | 'unknown';
   readonly mergedIntoId: string | null;
+  /**
+   * Which expense bucket this supplier's purchase invoices fall into on the invoice basis (§2.1,
+   * ADR-027.4). Unset means nobody has said, and the amounts are `uncategorised` — which the P&L
+   * reports as such rather than guessing a category.
+   */
+  readonly defaultExpenseCategory: StandardCategory | null;
 }
 
 export interface BankAccountRef {

@@ -63,7 +63,8 @@ export const CreateBankAccountInput = z.object({
   // Masked at rest: the last four digits are all any metric needs, and all we are willing to hold.
   accountNumberMasked: z.string().trim().max(8).optional(),
   sortCodeMasked: z.string().trim().max(10).optional(),
-  currency: z.string().length(3).default('GBP'),
+  /** Left out, `api.create_bank_account` uses `organizations.base_currency` (Phase 13, ADR-101). */
+  currency: z.string().trim().length(3).optional(),
   accountType: z.enum(['current', 'savings', 'credit_card', 'loan', 'other']).default('current'),
   ledgerAccountId: z.string().uuid().nullable().optional(),
 });

@@ -81,7 +81,7 @@ const ledgerCell = (
   periodId: may.id, source: 'ledger', standardCategory: category, accountId,
   counterpartyId: null, bankAccountId: null, balanceKind: null, balanceBasis: null,
   invoiceType: null, transferKind: null, unpairedTransferCandidate: false,
-  debit, credit, amount: String(Number(debit) - Number(credit)),
+  debit, credit, amount: String(Number(debit) - Number(credit)), fallbackRows: 0,
   rowCount: 1, minDate: '2026-05-01', maxDate: '2026-05-31',
 });
 

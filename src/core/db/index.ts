@@ -23,6 +23,7 @@ export {
   registerDocument,
   finalizeUpload,
   startCalculationRun,
+  applyBankingPass,
   finishChunk,
   finishCalculationRun,
   setPeriodCompleteness,

@@ -58,7 +58,7 @@ export function UploadForm({
           label="Which account is it for?"
           htmlFor="bank_account_id"
           hint={bankAccounts.length === 0
-            ? 'Add a bank account on the Cash page first.'
+            ? 'Add a bank account on the Banking page first.'
             : undefined}
         >
           <Select id="bank_account_id" name="bank_account_id" defaultValue={bankAccounts[0]?.id ?? ''}>

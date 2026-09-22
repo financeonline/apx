@@ -16,7 +16,7 @@ Purpose: fix the boundaries so business logic lives in modules, not in React com
 ```
 src/app        Next.js routes, layouts, server components, server actions, route handlers, UI components
    │  imports only  ▼
-src/modules    auth · tenancy · documents · imports · banking · financial-engine · health · alerts · evidence · ai · actions · reporting · audit · portfolio
+src/modules    auth · tenancy · documents · imports · banking · financial-engine · commercial · health · alerts · evidence · ai · actions · reporting · audit · portfolio
    │  imports only  ▼
 src/core       permissions · money · periods · db · storage · jobs · errors · logging
 ```
@@ -52,6 +52,7 @@ ai           → financial-engine, health, alerts, evidence, banking, actions, d
 actions      → evidence, tenancy, audit
 forecast     → financial-engine (read), tenancy, evidence (read), audit
 scenarios    → forecast, tenancy, evidence (read), audit    -- the forecast IS the baseline (ADR-100)
+commercial   → financials (counterparties, invoices — read), tenancy, audit    -- no engine write; figures are read from metric_current by dashboard (ADR-102)
 reporting    → financial-engine, health, alerts, actions, evidence
 portfolio    → tenancy, health, alerts, imports (read-only aggregate projections, ADR-038.13)
 audit        → (none)
@@ -154,10 +155,16 @@ Never: insert into target tables outside `api.commit_import_batch`; drop a row; 
 Depends: documents, tenancy, banking (bank account lookup/create), financial-engine (enqueue), ai (extraction), audit. Emits: audit `import.started`, `import.mapped`, `import.committed`, `import.rejected`, `import.rolled_back`, `import.replaced`, `import.row_decided`; jobs `document.extract`, `import.commit_large`, `calculation.run`.
 
 ### 4.7 banking (`modules/banking`)
-Responsibility: bank accounts, categorisation rules, transfer and recurring detection, banking view models, coverage.
+Responsibility: bank accounts, categorisation rules, transfer and recurring detection, the banking pass (`planBankingPass` pure + `bankingStep`, injected into the calculation run as `RunDeps.bankingPass`, Phase 13, ADR-101), paged transaction reads. Banking VIEW MODELS live in `modules/dashboard/services/banking.ts` (overview, transactions page, transaction detail, recurring payments), which reads `metric_current` and `api.bank_period_summary` and is what the pages and AI tools 20–23 consume.
 Services: `listBankAccounts(ctx)` [banking.view]; `createBankAccount(ctx, input)` → `api.create_bank_account` [financials.edit; refuses a duplicate masked identity, ADR-029.4]; `setOpeningBalance(ctx, accountId, amount, date)` → `api.set_opening_balance` [financials.edit]; `categoriseTransactions(ctx, batchId | range)` [system; writes `category_history` rows]; `overrideCategory(ctx, txnId, accountId)` → `api.override_bank_category` [banking.reconcile; writes `category_history`]; `markTransfer(ctx, txnId, pairId | null)` → `api.mark_transfer` [banking.reconcile]; `detectRecurring(ctx, range)` [system; invoked inside each calculation chunk before health, never as a separately timed job, with `detector_version` in the run fingerprint, ADR-047.11]; `getBankingOverview(ctx, period)` → view model [banking.view]; `listTransactions(ctx, filter, page)` [banking.view; `description_normalized` for clients].
 Never: compute cash metrics (financial-engine does, from these rows); edit amounts or dates (corrections go through imports supersession); treat a cash↔card/loan pair as a cash transfer (ADR-028).
 Depends: tenancy, financial-engine (read snapshots for the overview), audit. Emits: audit `bank_account.created`, `bank_account.opening_balance_set`, `bank_txn.recategorised`, `bank_txn.transfer_marked`; job `calculation.run` (coalesced, ADR-031.1) after category/transfer changes.
+
+### 4.7a commercial (`modules/commercial`)
+
+Phase 14 (ADR-102). Owns products, invoice lines, marketing channels, campaigns, campaign spend and opportunities — the rows a person records — and the pure attribution rules (`domain/rules.ts`: product contribution with sufficiency, campaign attribution through won opportunities from the won month, acquisition cost and conversion with named denominators, concentration trend, sales by period). Writes go through `api.upsert_product`, `api.set_invoice_lines`, `api.upsert_channel`, `api.upsert_campaign`, `api.set_campaign_spend`, `api.upsert_opportunity` (all `customers.edit`); reads are RLS-scoped selects plus `api.product_period_summary`. It never sums an invoice and never writes a metric: `dashboard/services/commercial.ts` composes its outputs with `metric_current` rows into the Customers view models that the pages and AI tools 24–26 render.
+
+Depends: financials (read), tenancy, audit. Emits: audit `product.created`/`product.updated`, `invoice.lines_set`, `channel.created`/`channel.updated`, `campaign.created`/`campaign.updated`, `campaign.spend_set`, `opportunity.created`/`opportunity.updated` (with `stage_from`/`stage_to` on a stage change).
 
 ### 4.8 financial calculations (`modules/financial-engine`)
 Responsibility: `FINANCIAL_ENGINE.md` — metric registry, precedence, calculation runs, snapshots, `metric_current` pointers, variance, period completeness.

@@ -258,7 +258,7 @@ const INDEX_PAGES = [
     permission: 'financials.view',
   },
   {
-    slug: 'banking', title: 'Bank activity', metric: 'net_cash_movement',
+    slug: 'banking', title: 'Banking', metric: 'net_cash_movement',
     description: 'Your accounts and every transaction in the month.',
     permission: 'banking.view',
   },
@@ -714,9 +714,16 @@ export async function loadCustomers(
   const names = new Map(counterparties.map((c) => [c.id, c.name]));
   const shareOf = new Map(shares.map((s) => [dimensionKeyOf(s) ?? '', s]));
 
-  // Sorting compares two stored values; it never adds them. A NULL sorts last, because "we could
-  // not work this out" is not a small number (§4).
+  /*
+   * Sorting compares two stored values; it never adds them. A NULL sorts last, because "we could
+   * not work this out" is not a small number (§4). The synthetic unattributed row sorts last of all
+   * whatever its size: it is the revenue nobody could attribute, and ranking it among the customers
+   * would present a gap in the data as the business's biggest client (ADR-103).
+   */
   const ranked = [...revenue].sort((a, b) => {
+    const aUnattributed = dimensionKeyOf(a) === null;
+    const bUnattributed = dimensionKeyOf(b) === null;
+    if (aUnattributed !== bUnattributed) return aUnattributed ? 1 : -1;
     if (a.value === null) return b.value === null ? 0 : 1;
     if (b.value === null) return -1;
     return compare(b.value, a.value);
@@ -730,7 +737,7 @@ export async function loadCustomers(
       const share = id ? shareOf.get(id) ?? null : null;
       return {
         counterpartyId: id,
-        name: id ? names.get(id) ?? 'Unknown customer' : 'Unattributed',
+        name: id ? names.get(id) ?? 'Unknown customer' : 'Not attributed to a customer',
         href: id ? `/app/${orgSlug}/customers/${id}` : null,
         revenue: toFigure(row, scope.period, null, options),
         share: share ? formatFigure(share) : '—',

@@ -59,7 +59,7 @@ function counterparty(
   kind: CounterpartyRef['kind'],
   mergedIntoId: string | null = null,
 ): CounterpartyRef {
-  return { id, name: `cp-${id.slice(-4)}`, kind, mergedIntoId };
+  return { id, name: `cp-${id.slice(-4)}`, kind, mergedIntoId, defaultExpenseCategory: null };
 }
 
 function context(counterparties: readonly CounterpartyRef[]): EngineContext {

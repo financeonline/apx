@@ -105,5 +105,35 @@ export {
   type ProxyWarning,
 } from './domain/proxy';
 
-export { listBankAccounts, listBankTransactions, readRawDescriptions } from './data/repository';
+/**
+ * Phase 13 (ADR-101): the three rules above, COMPOSED and RUN. `planBankingPass` is pure; the
+ * calculation run applies its plan through `api_server.apply_banking_pass` before it fingerprints.
+ */
+export {
+  BANKING_PASS_VERSION,
+  accountForCategory,
+  applyPlanInMemory,
+  bankingRuleVersions,
+  planBankingPass,
+  type BankingPassInput,
+  type BankingPassPlan,
+  type CategorisationWrite,
+  type GroupWrite,
+  type PairWrite,
+  type PassBankAccount,
+  type PassTransaction,
+} from './domain/pass';
+
+export {
+  countBankTransactions,
+  listBankAccounts,
+  listBankTransactions,
+  listRecurringGroups,
+  loadBankTransaction,
+  loadLatestGroupMembers,
+  readRawDescriptions,
+  type BankTransactionFilter,
+  type RecurringGroupRow,
+} from './data/repository';
 export { markTransfer, overrideBankCategory } from './services';
+export { bankingStep, runBankingPass, type BankingStepDeps } from './services/pass';

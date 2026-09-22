@@ -41,7 +41,8 @@ function loadAggregate(from: string, to: string): AggregateCell[] {
              -- Cast to text: JSON renders numeric unquoted and would drop the trailing zeros that
              -- make 20000.00 a money value rather than a float (ADR-006).
              'debit', a.debit::text, 'credit', a.credit::text, 'amount', a.amount::text,
-             'row_count', a.row_count, 'min_date', a.min_date, 'max_date', a.max_date)
+             'row_count', a.row_count, 'min_date', a.min_date, 'max_date', a.max_date,
+             'fallback_rows', a.fallback_rows)
              order by a.source::text, a.standard_category::text), '[]')::text
       from app.aggregate_periods('${orgId}', '${from}', '${to}') a`);
 
@@ -61,6 +62,7 @@ function loadAggregate(from: string, to: string): AggregateCell[] {
     credit: String(r.credit ?? '0'),
     amount: String(r.amount ?? '0'),
     rowCount: Number(r.row_count ?? 0),
+    fallbackRows: Number(r.fallback_rows ?? 0),
     minDate: r.min_date as string | null,
     maxDate: r.max_date as string | null,
   }));

@@ -69,29 +69,54 @@ export const getCustomerProfitability: ToolDefinition<{ period: string | { from:
     if (revenue.length === 0) return noData('customer revenue');
     const names = new Map(counterparties.map((c) => [c.id, c.name]));
 
-    // Rows are per customer per period; a range sums nothing here — the model gets each period's
-    // own snapshot and cites the one it quotes.
-    const rows = revenue.map((r) => {
+    /*
+     * Rows are per customer per period; a range sums nothing here — the model gets each period's
+     * own snapshot and cites the one it quotes.
+     *
+     * The engine's synthetic `dimension_id = NULL` row is the revenue it could not attribute to
+     * anybody (§3.5). It is a data-quality state, not a customer, so it leaves the ranked rows and
+     * is reported on its own: a model handed it as row one would answer "your biggest customer is
+     * Unattributed" (ADR-103).
+     */
+    const rowFor = (r: (typeof revenue)[number], id: string) => {
       const share = shares.find((s) => s.dimensionId === r.dimensionId && s.periodId === r.periodId);
       const period = scope.periods.find((p) => p.id === r.periodId)!;
-      const id = r.dimensionId ?? 'unattributed';
       return {
-        subject: subject('counterparty', id, r.dimensionId ? names.get(r.dimensionId) ?? null : 'Unattributed'),
+        subject: subject('counterparty', id, names.get(id) ?? null),
         period: ref(period),
         revenue: money(r.value, r.currency),
         share: share ? ratio(share.value) : null,
         snapshot_id: r.snapshotId,
         share_snapshot_id: share?.snapshotId ?? null,
       };
-    });
+    };
+    const rows = revenue
+      .filter((r) => r.dimensionId !== null)
+      .map((r) => rowFor(r, r.dimensionId!));
+    const unattributed = revenue
+      .filter((r) => r.dimensionId === null && r.value !== null && !new Decimal(r.value).isZero())
+      .map((r) => {
+        const share = shares.find((s) => s.dimensionId === null && s.periodId === r.periodId);
+        const period = scope.periods.find((p) => p.id === r.periodId)!;
+        return {
+          period: ref(period),
+          revenue: money(r.value, r.currency),
+          share: share ? ratio(share.value) : null,
+          snapshot_id: r.snapshotId,
+        };
+      });
     const key = input.order === 'share' ? 'share' : 'revenue';
     rows.sort((a, b) => new Decimal(b[key]?.value ?? 0).comparedTo(new Decimal(a[key]?.value ?? 0)));
 
     const conc = (k: string) => { const s = headline.find((x) => x.metricKey === k && x.dimensionType === 'none'); return s ? { value: snapshotNumber(s), snapshot_id: s.snapshotId } : null; };
     return ok({
       rows: rows.slice(0, input.limit ?? 10),
+      not_attributed_to_a_customer: unattributed,
       concentration: { top1: conc('customer_concentration_top1'), top5: conc('customer_concentration_top5'), hhi: conc('revenue_concentration_hhi') },
-      note: 'Contribution is revenue contribution in MOTION today; cost allocation per customer is not available yet.',
+      note: 'Contribution is revenue contribution in MOTION today; cost allocation per customer is not available yet.'
+        + (unattributed.length > 0
+          ? ' Revenue under `not_attributed_to_a_customer` belongs to no customer MOTION could identify; it is a gap in the data, never a customer, and must not be named or ranked as one.'
+          : ''),
     }, { periods: scope.periods.map(ref), calculation_run_id: null }, call);
   },
 };

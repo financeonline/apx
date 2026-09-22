@@ -544,6 +544,24 @@ export async function finishChunk(input: Record<string, unknown>): Promise<{ wri
   return { written: Number(written ?? 0) };
 }
 
+/**
+ * The banking pass (Phase 13, ADR-101): the calculation run's plan of rule categorisations,
+ * transfer pairs and recurring groups, applied in one transaction. `runId` may be null — the pass
+ * runs BEFORE the run row exists, so its writes are inside the fingerprint (ADR-047.8).
+ */
+export async function applyBankingPass(
+  organizationId: string,
+  runId: string | null,
+  plan: Record<string, unknown>,
+): Promise<Record<string, number>> {
+  const counts = await serverRpc<Record<string, number>>('apply_banking_pass', {
+    p_org: organizationId,
+    p_run: runId,
+    p_plan: plan,
+  });
+  return counts ?? {};
+}
+
 export async function finishCalculationRun(
   runId: string,
   organizationId: string,

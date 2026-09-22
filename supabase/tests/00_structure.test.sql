@@ -135,8 +135,11 @@ select is(
     where n.nspname = 'app' and not p.prosecdef
       -- The pure helpers: catalogue-free, table-free, deterministic. A definer context would buy
       -- them nothing. `fiscal_position`, `normalize_name` and `standard_category_label` joined the
-      -- list with the Phase 4 financial schema and are pure in exactly the same sense.
-      and p.proname not in ('ceiling_allows', 'fiscal_position', 'job_max_runtime', 'jwt',
+      -- list with the Phase 4 financial schema and are pure in exactly the same sense; so do
+      -- `invoice_net` and `invoice_net_is_vat_fallback`, which are arithmetic on three columns
+      -- their callers already hold (ADR-103).
+      and p.proname not in ('ceiling_allows', 'fiscal_position', 'invoice_net',
+                            'invoice_net_is_vat_fallback', 'job_max_runtime', 'jwt',
                             'normalize_name', 'role_claim', 'role_rank', 'slugify',
                             'standard_category_label', 'uid')),
   0, 'every app.* function that touches a table is SECURITY DEFINER');

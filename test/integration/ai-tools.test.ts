@@ -149,6 +149,13 @@ const INPUTS: Record<string, () => unknown> = {
   get_document_evidence: () => ({ document_id: ledgerDocumentId }),
   get_forecast: () => ({}),
   get_scenario: () => ({}),
+  get_bank_accounts: () => ({ period: MAY() }),
+  get_recurring_payments: () => ({}),
+  get_unusual_transactions: () => ({ period: MAY() }),
+  get_bank_categories: () => ({ period: MAY() }),
+  get_product_contribution: () => ({ period: MAY() }),
+  get_campaign_performance: () => ({ period: MAY() }),
+  get_sales_pipeline: () => ({ period: MAY() }),
 };
 
 function snapshotOf(metricKey: string): string {
@@ -159,12 +166,13 @@ function snapshotOf(metricKey: string): string {
 }
 
 describe('the registry is closed and complete', () => {
-  it('has exactly the nineteen tools §3 names, each with a permission and a schema', () => {
+  it('has exactly the twenty-six tools §3 names, each with a permission and a schema', () => {
     // Fifteen through Phase 8; the two evidence tools in Phase 9 (ADR-097); `get_forecast` in
-    // Phase 11 (ADR-099); `get_scenario` in Phase 12 (ADR-100). The count is asserted so a tool
+    // Phase 11 (ADR-099); `get_scenario` in Phase 12 (ADR-100); the four banking tools in Phase 13
+    // (ADR-101); the three commercial tools in Phase 14 (ADR-102). The count is asserted so a tool
     // cannot be added without editing this test.
-    expect(TOOL_NAMES).toHaveLength(19);
-    expect(new Set(TOOL_NAMES).size).toBe(19);
+    expect(TOOL_NAMES).toHaveLength(26);
+    expect(new Set(TOOL_NAMES).size).toBe(26);
     for (const tool of TOOLS) {
       expect(tool.permission, `${tool.name} has a permission`).toBeTruthy();
       expect(tool.description.length, `${tool.name} tells the model when to use it`).toBeGreaterThan(40);
@@ -194,6 +202,15 @@ describe('the role × tool matrix (§10.1)', () => {
     expect((result.data as { message: string }).message).toMatch(/not available to your role/);
     expect(persisted.authorized).toBe(false);
     expect(persisted.denial_reason).toBe('missing:documents.view');
+  });
+
+  it('a client may call the three commercial tools (customers.view), and each answers with data or an honest NO_DATA (ADR-102)', async () => {
+    const ctx = contextFor(clientUserId, 'client');
+    for (const name of ['get_product_contribution', 'get_campaign_performance', 'get_sales_pipeline']) {
+      const { result, persisted } = await invoke(ctx, name, INPUTS[name]!());
+      expect(persisted.authorized, `${name} is authorised for a client`).toBe(true);
+      if (!result.ok) expect((result.data as { code: string }).code).toBe('NO_DATA');
+    }
   });
 
   it('a client may read figures, and gets them', async () => {

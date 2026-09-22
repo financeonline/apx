@@ -44,9 +44,9 @@ All keys live in `src/core/permissions/catalogue.ts` as a `const` union; the rol
 | `imports.create` | ✓ | ✓ | ✓ | ✓ | ✗ | Upload files, start batches |
 | `imports.review` | ✓ | ✓ | ✓ | ✓ | ✗ | Map, resolve issues, commit, roll back |
 | `banking.view` | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| `banking.reconcile` | ✓ | ✓ | ✓ | ✓ | ✗ | Categorise, flag transfers; matching post-MVP |
+| `banking.reconcile` | ✓ | ✓ | ✓ | ✓ | ✗ | Categorise, pair/unpair transfers on the transaction page (Phase 13); line matching post-MVP. Adding a bank account is `financials.edit`; opening the statement itself is `documents.view`; the banking pages and tools 20–23 need only `banking.view` |
 | `customers.view` | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| `customers.edit` | ✓ | ✓ | ✓ | ✓ | ✗ | Merge/rename counterparties, set kind |
+| `customers.edit` | ✓ | ✓ | ✓ | ✓ | ✗ | Merge/rename counterparties, set kind; Phase 14 (ADR-102): record products, invoice lines, channels, campaigns, spend and opportunities |
 | `reports.view` | ✓ | ✓ | ✓ | ✓ | ✓ | |
 | `reports.generate` | ✓ | ✓ | ✓ | ✓ | ✗ | Enqueue report render |
 | `ai.use` | ✓ | ✓ | ✓ | ✓ | ✓ | Subject to org quota (CD-24) |

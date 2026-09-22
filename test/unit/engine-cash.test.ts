@@ -135,6 +135,7 @@ function cell(input: {
     credit,
     amount: parseDecimal(debit).minus(parseDecimal(credit)).toFixed(2),
     rowCount: 1,
+    fallbackRows: 0,
     minDate: null,
     maxDate: null,
     transferKind: input.transferKind ?? 'none',

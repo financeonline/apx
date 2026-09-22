@@ -5,9 +5,11 @@ import {
   getAlerts, getDocumentEvidenceTool, getEvidence, getForecast, getHealthScore, getRecordEvidence,
   getScenario, getSourceDocumentReference, getTransactionsForEvidence,
 } from './intelligence';
+import { getBankAccounts, getBankCategories, getRecurringPayments, getUnusualTransactions } from './banking';
+import { getCampaignPerformance, getProductContribution, getSalesPipeline } from './commercial';
 
 /**
- * The closed registry (AI_ARCHITECTURE.md §3): the nineteen tools, and no way to add a twentieth
+ * The closed registry (AI_ARCHITECTURE.md §3): the twenty-six tools, and no way to add another
  * without a code change here, a permission, a Zod schema with branded numbers, and a test.
  *
  * The last two were added in Phase 9 (ADR-097). They give the analyst the two ends of the evidence
@@ -17,6 +19,14 @@ import {
  *
  * Tool 19 (Phase 12, ADR-100) READS a saved what-if and takes no assumptions, so there is no tool
  * on which a model-invented assumption could become a stored figure — the structural half of §18.
+ *
+ * Tools 20–23 (Phase 13, ADR-101) read banking through the Banking page's own services. Each
+ * result states `source: 'imported_statements'` and `connected: false`, because no live provider
+ * exists and an answer that said otherwise must contradict its own evidence.
+ *
+ * Tools 24–26 (Phase 14, ADR-102) read commercial intelligence through the Customers pages' own
+ * services: product contribution only from attributed lines, campaign revenue only through won
+ * opportunities, conversion with its cohort named. Each gap is returned as a gap, never filled.
  *
  * Order is the order the model is shown them, broadest first. `submit_answer` is not a tool in this
  * sense — it is the response contract (§5) and is added by the loop as the forced final call.
@@ -44,6 +54,13 @@ export const TOOLS: readonly AnyTool[] = [
   getDocumentEvidenceTool,
   getForecast,
   getScenario,
+  getBankAccounts,
+  getRecurringPayments,
+  getUnusualTransactions,
+  getBankCategories,
+  getProductContribution,
+  getCampaignPerformance,
+  getSalesPipeline,
 ];
 
 export const TOOL_NAMES: readonly string[] = TOOLS.map((t) => t.name);

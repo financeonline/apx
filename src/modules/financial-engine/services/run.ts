@@ -2,6 +2,7 @@ import 'server-only';
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { toMotionError } from '@/core/errors';
+import { bankingRuleVersions } from '@/modules/banking';
 import { log } from '@/core/logging';
 import { affectedRange, chunkPeriods, chunkWindow, type CalculationTrigger } from '../domain/chunking';
 import { computeCoverage, isPeriodComplete } from '../domain/coverage';
@@ -115,6 +116,14 @@ export interface RunDeps {
    * uncommitted snapshot has no id.
    */
   readonly scoreHealth: (input: HealthChunkInput) => Promise<{ written: number }>;
+  /**
+   * The banking pass (Phase 13, ADR-101; §2.4 step 5): rule categorisation, transfer pairing and
+   * recurring detection over the organisation's accepted rows, applied BEFORE the fingerprint is
+   * read so that what it wrote is part of what the fingerprint sees. A run over an unchanged
+   * organisation therefore still finishes `no_change`; a run whose rows changed re-categorises
+   * first and then computes from the result. Optional so the loop's own tests need not supply it.
+   */
+  readonly bankingPass?: (input: { organizationId: string; asOf: string }) => Promise<unknown>;
 }
 
 /** What the health step needs from the chunk that just committed. */
@@ -139,6 +148,7 @@ export async function runCalculation(
 ): Promise<RunOutcome> {
   const { scoped } = deps;
   const orgId = request.organizationId;
+  if (deps.bankingPass) await deps.bankingPass({ organizationId: orgId, asOf: request.asOf });
 
   const [allPeriods, accounts, counterparties, bankAccounts, settings, fingerprintSources] =
     await Promise.all([
@@ -202,7 +212,9 @@ export async function runCalculation(
       defaultVatRate: settings.defaultVatRate,
       taxableCategories: [...settings.taxableCategories],
     },
-    detectorVersion: 'recurring.v1',
+    // The keyword set, the recurring detector and their composition (Phase 13, ADR-101): a change
+    // to any of them re-categorises history, so it must re-fingerprint too.
+    detectorVersion: bankingRuleVersions(),
     asOfDate: rangeIncludesCurrent ? request.asOf : null,
   });
 
