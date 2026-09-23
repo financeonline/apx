@@ -154,7 +154,7 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 
 | Route | Purpose | Roles | Permissions | Flag | Render | Data loaded | Empty / denied |
 |---|---|---|---|---|---|---|---|
-| `/portfolio` | Cards for assigned organizations: name, health score, open alerts, last import | `platform_employee`, `platform_super_admin` (TOTP enrolled) | `assignments.view` | — | Server | `portfolio.list(ctx)` — one aggregate projection per data type filtered by `organization_id IN (select app.accessible_org_ids())`, cached per organization tag (ADR-038.13) | No assignments → "No client organizations assigned yet" |
+| `/portfolio` | The Command Centre (ADR-112): attention queue, portfolio counts, client list, recent changes; `/portfolio/alerts`, `/portfolio/actions`, `/portfolio/clients/[orgId]`, `/portfolio/analyst` | `platform_employee`, `platform_super_admin` (TOTP enrolled), and any member holding `owner` or `admin` in at least one organisation | the adviser roles, i.e. the holders of `assignments.view` | — | Server | `portfolio.list(ctx)` — one aggregate projection per data type filtered by `organization_id IN (select app.accessible_org_ids())`, cached per organization tag (ADR-038.13) | No assignments → "No client organizations assigned yet" |
 
 ## 6. Platform family `/platform/*`
 
@@ -199,7 +199,7 @@ Server actions (in `actions.ts` files colocated with pages) handle all other mut
 5. Load the platform role (single cached query per request):
    - `platform_super_admin`: may access every family.
    - `platform_employee`: `/platform/*` → 404; `/app/[orgSlug]` allowed only if an active assignment exists (checked in layout, not middleware, to keep middleware light); `/` and `/select-organization` redirect to `/portfolio`.
-   - Members: `/platform/*` and `/portfolio` → 404.
+   - Members: `/platform/*` → 404. `/portfolio` is decided by its layout (ADR-112): an owner or admin of at least one organisation has a Command Centre over the organisations they hold those roles in; a client-only member, like a stranger, gets the uniform 404.
 6. `/` with session → redirect to `profiles.last_active_org_id` slug only if that organization is in the user's accessible set (checked in the layout; a stale or foreign id is ignored, never resolved to a slug), else `/select-organization`.
 7. `/app/[orgSlug]/*`: do not resolve access in middleware beyond session; the org layout does it (needs DB and returns 404 uniformly).
 8. Attach `x-request-id` header; apply rate-limit buckets for `/api/*` and auth routes.
@@ -216,7 +216,7 @@ app/
   app/[orgSlug]/layout.tsx         resolves slug → org, builds AccessContext (React.cache), 404 on none,
                                    renders customer shell: 7-item nav + Settings + "Add data" button + org switcher
   app/[orgSlug]/(sections)/…       one folder per nav item; section layouts add secondary nav (money/*)
-  portfolio/layout.tsx             employee shell
+  portfolio/layout.tsx             Command Centre shell (ADR-112)
   platform/layout.tsx              super admin shell (distinct visual identity)
   api/…/route.ts                   handlers
 ```
@@ -247,7 +247,7 @@ Expected HTTP status for a representative set. `member-B` = member of another or
 | `/app/A/settings/billing` (flag off) | 404 | 404 | 404 | 404 | 404 | 404 | 404 | 302 |
 | `/app/A/settings/danger` | 200 | 403* | 403* | 403* | 404 | 404 | 200 | 302 |
 | `/app/A/evidence/[bundle-of-B]` | 404 | 404 | 404 | 404 | 404 | 404 | 404 | 302 |
-| `/portfolio` | 404 | 404 | 404 | 200 | 200 | 404 | 200 | 302 |
+| `/portfolio` (ADR-112) | 200 | 200 | 404 | 200 | 200 | 404 | 200 | 302 |
 | `/platform/organizations` | 404 | 404 | 404 | 404 | 404 | 404 | 200 | 302 |
 | `POST /api/imports/upload` (org A) | 200 | 200 | 403 | 200 | 404 | 404 | 200 | 401 |
 | `GET /api/documents/[A-doc]/url` | 200 | 200 | 403 | 200 | 404 | 404 | 200 | 401 |

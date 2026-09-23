@@ -88,7 +88,7 @@ Every permission in this table is checked twice on a write: by `assertCan` in th
 | Who can use AI | Every effective role except `none`, within organization quota. |
 | Who can view audit logs | Owner and Admin for their organization; Super Admin for all. Employees and Clients cannot. |
 | Who can change organization settings | Owner, Admin, Super Admin. |
-| Who can access platform administration | Super Admin only. Employees get `/portfolio`, not `/platform`. |
+| Who can access platform administration | Super Admin only. Employees get `/portfolio`, not `/platform`. Since ADR-112 `/portfolio` is the Command Centre for every adviser-capable role (super admin, employee, owner, admin), each over the organisations they already reach; a client never has one. |
 
 ## 3. Role-specific constraints beyond the matrix
 

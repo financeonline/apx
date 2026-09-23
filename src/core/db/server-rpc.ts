@@ -750,3 +750,39 @@ export async function recordExtractionPage(
     p_line_count: input.lineCount ?? null, p_error: input.error ?? null, p_balances_read: input.balancesRead ?? null,
   });
 }
+
+// ---------------------------------------------------------------------------------------------
+// Phase 15 — the adviser analyst's turn record (ADR-113)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * Opens a portfolio turn BEFORE the model is called: the database re-checks that the actor
+ * advises every organisation in scope and charges the 10/min throttle. `PermissionDenied` for a
+ * scope the actor may not advise, whatever the server asked for.
+ */
+export async function beginPortfolioTurn(
+  actor: ServerRpcActor,
+  input: { question: string; scopeOrganizationIds: readonly string[]; promptVersion: string },
+): Promise<string> {
+  const { data, error } = await serverClient().schema('api_server').rpc('portfolio_ai_begin_turn', {
+    p_actor: actor.userId, p_question: input.question, p_scope: [...input.scopeOrganizationIds],
+    p_prompt_version: input.promptVersion,
+  });
+  if (error) throw toMotionError(error, actor.requestId);
+  return data as string;
+}
+
+/** Records what the server observed of the turn: the validated answer (or none), grounding, tokens. */
+export async function finishPortfolioTurn(
+  actor: ServerRpcActor,
+  input: {
+    turnId: string; answer: unknown | null; grounding: 'passed' | 'degraded' | 'failed' | 'not_applicable';
+    model: string | null; inputTokens: number; outputTokens: number;
+  },
+): Promise<void> {
+  const { error } = await serverClient().schema('api_server').rpc('portfolio_ai_finish_turn', {
+    p_actor: actor.userId, p_turn: input.turnId, p_answer: input.answer, p_grounding: input.grounding,
+    p_model: input.model, p_tokens_in: input.inputTokens, p_tokens_out: input.outputTokens,
+  });
+  if (error) throw toMotionError(error, actor.requestId);
+}

@@ -196,7 +196,13 @@ export async function middleware(request: NextRequest) {
   const notFound = new URL('/404', url.origin);
 
   if (family === 'platform' && !isActiveSuperAdmin) return finish(notFound, true);
-  if (family === 'portfolio' && !isActivePlatformAccount) return finish(notFound, true);
+  /*
+   * `/portfolio` is the Command Centre for every adviser-capable role, member or platform account
+   * (ADR-112). Which organisations, if any, a session may advise needs the database, so the
+   * portfolio layout decides and renders the uniform 404 for a caller with none — a client-only
+   * member, a stranger, an unassigned employee. Middleware keeps only the session and MFA checks
+   * above; a platform account still cannot reach here at aal1 (step 4a).
+   */
 
   // 6. `/` with a session goes to the family the account belongs to. A stale or foreign
   //    last_active_org_id is never resolved to a slug (§8.6) — /select-organization decides.

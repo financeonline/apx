@@ -61,7 +61,7 @@ export default async function OrgLayout({
             MOTION
           </Link>
           <PrimaryNav ctx={ctx} orgSlug={orgSlug} />
-          <div className="ml-auto flex items-center gap-3 text-sm">
+          <div className="ml-auto flex flex-wrap items-center justify-end gap-3 text-sm">
             <DataMenu ctx={ctx} orgSlug={orgSlug} />
             {showSettings && (
               <Link href={`/app/${orgSlug}/settings`} className="text-ink-muted hover:text-ink">
@@ -69,6 +69,10 @@ export default async function OrgLayout({
               </Link>
             )}
             <Badge tone="neutral">{ROLE_LABELS[ctx.effectiveRole]}</Badge>
+            {/* The roles that hold assignments.view are exactly the roles with a Command Centre (ADR-112). */}
+            {can(ctx, 'assignments.view') && (
+              <Link href="/portfolio" className="text-ink-muted hover:text-ink">Command Centre</Link>
+            )}
             <Link href="/select-organization" className="text-ink-muted hover:text-ink">Switch</Link>
             <Link href="/account" className="text-ink-muted hover:text-ink">Account</Link>
           </div>

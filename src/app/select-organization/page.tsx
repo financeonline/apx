@@ -2,6 +2,7 @@ import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createUserClient } from '@/core/db/user-client';
 import { listMyOrganizations } from '@/modules/tenancy';
+import { adviserOrganisations } from '@/modules/portfolio';
 import { Card, CardBody, Badge } from '@/components/ui/surfaces';
 import { ORG_STATUS_LABELS, ROLE_LABELS } from '@/components/labels';
 import type { EffectiveRole } from '@/core/permissions';
@@ -17,9 +18,24 @@ export default async function SelectOrganizationPage() {
   if (organizations.length === 0) redirect('/onboarding');
   if (organizations.length === 1) redirect(`/app/${organizations[0]!.slug}/home`);
 
+  const advises = adviserOrganisations(organizations).length > 0;
+
   return (
     <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col justify-center gap-6 px-6 py-12">
       <h1 className="text-2xl font-semibold tracking-tight">Choose an organisation</h1>
+      {advises ? (
+        <Link href="/portfolio" className="block">
+          <Card className="border-line-strong transition-colors hover:border-accent">
+            <CardBody className="flex items-center justify-between gap-4">
+              <span>
+                <span className="block font-medium">Command Centre</span>
+                <span className="block text-sm text-ink-muted">Health, alerts and actions across every organisation you advise.</span>
+              </span>
+              <span className="text-sm text-accent">Open</span>
+            </CardBody>
+          </Card>
+        </Link>
+      ) : null}
       <ul className="flex flex-col gap-3">
         {organizations.map((organization) => (
           <li key={organization.organizationId}>

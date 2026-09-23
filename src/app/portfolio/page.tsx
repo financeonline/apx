@@ -1,75 +1,56 @@
 import Link from 'next/link';
-import { redirect } from 'next/navigation';
-import { createUserClient } from '@/core/db/user-client';
-import { listMyOrganizations } from '@/modules/tenancy';
-import { PageHeader, Card, CardBody, EmptyState, Badge } from '@/components/ui/surfaces';
-import { ORG_STATUS_LABELS } from '@/components/labels';
-import { loadPortfolioScores } from '@/modules/health';
-import { Disclaimer, HealthScoreInline } from '@/components/dashboard';
+import { getPortfolioContext, loadPortfolio } from '@/modules/portfolio';
+import { PageHeader, Card, CardBody, CardHeader } from '@/components/ui/surfaces';
+import { Disclaimer } from '@/components/dashboard';
+import { AttentionQueue, ClientTable, CountsStrip, RecentChanges } from '@/components/portfolio';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * The adviser's landing page (TENANCY_MODEL.md §5.6). One statement over the caller's accessible
- * set — a read-only aggregate projection, not a cross-tenant query.
+ * The Command Centre's first screen answers "what needs my attention?" before anything else
+ * (SOW §18; brief §15): the queue, then the counts, then every client, then what changed.
  */
 export default async function PortfolioPage() {
-  const db = await createUserClient();
-  const { data } = await db.auth.getUser();
-  if (!data.user) redirect('/sign-in?next=/portfolio');
-
-  const organizations = await listMyOrganizations(db);
-  /*
-   * ONE read for every card (ADR-038.13). The scores arrive keyed by organisation; an organisation
-   * with no scored month simply has no entry, and its card says so rather than showing a zero.
-   */
-  const scores = await loadPortfolioScores(db);
+  const ctx = await getPortfolioContext();
+  const view = await loadPortfolio(ctx);
+  const now = ctx.now();
 
   return (
-    <main className="mx-auto w-full max-w-4xl px-6 py-12">
+    <>
       <PageHeader
-        title="Your client organisations"
-        description="The organisations you have been assigned to help with."
+        eyebrow="Command Centre"
+        title={view.counts.needingAttention === 0
+          ? `All ${view.counts.clients} ${view.counts.clients === 1 ? 'client is' : 'clients are'} clear`
+          : `${view.counts.needingAttention} of ${view.counts.clients} ${view.counts.clients === 1 ? 'client needs' : 'clients need'} attention`}
+        description="Health, alerts and actions across the organisations you advise, from MOTION's own figures. Nothing here is worked out on the way to the screen."
+        action={<Link href="/portfolio/analyst" className="text-sm text-accent underline underline-offset-2">Ask the adviser analyst</Link>}
       />
-      <div className="mt-8">
-        {organizations.length === 0 ? (
-          <EmptyState title="No client organisations assigned yet">
-              A MOTION super admin assigns you to a client organisation. When they do, it appears here.
-            </EmptyState>
-        ) : (
-          <ul className="grid gap-3 sm:grid-cols-2">
-            {organizations.map((organization) => (
-              <li key={organization.organizationId}>
-                <Link href={`/app/${organization.slug}/home`}>
-                  <Card className="h-full transition-colors hover:border-line-strong">
-                    <CardBody className="flex items-start justify-between gap-3">
-                      <span>
-                        <span className="block font-medium">{organization.name}</span>
-                        <span className="mt-2 block">
-                          <HealthScoreInline
-                            score={scores.get(organization.organizationId)?.score ?? null}
-                            band={scores.get(organization.organizationId)?.band ?? null}
-                            dimensionsUsed={scores.get(organization.organizationId)?.dimensionsUsed ?? 0}
-                            dimensionsTotal={scores.get(organization.organizationId)?.dimensionsTotal ?? 6}
-                          />
-                        </span>
-                        <span className="mt-1 block text-sm text-ink-muted">
-                          Open alerts arrive with the alert engine.
-                        </span>
-                      </span>
-                      {organization.status !== 'active' && (
-                        <Badge tone="warn">{ORG_STATUS_LABELS[organization.status]}</Badge>
-                      )}
-                    </CardBody>
-                  </Card>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        )}
-      </div>
-      {/* SOW §9. Once for the list rather than on every card. */}
-      {organizations.length > 0 ? <Disclaimer /> : null}
-    </main>
+
+      <section aria-labelledby="attention" className="mb-10">
+        <h2 id="attention" className="mb-3 font-serif text-lg">Clients needing attention</h2>
+        <AttentionQueue rows={view.attention} today={view.today} now={now} />
+      </section>
+
+      <section aria-labelledby="overview" className="mb-10">
+        <h2 id="overview" className="mb-3 font-serif text-lg">Portfolio overview</h2>
+        <CountsStrip counts={view.counts} />
+      </section>
+
+      <section aria-labelledby="clients" className="mb-10">
+        <h2 id="clients" className="mb-3 font-serif text-lg">Every client</h2>
+        <ClientTable rows={view.clients} />
+      </section>
+
+      <section aria-labelledby="recent" className="mb-10">
+        <Card>
+          <CardHeader title="Recent changes" description="Alerts raised and actions finished in the last seven days." />
+          <CardBody>
+            <RecentChanges changes={view.recent} organisations={view.organisations} now={now} />
+          </CardBody>
+        </Card>
+      </section>
+
+      <Disclaimer />
+    </>
   );
 }
