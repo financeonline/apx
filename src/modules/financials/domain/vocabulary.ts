@@ -60,3 +60,79 @@ export const BASIS_TEXT: Readonly<Record<string, string>> = {
   mixed: 'From more than one source',
   none: 'No source covers this month',
 };
+
+// -----------------------------------------------------------------------------------------------
+// Semantic availability (ADR-106)
+// -----------------------------------------------------------------------------------------------
+
+/**
+ * Whether a figure is ECONOMICALLY ESTABLISHED, as distinct from whether the engine wrote a number
+ * for it.
+ *
+ * The engine's contract (FINANCIAL_ENGINE.md §3.1) is that gross profit IS revenue when the
+ * organisation has no cost of sales to subtract, so that the statement still adds up; it says so
+ * with the warning `no_cost_of_sales` and a `cost_of_sales` that is NULL with its reason. That
+ * number is right as a line in a statement and misleading as a conclusion: "profit after direct
+ * costs equals sales" reads as a 100% margin to somebody who simply never recorded their costs.
+ *
+ * Home has omitted the card since ADR-105. The analyst did not — it was handed £9,000 with
+ * `assurance_level: calculated` and `completeness: 1.00`, the same figure dressed as an established
+ * conclusion. ADR-106 makes this ONE rule for every surface. It lives here because `financials` is
+ * the module both the dashboard and the AI already depend on for financial vocabulary.
+ *
+ * This is a presentation semantic. It changes nothing the engine calculates or stores.
+ */
+export type MetricAvailability =
+  | { readonly state: 'available' }
+  | { readonly state: 'not_applicable'; readonly reason: string };
+
+/** The reasons a cost of sales is absent BY DESIGN rather than merely missing (CD-05, ADR-104). */
+export const COST_OF_SALES_ABSENT_CODES: readonly string[] = [
+  'no_cost_of_sales_accounts',
+  'cost_of_sales_in_other_source',
+];
+
+/**
+ * The reader's words for each availability reason. Shared so the card, the report and the analyst
+ * cannot describe one limitation in two ways (`missingReasonText` spreads this in).
+ */
+export const AVAILABILITY_REASON_TEXT: Readonly<Record<string, string>> = {
+  no_cost_of_sales_accounts: 'You have no direct-cost accounts, so this does not apply.',
+  cost_of_sales_in_other_source:
+    'Your purchase invoices show direct costs, but the source this month’s figures come from does not, so this cannot be established.',
+  // Reachable only where the `cost_of_sales` figure itself was not read, e.g. a trend over months.
+  no_cost_of_sales:
+    'No cost of sales is recorded on the source this month’s figures come from, so this cannot be established.',
+};
+
+/** What a figure carries for this rule: the engine's own value and data-quality codes. */
+export interface AvailabilityInput {
+  readonly value: string | null;
+  readonly warnings: readonly string[];
+  readonly missing: readonly string[];
+}
+
+/**
+ * The one rule. `costOfSales` is the same period's `cost_of_sales` figure where the caller has it:
+ * it carries the ACCURATE reason code, which `gross_profit` does not, because the engine strips the
+ * absent-by-design code from gross profit's own `missing` (that value is not missing).
+ */
+export function metricAvailability(
+  metricKey: string,
+  figure: AvailabilityInput,
+  costOfSales?: AvailabilityInput | null,
+): MetricAvailability {
+  if (metricKey !== 'gross_profit' && metricKey !== 'gross_margin') return { state: 'available' };
+
+  const costAbsentCode = costOfSales != null && costOfSales.value === null
+    ? costOfSales.missing.find((code) => COST_OF_SALES_ABSENT_CODES.includes(code))
+    : undefined;
+  const ownCode = figure.missing.find((code) => COST_OF_SALES_ABSENT_CODES.includes(code));
+  const unsupported = figure.warnings.includes('no_cost_of_sales')
+    || ownCode !== undefined
+    || costAbsentCode !== undefined;
+  if (!unsupported) return { state: 'available' };
+
+  // Prefer the reason `cost_of_sales` states, then this figure's own, then the generic one.
+  return { state: 'not_applicable', reason: costAbsentCode ?? ownCode ?? 'no_cost_of_sales' };
+}

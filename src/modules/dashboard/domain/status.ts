@@ -11,6 +11,7 @@
  * same table, so a second copy anywhere would be a second answer to "how sure are we".
  */
 
+import { AVAILABILITY_REASON_TEXT } from '@/modules/financials';
 import type { AssuranceLevel, DataQuality } from '@/modules/financial-engine';
 
 export type StatusKind = 'none' | 'calculated' | 'partial' | 'estimate' | 'check' | 'not_available';
@@ -90,8 +91,9 @@ const MISSING_REASONS: Readonly<Record<string, string>> = {
   no_opening_balance: 'We need an opening balance for this account first.',
   no_prior_trial_balance: 'The previous month’s figures are missing, so this cannot be worked out.',
   stale_invoice_data: 'Your invoice list is too old to answer this for this month.',
-  no_cost_of_sales_accounts: 'You have no direct-cost accounts, so this does not apply.',
-  cost_of_sales_in_other_source: 'Your purchase invoices show direct costs, but the source this month’s figures come from does not, so this cannot be established.',
+  // The cost-of-sales reasons are the shared ones (ADR-106): Home, the report and the analyst all
+  // explain this limitation, and they may not word it differently.
+  ...AVAILABILITY_REASON_TEXT,
   comparison_period_missing: 'There is no earlier month to compare with.',
   comparison_is_zero: 'The month being compared with was zero, so a percentage would not mean anything.',
   insufficient_history: 'We need a few more months of data for this.',

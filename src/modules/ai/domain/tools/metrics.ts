@@ -3,7 +3,10 @@ import {
   CATEGORY_LABELS, loadDimensioned, loadMetricSeries, loadPeriodSnapshots, loadPeriods,
   loadPeriodsWithData, type SnapshotRow,
 } from '@/modules/dashboard';
-import { listAccounts, listCounterparties } from '@/modules/financials';
+import {
+  AVAILABILITY_REASON_TEXT, listAccounts, listCounterparties, metricAvailability,
+  type AvailabilityInput,
+} from '@/modules/financials';
 import {
   isMetricKey, metricDefinition, varianceKey, VARIANCE_SUFFIXES, type VarianceSuffix,
 } from '@/modules/financial-engine';
@@ -44,18 +47,53 @@ interface MetricValue {
   readonly value: NumericValue | null;
   readonly basis: string;
   readonly assurance_level: string;
+  /**
+   * ADR-106. Whether the figure is economically ESTABLISHED, not merely whether the engine wrote a
+   * number. `not_applicable` carries the reason and NO value, so the model has nothing to state as
+   * an established conclusion and must report the limitation instead. Present on every metric so
+   * the model never has to infer the state from the absence of a field.
+   */
+  readonly availability:
+    | { readonly state: 'available' }
+    | { readonly state: 'not_applicable'; readonly reason: string; readonly explanation: string };
   readonly data_quality: { completeness: NumericValue; warnings: readonly string[]; missing: readonly string[] };
   readonly snapshot_id: string;
   readonly subject?: Subject;
 }
 
-function metricValue(row: SnapshotRow, period: PeriodRef, subj?: Subject): MetricValue {
+const qualityOf = (row: SnapshotRow): AvailabilityInput =>
+  ({ value: row.value, warnings: row.dataQuality.warnings, missing: row.dataQuality.missing });
+
+/**
+ * `costOfSales` is the same period's `cost_of_sales` row where the caller already has it: it holds
+ * the accurate reason code. Without it the rule still fires on gross profit's own warning, with the
+ * generic reason.
+ */
+function metricValue(
+  row: SnapshotRow,
+  period: PeriodRef,
+  subj?: Subject,
+  costOfSales?: SnapshotRow | null,
+): MetricValue {
+  const availability = metricAvailability(
+    row.metricKey, qualityOf(row), costOfSales ? qualityOf(costOfSales) : null,
+  );
+  const notApplicable = availability.state === 'not_applicable';
   return {
     metric_key: row.metricKey,
     period,
-    value: snapshotNumber(row),
+    // §18: a figure that is not established is not a number the model may quote.
+    value: notApplicable ? null : snapshotNumber(row),
     basis: row.basis,
     assurance_level: row.assurance,
+    availability: availability.state === 'not_applicable'
+      ? {
+        state: 'not_applicable',
+        reason: availability.reason,
+        explanation: AVAILABILITY_REASON_TEXT[availability.reason]
+          ?? AVAILABILITY_REASON_TEXT.no_cost_of_sales!,
+      }
+      : { state: 'available' },
     data_quality: {
       completeness: count(String(row.dataQuality.completeness), 2)!,
       warnings: row.dataQuality.warnings,
@@ -164,9 +202,10 @@ export const getBusinessSummary: ToolDefinition<{ period?: string }, unknown> = 
       : null;
     const health = await loadHealthCard(ctx.db, ctx.orgId!, period.id, previous?.id ?? null, ctx.requestId);
 
+    const costOfSales = byKey.get('cost_of_sales') ?? null;
     const metrics = HEADLINE.flatMap((key) => {
       const row = byKey.get(key);
-      return row ? [metricValue(row, period)] : [];
+      return row ? [metricValue(row, period, undefined, costOfSales)] : [];
     });
     const runId = snapshots[0] ? String(snapshots[0].components.calculation_run_id ?? '') || null : null;
     return ok({
@@ -215,6 +254,8 @@ export const getMetric: ToolDefinition<{ metric_key: string; period?: string; di
 
     let base: SnapshotRow | undefined;
     let subj: Subject | undefined;
+    // The same period's cost of sales, for the availability rule's accurate reason (ADR-106).
+    let costOfSales: SnapshotRow | null = null;
     if (input.dimension) {
       const rows = await loadDimensioned(ctx.db, ctx.orgId!, input.metric_key, [period.id], ctx.requestId);
       base = rows.find((r) => (r.dimensionId ?? r.dimensionKey) === input.dimension!.id && r.dimensionType === input.dimension!.type);
@@ -222,6 +263,7 @@ export const getMetric: ToolDefinition<{ metric_key: string; period?: string; di
     } else {
       const rows = await loadPeriodSnapshots(ctx.db, ctx.orgId!, period.id, ctx.requestId);
       base = rows.find((r) => r.metricKey === input.metric_key && r.dimensionType === 'none');
+      costOfSales = rows.find((r) => r.metricKey === 'cost_of_sales' && r.dimensionType === 'none') ?? null;
     }
     if (!base) return noData(`${metricDefinition(input.metric_key).label.toLowerCase()} figure`);
 
@@ -235,13 +277,19 @@ export const getMetric: ToolDefinition<{ metric_key: string; period?: string; di
       return [s, row ? varianceValue(row, periods) : null];
     }));
 
-    const components = Object.entries(base.components)
+    const value = metricValue(base, period, subj, costOfSales);
+    /*
+     * ADR-106: a figure that is not established exposes no components either. Gross profit's
+     * components are revenue and cost of sales, and handing the model "revenue 9,000" under a
+     * gross-profit result is the same invitation to state it that suppressing the value removed.
+     */
+    const components = value.availability.state === 'not_applicable' ? [] : Object.entries(base.components)
       .filter(([, v]) => typeof v === 'string' && /^-?\d+(\.\d+)?$/.test(v))
       .map(([name, v]) => ({ name, value: money(v as string, base!.currency), snapshot_id: base!.snapshotId }));
 
     const comparisonPeriods = Object.values(variance).flatMap((v) => (v && v.comparison_period ? [v.comparison_period] : []));
     return ok(
-      { ...metricValue(base, period, subj), components, variance },
+      { ...value, components, variance },
       { periods: periodsIn([period, ...comparisonPeriods]), basis: base.basis, assurance_level: base.assurance, calculation_run_id: null },
       call,
     );

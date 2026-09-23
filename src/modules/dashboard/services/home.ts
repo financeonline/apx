@@ -1,6 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { varianceKey } from '@/modules/financial-engine';
+import { metricAvailability, type AvailabilityInput } from '@/modules/financials';
 import {
   loadHealthCard, loadHealthHistory, summarySentence,
   type HealthCardView, type HealthHistoryPoint, type SummarySentence,
@@ -97,6 +98,11 @@ const HEADLINE_ORDER = [
 /** The bank-only variant's three cards plus cash (§4, ADR-035). */
 const BANK_ONLY_ORDER = ['cash_inflows', 'cash_outflows', 'net_cash_movement', 'closing_cash'] as const;
 
+/** A snapshot row as the shared availability rule reads it (ADR-106). */
+function qualityOf(row: SnapshotRow): AvailabilityInput {
+  return { value: row.value, warnings: row.dataQuality.warnings, missing: row.dataQuality.missing };
+}
+
 function index(rows: readonly SnapshotRow[]): Map<string, SnapshotRow> {
   const map = new Map<string, SnapshotRow>();
   for (const row of rows) {
@@ -159,22 +165,19 @@ export function buildHeadlineCards(input: {
    * engine still writes as revenue so the statement adds up — carries the warning
    * `no_cost_of_sales` with that reason deliberately REMOVED from its own `missing`. Testing
    * `gross_profit.missing` alone, as this did until ADR-105, tested a field the engine empties.
+   *
+   * ADR-106 moved the decision itself into `financials` so that Home, the monthly report and the
+   * analyst answer one question once. This reads the shared rule; it no longer states it.
    */
   const grossProfit = byKey.get('gross_profit');
   const costOfSales = byKey.get('cost_of_sales');
-  const costAbsentCodes = ['no_cost_of_sales_accounts', 'cost_of_sales_in_other_source'];
-  const costOfSalesUnavailable = costOfSales !== undefined
-    && costOfSales.value === null
-    && costOfSales.dataQuality.missing.some((code) => costAbsentCodes.includes(code));
-  const grossProfitUnsupported = grossProfit !== undefined && (
-    grossProfit.dataQuality.warnings.includes('no_cost_of_sales')
-    || grossProfit.dataQuality.missing.some((code) => costAbsentCodes.includes(code))
-    || costOfSalesUnavailable
-  );
-  const hidesGrossProfit = !grossProfit || grossProfitUnsupported;
+  const availability = grossProfit === undefined
+    ? null
+    : metricAvailability('gross_profit', qualityOf(grossProfit), costOfSales ? qualityOf(costOfSales) : null);
+  const hidesGrossProfit = availability === null || availability.state === 'not_applicable';
   // The reason the reader is given instead of the card — the engine's own, in the shared words.
-  const grossProfitNote = grossProfit !== undefined && grossProfitUnsupported
-    ? missingReasonText(costOfSales?.dataQuality.missing ?? grossProfit.dataQuality.missing)
+  const grossProfitNote = availability !== null && availability.state === 'not_applicable'
+    ? missingReasonText([availability.reason])
     : null;
 
   // The bank-only variant (ADR-035): the organisation has bank data and NO P&L source at all.

@@ -65,4 +65,8 @@ export {
   updateCounterparty,
 } from './services';
 
-export { BASIS_TEXT, METRIC_LABELS, labelFor } from './domain/vocabulary';
+export {
+  AVAILABILITY_REASON_TEXT, BASIS_TEXT, COST_OF_SALES_ABSENT_CODES, METRIC_LABELS,
+  labelFor, metricAvailability,
+  type AvailabilityInput, type MetricAvailability,
+} from './domain/vocabulary';

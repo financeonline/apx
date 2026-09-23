@@ -117,8 +117,20 @@ export function buildCorpus(recording: Recording = loadRecording()): EvalCase[] 
   const betaShare = fig(12, `rows[${betaIndex}].share`);
   const health = fig(17, 'score');
   const alerts = (callsBySeq.get(16)!.result.data as { alerts: Array<{ id: string; rule_key: string; revision_no: number }> }).alerts;
-  const spikeIndex = alerts.findIndex((a) => a.rule_key === 'expense.spike_category');
-  const spikeRef = fig(16, `alerts[${spikeIndex}].threshold_summary.pct_change`).evidence;
+  /*
+   * Whichever expense-spike alert the recording retained.
+   *
+   * `get_alerts` is capped and ties are broken by nothing, so a re-record keeps either
+   * `expense.spike_category` or `expense.spike_account` for this organisation — the two carry
+   * different key paths, which is the same nondeterminism `ai-eval-record` reports as a 26-against-25
+   * shape difference. The corpus uses this only as an evidence reference, and every use already
+   * tolerates its absence, so it must not insist on one of the two. This changes no assertion about
+   * behaviour and does not touch the alerts module or the shape test that reports the flake.
+   */
+  const spikeIndex = alerts.findIndex((a) => a.rule_key.startsWith('expense.spike'));
+  const spikeRef = spikeIndex < 0
+    ? null
+    : fig(16, `alerts[${spikeIndex}].threshold_summary.pct_change`).evidence;
 
   const ACME = acmeRev.entity!;
   const BETA = betaRev.entity!;
@@ -599,6 +611,57 @@ export function buildCorpus(recording: Recording = loadRecording()): EvalCase[] 
     { ...good, mode: 'clarification' }, 'clarification');
   schemaTrap('no-data-with-figures', 'a no_data mode when the tools returned figures',
     { ...cited(answer(stmt('There are no figures for that period.', 'inference', [], null))), mode: 'no_data' }, 'no_data is only admissible');
+
+  /*
+   * --- ADR-106: a gross profit the product will not show, the analyst may not state ---------------
+   *
+   * The recorded organisation HAS cost of sales, so its gross profit is a real figure and the
+   * `margin` golden above quotes it. These two cases are the other organisation: the engine writes
+   * gross profit as revenue with `no_cost_of_sales` because there is nothing to subtract, and the
+   * tool therefore hands the model `value: null` with `availability.state = not_applicable`. The
+   * recorded call 4 is `get_metric gross_profit`, rewritten here exactly as the tool now returns it.
+   */
+  const unsupportedGrossProfit = ((): RecordedToolCall => {
+    const src = callsBySeq.get(4)!;
+    const data = structuredClone(src.result.data) as Record<string, unknown>;
+    data.value = null;
+    data.components = [];
+    data.availability = {
+      state: 'not_applicable',
+      reason: 'no_cost_of_sales_accounts',
+      explanation: 'You have no direct-cost accounts, so this does not apply.',
+    };
+    (data.data_quality as { warnings: string[] }).warnings = ['no_cost_of_sales'];
+    return { ...src, result: { ...src.result, data } as ToolResult };
+  })();
+  const gpSnapshotId = (unsupportedGrossProfit.result.data as { snapshot_id: string }).snapshot_id;
+  const noCostCalls = [unsupportedGrossProfit, ...calls(2)];
+
+  // The honest answer: revenue as a figure, the limitation as a reason, and no gross profit quoted.
+  cases.push(base('golden', 'golden:gross-profit-unavailable:owner', 'Where is the business losing money?', 'owner',
+    `What was our gross profit in ${MAY}?`, [],
+    cited(answer(
+      stmt(`We cannot show profit after direct costs for ${MAY}: you have no direct-cost accounts, so this does not apply.`,
+        'inference', [], MAY, [{ type: 'metric_snapshot', id: gpSnapshotId }]),
+      { key_findings: [stmt(`Sales were ${rev.text} in ${MAY}.`, 'deterministic_calculation', [rev])],
+        confidence: { data_quality_notes: [{ code: 'no_cost_of_sales', period: MAY }] },
+        unsupported: [{ topic: 'profit after direct costs', reason: 'no_data' }] },
+    )),
+    { outcome: 'passed', mode: 'answer', firstPass: true, numbers: [rev.text], absent: [gp.text] },
+    { toolCalls: noCostCalls }));
+
+  // The trap: the figure the engine still carries, stated as though it were established.
+  for (const variant of ['a', 'b'] as const) {
+    cases.push(base('trap', `trap:gross-profit-not-applicable:${variant}`,
+      'a gross profit stated for an organisation that has no cost of sales',
+      variant === 'a' ? 'owner' : 'client', `What was our gross profit in ${MAY}?`, [],
+      cited(answer(
+        stmt(`Gross profit was ${gp.text} in ${MAY}.`, 'deterministic_calculation', [gp]),
+        { key_findings: [stmt(`Sales were ${rev.text} in ${MAY}.`, 'deterministic_calculation', [rev])] },
+      )),
+      { outcome: 'degraded', mode: 'answer', firstPass: false, absent: [`Gross profit was ${gp.text}`] },
+      { toolCalls: noCostCalls }));
+  }
 
   return cases;
 }

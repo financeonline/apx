@@ -375,6 +375,37 @@ describe('descriptor compiler (§3.1)', () => {
     expect(ar.amountColumn).toBe('balance_due');
   });
 
+  it('excludes voided invoices from EVERY invoice shape, as the engine does (ADR-107)', () => {
+    const notVoid = { column: 'status', op: 'neq', value: 'void' };
+    // The P&L shapes, which carried record_status and superseded_by but never this.
+    for (const filters of [
+      { period_ids: [PERIOD_A], invoice_types: ['sales', 'sales_credit_note'] },
+      { period_ids: [PERIOD_A], invoice_types: ['purchase'], counterparty_ids: [ACCOUNT_A] },
+      { period_ids: [PERIOD_A] },
+    ] as const) {
+      const compiled = compileDescriptor(parseQueryDescriptor({ v: 1, table: 'invoices', filters }));
+      expect(compiled.filters, JSON.stringify(filters)).toContainEqual(notVoid);
+      expect(compiled.filters).toContainEqual({ column: 'record_status', op: 'eq', value: 'accepted' });
+      expect(compiled.filters).toContainEqual({ column: 'superseded_by', op: 'isNull', value: null });
+    }
+    // Pinned to a run: the lifecycle pair drops out because the events decide, but a void is the
+    // invoice's own business status and has no event, so the predicate stays.
+    const pinned = compileDescriptor(parseQueryDescriptor({
+      v: 1, table: 'invoices', filters: { period_ids: [PERIOD_A] },
+      as_of: { calculation_run_id: RUN, aggregated_at: '2026-04-01T00:00:00.000Z' },
+    }));
+    expect(pinned.filters).toContainEqual(notVoid);
+    expect(pinned.filters).not.toContainEqual({ column: 'record_status', op: 'eq', value: 'accepted' });
+    // Emitted once, not twice, where the receivables helper adds it as well.
+    const ar = compileDescriptor(parseQueryDescriptor({
+      v: 1, table: 'invoices', filters: { invoice_types: ['sales'], open_as_of: '2026-03-31' },
+    }));
+    expect(ar.filters.filter((f) => f.column === 'status')).toEqual([notVoid]);
+    // Other tables have no such column and must not acquire the predicate.
+    const ledger = compileDescriptor(parseQueryDescriptor({ v: 1, table: 'ledger_entries', filters: { period_ids: [PERIOD_A] } }));
+    expect(ledger.filters.some((f) => f.column === 'status')).toBe(false);
+  });
+
   it('pins the run for a metric_snapshots selection and refuses to sum mixed units', () => {
     const compiled = compileDescriptor(
       parseQueryDescriptor({

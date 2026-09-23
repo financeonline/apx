@@ -1,8 +1,120 @@
 # Phase 14 — remediation, verification and closeout
 
-> **Final commit: `8f81dd3`** — "Phase 14 — Home gross-profit card and invoice-basis evidence amount (ADR-105)", on `main`, pushed to `origin/main`, working tree clean.
+> **Final commit: the Phase 14 void-and-analyst remediation (ADR-106, ADR-107)** on `main`, pushed to `origin/main`, working tree clean. It answers the adversarial audit of `b6cac0b` recorded in Part E.
 >
-> **Status: IMPLEMENTATION VERIFIED BY OPUS — INDEPENDENT FABLE 5.1 AUDIT PENDING.** Part D records what this closeout pass verified against the committed tree. It is *not* an independent audit and does not declare Phase 15 readiness. Only the independent Fable 5.1 audit can do that. Parts A, C and B below are kept as written, in the order they were produced.
+> **Status: IMPLEMENTED AND VERIFIED BY OPUS — INDEPENDENT FABLE 5.1 AUDIT PENDING.** No pass recorded in this file was independent: the same session wrote the implementation and the record. Phase 14 is **not** declared ready for Phase 15, and only the independent Fable 5.1 audit can declare it. Parts are in the order they were produced, newest first.
+>
+> Commit chain: `55acbeb` (ADR-103) → `f8fdc58` (ADR-104) → `8f81dd3` (ADR-105) → `b6cac0b` (closeout record) → this commit (ADR-106, ADR-107).
+
+---
+
+# Part E — adversarial audit of `b6cac0b`, and the remediation that answers it
+
+An adversarial pass over `b6cac0b` probed the ground the earlier passes had asserted rather than exercised. It found one HIGH and two MEDIUM, and four factual errors in Part D. Everything here was reproduced against a real clean database before it was fixed, and the fixes are verified the same way.
+
+## HIGH-1 — voided invoices were inside the evidence behind every invoice-basis figure
+
+**Found.** The engine's invoice fold discards voided invoices; the evidence drill-down did not. `status <> 'void'` existed in exactly one place in the evidence layer, inside the helper that builds the receivables and payables shape, so no P&L descriptor ever got it. Supersession was correct throughout, which isolated the cause precisely.
+
+| Figure | Engine | Its own drill-down, before |
+|---|---|---|
+| Cost of sales | 3,250.00 | 10,250.00 over 4 rows |
+| Revenue | 8,000.00 | 13,000.00 |
+| Customer revenue, one customer | 8,000.00 | 13,000.00 |
+
+Each gap was exactly the net of a voided invoice, and the analyst's `get_transactions_for_evidence` reported £10,250 over 4 records as the evidence for £3,250. Reachable through the ordinary import: invoice `status` is a mappable column and the commit routine casts it straight to the enum, so any list exported with voided invoices lands them. The root cause predates Phase 14; ADR-105 changed the amount from an outstanding balance to a full net, and Part D asserted the reconciliation as verified without ever seeding a voided invoice.
+
+**Fixed (ADR-107).** The compiler applies the engine's third clause to every invoices descriptor through one named helper that the receivables helper also calls, so there is a single spelling. It is applied whether or not the selection is pinned to a run, because a void is the invoice's own business status and has no `record_status_events` row — which is why the as-of projection could not see it. Descriptor hashes are computed over the descriptor, not the compiled query, so no stored hash changed.
+
+**Verified.** On a second organisation with different amounts: cost of sales 5,522.00 with a drill-down of 5,522.00 over 2 rows, the 9,999 void absent and the 2,222 that superseded a 1,111 present; revenue 20,000.00 against a 12,345 void; the same customer's revenue; and the analyst's evidence tool at 5,522.00 over 2 records. `test/integration/evidence-void-invoice.test.ts` fails 4 of its 5 cases on `b6cac0b` and passes here.
+
+## MEDIUM-1 — the analyst reported the gross profit Home refuses to show
+
+**Found.** On an organisation with sales of £9,000 and no direct-cost accounts, Home omitted the card and explained why, while `get_business_summary` returned gross profit of £9,000 with `assurance_level: calculated` and `completeness: 1.00`. The only caveat was one entry in a warnings array for which the prompt had no rule, and the prompt tells the model to mention assurance only when it is not calculated. ADR-105 had fixed one surface of a two-surface product concept.
+
+**Fixed (ADR-106).** The rule is now stated once, in `financials`, as a structured availability state rather than free-form warning text. Home and the monthly report read it instead of restating it. Every metric the analyst receives carries `availability`; `not_applicable` carries the reason and the explanation and **no value**, and a not-applicable `get_metric` also returns no components, so there is nothing to quote and nothing to rebuild the figure from. The prompt states the deterministic rule for the structured field. The engine is untouched and still writes gross profit as revenue with its warning, because a statement has to add up.
+
+**Verified.** Both directions, on two organisations: the unsupported one gives Home no card and the analyst no value with reason `no_cost_of_sales_accounts` in the same words Home prints; the one with a real cost line gives Home the card and the analyst £7,000 marked available.
+
+## MEDIUM-2 — the `ai-eval-record` nondeterminism was documented wrongly
+
+**Found.** Part D said the failure passes in isolation. Eight isolated runs gave five passes and three failures, all with the identical signature. Re-recording the fixture for ADR-106 sharpened the diagnosis further: the retained alert is sometimes `expense.spike_category` and sometimes `expense.spike_account`, and those two rules carry different key paths — which is precisely the 26-against-25 shape difference the test reports. It is not only an ordering effect.
+
+**Not fixed, by instruction.** The alerts module and the shape test are untouched. Two consequences had to be handled, neither of which weakens an assertion:
+
+- The corpus hard-coded `expense.spike_category` when picking an evidence reference, so a re-record that retained the other rule made the corpus throw. It now takes whichever expense-spike alert the recording holds, and tolerates neither, which every use of that reference already did.
+- **The recording is itself a draw from the same distribution.** ADR-106 changes a tool's output, so re-recording is mandatory. The first re-record captured an unlucky snapshot — `expense.spike_account` first, and an empty `top_alerts` on the second summary call that later runs populate — and the test then failed 6 of 6 isolated runs rather than its usual minority. Re-recording again produced a representative capture, after which 3 of 5 isolated runs pass with the familiar 26-against-25 signature, matching the 5-of-8 measured on `b6cac0b`. Anyone re-recording this fixture should re-run the test a few times afterwards and re-record if it never passes; that is a property of the nondeterminism, not a fix for it.
+
+## Corrections to Part D
+
+Part D's findings stand except where corrected here. Five statements in it were wrong and are corrected in place, each marked **Corrected** where it sits: the blanket reconciliation claim (§6), the flake characterisation (§16), the integration gate row (§17), the description of the migrations' grants (scope check), and the description of the earlier passes as "independent" (§3). Its description of `/portfolio` is expanded for accuracy in the same place.
+
+## pgTAP guard limitation
+
+`13_invoice_net.test.sql` asserts that no invoice reader carries its own copy of the net-of-tax rule. The assertion matches only the **unqualified** spelling: verified in Postgres, a table-qualified duplicate such as `i.total_amount - i.tax_amount` does not match it, and that is exactly how the superseded version of `set_invoice_lines` was written. The guard is therefore weaker than it reads. The live functions were checked directly instead: `app.aggregate_periods`, `api.set_invoice_lines` and `api.product_period_summary` each call `app.invoice_net` once and none carries its own spelling, qualified or bare. The guard was left as it is rather than widened, to keep this pass inside Phase 14 correctness.
+
+## What this remediation contains
+
+Six source files; no migration, no schema change, no engine change.
+
+| Change | Where |
+|---|---|
+| The one availability rule, its reason text and its types | `financials/domain/vocabulary.ts`, exported from the module index |
+| Home reads the rule instead of restating it | `dashboard/services/home.ts` |
+| The cost-of-sales reason text has one source | `dashboard/domain/status.ts` |
+| `availability` on every `MetricValue`; no value and no components when not applicable | `ai/domain/tools/metrics.ts` |
+| The deterministic rule for the structured field; `analyst-v3.5` | `ai/domain/prompt.ts`, `ai/data/claude-client.ts` |
+| The engine's third invoice clause on every invoices descriptor | `evidence/data/descriptor-compiler.ts` |
+
+Tests added:
+
+| Test | Cases |
+|---|---|
+| `test/integration/evidence-void-invoice.test.ts` | 5. Cost of sales, revenue, a customer's revenue and operating expenses each reconcile to their figure with a void present; the superseded invoice stays excluded and its replacement included; the analyst's evidence tool cannot return the voided row. **4 of the 5 fail on `b6cac0b`.** |
+| `test/integration/ai-gross-profit-availability.test.ts` | 6. Both directions on two organisations: Home and both analyst tools agree that the figure is not applicable, with the same reason in the same words; and a real cost line still yields £7,000 everywhere. |
+| `test/unit/metric-availability.test.ts` | 8. The rule itself, including the preference for the cost figure's reason, the trend case with no cost figure, and that no other metric is touched. |
+| `test/unit/evidence-descriptor.test.ts` | +1. The void predicate on every invoice shape, pinned and unpinned, emitted once where the receivables helper also adds it, and absent from other tables. |
+| `test/fixtures/ai/corpus.ts` | +3 eval cases: one golden that reports the limitation and quotes no gross profit, two traps that state it and must be rejected. |
+
+## NEW — HIGH-2, found while regression-testing merges, NOT fixed in this pass
+
+Regression-testing the merge item turned up a **second reconciliation gap of the same family as HIGH-1**, pre-existing and unrelated to either blocker. It is recorded here and deliberately left alone, because this pass was scoped to HIGH-1 and MEDIUM-1 and an engine change at commit time is exactly the broadening the brief forbids.
+
+**The defect.** The engine folds a merged counterparty's rows into the survivor (`coalesce(c.merged_into_id, i.counterparty_id)`), but `concentration.ts#counterpartyEvidence` writes a descriptor naming only the surviving id, while the invoice rows still carry the original one. The absorbed counterparty's invoices are therefore missing from the survivor's drill-down.
+
+Reproduced on a clean database: customer A invoiced 5,000 net, customer B invoiced 3,000 net, B merged into A, recalculated. `customer_revenue` for A is **8,000.00**; the stored descriptor is `counterparty_ids: [A]`; resolving it returns **1 row, 5,000.00**. B's own snapshot is gone, as intended, so the 3,000 is visible in no drill-down at all.
+
+**Why it is HIGH.** It breaks the same invariant HIGH-1 broke — the evidence behind a figure must equal that figure — on a first-class Phase 14 feature, and it understates rather than overstates, which is the harder error to notice. It is not caused by ADR-105 or ADR-107 and predates both.
+
+**The likely fix, for a later pass.** `counterpartyEvidence` has `ctx.counterparties` with `mergedIntoId`, so the descriptor can name the survivor plus every id merged into it. That changes which descriptor is written, not any figure, and needs a test asserting the survivor's drill-down equals the survivor's figure after a merge. It was not attempted here.
+
+## Remaining findings after this remediation
+
+| ID | Severity | Status |
+|---|---|---|
+| HIGH-1 | — | **CLOSED**: voided invoices are out of every invoice-basis drill-down, asserted by a test that fails without the fix |
+| HIGH-2 | HIGH | **OPEN, new, not fixed**: a merged counterparty's invoices are missing from the survivor's evidence (above) |
+| MEDIUM-1 | — | **CLOSED**: one availability rule across Home, the report and the analyst |
+| MEDIUM-7, MEDIUM-8 | — | CLOSED earlier by `8f81dd3` (ADR-105); MEDIUM-8's reconciliation claim is now qualified and tested for the void case |
+| MEDIUM-2 | MEDIUM | open by instruction: the nondeterministic `ai-eval-record` test. Not fixed, not suppressed |
+| Phase 13 MEDIUM-4 | MEDIUM (Phase 13) | open: the transactions table scrolls sideways at 375 px |
+| LOW-1…7 | LOW | open, unchanged from the earlier audits |
+| LOW-8 | LOW | open: `computeCash` handed an `openingCarry` carrying `no_bank_accounts` keeps the series NULL; no production caller supplies one |
+| LOW-9 | LOW | open: `gross_margin` stores `no_cost_of_sales_accounts` where `cost_of_sales` stores `cost_of_sales_in_other_source`. Presentation is unaffected — ADR-106 prefers the cost figure's reason on every surface |
+| LOW-10 | LOW | open: NULL cash snapshots store `assurance_level = calculated`; the badge shows "—" |
+| LOW-11 | LOW | open: the pgTAP duplicate-rule guard matches only the unqualified spelling (above) |
+| LOW-12 | LOW | open, cosmetic, pre-existing since Phase 4: `exclude_transfers` appears twice in the bank-transactions filter allow-list, which is read into a Set, so it has no effect |
+| LOW-13 | LOW | open, a trap rather than a defect: `evidence_query` stores JSON `null` rather than SQL NULL for "no descriptor", which has now misled two test authors |
+
+None was fixed opportunistically. Scope was held to the two correctness blockers and the documentation.
+
+## Status
+
+**IMPLEMENTED AND VERIFIED BY OPUS. INDEPENDENT FABLE 5.1 AUDIT PENDING.**
+
+Phase 14 is **not** declared ready for Phase 15, and nothing in this file is an independent audit: the same session wrote the implementation, the closeout record, the adversarial pass that found HIGH-1 and MEDIUM-1, and this remediation. Phase 15 is not started. The next operation is the independent Fable 5.1 audit against this commit.
+
+**One HIGH is open.** HIGH-2 above was found in this pass and deliberately not fixed, because it falls outside the two blockers this remediation was scoped to. Anyone reading this as a readiness statement should read it as: the two blockers are closed and verified, and a third defect of the same family is known, located and waiting for a decision.
 
 ---
 
@@ -18,9 +130,11 @@ Method: code reading of the committed tree at `8f81dd3`; the eleven gates re-run
 
 `55acbeb` (ADR-103): the invoice-basis fold at the root, `app.invoice_net` as the single net-of-tax rule, "Unattributed" made not-a-customer, and counterparty merges followed through the aggregate. `f8fdc58` (ADR-104): the cash empty-set, the over-selecting expense evidence and the unwarned 100% gross margin. Parts B and C record both.
 
-## 3. Independent verification already performed
+## 3. Audit passes already performed
 
-Three independent audits ran before this pass: `PHASE_14_FINAL_AUDIT.md` (Phase 14 as delivered), `PHASE_14_REMEDIATION_AUDIT.md` (`55acbeb`), and Part A of this file (`f8fdc58`). Each returned NOT READY and named the findings the next commit answered.
+Three audit passes ran before this one: `PHASE_14_FINAL_AUDIT.md` (Phase 14 as delivered), `PHASE_14_REMEDIATION_AUDIT.md` (`55acbeb`), and Part A of this file (`f8fdc58`). Each returned NOT READY and named the findings the next commit answered. A fourth, recorded in Part E, audited `b6cac0b` and found HIGH-1 and MEDIUM-1.
+
+> **Corrected (Part E).** These were originally described as "independent". They were not: every one of them, and this closeout, was produced by the same session that wrote the implementation. They were adversarial read-only passes under a do-not-modify instruction, which is useful and is not independence. The independent Fable 5.1 audit has not yet run.
 
 ## 4. Cash empty-set
 
@@ -32,7 +146,9 @@ Verified intact. The engine distinguishes a true zero from no data in every fami
 
 ## 6. Cost-of-sales evidence mismatch
 
-Fixed and verified. Descriptors are scoped to the suppliers that contributed (ADR-104), and the summed amount now matches the figure (ADR-105, item 9). Probed through the analyst's own `get_transactions_for_evidence` tool against a live run: a `cost_of_sales` figure of 3,000.000000 returns **2 records, £1,800 and £1,200, sum £3,000.00, count 2**. `operating_expenses` carries a descriptor naming only the marketing supplier and no stock supplier. `other_expense`, a category nobody's purchases went into, carries no descriptor at all.
+Descriptors are scoped to the suppliers that contributed (ADR-104), and the summed amount matches the figure (ADR-105, item 9). Probed through the analyst's own `get_transactions_for_evidence` tool against a live run: a `cost_of_sales` figure of 3,000.000000 returns **2 records, £1,800 and £1,200, sum £3,000.00, count 2**. `operating_expenses` carries a descriptor naming only the marketing supplier and no stock supplier. `other_expense`, a category nobody's purchases went into, carries no descriptor at all.
+
+> **Corrected (Part E, HIGH-1).** As written this section claimed the reconciliation held generally. It did not: this fixture contained no voided invoice, and a voided invoice was included in every invoice-basis P&L drill-down while the engine excluded it from the figure. Fixed by ADR-107 and now covered by a test that seeds one. The accurate claim is narrower and is stated in Part E: the drill-down behind an invoice-basis figure reconciles to that figure for unpaid, partly paid, fully paid, credit-note, superseded **and voided** invoices, each asserted by a test.
 
 ## 7. Gross-margin assurance
 
@@ -90,7 +206,9 @@ PASS. The Phase 14 commercial tools call the same `loadProducts`, `loadMarketing
 
 ## 16. Known pre-existing issues
 
-- **`ai-eval-record` ordering flake.** `loadAlerts` orders by severity and timestamp with no identifier tiebreaker, and the shape comparison samples only the first array element, so equally ranked alerts can arrive in either order (`get_alerts #16 output shape`, 26 against 25 key paths). **It did not fire in this run** — integration was 668 of 668 — and it passes in isolation. Not fixed, not suppressed, not worked around: the alerts module and the test were left exactly as they are, per instruction.
+- **Pre-existing nondeterministic `ai-eval-record` test.** `loadAlerts` is capped and ordered by severity and timestamp with no identifier tiebreaker, so which alert the recorded call retains varies between runs (`get_alerts #16 output shape`, 26 against 25 key paths). **It did not fire in the run recorded in this Part.** Not fixed, not suppressed, not worked around: the alerts module and the test were left exactly as they are, per instruction.
+
+  > **Corrected (Part E, MEDIUM-2).** This bullet originally said the test "passes in isolation". That is false: eight isolated runs gave five passes and three failures, every failure with the identical signature. It is a genuinely nondeterministic test, not a full-suite ordering effect, and it can fail on any run. Re-recording for ADR-106 showed the retained alert varies between `expense.spike_category` and `expense.spike_account`, two rules whose key paths differ — which is the shape difference itself.
 - **`ai-eval-job` live-model transient.** One "the model could not be called" in an earlier run, never reproduced; passed here. Environmental, not a code regression.
 - **Phase 13 MEDIUM-4:** the transactions table scrolls sideways at 375 px.
 
@@ -103,7 +221,7 @@ PASS. The Phase 14 commercial tools call the same `loadProducts`, `loadMarketing
 | Typecheck (`tsc --noEmit`) | PASS |
 | Lint (`eslint .`) | PASS |
 | Unit | PASS — 70 files, 1,994 tests |
-| Integration | PASS — 41 files, **668 of 668** |
+| Integration | 41 files, **668 of 668 in this run**. Not an invariant: the nondeterministic `ai-eval-record` test can fail on any run, and a clean-database run of `b6cac0b` measured 667 of 668 with exactly that failure |
 | pgTAP | PASS — 16 files, 1,034 tests |
 | Playwright | PASS — 64 passed, 1 pre-existing skip |
 | AI eval | PASS — 170 |
@@ -130,7 +248,13 @@ No gate is called PASS with an unexplained failure inside it.
 
 ## Scope check on the final tree
 
-`git diff b2a73ea..8f81dd3` introduces no Phase 15 surface: no Adviser or CFO Command Centre route, no portfolio table, no multi-client dashboard (`/portfolio` has existed since Phase 1 and no Phase 13 or 14 commit touches it). Three migrations, all Phase 13 and 14, and every grant statement in them revokes rather than widens. No policy dropped, no RLS disabled. `f8fdc58..8f81dd3` changes no migration, no schema, no precedence, no `app.invoice_net` semantics, no Phase 13 contract, no alerts module and no test expectation written to fit broken behaviour.
+`git diff b2a73ea..8f81dd3` introduces no Phase 15 surface: no Adviser or CFO Command Centre route, no portfolio table, no multi-client dashboard. Three migrations, all Phase 13 and 14. No policy dropped, no RLS disabled. `f8fdc58..8f81dd3` changes no migration, no schema, no precedence, no `app.invoice_net` semantics, no Phase 13 contract, no alerts module and no test expectation written to fit broken behaviour.
+
+> **Corrected (Part E).** Two statements here were wrong as written.
+>
+> **Grants.** The original said every grant statement in the three migrations revokes rather than widens. It does not. They follow the established SECURITY DEFINER pattern: each new `api.*` function is revoked from `public` and `anon` and then granted `execute` to `authenticated`, and each `api_server.*` function is revoked from everyone and granted `execute` to `service_role` alone. Direct write grants on tables are revoked. RLS stays enabled and forced, no policy is dropped, and no tenant-boundary weakening was demonstrated by any probe or suite.
+>
+> **`/portfolio`.** The original implied only that the path is old. Accurately: the path first appears in Phase 1 and its current content dates from Phase 6 (`b388bea`). It is an adviser landing page that lists the organisations the caller can already reach and shows each one's health score, as a read-only projection over the caller's accessible set. No Phase 13 or 14 commit touches it. It is **not** the Phase 15 Adviser/CFO Command Centre, and its existence is not evidence that Phase 15 has been started.
 
 ## Phase 15
 
@@ -138,7 +262,7 @@ No gate is called PASS with an unexplained failure inside it.
 
 ---
 
-# Part A — final independent re-audit of `f8fdc58`
+# Part A — final re-audit of `f8fdc58` (adversarial pass, not independent — see Part E)
 
 > **Commit audited: `f8fdc58`** on `main` (`HEAD`, `origin/main` and the working tree agree; `git status --porcelain` empty). Audit date: 2026-09-23. Method: code reading of the committed tree; the full gate suite on a clean database (`supabase db reset`); every adversarial probe from the two earlier audits re-run; new probes for the three previous blockers, for a business that imports history before adding banking, for the analyst's evidence tool, and for Home; a detached worktree at 55acbeb for before/after comparison. **No implementation code was modified.** Part B below is the implementation team's record, kept as submitted.
 

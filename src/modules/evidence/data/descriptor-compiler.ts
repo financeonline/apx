@@ -218,8 +218,28 @@ class FilterSet {
  */
 function addOpenAt(filters: FilterSet, post: PostFilter[], date: string): void {
   filters.add({ column: 'issue_date', op: 'lte', value: date });
-  filters.add({ column: 'status', op: 'neq', value: 'void' });
+  addNotVoid(filters);
   post.push({ kind: 'open_at', date });
+}
+
+/**
+ * A voided invoice is not a financial record of anything (ADR-107).
+ *
+ * `app.aggregate_periods` reads invoices under `record_status = 'accepted' and superseded_by is
+ * null and status <> 'void'`, and every other invoice reader in the engine repeats that third
+ * clause. The evidence layer carried only the first two, because the lifecycle pair is generic and
+ * lives in the shared block while `status <> 'void'` sat inside `addOpenAt` — so the receivables and
+ * payables shape excluded voided invoices and every P&L shape did not. A voided invoice therefore
+ * appeared in the drill-down behind revenue, cost of sales, an expense category and a customer's
+ * revenue, and from ADR-105 it contributed its full net to the total: the evidence behind a £3,250
+ * figure summed to £10,250.
+ *
+ * `status` is an invoice's own business state, not a record-lifecycle event, so it is NOT in
+ * `record_status_events` and is applied as a column predicate whether or not the selection is
+ * pinned to a run — exactly as the engine's own re-read of the table applies it.
+ */
+function addNotVoid(filters: FilterSet): void {
+  filters.add({ column: 'status', op: 'neq', value: 'void' });
 }
 
 function compileFilter(
@@ -362,6 +382,9 @@ export function compileDescriptor(descriptor: QueryDescriptorV1): CompiledQuery 
     filters.add({ column: 'record_status', op: 'eq', value: 'accepted' });
     filters.add({ column: 'superseded_by', op: 'isNull', value: null });
   }
+
+  // The third clause of the engine's invoice eligibility rule, for EVERY invoice shape (ADR-107).
+  if (descriptor.table === 'invoices') addNotVoid(filters);
 
   for (const key of FILTER_ORDER) compileFilter(key, descriptor, filters, post);
 
