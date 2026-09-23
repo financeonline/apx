@@ -3,7 +3,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { compare, formatMoney } from '@/core/money';
 import { varianceKey } from '@/modules/financial-engine';
 import {
-  listAccounts, listCounterparties, listInvoices,
+  listAccounts, listCounterparties, listInvoices, metricAvailability,
   STANDARD_CATEGORIES,
   type Account, type Counterparty, type Invoice, type StandardCategory,
 } from '@/modules/financials';
@@ -154,9 +154,33 @@ function figuresFor(
   options: FigureOptions,
 ): MetricCardView[] {
   const out: MetricCardView[] = [];
+  const costOfSales = byKey.get('cost_of_sales');
   for (const key of keys) {
     const row = byKey.get(key);
     if (!row) continue;
+    /*
+     * ADR-106: the ONE availability rule Home and the analyst read. The engine writes gross profit as
+     * revenue when there is no cost of sales to subtract, so the statement adds up; on this page that
+     * line sat between a cost of sales reading "—" and a margin reading "—" as "£12,500 · Partial
+     * data", which is the same figure Home omits and the analyst is not given. It is presented here
+     * exactly as an unavailable figure is — "—" with the engine's reason — by handing the renderer
+     * the row with no value and that reason, so no second rendering rule exists. A real gross
+     * profit is untouched.
+     */
+    const availability = metricAvailability(
+      key,
+      { value: row.value, warnings: row.dataQuality.warnings, missing: row.dataQuality.missing },
+      costOfSales
+        ? { value: costOfSales.value, warnings: costOfSales.dataQuality.warnings, missing: costOfSales.dataQuality.missing }
+        : null,
+    );
+    if (availability.state === 'not_applicable') {
+      out.push(toFigure(
+        { ...row, value: null, dataQuality: { ...row.dataQuality, missing: [availability.reason as SnapshotRow['dataQuality']['missing'][number]] } },
+        period, null, options,
+      ));
+      continue;
+    }
     out.push(toFigure(row, period, byKey.get(varianceKey(key, 'prev_period')) ?? null, options));
   }
   return out;

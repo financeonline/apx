@@ -1,10 +1,118 @@
 # Phase 14 — remediation, verification and closeout
 
-> **Final commit: the Phase 14 void-and-analyst remediation (ADR-106, ADR-107)** on `main`, pushed to `origin/main`, working tree clean. It answers the adversarial audit of `b6cac0b` recorded in Part E.
+> **Final commit: the Phase 14 evidence and cross-surface consistency closure (ADR-108, and the ADR-106 addendum)** on `main`, pushed to `origin/main`, working tree clean. It answers the Fable 5.1 audit of `33ae461` recorded in Part F.
 >
-> **Status: IMPLEMENTED AND VERIFIED BY OPUS — INDEPENDENT FABLE 5.1 AUDIT PENDING.** No pass recorded in this file was independent: the same session wrote the implementation and the record. Phase 14 is **not** declared ready for Phase 15, and only the independent Fable 5.1 audit can declare it. Parts are in the order they were produced, newest first.
+> **Status: IMPLEMENTED AND VERIFIED — INDEPENDENT FABLE 5.1 SIGN-OFF PENDING.** Parts D and E were written by the implementing session under Opus 5. Part F's audit ran under Fable 5.1 in the same session, which is model independence and not context independence; its findings were reproduced against a clean database with fresh figures rather than recalled. Phase 14 is **not** declared ready for Phase 15 in this file. Parts are in the order they were produced, newest first.
 >
-> Commit chain: `55acbeb` (ADR-103) → `f8fdc58` (ADR-104) → `8f81dd3` (ADR-105) → `b6cac0b` (closeout record) → this commit (ADR-106, ADR-107).
+> Commit chain: `55acbeb` (ADR-103) → `f8fdc58` (ADR-104) → `8f81dd3` (ADR-105) → `b6cac0b` (closeout record) → `33ae461` (ADR-106, ADR-107) → this commit (ADR-108, ADR-106 addendum).
+
+---
+
+# Part F — Fable 5.1 audit of `33ae461`, and the closure that answers it
+
+The audit ran under Fable 5.1 against `33ae461` on a clean database, with fresh figures, and re-ran every gate itself rather than accepting Part E's numbers. It verified the two fixes of `33ae461`, confirmed the merge gap Part E had left open and found it wider than recorded, and found one presentation surface the availability rule had not reached. This part records the audit, the closure, and the verification of the closure.
+
+## Verified at `33ae461`, independently
+
+- **Void (ADR-107).** On an organisation with a sale of 17,250 beside a voided sale of 4,444, and a purchase of 2,675 beside a voided purchase of 8,888 **from the same supplier** (so supplier scoping could not hide it): cost of sales 2,675 with a drill-down of 2,675, revenue 17,250 with a drill-down of 17,250, and the analyst's evidence tool citing 17,250 over one record. The voided ids appear in no selection.
+- **Analyst availability (ADR-106).** On an organisation with sales of 12,500 and no direct-cost accounts: Home omits the card; `get_business_summary` and `get_metric` return no value with `not_applicable` and the reason; `get_metric_trend` returns a point with no value and an empty summary.
+- **Health, alerts, forecast, scenarios.** Read for the same figure: the profitability dimension and the margin alert consume `gross_margin`, which is NULL; the forecast projects gross profit only when both revenue and cost of sales have levels, and scenarios take it from the forecast. None reintroduces the figure.
+- **The re-recorded fixture.** A structural diff of every recorded call between `b6cac0b` and `33ae461` shows the same thirty calls and, apart from `availability` paths, no key path added or removed anywhere.
+- **Grounding.** The allowed-set walker builds citable entries only from branded numeric nodes, so `availability.explanation` is inert text and cannot be quoted as a figure.
+- **Gates at `33ae461`** (independent run): typecheck, lint, unit 2,003, pgTAP 1,034, Playwright 64 with one pre-existing skip, AI eval 173, schema drift, build all PASS; integration 678 of 679, the one failure the nondeterministic `ai-eval-record` test (`get_alerts #16 output shape`, 27 against 25).
+
+## HIGH-2 — a merged counterparty's rows were missing from the survivor's evidence, on every basis
+
+**Found.** Part E recorded the customer case on the invoice basis and left it. The audit reproduced it (customer revenue 8,000, evidence 5,000) and then probed where the same builder is used. It is everywhere a counterparty scopes a descriptor:
+
+| Case | Engine | Drill-down before |
+|---|---|---|
+| Merged customer, invoice basis | 8,000.00 | 5,000.00 |
+| Merged supplier, `supplier_spend`, invoice basis | 3,750.00 | 1,500.00 |
+| Cost of sales fed by that merged supplier (ADR-104's supplier-scoped descriptor) | 3,750.00 | names the survivor only |
+| Merged customer, **ledger** basis | 5,000.00 | 4,000.00 |
+
+Root cause: the fold attributes a merged party's rows to its survivor, a merge is a pointer that never rewrites a row, and both descriptor builders — `concentration.ts#counterpartyEvidence` and `pnl.ts#leafEvidence` — recorded only the surviving id. It understates rather than overstates, on a first-class Phase 14 feature, reached by the ordinary merge action.
+
+**Fixed (ADR-108).** One pure helper, `withMergedCounterparties`, computes the closure once — the named ids plus every counterparty merged into them, followed to a fixed point, sorted — and both builders call it. Nothing about the fold, any figure, precedence or `app.invoice_net` changed; what changed is which rows a descriptor names.
+
+**Verified.** On fresh organisations: a merged customer's revenue 8,550 with a drill-down of 8,550 over two rows including the absorbed sale; a merged supplier's spend 2,260 and the cost of sales it feeds 2,260, both drill-downs naming both suppliers and reconciling; a ledger-basis merged customer 4,025 with a drill-down of 4,025; and the analyst's evidence tool citing both rows and 8,550. The audit's own probes re-run against the fix: 3,750 with 3,750, 5,000 with 5,000, 8,000 with 8,000. `test/integration/evidence-merged-counterparty.test.ts` **fails 4 of 4 on `33ae461`** and passes here.
+
+## MEDIUM-3 — the Profit & loss page still printed the gross profit Home hides
+
+**Found.** On the 12,500 organisation, Money › Profit & loss printed:
+
+| Line | Before |
+|---|---|
+| Revenue | £12,500.00 · Calculated |
+| Cost of sales | — · "You have no direct-cost accounts, so this does not apply." |
+| **Gross profit** | **£12,500.00 · Partial data · "Some data is missing or uncategorised"** |
+| Gross margin | — · "You have no direct-cost accounts, so this does not apply." |
+
+The one line the product had decided not to state as a conclusion was stated, with a generic badge, on the page an owner opens to look closer, between two lines that gave the real reason.
+
+**Fixed (ADR-106 addendum).** `figuresFor` now reads `metricAvailability` — the same rule Home and the analyst read, not a page-local one — and presents a `not_applicable` figure exactly as an unavailable figure is presented, by handing the renderer the row with no value and the engine's reason. No second rendering rule exists. Revenue and a real gross profit are untouched.
+
+**Verified.** The line now reads "—" with "You have no direct-cost accounts, so this does not apply."; the organisation with a real cost line still shows £7,000.00 · Calculated and a real margin. Asserted in both directions in `test/integration/ai-gross-profit-availability.test.ts`.
+
+## Cross-surface consistency, after this pass
+
+One rule, `metricAvailability` in `financials`, read by: Home, the monthly report (through the same card builder), Money › Profit & loss, `get_business_summary`, `get_metric`, `get_metric_trend`, and therefore the analyst's answer. The Money index page lists revenue, cash and net movement and never carried gross profit. Health, alerts, forecast and scenarios consume `gross_margin` or require both sides, and were already consistent. The engine is untouched throughout: it still writes gross profit as revenue with its warning, because a statement has to add up, and no surface now reads that number as a conclusion.
+
+## Invoice eligibility, final rule
+
+For a P&L-shaped invoice descriptor: accepted, not superseded, **not void**, the canonical signed net-of-tax amount, and — for a counterparty-scoped one — the survivor plus every party merged into it. Payment status never zeroes a recognised invoice. For the receivables and payables shape: the same eligibility, summed on `balance_due`. One spelling of each clause: the lifecycle pair in the compiler's shared block, the void clause in one helper both shapes call, the amount basis chosen by shape, and the merge closure in one engine helper both descriptor builders call.
+
+## Tests added in this pass
+
+| Test | Cases |
+|---|---|
+| `test/integration/evidence-merged-counterparty.test.ts` | 4. Merged customer on the invoice basis; merged supplier's spend and the cost of sales it feeds; the analyst's evidence tool; merged customer on the ledger basis. Each asserts the descriptor names both parties, the absorbed row is present, the count, and total = figure. **4 of 4 fail on `33ae461`.** |
+| `test/integration/ai-gross-profit-availability.test.ts` | +2. The Profit & loss page prints "—" with the reason for the organisation without cost of sales, and £7,000.00 · Calculated for the one with it. |
+| `test/unit/engine-merged.test.ts` | 5. The closure: unchanged ids sorted, every party merged into a survivor, a chain followed, an absorbed id alone not widened, byte-stability. |
+
+The AI evaluation cases for the unsupported and the valid gross profit (one golden, two traps, added in `33ae461`) stand. The voided-invoice and merged-counterparty evidence cases are proved through the real `get_transactions_for_evidence` tool in the integration tests above rather than in the recorded corpus, because the recording's inputs are period labels and an evidence call needs a snapshot id that exists only at run time; the corpus itself contains no evidence-tool call.
+
+## Gates — clean database, final tree
+
+`supabase db reset`, then in order:
+
+| Gate | Result |
+|---|---|
+| Typecheck, Lint | PASS |
+| Unit | PASS, 72 files, 2,008 |
+| Integration | PASS, 44 files, **685 of 685 in this run**. Not an invariant: the nondeterministic `ai-eval-record` test can fail on any run |
+| pgTAP | PASS, 16 files, 1,034 |
+| Playwright | PASS, 64 passed, 1 pre-existing skip |
+| AI eval | PASS, 173 |
+| Schema drift | PASS, 54 tables, 118 api functions, RLS forced everywhere, no write grants |
+| Authorization, Tenant isolation | PASS, permission matrix in sync across all five roles, `rls-isolation` 42, `isolation-cases` 10, Playwright `authz` project |
+| Production build | PASS |
+
+**Adversarial probes**: 15 files, 52 assertions, **50 pass**. The two failures are the documented pre-existing cash-join cases (confirmed identical on `55acbeb`; LOW-8's unreachable `openingCarry` path), unchanged. Everything in the brief's list is covered: empty organisation, no bank account, banking added later, invoice-only, bank plus invoice, the AED organisation, credit note, voided invoice, superseded invoice and its replacement, paid and partly paid invoices, cost of sales absent and in another source, supplier and customer merges on the invoice and ledger bases, evidence reconciliation, product partition, campaign attribution, unattributed exclusion, analyst and Profit & loss gross-profit handling, employee assignment, client and tenant isolation.
+
+**Pre-existing nondeterministic `ai-eval-record` test**, measured again on the final tree: **8 isolated runs, 7 pass, 1 fail**, the failure carrying the known signature (`get_alerts #16 output shape`, 26 against 25). Earlier measurements were 5 of 8 and 3 of 5. It is nondeterministic, not a full-suite effect, and it was not fixed, suppressed or altered.
+
+**Security.** All five roles behave as the matrix states; an employee reaches only assigned organisations and a client only its own; enforcement is server-side and in RLS. The three Phase 13 and 14 migrations follow the established SECURITY DEFINER pattern: each `api.*` function is revoked from `public` and `anon` and granted `execute` to `authenticated`, each `api_server.*` function is granted only to `service_role`, direct table writes are revoked, RLS stays enabled and forced, no policy is dropped, and no tenant-boundary weakening was demonstrated by any probe or suite. This pass touches none of it.
+
+## Remaining findings after this pass
+
+| ID | Severity | Status |
+|---|---|---|
+| HIGH-1, HIGH-2, MEDIUM-1, MEDIUM-3, MEDIUM-7, MEDIUM-8 | — | CLOSED and verified, each by a test that fails without its fix |
+| MEDIUM-2 | MEDIUM | open by instruction: the nondeterministic `ai-eval-record` test |
+| Phase 13 MEDIUM-4 | MEDIUM (Phase 13) | open: the transactions table scrolls sideways at 375 px |
+| LOW-1…13 | LOW | open, unchanged, as listed in Part E |
+
+## Status
+
+**IMPLEMENTED AND VERIFIED. INDEPENDENT FABLE 5.1 SIGN-OFF PENDING.**
+
+Every CRITICAL, HIGH and MEDIUM correctness finding raised against Phase 14 across five audit passes is closed, except the nondeterministic test left open by instruction and the Phase 13 layout item. Phase 15 is not started. This file does not declare Phase 14 ready for Phase 15; the final independent Fable 5.1 sign-off against this commit does that or does not.
+
+## Scope check
+
+No migration, no schema change, no change to the fold, precedence, `app.invoice_net`, RLS, grants, the permission matrix, Phase 13, or anything under a Phase 15 name. The engine change is confined to which counterparty ids a descriptor names.
 
 ---
 
@@ -93,7 +201,7 @@ Reproduced on a clean database: customer A invoiced 5,000 net, customer B invoic
 | ID | Severity | Status |
 |---|---|---|
 | HIGH-1 | — | **CLOSED**: voided invoices are out of every invoice-basis drill-down, asserted by a test that fails without the fix |
-| HIGH-2 | HIGH | **OPEN, new, not fixed**: a merged counterparty's invoices are missing from the survivor's evidence (above) |
+| HIGH-2 | — | **CLOSED in Part F (ADR-108)**; was open at the end of this part, and wider than recorded here: it applied to suppliers and to every basis |
 | MEDIUM-1 | — | **CLOSED**: one availability rule across Home, the report and the analyst |
 | MEDIUM-7, MEDIUM-8 | — | CLOSED earlier by `8f81dd3` (ADR-105); MEDIUM-8's reconciliation claim is now qualified and tested for the void case |
 | MEDIUM-2 | MEDIUM | open by instruction: the nondeterministic `ai-eval-record` test. Not fixed, not suppressed |
@@ -114,7 +222,7 @@ None was fixed opportunistically. Scope was held to the two correctness blockers
 
 Phase 14 is **not** declared ready for Phase 15, and nothing in this file is an independent audit: the same session wrote the implementation, the closeout record, the adversarial pass that found HIGH-1 and MEDIUM-1, and this remediation. Phase 15 is not started. The next operation is the independent Fable 5.1 audit against this commit.
 
-**One HIGH is open.** HIGH-2 above was found in this pass and deliberately not fixed, because it falls outside the two blockers this remediation was scoped to. Anyone reading this as a readiness statement should read it as: the two blockers are closed and verified, and a third defect of the same family is known, located and waiting for a decision.
+**One HIGH was open at the end of this part.** HIGH-2 above was found in this pass and deliberately not fixed, because it fell outside the two blockers this remediation was scoped to. It was closed in the following pass (Part F, ADR-108), which also found it wider than recorded here.
 
 ---
 

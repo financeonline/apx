@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '@/core/permissions';
 import { resolvePeriodContext, TOOLS } from '@/modules/ai';
-import { loadHome, loadPeriods, loadPeriodsWithData } from '@/modules/dashboard';
+import { loadHome, loadPeriodScope, loadPeriods, loadPeriodsWithData, loadProfitAndLoss } from '@/modules/dashboard';
 import { drainJobs } from '@/modules/jobs';
 import type { AccessContext } from '@/modules/tenancy';
 import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
@@ -146,7 +146,34 @@ describe('no cost of sales: every surface says the same thing (ADR-106)', () => 
   });
 });
 
+describe('no cost of sales: the Profit & loss page reads the same rule (ADR-106, closed by ADR-108’s pass)', () => {
+  it('prints gross profit as "—" with the engine’s reason, between a cost of sales and a margin that already did', async () => {
+    const scope = await loadPeriodScope(clientFor(owner), noCost, null, `itest-${RUN}`);
+    const pnl = await loadProfitAndLoss(clientFor(owner), noCost, 'gp', scope!, `itest-${RUN}`);
+    const line = (key: string) => pnl.above.find((f) => f.metricKey === key)!;
+    // Before this pass the page printed "£9,000.00 · Partial data" here, the figure Home omits.
+    expect(line('gross_profit').value).toBe('—');
+    expect(line('gross_profit').rawValue).toBeNull();
+    expect(line('gross_profit').status.kind).toBe('not_available');
+    expect(line('gross_profit').status.tooltip).toBe('You have no direct-cost accounts, so this does not apply.');
+    expect(line('gross_margin').value).toBe('—');
+    expect(line('cost_of_sales').value).toBe('—');
+    // Revenue is a real figure and is untouched.
+    expect(line('revenue').value).toBe('£9,000.00');
+    expect(line('revenue').status.kind).toBe('calculated');
+  });
+});
+
 describe('a real cost of sales: the figure still comes through everywhere', () => {
+  it('the Profit & loss page shows the real gross profit and margin', async () => {
+    const scope = await loadPeriodScope(clientFor(owner), withCost, null, `itest-${RUN}`);
+    const pnl = await loadProfitAndLoss(clientFor(owner), withCost, 'gp', scope!, `itest-${RUN}`);
+    const line = (key: string) => pnl.above.find((f) => f.metricKey === key)!;
+    expect(line('gross_profit').value).toBe('£7,000.00');
+    expect(line('gross_profit').status.kind).toBe('calculated');
+    expect(line('gross_margin').value).not.toBe('—');
+  });
+
   it('Home shows the card', async () => {
     const home = await loadHome(clientFor(owner), withCost, 'gp');
     expect(home.kind).toBe('ready');

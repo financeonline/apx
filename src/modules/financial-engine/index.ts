@@ -86,6 +86,7 @@ export {
 // consumer all speak these; `motion/no-deep-module-import` correctly refuses a path into `domain/`.
 // ---------------------------------------------------------------------------------------------
 export * from './domain/sign';
+export * from './domain/merged';
 export * from './domain/categories';
 export * from './domain/pnl';
 export * from './domain/variance';

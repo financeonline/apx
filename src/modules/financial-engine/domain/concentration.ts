@@ -23,6 +23,7 @@ import {
   metricQuality,
   type PeriodMetrics,
 } from './cash';
+import { withMergedCounterparties } from './merged';
 import type {
   AssuranceLevel,
   BasisChoice,
@@ -188,7 +189,12 @@ function counterpartyEvidence(
   // worse than none, so the synthetic snapshot carries none.
   if (counterpartyId === null) return null;
   const accountIds = side === 'customer' ? input.revenueAccountIds : input.expenseAccountIds;
-  const filters: LeafDescriptor['filters'] = { period_ids: [input.period.id], counterparty_ids: [counterpartyId] };
+  // The figure is the SURVIVOR's, folded from every party merged into it; the rows keep their
+  // original ids, so the descriptor names the survivor and all of them (ADR-108).
+  const filters: LeafDescriptor['filters'] = {
+    period_ids: [input.period.id],
+    counterparty_ids: [...withMergedCounterparties(ctx.counterparties, [counterpartyId])],
+  };
 
   switch (input.basis.basis) {
     case 'invoices':

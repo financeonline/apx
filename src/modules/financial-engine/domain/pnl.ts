@@ -34,6 +34,7 @@ import {
   OPEX_CATEGORIES,
 } from './categories';
 import { weakestOf } from '@/core/assurance';
+import { withMergedCounterparties } from './merged';
 import type {
   AccountRef,
   AssuranceLevel,
@@ -274,9 +275,10 @@ function leafEvidence(
     const categories = new Set(
       input.accounts.filter((a) => accountIds.includes(a.id)).map((a) => a.standardCategory),
     );
-    const counterparties = [...new Set(
+    // The fold recorded SURVIVING ids; the rows carry the originals. Name both (ADR-108).
+    const counterparties = withMergedCounterparties(ctx.counterparties, [...new Set(
       [...categories].flatMap((category) => [...(input.invoiceCounterparties?.get(category) ?? [])]),
-    )].sort();
+    )]);
     if (counterparties.length === 0) return null;
     return {
       kind: 'leaf',
