@@ -65,8 +65,16 @@ export interface CompiledQuery {
    * the basis every invoice-basis P&L figure is computed on. A receivables or payables descriptor
    * (one carrying `open_as_of` / `overdue_as_of`) keeps `balance_due`, because Σ balance_due IS that
    * figure; a P&L descriptor summed on `balance_due` listed a paid sale as £0 under revenue (ADR-105).
+   *
+   * `column_magnitude` reads the column's absolute value. A bank amount is signed, and an
+   * outflow-direction selection therefore sums to the NEGATIVE of the figure it sits behind —
+   * `cash_outflows` of £4,200.00 had a drill-down totalling −£4,200.00, while `cash_inflows`
+   * matched, so the two halves of one statement disagreed about sign (ADR-109). The engine states
+   * money out as a positive magnitude, as it does every expense, so the evidence does too. A
+   * direction-filtered selection is all one way, so no row loses information by showing its size;
+   * `transferKind` and the row's own description still say what each payment was.
    */
-  readonly amountBasis: 'column' | 'invoice_net';
+  readonly amountBasis: 'column' | 'invoice_net' | 'column_magnitude';
   readonly asOf: { readonly calculationRunId: string; readonly aggregatedAt: string } | null;
   readonly limit: number;
   /** True for the four tables with a `record_status_events` lifecycle. */
@@ -402,6 +410,13 @@ export function compileDescriptor(descriptor: QueryDescriptorV1): CompiledQuery 
     && descriptor.filters.open_as_of === undefined
     && descriptor.filters.overdue_as_of === undefined;
 
+  /*
+   * A signed bank amount under a direction filter: the figure is a magnitude, so the total is too
+   * (ADR-109). `inflow` rows are already positive, so this changes nothing for them.
+   */
+  const bankDirectional = descriptor.table === 'bank_transactions'
+    && descriptor.filters.direction !== undefined;
+
   return {
     table: descriptor.table,
     columns: spec.columns,
@@ -409,7 +424,7 @@ export function compileDescriptor(descriptor: QueryDescriptorV1): CompiledQuery 
     postFilters: post,
     order,
     amountColumn: invoicePnl ? null : spec.amountColumn,
-    amountBasis: invoicePnl ? 'invoice_net' : 'column',
+    amountBasis: invoicePnl ? 'invoice_net' : bankDirectional ? 'column_magnitude' : 'column',
     asOf: descriptor.as_of
       ? {
           calculationRunId: descriptor.as_of.calculation_run_id,

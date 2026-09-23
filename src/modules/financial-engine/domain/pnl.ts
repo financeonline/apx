@@ -253,6 +253,17 @@ function leafEvidence(
   ctx: EngineContext,
   accountIds: readonly string[],
   side: 'income' | 'expense',
+  /**
+   * The income figure this descriptor is for, on the invoice basis only (ADR-109).
+   *
+   * Sales invoices are the REVENUE figure. They are not `other_income`, which no invoice can reach:
+   * an invoice becomes revenue (a sale) or an expense category (a purchase, by its supplier's
+   * default category), never other income. Handing `other_income` the sales-type descriptor gave a
+   * figure of 0.00 a drill-down of every sale in the month — 18,500.00 over three rows in the sweep
+   * that found this. The expense branch below has always guarded the same mistake ("a figure nobody's
+   * purchases went into gets no descriptor"); the income branch did not.
+   */
+  incomeCategory: 'revenue' | 'other_income' = 'revenue',
 ): EvidenceQuery | null {
   const table = BASIS_TABLE[input.basis.basis];
   if (table === null) return null;
@@ -260,6 +271,7 @@ function leafEvidence(
   const period_ids = [input.period.id];
   if (table === 'invoices') {
     if (side === 'income') {
+      if (incomeCategory !== 'revenue') return null;
       // Sales and their credit notes ARE the revenue figure: the type filter reconciles exactly.
       return {
         kind: 'leaf',
@@ -704,7 +716,7 @@ function buildOtherIncome(b: Builder): Figure {
     key: 'other_income',
     unit: 'money',
     figure,
-    evidence: leafEvidence(b.input, b.ctx, total.accountIds, 'income'),
+    evidence: leafEvidence(b.input, b.ctx, total.accountIds, 'income', 'other_income'),
     components: { categories: ['other_income'], account_ids: total.accountIds, row_count: total.rowCount },
   });
   return figure;
@@ -1025,6 +1037,7 @@ function buildExpenseByCategory(b: Builder): void {
       evidence: leafEvidence(
         b.input, b.ctx, total.accountIds,
         CATEGORY_ACCOUNT_TYPE[category] === 'income' ? 'income' : 'expense',
+        category === 'revenue' ? 'revenue' : 'other_income',
       ),
       components: { category, account_ids: total.accountIds, row_count: total.rowCount },
     });

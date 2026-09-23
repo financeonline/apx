@@ -286,6 +286,14 @@ function amountReader(compiled: CompiledQuery): (row: Row) => string | null {
   }
   const column = compiled.amountColumn;
   if (column === null) return (row) => (compiled.table === 'metric_snapshots' ? str(row, 'value') : null);
+  if (compiled.amountBasis === 'column_magnitude') {
+    return (row) => {
+      const raw = str(row, column);
+      if (raw === null) return null;
+      const parsed = parseDecimalOrNull(raw, 'amount');
+      return parsed === null ? null : toMoneyString(parsed.abs());
+    };
+  }
   return (row) => str(row, column);
 }
 

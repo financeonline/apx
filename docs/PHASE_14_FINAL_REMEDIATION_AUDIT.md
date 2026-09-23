@@ -1,10 +1,76 @@
 # Phase 14 — remediation, verification and closeout
 
-> **Final commit: the Phase 14 evidence and cross-surface consistency closure (ADR-108, and the ADR-106 addendum)** on `main`, pushed to `origin/main`, working tree clean. It answers the Fable 5.1 audit of `33ae461` recorded in Part F.
+> **Final commit: the Phase 14 invariant hardening (ADR-109)** on `main`, pushed to `origin/main`, working tree clean. It answers the release check of `621f9e6` recorded in Part G.
 >
 > **Status: IMPLEMENTED AND VERIFIED — INDEPENDENT FABLE 5.1 SIGN-OFF PENDING.** Parts D and E were written by the implementing session under Opus 5. Part F's audit ran under Fable 5.1 in the same session, which is model independence and not context independence; its findings were reproduced against a clean database with fresh figures rather than recalled. Phase 14 is **not** declared ready for Phase 15 in this file. Parts are in the order they were produced, newest first.
 >
-> Commit chain: `55acbeb` (ADR-103) → `f8fdc58` (ADR-104) → `8f81dd3` (ADR-105) → `b6cac0b` (closeout record) → `33ae461` (ADR-106, ADR-107) → this commit (ADR-108, ADR-106 addendum).
+> Commit chain: `55acbeb` (ADR-103) → `f8fdc58` (ADR-104) → `8f81dd3` (ADR-105) → `b6cac0b` (closeout record) → `33ae461` (ADR-106, ADR-107) → `621f9e6` (ADR-108, ADR-106 addendum) → this commit (ADR-109).
+>
+> **Phase 14 is NOT READY for Phase 15.** One HIGH remains open and is not a defect this pass could close by itself: bank-basis counterparty evidence (HIGH-3 in Part G) needs a product decision between narrowing a figure and withdrawing a descriptor. Everything else raised across six passes is closed and verified.
+
+---
+
+# Part G — release check of `621f9e6`: the invariant gets a guard, and the guard finds two more
+
+The previous five passes each fixed "the drill-down must equal the figure" in one more place. This pass asked a different question: how many places are there, and which has nobody looked at? The engine has **16 leaf-descriptor producers** across four files; five metric families had a reconciliation test.
+
+## The guard
+
+`test/integration/evidence-reconciliation-sweep.test.ts` names no metric. It seeds three organisations on the three P&L bases, reads every row of `metric_current` whose snapshot carries a leaf descriptor, resolves each through the real evidence service under the owner's RLS, and asserts Σ evidence = figure. **97 descriptors checked on the final tree.** The fixture contains rows the figures exclude — voided invoices, a credit note, an uncategorised payment, a matched transfer pair, an unpaired transfer candidate — so a descriptor that is merely too broad fails rather than passes. A new figure joins the test by existing.
+
+Proved both ways: on `621f9e6` it reports 110 descriptors and **fails** with the two defects below; on this tree it reports 97 and passes.
+
+## HIGH-4 — `other_income` re-selected every sale (fixed, ADR-109)
+
+On the invoice basis the income branch returned the sales-type descriptor to whichever income figure asked. Exact for `revenue`; wrong for `other_income`, which no invoice can reach. Measured: a figure of **0.00** with a drill-down of **18,500.00 over three rows** — every sale in the month, sitting behind a line that was zero. The branch now takes the income category and returns no descriptor for anything but revenue, the guard the expense branch has always had.
+
+## MEDIUM-5 — a directional bank selection summed to the negative of its figure (fixed, ADR-109)
+
+`cash_outflows` of **4,200.00** had a drill-down totalling **−4,200.00**, while `cash_inflows` matched: one statement, two sign conventions, and the analyst's `sum` would have cited the negative. Any `bank_transactions` descriptor carrying a `direction` now totals on the column's magnitude, because the engine states money out as a positive magnitude as it does every expense.
+
+## HIGH-3 — bank-basis counterparty evidence: confirmed, root cause identified, NOT fixed
+
+The one family the sweep cannot yet include, named in the test rather than skipped.
+
+On the **bank** basis a counterparty's figure is Σ|amount| over every cell for that party that is not revenue-categorised. `compose.ts#counterpartyAmounts` classifies by category and takes `.abs()`, so the figure includes uncategorised rows, transfer legs, and inflows that are not revenue-categorised. The descriptor (`concentration.ts`) selects expense-category, outflow, non-cash-transfer rows. Measured: `supplier_spend` of **8,850.00** with a drill-down of **0.00 over 0 rows** once the banking pass had recategorised the fixture's payments.
+
+The two populations differ by construction, and a v1 descriptor cannot express the first: there is no "not in these categories" filter, and adding one would not fix the inflow and transfer differences. Closing it means **either** narrowing the figure to expense-category non-transfer outflows, which changes a financial output, **or** withdrawing the descriptor on this basis as the engine already does for the Unattributed row ("evidence that reconciles to the wrong number is worse than none"). Both are product decisions. Patching the compiler to paper over it would be the speculative change this pass was told not to make.
+
+Scope: organisations whose P&L basis is `bank`, for `customer_revenue` and `supplier_spend` drill-downs only. No figure is wrong; the evidence behind these two is.
+
+## Gates and probes — clean database, final tree
+
+| Gate | Result |
+|---|---|
+| Typecheck, Lint | PASS |
+| Unit | PASS, 73 files, 2,009 |
+| Integration | PASS, 45 files, **686 of 686 in this run**. Not an invariant: the nondeterministic `ai-eval-record` test can fail on any run |
+| pgTAP | PASS, 16 files, 1,034 |
+| Playwright | PASS, 64 passed, 1 pre-existing skip |
+| AI eval | PASS, 173 |
+| Schema drift | PASS, 54 tables, 118 api functions, RLS forced everywhere, no write grants |
+| Authorization, Tenant isolation | PASS, permission matrix in sync across all five roles, `rls-isolation` 42, `isolation-cases` 10, Playwright `authz` project |
+| Production build | PASS |
+
+**Adversarial probes**: 15 files, 52 assertions, **50 pass**. The two failures are the documented pre-existing cash-join cases (confirmed identical on `55acbeb`; LOW-8's unreachable `openingCarry` path), unchanged by this pass.
+
+**Evidence reconciliation sweep**: 97 leaf descriptors across the three P&L bases, all reconciling.
+
+**Pre-existing nondeterministic `ai-eval-record` test**, measured again on the final tree: **8 isolated runs, 8 pass, 0 fail**. Across this project's measurements the isolated pass rate has been 5 of 8, 3 of 5, 7 of 8 and now 8 of 8. It is nondeterministic, it can fail on any run, and it was not fixed, suppressed or altered. It did not fire in the gate run above.
+
+**Security and tenant isolation.** All five roles behave as the matrix states; an employee reaches only assigned organisations and a client only its own; enforcement is server-side and in RLS. The three Phase 13 and 14 migrations follow the established SECURITY DEFINER pattern — each `api.*` function revoked from `public` and `anon` and granted `execute` to `authenticated`, each `api_server.*` function granted only to `service_role`, direct table writes revoked, RLS enabled and forced, no policy dropped, and no tenant-boundary weakening demonstrated by any probe or suite. This pass touches none of it.
+
+**`app.invoice_net`.** Verified on the live database rather than from the guard: `app.aggregate_periods`, `api.set_invoice_lines` and `api.product_period_summary` each call it exactly once, and none carries its own spelling of the rule, qualified or bare. The pgTAP guard's regex matches only the unqualified spelling and is therefore weaker than it reads; it was left as it is rather than made brittle, and the limitation is recorded as LOW-11.
+
+## Remaining findings after this pass
+
+| ID | Severity | Status |
+|---|---|---|
+| HIGH-1, HIGH-2, HIGH-4, MEDIUM-1, MEDIUM-3, MEDIUM-5, MEDIUM-7, MEDIUM-8 | — | CLOSED and verified, each by a test that fails without its fix |
+| **HIGH-3** | **HIGH** | **OPEN**: bank-basis counterparty evidence (above). Needs a product decision; blocks Phase 15 |
+| MEDIUM-2 | MEDIUM | open by instruction: the nondeterministic `ai-eval-record` test |
+| Phase 13 MEDIUM-4 | MEDIUM (Phase 13) | open: the transactions table scrolls sideways at 375 px |
+| LOW-1…13 | LOW | open, unchanged, as listed in Part E |
 
 ---
 
@@ -106,9 +172,9 @@ The AI evaluation cases for the unsupported and the valid gross profit (one gold
 
 ## Status
 
-**IMPLEMENTED AND VERIFIED. INDEPENDENT FABLE 5.1 SIGN-OFF PENDING.**
+**IMPLEMENTED AND VERIFIED AS OF PART F.** Superseded by Part G, which found two more defects of the same family and one that remains open.
 
-Every CRITICAL, HIGH and MEDIUM correctness finding raised against Phase 14 across five audit passes is closed, except the nondeterministic test left open by instruction and the Phase 13 layout item. Phase 15 is not started. This file does not declare Phase 14 ready for Phase 15; the final independent Fable 5.1 sign-off against this commit does that or does not.
+Every CRITICAL, HIGH and MEDIUM correctness finding raised against Phase 14 across five audit passes was closed at this point, except the nondeterministic test left open by instruction and the Phase 13 layout item. Part G then added HIGH-4 and MEDIUM-5 (both since fixed) and HIGH-3 (open). Phase 15 is not started. This file does not declare Phase 14 ready for Phase 15; the final independent Fable 5.1 sign-off against this commit does that or does not.
 
 ## Scope check
 

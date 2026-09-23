@@ -375,6 +375,32 @@ describe('descriptor compiler (§3.1)', () => {
     expect(ar.amountColumn).toBe('balance_due');
   });
 
+  it('sums a directional bank selection as a magnitude, because the figure is one (ADR-109)', () => {
+    // A bank amount is signed. `cash_outflows` of 4,200.00 had a drill-down totalling -4,200.00
+    // while `cash_inflows` matched, so the two halves of one statement disagreed about sign.
+    const out = compileDescriptor(parseQueryDescriptor({
+      v: 1, table: 'bank_transactions',
+      filters: { period_ids: [PERIOD_A], bank_account_ids: [BANK_A], direction: 'outflow' },
+    }));
+    expect(out.amountBasis).toBe('column_magnitude');
+    expect(out.amountColumn).toBe('amount');
+    // Inflows are already positive; the same basis is harmless and keeps one rule for the table.
+    const inflow = compileDescriptor(parseQueryDescriptor({
+      v: 1, table: 'bank_transactions', filters: { period_ids: [PERIOD_A], direction: 'inflow' },
+    }));
+    expect(inflow.amountBasis).toBe('column_magnitude');
+    // Without a direction the selection can mix signs and must keep them.
+    const mixed = compileDescriptor(parseQueryDescriptor({
+      v: 1, table: 'bank_transactions', filters: { period_ids: [PERIOD_A] },
+    }));
+    expect(mixed.amountBasis).toBe('column');
+    // Other tables are untouched.
+    const ledger = compileDescriptor(parseQueryDescriptor({
+      v: 1, table: 'ledger_entries', filters: { period_ids: [PERIOD_A], direction: 'debit' },
+    }));
+    expect(ledger.amountBasis).toBe('column');
+  });
+
   it('excludes voided invoices from EVERY invoice shape, as the engine does (ADR-107)', () => {
     const notVoid = { column: 'status', op: 'neq', value: 'void' };
     // The P&L shapes, which carried record_status and superseded_by but never this.
