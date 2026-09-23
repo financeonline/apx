@@ -57,8 +57,16 @@ export interface CompiledQuery {
   readonly filters: readonly CompiledFilter[];
   readonly postFilters: readonly PostFilter[];
   readonly order: readonly CompiledOrder[];
-  /** The column summed into `total`, or `null` when a sum would be meaningless. */
+  /** The column summed into `total`, or `null` when a sum would be meaningless (or when `amountBasis` is not a column). */
   readonly amountColumn: string | null;
+  /**
+   * How a row's amount is read. `column` reads `amountColumn`. `invoice_net` applies the engine's
+   * net-of-tax rule (`invoiceNetOfTax`, the mirror of `app.invoice_net`) signed by invoice type —
+   * the basis every invoice-basis P&L figure is computed on. A receivables or payables descriptor
+   * (one carrying `open_as_of` / `overdue_as_of`) keeps `balance_due`, because Σ balance_due IS that
+   * figure; a P&L descriptor summed on `balance_due` listed a paid sale as £0 under revenue (ADR-105).
+   */
+  readonly amountBasis: 'column' | 'invoice_net';
   readonly asOf: { readonly calculationRunId: string; readonly aggregatedAt: string } | null;
   readonly limit: number;
   /** True for the four tables with a `record_status_events` lifecycle. */
@@ -122,8 +130,8 @@ const TABLES: Record<DescriptorTable, TableSpec> = {
   invoices: {
     columns: [
       'id', 'organization_id', 'invoice_type', 'counterparty_id', 'invoice_number', 'issue_date',
-      'due_date', 'period_id', 'total_amount', 'amount_paid', 'balance_due', 'currency', 'status',
-      'paid_date', 'description', 'record_status', 'assurance_level', 'superseded_by',
+      'due_date', 'period_id', 'subtotal', 'tax_amount', 'total_amount', 'amount_paid', 'balance_due',
+      'currency', 'status', 'paid_date', 'description', 'record_status', 'assurance_level', 'superseded_by',
     ],
     filters: ['period_ids', 'counterparty_ids', 'invoice_types', 'open_as_of', 'overdue_as_of'],
     orderColumns: ['id', 'issue_date', 'due_date', 'total_amount', 'balance_due', 'created_at'],
@@ -364,13 +372,21 @@ export function compileDescriptor(descriptor: QueryDescriptorV1): CompiledQuery 
     return { column: entry.field, ascending: entry.dir === 'asc' };
   });
 
+  // An invoice descriptor with no open/overdue filter is a P&L selection (revenue, cost of sales,
+  // an expense category, a customer's revenue): its amount is the net the engine summed, not the
+  // balance still owed (ADR-105).
+  const invoicePnl = descriptor.table === 'invoices'
+    && descriptor.filters.open_as_of === undefined
+    && descriptor.filters.overdue_as_of === undefined;
+
   return {
     table: descriptor.table,
     columns: spec.columns,
     filters: filters.list(),
     postFilters: post,
     order,
-    amountColumn: spec.amountColumn,
+    amountColumn: invoicePnl ? null : spec.amountColumn,
+    amountBasis: invoicePnl ? 'invoice_net' : 'column',
     asOf: descriptor.as_of
       ? {
           calculationRunId: descriptor.as_of.calculation_run_id,

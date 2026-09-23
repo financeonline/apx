@@ -115,6 +115,11 @@ function HeadlineNumbers({ view }: { view: HomeView }) {
       <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
         {view.cards.map((card) => <MetricCard key={card.metricKey} card={card} />)}
       </div>
+      {view.grossProfitNote ? (
+        <p className="mt-3 text-xs text-ink-muted" data-testid="gross-profit-note">
+          Profit after direct costs isn’t shown: {view.grossProfitNote}
+        </p>
+      ) : null}
     </section>
   );
 }

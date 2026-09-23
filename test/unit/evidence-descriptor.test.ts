@@ -354,6 +354,25 @@ describe('descriptor compiler (§3.1)', () => {
     expect(compiled.filters).toContainEqual({ column: 'due_date', op: 'lt', value: '2026-03-31' });
     expect(compiled.postFilters).toEqual([{ kind: 'open_at', date: '2026-03-31' }]);
     expect(compiled.amountColumn).toBe('balance_due');
+    expect(compiled.amountBasis).toBe('column');
+  });
+
+  it('reads an invoice-basis P&L selection on the engine’s net-of-tax basis, never on balance_due (ADR-105)', () => {
+    // No open/overdue filter: this is revenue, cost of sales or an expense category on the invoice basis.
+    const pnl = compileDescriptor(parseQueryDescriptor({
+      v: 1, table: 'invoices',
+      filters: { period_ids: ['00000000-0000-4000-8000-000000000001'], invoice_types: ['purchase', 'purchase_credit_note'], counterparty_ids: ['00000000-0000-4000-8000-000000000002'] },
+    }));
+    expect(pnl.amountBasis).toBe('invoice_net');
+    expect(pnl.amountColumn).toBeNull();
+    // The net rule needs the three money columns the header carries.
+    expect(pnl.columns).toEqual(expect.arrayContaining(['subtotal', 'tax_amount', 'total_amount', 'invoice_type', 'status']));
+    // The supplier filter that scopes the figure is untouched.
+    expect(pnl.filters).toContainEqual({ column: 'counterparty_id', op: 'in', value: ['00000000-0000-4000-8000-000000000002'] });
+    // Receivables keep the balance still owed, which IS that figure.
+    const ar = compileDescriptor(parseQueryDescriptor({ v: 1, table: 'invoices', filters: { invoice_types: ['sales'], open_as_of: '2026-03-31' } }));
+    expect(ar.amountBasis).toBe('column');
+    expect(ar.amountColumn).toBe('balance_due');
   });
 
   it('pins the run for a metric_snapshots selection and refuses to sum mixed units', () => {

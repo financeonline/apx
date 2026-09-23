@@ -10,7 +10,7 @@ import {
   changeFrom, formatValue, labelFor, toMetricCard,
   type MetricCardView, type PeriodLabel, type SnapshotRow,
 } from '../domain/view-models';
-import { BASIS_TEXT } from '../domain/status';
+import { BASIS_TEXT, missingReasonText } from '../domain/status';
 
 /**
  * Home (UX_ARCHITECTURE.md §4).
@@ -74,8 +74,10 @@ export interface HomeView {
   readonly basisLine: string;
   readonly partialMonth: PartialMonthLine | null;
   readonly recalculating: boolean;
-  /** True when no cost-of-sales account exists, so the gross-profit card is omitted (CD-05). */
+  /** True when cost of sales cannot be established, so the gross-profit card is omitted (CD-05, ADR-105). */
   readonly hidesGrossProfit: boolean;
+  /** The engine's reason for omitting it, in the shared reason words; null when the card is shown. */
+  readonly grossProfitNote: string | null;
   /**
    * The health score for this period, or NULL when none was written — which happens for exactly one
    * reason: the period is not complete (ADR-030.4). The card is omitted rather than showing a zero.
@@ -137,6 +139,8 @@ export function buildHeadlineCards(input: {
 }): {
   cards: MetricCardView[];
   hidesGrossProfit: boolean;
+  /** Why the gross-profit card is omitted, in the reader's words; null when it is shown. */
+  grossProfitNote: string | null;
   bankOnly: boolean;
   /** Distinct from `bankOnly`: an organisation can lack a P&L source and have no cash data either. */
   noPnlSource: boolean;
@@ -146,12 +150,32 @@ export function buildHeadlineCards(input: {
   const previous = input.previousLabel === null ? null : { label: input.previousLabel };
   const orgSlug = input.orgSlug;
 
-  // CD-05: an organisation with no direct-cost accounts never sees a gross-profit card, because
-  // "profit after direct costs" equal to sales would read as a 100% margin.
+  /*
+   * CD-05: an organisation whose cost of sales cannot be established never sees a gross-profit
+   * card, because "profit after direct costs" equal to sales reads as a 100% margin.
+   *
+   * The engine says so in two places and this reads both (ADR-105): `cost_of_sales` is NULL with
+   * `no_cost_of_sales_accounts` or `cost_of_sales_in_other_source`, and `gross_profit` — which the
+   * engine still writes as revenue so the statement adds up — carries the warning
+   * `no_cost_of_sales` with that reason deliberately REMOVED from its own `missing`. Testing
+   * `gross_profit.missing` alone, as this did until ADR-105, tested a field the engine empties.
+   */
   const grossProfit = byKey.get('gross_profit');
-  const hidesGrossProfit = !grossProfit
-    || grossProfit.dataQuality.missing.includes('no_cost_of_sales_accounts')
-    || grossProfit.dataQuality.missing.includes('cost_of_sales_in_other_source');
+  const costOfSales = byKey.get('cost_of_sales');
+  const costAbsentCodes = ['no_cost_of_sales_accounts', 'cost_of_sales_in_other_source'];
+  const costOfSalesUnavailable = costOfSales !== undefined
+    && costOfSales.value === null
+    && costOfSales.dataQuality.missing.some((code) => costAbsentCodes.includes(code));
+  const grossProfitUnsupported = grossProfit !== undefined && (
+    grossProfit.dataQuality.warnings.includes('no_cost_of_sales')
+    || grossProfit.dataQuality.missing.some((code) => costAbsentCodes.includes(code))
+    || costOfSalesUnavailable
+  );
+  const hidesGrossProfit = !grossProfit || grossProfitUnsupported;
+  // The reason the reader is given instead of the card — the engine's own, in the shared words.
+  const grossProfitNote = grossProfit !== undefined && grossProfitUnsupported
+    ? missingReasonText(costOfSales?.dataQuality.missing ?? grossProfit.dataQuality.missing)
+    : null;
 
   // The bank-only variant (ADR-035): the organisation has bank data and NO P&L source at all.
   //
@@ -185,7 +209,7 @@ export function buildHeadlineCards(input: {
     }));
   }
 
-  return { cards, hidesGrossProfit, bankOnly, noPnlSource };
+  return { cards, hidesGrossProfit, grossProfitNote, bankOnly, noPnlSource };
 }
 
 /** The basis and freshness line (§4 level 1). Shared with the report, which prints it too. */
@@ -269,7 +293,7 @@ export async function loadHome(
   const snapshots = await repo.loadPeriodSnapshots(db, orgId, period.id, requestId);
   const byKey = index(snapshots);
 
-  const { cards, hidesGrossProfit, bankOnly, noPnlSource } = buildHeadlineCards({
+  const { cards, hidesGrossProfit, grossProfitNote, bankOnly, noPnlSource } = buildHeadlineCards({
     snapshots, period, previousLabel: previous?.label ?? null, orgSlug,
   });
 
@@ -318,6 +342,7 @@ export async function loadHome(
     partialMonth: partialLine,
     recalculating,
     hidesGrossProfit,
+    grossProfitNote,
     health,
     summary,
     comparisonLabel: previous?.label ?? null,

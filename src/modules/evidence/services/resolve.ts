@@ -2,6 +2,8 @@ import 'server-only';
 import { NotFound } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import { parseDecimalOrNull, sum, toMoneyString, type Decimal } from '@/core/money';
+import { invoiceNetOfTax, invoiceSignFor } from '@/modules/financial-engine';
+import type { InvoiceStatus, InvoiceType } from '@/modules/financials';
 import type { AccessContext } from '@/modules/tenancy';
 import {
   selectVisibleRecordIds,
@@ -259,10 +261,38 @@ const DESCRIPTION_COLUMN: Record<DescriptorTable, string | null> = {
   metric_snapshots: null,
 };
 
+/**
+ * How a row's amount is read for this selection (ADR-105).
+ *
+ * `invoice_net`: the engine's net-of-tax rule signed by type, so credit notes subtract — the exact
+ * basis the invoice-basis P&L summed, which is what makes Σ rows equal the figure. `column`: the
+ * table's amount column (`balance_due` for receivables and payables, `amount` for ledger and bank).
+ */
+function amountReader(compiled: CompiledQuery): (row: Row) => string | null {
+  if (compiled.amountBasis === 'invoice_net') {
+    return (row) => {
+      const totalAmount = str(row, 'total_amount');
+      const invoiceType = str(row, 'invoice_type') as InvoiceType | null;
+      if (totalAmount === null || invoiceType === null) return null;
+      const { net } = invoiceNetOfTax({
+        invoiceType,
+        status: (str(row, 'status') ?? 'open') as InvoiceStatus,
+        subtotal: str(row, 'subtotal'),
+        taxAmount: str(row, 'tax_amount'),
+        totalAmount,
+      });
+      return toMoneyString(invoiceSignFor(invoiceType) === 1 ? net : net.negated());
+    };
+  }
+  const column = compiled.amountColumn;
+  if (column === null) return (row) => (compiled.table === 'metric_snapshots' ? str(row, 'value') : null);
+  return (row) => str(row, column);
+}
+
 function toRecordView(
   table: DescriptorTable,
   row: Row,
-  amountColumn: string | null,
+  amountOf: (row: Row) => string | null,
   projection: AsOfProjection,
 ): RecordView {
   const bankState = projection.bankCategory.get(String(row.id));
@@ -284,7 +314,7 @@ function toRecordView(
     standardCategory: accountId ? (projection.accountCategory.get(accountId) ?? null) : null,
     // metric_snapshots has no summable amount column (mixed units), but the row's own value is
     // still what the drawer shows for it, so it is surfaced here while `total` stays null.
-    amount: amountColumn ? str(row, amountColumn) : table === 'metric_snapshots' ? str(row, 'value') : null,
+    amount: amountOf(row),
     currency: str(row, 'currency'),
     direction: str(row, 'direction'),
     transferKind: bankState ? bankState.transferKind : str(row, 'transfer_kind'),
@@ -296,11 +326,12 @@ function toRecordView(
 }
 
 /** Σ amount over the whole selection, as a money string; `null` when a sum has no meaning. */
-function totalOf(rows: Row[], amountColumn: string | null): string | null {
-  if (amountColumn === null) return null;
+function totalOf(rows: Row[], compiled: CompiledQuery, amountOf: (row: Row) => string | null): string | null {
+  // A selection with no amount to sum (mixed-unit snapshots) has no total.
+  if (compiled.amountBasis === 'column' && compiled.amountColumn === null) return null;
   const amounts: Decimal[] = [];
   for (const row of rows) {
-    const parsed = parseDecimalOrNull(str(row, amountColumn), amountColumn);
+    const parsed = parseDecimalOrNull(amountOf(row), 'amount');
     // NULL is "not known", which is not zero (FINANCIAL_ENGINE.md §1.5); it contributes nothing.
     if (parsed !== null) amounts.push(parsed);
   }
@@ -322,10 +353,11 @@ export async function resolveCompiled(
   const pageRows = selection.slice(offset, offset + compiled.limit);
   const nextOffset = offset + pageRows.length;
 
+  const amountOf = amountReader(compiled);
   return {
-    rows: pageRows.map((row) => toRecordView(compiled.table, row, compiled.amountColumn, projection)),
+    rows: pageRows.map((row) => toRecordView(compiled.table, row, amountOf, projection)),
     count: selection.length,
-    total: totalOf(selection, compiled.amountColumn),
+    total: totalOf(selection, compiled, amountOf),
     ...(nextOffset < selection.length ? { nextCursor: { offset: nextOffset } } : {}),
   };
 }

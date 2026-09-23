@@ -1,5 +1,6 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { Decimal } from '@/core/money';
+import { loadHome } from '@/modules/dashboard';
 import { drainJobs } from '@/modules/jobs';
 import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
 
@@ -337,5 +338,24 @@ describe('golden: cost of sales that lives only in invoices is not a zero on the
     expect(snapshotField(orgC, augC, 'cost_of_sales', 'data_quality')).toMatch(/cost_of_sales_in_other_source/);
     expect(metric(orgC, augC, 'gross_margin')).toBeNull();
     expect(snapshotField(orgC, augC, 'gross_profit', 'data_quality')).toMatch(/no_cost_of_sales/);
+  });
+});
+
+describe('golden: Home shows gross profit only where the engine established cost of sales (CD-05, ADR-105)', () => {
+  it('shows the card, with the figure, for the invoice-only organisation that has a cost line', async () => {
+    const home = await loadHome(clientFor(owner), orgA, 'a');
+    if (home.kind !== 'ready') throw new Error(`expected a ready Home, got ${home.kind}`);
+    expect(home.view.hidesGrossProfit).toBe(false);
+    expect(home.view.grossProfitNote).toBeNull();
+    const card = home.view.cards.find((c) => c.metricKey === 'gross_profit');
+    expect(card?.value).toContain('7,650');
+  });
+
+  it('omits the card and says why for the ledger organisation whose cost of sales lives only in invoices', async () => {
+    const home = await loadHome(clientFor(ownerTwo), orgC, 'c');
+    if (home.kind !== 'ready') throw new Error(`expected a ready Home, got ${home.kind}`);
+    expect(home.view.hidesGrossProfit).toBe(true);
+    expect(home.view.cards.map((c) => c.metricKey)).not.toContain('gross_profit');
+    expect(home.view.grossProfitNote).toMatch(/purchase invoices show direct costs/);
   });
 });

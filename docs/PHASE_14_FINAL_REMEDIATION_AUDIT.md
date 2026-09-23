@@ -1,4 +1,174 @@
-# Phase 14 — final remediation record
+# Phase 14 — final independent re-audit
+
+> **Commit audited: `f8fdc58`** on `main` (`HEAD`, `origin/main` and the working tree agree; `git status --porcelain` empty). Audit date: 2026-09-23. Method: code reading of the committed tree; the full gate suite on a clean database (`supabase db reset`); every adversarial probe from the two earlier audits re-run; new probes for the three previous blockers, for a business that imports history before adding banking, for the analyst's evidence tool, and for Home; a detached worktree at 55acbeb for before/after comparison. **No implementation code was modified.** Part B below is the implementation team's record, kept as submitted.
+
+## Verdict
+
+**NOT READY FOR PHASE 15.**
+
+The three blockers from the previous audit are **independently resolved** — cash is unavailable with its reason where nothing can establish it, the cost-of-sales drill-down selects exactly its suppliers, and a ledger organisation with invoice-only purchases no longer gets a silent 100% margin — and every gate is green on a clean database, including a 661-of-661 integration run in which the known flake did not fire. The verdict turns on two findings that are pre-existing in origin but stand between the reader and an honest figure: Home has never hidden the "Profit after direct costs" card when cost of sales is absent by design (the rule it relies on reads a field the engine deliberately empties), so an organisation with no cost data is shown profit after direct costs equal to its sales; and the evidence drill-down behind an invoice-basis P&L figure sums the invoices' *outstanding balance*, not their net amount, so "Cost of sales £3,000" lists rows totalling £3,600 and a fully paid invoice would appear as £0 under revenue. Both are small to fix and precisely located below. Under the stated bar — no new MEDIUM correctness issue — the honest answer is not yet.
+
+| Severity | Count | |
+|---|---|---|
+| CRITICAL | 0 | |
+| HIGH | 0 | |
+| MEDIUM | 2 | both pre-existing in origin; one newly reachable because of ADR-103, one a dead rule the remediation report describes as working |
+| LOW | 3 new, plus the 7 carried from earlier audits and the Phase 13 mobile-scroll item |
+
+## A. Cash engine
+
+Reproduced end to end (real queue, real aggregate) and at unit level.
+
+| Check | Result |
+|---|---|
+| No bank account, no statement | `opening_cash`, `closing_cash`, `cash_inflows`, `cash_outflows`, `net_cash_movement` all **NULL**; basis `none`; completeness 0; reason `no_bank_accounts` — on an invoice-only organisation (revenue 7,000 on `invoices`), and on every period of an organisation with nothing |
+| Not zero | no cash metric carries a value for such an organisation (`select … where value is not null` returns nothing across the family) |
+| Home | "Cash — · no comparison yet" beside correct headline figures; no "£0" anywhere on the page |
+| Money › Cash | "Money in — … Add a bank account and upload its statements to see your cash." for every cash row; no "£0" |
+| Assurance | the badge is "—" with the reason tooltip; `statusFor` short-circuits on a NULL value before assurance is considered. The stored `assurance_level` column still reads `calculated` on the NULL row (LOW-10 below) |
+| Valid account and balance | golden org B: `closing_cash` 8,800.00 on basis `bank`, inflows 4,800.00, outflows 1,000.00; the repository's cash unit suite (multi-account aggregation 1,000 + 500 → 1,560; one missing balance → NULL `no_opening_cash`) green |
+| Closed account | unit: an inactive account with a covering statement still yields that month's closing cash |
+| Later periods | no fabricated zero is inherited: months without a source stay NULL `no_bank_accounts`; the first month with a statement computes from the statement/opening balance |
+| History first, banking later | **the case most likely to regress, probed end to end through the app's own `import_commit` trigger:** three months of invoices then a bank account and August statement → August `opening 5,000 / inflows 1,000 / closing 6,000`, June still NULL `no_bank_accounts`; fourteen months of invoices then banking in November → November 6,000, October NULL; a subsequent full `recalc_manual` leaves both unchanged. Before f8fdc58 the same organisations reached 6,000 by carrying a fabricated 0 through the empty months — the number was the same, the path was not |
+
+Two observations from the unit level, neither reachable through the run (which never passes an `openingCarry`): a `computeCash` caller that DOES carry a `no_bank_accounts` NULL into a later chunk poisons the series (LOW-8); and an account that is active from the series start but only covered later returns `no_opening_cash` from the first period onward until an opening balance dated at the series start is entered — identical on 55acbeb, so pre-existing and by the comment's design, recoverable through the opening-balance form on Money › Cash (observation, not a finding).
+
+## B. Empty-set zero-fill sweep
+
+An organisation with no records at all, calculated: **no snapshot carries a value** — `customer_revenue`, `supplier_spend` and the synthetic concentration remainder, which 55acbeb wrote as 0.00 with basis `none` for every period, are gone. A ledger-only organisation: cash NULL `no_bank_accounts`, `cost_of_sales` NULL `no_cost_of_sales_accounts`, concentration NULL `no_counterparty_data`, `gross_margin` NULL — no zero where the source stated nothing. The never-zero-fill principle holds across the P&L, cash and counterparty families.
+
+## C. Evidence
+
+Reproduced with a 10,000 sale, cost-of-sales purchases of 1,800 + 1,200 from two suppliers, a 1,000 marketing purchase and a 600 uncategorised purchase:
+
+- the stored `cost_of_sales` descriptor carries `counterparty_ids` = the two stock suppliers only; `operating_expenses` names the ads supplier only; `other_expense` (no purchases) carries **no** descriptor rather than a generic one; `revenue` keeps the sales types.
+- resolved under the owner's RLS through the evidence service: cost of sales → **exactly 2 rows** (the stock invoices), operating expenses → 1 row, revenue → 1 row. (A first run returned nothing because my fixture had omitted the `record_status_events` a real commit writes and the as-of projection reads; with the events present the descriptors resolve as above. That is a fixture fact, not a defect.)
+- **MEDIUM-8 — the amount does not reconcile.** The resolver sums the invoices table's `amountColumn`, which is `balance_due` (`evidence/data/descriptor-compiler.ts`, with a comment that the v1 invoice filters were written for receivables and payables). So the rows behind "Cost of sales £3,000" total **£3,600** (gross, all unpaid), and a fully paid sale would show as **£0** under "Revenue". Until ADR-103 no invoice-basis P&L figure existed to drill into, so this projection was only ever used where Σ `balance_due` is the figure. It is now the drill-down for revenue, cost of sales and every expense category on the invoice basis. Fix: an amount projection per figure family — `app.invoice_net(subtotal, tax_amount, total_amount)` for P&L descriptors, `balance_due` for AR/AP — selected by the descriptor's purpose rather than its table.
+
+## D. Gross margin
+
+| Case | Engine | Home |
+|---|---|---|
+| Invoice basis with cost lines | `cost_of_sales` 4,000, `gross_profit` 9,000, `gross_margin` 0.69 — normal | card shown, correctly |
+| Invoice basis, no purchases | `cost_of_sales` NULL `no_cost_of_sales_accounts`, `gross_margin` NULL, `gross_profit` warns `no_cost_of_sales` | **card shown**: "Profit after direct costs · Partial data · £6,000" (browser probe) |
+| Ledger basis, purchases only as invoices | `cost_of_sales` NULL **`cost_of_sales_in_other_source`**, `gross_margin` NULL, `gross_profit` warns | **card shown**: "£9,000 [partial]", `hidesGrossProfit = false` |
+| Ledger basis, no cost of sales anywhere | NULL `no_cost_of_sales_accounts` | **card shown**: "£4,000 [partial]" |
+
+No cost is invented anywhere, and no margin is shown: `gross_margin` is NULL in every absent case and is not a Home card. But **MEDIUM-7 — Home does not hide the gross-profit card, and never has.** `buildHeadlineCards` hides it when `gross_profit.dataQuality.missing` contains the absent-by-design code, and `pnl.ts#buildGrossProfit` deliberately **filters that code out** of `gross_profit.missing` (present since Phase 4, `b2a73ea`), replacing it with the warning `no_cost_of_sales`. The rule therefore never fires; f8fdc58 extended a dead rule to the new code and its record states that Home hides the card. What a reader sees is "Profit after direct costs" equal to sales with a "Partial data" badge — exactly the impression CD-05 exists to prevent, for every organisation without cost-of-sales data, which is the commonest state of a small business in MOTION. Fix: test the warning the engine actually emits (`no_cost_of_sales`) or the `cost_of_sales` snapshot's own `missing`, and add the assertion the suite lacks. Also **LOW-9:** `buildGrossMargin` hard-codes `no_cost_of_sales_accounts` as its reason, so the ledger-with-invoices case reports the wrong reason on the margin ("You have no direct-cost accounts").
+
+## E. Phase 14 financial truth
+
+Re-run from the committed tree, independent probes and the repository's suites:
+
+1. **Invoice-only:** revenue 13,000 / cost of sales 4,000 / gross 9,000 / opex 1,500 / net 7,500 (probe); 8,550 / 900 / 7,650 (golden). Σ `customer_revenue` = revenue to the penny.
+2. **Bank + invoice:** revenue from invoices (4,000; 8,000), cash from bank (8,800; 6,800), no double count; `FAMILY_PRECEDENCE` unchanged.
+3. **Credit notes:** 12,000 − 2,000 → customer 10,000.
+4. **`app.invoice_net`:** twelve cases agree between SQL and TypeScript on value and fallback flag; callers `app.aggregate_periods`, `api.set_invoice_lines`, `api.product_period_summary`; no copies of the old expression.
+5. **VAT fallback:** 1 of 6 rows → `vat_inclusive`, `estimated`; an all-net organisation → Calculated.
+6. **Unattributed:** absent from the overview's top customers, from the engine's top-1/top-5 (attributed rows only), and from `get_customer_profitability.rows` (moved to `not_attributed_to_a_customer`).
+7. **Merges:** `commercial.test.ts` "keeps product mix, campaign attribution and revenue under the surviving customer" and the merge refusals — green; total credited revenue across campaigns equals the customer's revenue once.
+
+## F. Phase 13 regression
+
+`banking.test.ts` (20) green; the Phase 13 audit's ten integration probes (tools per role, B against A → NO_DATA, client categorise → 42501, stored identity masked) 10 of 10; `journey-13-banking` green inside the Playwright suite; the Phase 13 browser probe re-run: vocabulary never claims a connection, notices, categories, reconciliation copy, statement freshness, client controls absent, malformed and foreign ids 404 — all intact. The one soft assertion that fails is the Phase 13 audit's own MEDIUM-4 (transactions table forces horizontal scroll at 375 px), pre-existing and outside this remediation.
+
+## G. Security
+
+Permission matrix in sync (121 grants, all five roles). `rls-isolation` (42), `isolation-cases` (10), `ai-tools` role × tool matrix at 26 tools (23), `commercial.test.ts` roles and isolation (client `42501` on every commercial write, unassigned employee `P0002`, organisation B blind to A across six tables and three functions) — all green. Audit probes: an unassigned employee reads nothing and every tool answers with no organisation content; a forged `ctx.orgId` yields `NO_DATA`; a smuggled `organization_id` is stripped by the schema. Nothing in f8fdc58 touches RLS, grants or tenant context.
+
+## H. AI
+
+- `get_metric closing_cash` on the bank-less recording organisation returns `value: null`, `basis: none`, `data_quality.missing: [no_bank_accounts]` (recorded fixture, call 9) — the AI layer receives the NULL and does not manufacture a zero.
+- The rewritten `golden:cash` states "We cannot show your cash for May 2026: no bank account has been added yet, so there is no statement to establish it from", cites the NULL snapshot, carries `no_bank_accounts`, and asserts `£0` absent — verified in the committed corpus; the eval suite passes 170 of 170 in every run.
+- No tool computes a margin; `get_metric gross_margin` would return the engine's NULL with its reason.
+- Evidence references cite the same descriptors whose row set now reconciles (§C) — and whose summed amount does not (MEDIUM-8), which tool 13 would report as `sum`.
+
+## I. Gates — clean database, f8fdc58
+
+| Gate | Result |
+|---|---|
+| Typecheck | PASS |
+| Lint | PASS |
+| Unit | PASS — 69 files, 1,989 |
+| Integration | PASS — 40 files, **661 of 661** (the known flake did not fire this run) |
+| pgTAP | PASS — 16 files, 1,034 |
+| Playwright | PASS — 64 passed, 1 pre-existing skip |
+| AI eval | PASS — 170 |
+| Schema drift | PASS — 54 tables, 118 api functions, RLS forced, no write grants |
+| Authorization | PASS |
+| Tenant isolation | PASS |
+| Production build | PASS |
+| Phase 14 adversarial probes | 23 of 23; plus history-first (2), evidence (2), banking (10), browser (Home, Cash, banking pages) |
+
+**Known pre-existing flakes.** `ai-eval-record`: the ordering nondeterminism in `loadAlerts` (no identifier tiebreaker) sampled by a first-element shape comparison — did not fire in this run; fired in 3 of 3 full-suite runs of the previous audit; not introduced or changed by f8fdc58 (alerts module untouched, recording organisation has no invoices). `ai-eval-job`: one transient "the model could not be called" from the live model in one earlier run; passed in isolation and in every other run including this one; treated as environmental.
+
+## J. Remaining findings
+
+| ID | Severity | Status |
+|---|---|---|
+| MEDIUM-7 | MEDIUM | NEW (pre-existing since Phase 4/5): Home's gross-profit hide rule reads a field the engine empties; "Profit after direct costs" = sales is shown with a Partial badge whenever cost of sales is absent by design |
+| MEDIUM-8 | MEDIUM | NEW (pre-existing, newly reachable): invoice-basis P&L evidence sums `balance_due`; rows reconcile, amounts do not |
+| LOW-8 | LOW | NEW: `computeCash` poisons the series when handed an `openingCarry` carrying `no_bank_accounts`; the run passes no carry, so unreachable today |
+| LOW-9 | LOW | NEW: `gross_margin` reports `no_cost_of_sales_accounts` where `cost_of_sales` reports `cost_of_sales_in_other_source` |
+| LOW-10 | LOW | NEW: NULL cash snapshots store `assurance_level = calculated` (the badge is "—"; consistent with the `no_opening_cash` convention) |
+| LOW-1…6 | LOW | open, unchanged (overview Why link not rendered; tool money values without per-figure assurance; GBP fallback; mixed minor units; duplicate reads; no Action Centre link) |
+| LOW-7 | LOW | open: VAT-fallback share counts purchase rows against revenue; over-flags, never understates |
+| Phase 13 MEDIUM-4 | MEDIUM (Phase 13) | open: transactions table scrolls horizontally at 375 px |
+
+## Closed by f8fdc58 (verified)
+
+HIGH-2 cash empty-set zero · MEDIUM-4 evidence row set · MEDIUM-5 gross-margin source rule · the empty-organisation `customer_revenue`/`supplier_spend` zeros · the report/Home comparison-month disagreement · the recorded `£0` cash fixture and golden.
+
+## What readiness needs
+
+Two contained changes and a test each: make Home's hide rule read what the engine emits (and assert it for the invoice-only, ledger-only and ledger-with-invoice-cost cases), and give invoice-basis P&L descriptors a net amount projection distinct from the receivables one (and assert that the drill-down's sum equals the figure). Neither touches precedence, `app.invoice_net`, attribution, the alerts module or the cash rule verified above.
+
+---
+
+# Part C — remediation of MEDIUM-7 and MEDIUM-8 (ADR-105)
+
+> Date: 2026-09-23. Answers Part A above. The three earlier blockers were verified closed there and were not touched; nothing changed in the cash rule, `no_bank_accounts`, precedence, `app.invoice_net`, the VAT fallback, attribution, the unattributed handling, merges, Phase 13 banking, the alerts module, tenancy, employee permissions or the AI architecture. The `ai-eval-record` ordering flake is documented, not touched.
+
+## MEDIUM-7 — Home gross-profit card
+
+**Defect.** `buildHeadlineCards` hid the card when `gross_profit.dataQuality.missing` carried the absent-by-design code; `pnl.ts#buildGrossProfit` has always removed that code from `gross_profit.missing` and written gross profit as revenue with the warning `no_cost_of_sales`. The rule was dead: "Profit after direct costs · Partial data · £4,000" showed for every organisation without cost data.
+
+**Fix** (`dashboard/services/home.ts`, presentation only — the engine is unchanged): the rule now reads the engine's actual contract — the `no_cost_of_sales` warning on `gross_profit`, and a `cost_of_sales` that is NULL with `no_cost_of_sales_accounts` or `cost_of_sales_in_other_source` (the old `missing` check is kept for completeness). The card is omitted and Home prints the engine's reason beneath the headline figures in the shared reason words ("Profit after direct costs isn't shown: You have no direct-cost accounts, so this does not apply." / "… Your purchase invoices show direct costs, but the source this month's figures come from does not …"). The monthly report builds its cards through the same function, so it omits the card too. No value is manufactured, no NULL becomes zero, and a valid gross profit still shows with its figure.
+
+**Tests.** `test/unit/home-headline-cards.test.ts` (4): shown with 7,650 when a cost line exists; omitted with the reason for `no_cost_of_sales_accounts` **using the shape the engine really writes** (revenue value, warning, empty `missing`); omitted for `cost_of_sales_in_other_source`; a NULL revenue produces no card and no zero. `test/integration/engine-invoice-golden.test.ts` (+2): the invoice-only organisation with a cost line shows the card at 7,650 through `loadHome`; the ledger organisation with invoice-only cost of sales hides it and carries the reason. The pre-existing `home-figures.test.ts` case still passes.
+
+## MEDIUM-8 — invoice-basis evidence amount
+
+**Defect.** The invoices projection in `evidence/data/descriptor-compiler.ts` summed `balance_due`, written for receivables and payables. Behind "Cost of sales £3,000" the rows totalled the £3,600 still owed; a paid sale appeared under "Revenue" as £0.
+
+**Fix** (descriptor resolution, not display): a compiled query now carries `amountBasis`. An invoice descriptor with `open_as_of` / `overdue_as_of` — the receivables and payables shape — keeps `column` = `balance_due`. Every other invoice descriptor (revenue, cost of sales, an expense category, a customer's revenue on the invoice basis) is `invoice_net`: each row's amount is `invoiceNetOfTax` (the TypeScript mirror of `app.invoice_net`) signed by invoice type, so credit notes subtract and Σ rows equals the figure whatever has been paid. `subtotal` and `tax_amount` join the invoice column allow-list for that purpose. The supplier scoping of ADR-104 is untouched and a category nobody's purchases went into still carries no descriptor.
+
+**Tests.** `test/unit/evidence-descriptor.test.ts` (+1): a P&L invoice descriptor compiles to `amountBasis: invoice_net` with the money columns selected and the supplier filter intact; an `open_as_of` descriptor stays on `balance_due`. `test/integration/evidence-invoice-basis.test.ts` (5), resolved under the owner's RLS through the real evidence service against a real run: **unpaid** (1,800 net, not the 2,160 owed), **partly paid** (1,200, not the 740 still owed), **fully paid** (500, not 0) — three suppliers summing to the displayed 3,500.00; **revenue** of a fully paid sale still 10,000.00, not 0; **operating expenses** only the marketing supplier at 1,000.00; **a category with no purchases** (`other_expense`, `interest_expense`) has no descriptor; and a receivables/payables-shaped descriptor still sums `balance_due` (4,100.00, the paid one 0).
+
+## Gate results after remediation
+
+Clean database (`supabase db reset`), 2026-09-23:
+
+| Gate | Result |
+|---|---|
+| Typecheck | PASS |
+| Lint (`eslint .`) | PASS |
+| Unit | PASS — 70 files, 1,994 tests (+5: Home cards, descriptor basis) |
+| Integration | 667 of 668 — the one failure is the documented `ai-eval-record` ordering flake (`get_alerts #16 output shape`, 26 vs 25 key paths); it passes in isolation, and the alerts module and recording organisation are untouched by this commit. Green: `evidence-invoice-basis` (5, new), `engine-invoice-golden` (17), `home-figures`, `reporting` (16), `commercial` (11), `banking` (20), `ai-tools` (23), `rls-isolation` (42), `isolation-cases` (10), `ai-eval-job` (2) |
+| pgTAP | PASS — 16 files, 1,034 |
+| Playwright | PASS — 64 passed, 1 pre-existing skip |
+| AI eval | PASS — 170 |
+| Schema drift | PASS — 54 tables, 118 api functions (no schema change) |
+| Authorization / Tenant isolation | PASS |
+| Production build | PASS |
+
+**Re-verification of A–J from the brief, probes re-run against the remediated tree (37 of 37):** invoice-only P&L reconciles (13,000 / 4,000 / 9,000 / 7,500; golden 8,550 / 900 / 7,650); invoice-only without a cost basis keeps `cost_of_sales` NULL and Home shows no gross-profit card but the sentence "Profit after direct costs isn't shown: You have no direct-cost accounts, so this does not apply." (browser); the cost-of-sales drill-down now totals 3,000.00 behind a 3,000.00 figure and 10,000.00 behind a fully paid 10,000.00 sale; a partly paid invoice shows its net; bank + invoice precedence and cash unchanged (8,800 on bank, 4,000 on invoices); no bank account → cash NULL `no_bank_accounts`, "Cash —" on Home; history first then banking later still reaches 6,000; commercial rules, currency, isolation and the analyst's tool contexts unchanged; Phase 13 banking probes 10 of 10; RBAC and tenant suites green.
+
+**Remaining findings (unchanged, none blocking):** LOW-1…7 from earlier audits, LOW-8 (`computeCash` with a `no_bank_accounts` carry; unreachable through the run), LOW-9 (`gross_margin` reason code), LOW-10 (NULL cash snapshots store `assurance_level = calculated`), the Phase 13 transactions-page 375 px scroll (Phase 13 MEDIUM-4), and the pre-existing `ai-eval-record` flake.
+
+Readiness is for the independent audit to declare; this record claims only that the two findings are fixed and verified.
+
+# Part B — implementation record, as submitted with f8fdc58
 
 > Date: 2026-09-22. Answers the independent re-audit `PHASE_14_REMEDIATION_AUDIT.md` (verdict NOT READY: HIGH-2, MEDIUM-4, MEDIUM-5, MEDIUM-6). Decision record: ADR-104. Phase 15 was not started. Nothing in Phase 13 or Phase 14's commercial logic, in invoice precedence, in `app.invoice_net`, in customer attribution, in the alerts module or in the dashboard's arithmetic was changed.
 
