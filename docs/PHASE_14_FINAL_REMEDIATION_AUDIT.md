@@ -1,4 +1,144 @@
-# Phase 14 — final independent re-audit
+# Phase 14 — remediation, verification and closeout
+
+> **Final commit: `8f81dd3`** — "Phase 14 — Home gross-profit card and invoice-basis evidence amount (ADR-105)", on `main`, pushed to `origin/main`, working tree clean.
+>
+> **Status: IMPLEMENTATION VERIFIED BY OPUS — INDEPENDENT FABLE 5.1 AUDIT PENDING.** Part D records what this closeout pass verified against the committed tree. It is *not* an independent audit and does not declare Phase 15 readiness. Only the independent Fable 5.1 audit can do that. Parts A, C and B below are kept as written, in the order they were produced.
+
+---
+
+# Part D — final closeout (verification pass, 2026-09-23)
+
+Method: code reading of the committed tree at `8f81dd3`; the eleven gates re-run on a clean database (`supabase db reset`); every adversarial probe from the three earlier audits re-run; a new browser probe for the Home gross-profit card; detached worktrees at `55acbeb` and `b2a73ea` to separate pre-existing behaviour from regression. **No implementation code was changed by this pass** — the only change in the closeout commit is this document.
+
+## 1. The original Phase 14 engine defect
+
+`app.aggregate_periods` folded every invoice row of a period into one cell, so an organisation whose P&L came from invoices reported headline revenue of £0.00 while customer-level revenue was right. Recorded in Part B §1; fixed in `55acbeb` (ADR-103) by giving the invoice basis its own fold and one net-of-tax rule.
+
+## 2. The previous remediation
+
+`55acbeb` (ADR-103): the invoice-basis fold at the root, `app.invoice_net` as the single net-of-tax rule, "Unattributed" made not-a-customer, and counterparty merges followed through the aggregate. `f8fdc58` (ADR-104): the cash empty-set, the over-selecting expense evidence and the unwarned 100% gross margin. Parts B and C record both.
+
+## 3. Independent verification already performed
+
+Three independent audits ran before this pass: `PHASE_14_FINAL_AUDIT.md` (Phase 14 as delivered), `PHASE_14_REMEDIATION_AUDIT.md` (`55acbeb`), and Part A of this file (`f8fdc58`). Each returned NOT READY and named the findings the next commit answered.
+
+## 4. Cash empty-set
+
+Verified intact at `8f81dd3`. `financial-engine/domain/cash.ts` takes the empty branch only when the organisation has **no active cash-like account and no covered account**: every metric of the family is `value: null`, `basis: 'none'`, completeness 0, reason `no_bank_accounts`, and `previousClosing` is set to null so no later month inherits a figure. A covered account, including one that has since been closed, never reaches the branch. Browser: Home prints "Cash —" and Money › Cash prints "Add a bank account and upload its statements to see your cash." for every row; no `£0` anywhere on either page. `engine-invoice-golden.test.ts` asserts the family and the reason; `engine-cash.test.ts` asserts a valid bank source still calculates.
+
+## 5. Empty-set zero-fill sweep
+
+Verified intact. The engine distinguishes a true zero from no data in every family: the P&L returns `noSourceResults` (all fifteen keys NULL, `no_source_covers_period`, completeness 0) rather than zeros; the cash family returns the `no_bank_accounts` branch; `concentration.ts` omits the synthetic unattributed remainder entirely when the basis is `none`, so `customer_revenue` and `supplier_spend` are absent rather than 0.00. The empty-organisation probe confirms no snapshot carries a value.
+
+## 6. Cost-of-sales evidence mismatch
+
+Fixed and verified. Descriptors are scoped to the suppliers that contributed (ADR-104), and the summed amount now matches the figure (ADR-105, item 9). Probed through the analyst's own `get_transactions_for_evidence` tool against a live run: a `cost_of_sales` figure of 3,000.000000 returns **2 records, £1,800 and £1,200, sum £3,000.00, count 2**. `operating_expenses` carries a descriptor naming only the marketing supplier and no stock supplier. `other_expense`, a category nobody's purchases went into, carries no descriptor at all.
+
+## 7. Gross-margin assurance
+
+Verified. `pnl.ts#buildGrossMargin` returns NULL whenever cost of sales is absent by design, so no 100% margin is ever published, and `gross_margin` is not a Home card. Measured on the ledger organisation whose purchases exist only as invoices: `cost_of_sales = NULL ["cost_of_sales_in_other_source"]`, `gross_margin = NULL`, and Home reports `hidesGrossProfit: true`. No cost is invented. The reason code `gross_margin` itself stores remains `no_cost_of_sales_accounts` where `cost_of_sales` stores `cost_of_sales_in_other_source` — LOW-9, open and unchanged; Home reads `cost_of_sales`'s own reason, so the reader is told the right one.
+
+## 8. Home gross-profit card
+
+Fixed in `8f81dd3` and verified in the browser. `buildHeadlineCards` now reads what the engine emits — the `no_cost_of_sales` warning on `gross_profit`, or a `cost_of_sales` that is NULL with `no_cost_of_sales_accounts` or `cost_of_sales_in_other_source` — instead of the `gross_profit.missing` field `pnl.ts#buildGrossProfit` deliberately empties.
+
+| Case | Result at `8f81dd3` |
+|---|---|
+| A · invoice-only, no direct-cost purchases | **no card.** Home shows Sales £9,000, Profit £9,000, Cash —, then "Profit after direct costs isn't shown: You have no direct-cost accounts, so this does not apply." Console clean (browser probe) |
+| B · ledger basis, costs only in invoices | **no card.** `hidesGrossProfit: true`; cards are revenue, operating profit, cash only; the reason carried is `cost_of_sales_in_other_source` (probe) |
+| C · cost-of-sales purchase present | **card shown**, "Profit after direct costs · Calculated · £7,000" on revenue 9,000 less cost 2,000, and no note (browser probe) |
+| D · NULL revenue | no card and no zero: a NULL value renders as an em-dash; `home-headline-cards.test.ts` asserts it |
+| E · monthly report | the report calls the same `buildHeadlineCards` and destructures the already-filtered `cards`; it has no gross-profit rule of its own, so it cannot disagree with Home |
+
+## 9. Invoice-basis evidence correction
+
+Fixed in `8f81dd3` and verified against the compiled descriptor, not only the test. A `CompiledQuery` carries `amountBasis`. An invoices descriptor with `open_as_of` or `overdue_as_of` — the receivables and payables shape — keeps `column` with `amountColumn: 'balance_due'`. Every other invoices descriptor compiles to `invoice_net`, and the resolver reads each row through `invoiceNetOfTax` signed by `invoiceSignFor`, so credit notes subtract. The two bases are not collapsed. `invoiceNetOfTax` is imported from the financial engine, so no second implementation of the rule was created.
+
+## 10. Regression tests
+
+Added with the fix and green in this run: `home-headline-cards.test.ts` (4 unit cases, using the shape the engine really writes); `evidence-descriptor.test.ts` (+1: a P&L descriptor compiles to `invoice_net` with the money columns and the supplier filter intact, an as-of descriptor stays on `balance_due`); `engine-invoice-golden.test.ts` (+2 `loadHome` cases, card shown and card hidden with the reason); `evidence-invoice-basis.test.ts` (5 integration cases against a real run under the owner's RLS: unpaid 1,800, partly paid 1,200 and fully paid 500 each show their net and **sum to the displayed 3,500.00**; a fully paid 10,000 sale still reports 10,000, not 0; operating expenses names the marketing supplier only; two categories with no purchases have no descriptor; a receivables-shaped descriptor still sums `balance_due` to 4,100.00 with the paid invoice at 0).
+
+## 11. Adversarial probes
+
+13 probe files, 45 assertions: **40 pass, 5 fail, and every failure is accounted for as a probe artefact or a documented pre-existing item.** None is a regression in shipped behaviour.
+
+| Probe | Result |
+|---|---|
+| Empty organisation, invoice-only, bank + invoice, AED organisation, credit note, fully paid, partly paid, no-cost-of-sales, ledger with invoice-only costs, history-first banking, counterparty merge, tenant boundary, employee assignment boundary, client isolation | pass |
+| Evidence drill-down (`evidence13b`, `evidence13c`, `evidence14`) | pass |
+| `evidence13` (superseded) | 1 failure — the fixture omits the invoice `record_status_events` a real commit writes and the as-of projection reads. Re-run with them added, the substantive assertions pass (2 records, £3,000 sum against a £3,000 figure); the residual failure is the probe comparing the JSON `null` in `evidence_query` to the string `'NULL'`. Probe defect, not a product defect |
+| `cashjoin` / `cashjoin55`, test 1 (account active from the series start, opening balance dated later) | 2 failures — `no_opening_cash`, NULL. **Re-run in a detached worktree at `55acbeb`: identical.** Pre-existing, recoverable through the opening-balance form on Money › Cash |
+| `cashjoin` / `cashjoin55`, test 2 (a `no_bank_accounts` NULL handed forward as `openingCarry`) | 2 failures — LOW-8. At `55acbeb` the same probe passed only because the source-less months fabricated `0.00`, which is HIGH-2 itself. `openingCarry` has no production caller: `src` contains only its declaration and its read, and no caller sets `cashOptions`. Both end-to-end history-first probes, which drive the real queue, pass |
+
+Browser probes: Home gross-profit card (new, pass), cash unavailable never £0 (pass), commercial pages at 375 px with no ids on screen (pass), Phase 13 banking pages (one soft failure, item 14).
+
+## 12. Security
+
+PASS. The permission matrix is in sync across all five roles (OWNER, SUPER ADMIN, ADMIN, EMPLOYEE, CLIENT) and is checked in pgTAP against the TypeScript matrix. pgTAP 1,034 assertions green, including `06_financial_rls`. Playwright's `authorization-*` project signs in as three separate callers and checks the route → status matrix. `rls-isolation` (42) and `isolation-cases` (10) green: an employee reaches only assigned client organisations, a client reaches only its own, and organisation B is blind to A across six tables and three functions. Enforcement is server-side and database-level, not UI hiding. Schema drift reports RLS forced everywhere, no write grants and no reachable server functions. Nothing in `8f81dd3` touches RLS, grants, composite FKs or tenant context.
+
+## 13. Tenant isolation
+
+PASS, covered by the suites named in item 12 and by the commercial isolation cases (a client gets `42501` on every commercial write, an unassigned employee `P0002`).
+
+## 14. Phase 13 regression
+
+PASS with one pre-existing exception. `banking.test.ts` (20) green; `journey-13-banking` green inside the Playwright suite; `10_banking_intelligence` pgTAP green. The Phase 13 browser probe re-run at `8f81dd3`: the vocabulary never claims a live bank connection, the source sentence and last-statement line are present, unusual-payment and uncategorised notices render, the transaction detail opens by keyboard and shows category, counted status and printed balance, a malformed id returns 404, and a client sees no add-account, no add-data call to action, no category control and no transfer control. The one soft failure is the Phase 13 audit's own MEDIUM-4: the transactions table forces horizontal scroll at 375 px (scrollWidth 553 against 375). Pre-existing, outside this remediation, and unchanged.
+
+## 15. AI integrity
+
+PASS. The Phase 14 commercial tools call the same `loadProducts`, `loadMarketing` and `loadSales` the screens call, so the AI reads deterministic engine output and is never a source of financial truth. The envelope helpers return `null` for a null value rather than a zero, so an unavailable figure cannot become £0 in a tool result. No tool computes a margin. Evidence references resolve to the same descriptors whose rows now sum to the figure (item 6). Attribution refusal is intact and "Unattributed" is a synthetic engine row the AI reports separately, never a ranked customer. The corrected bank-less fixture is in the committed corpus: `get_metric closing_cash` returns `value: null`, `basis: none`, `no_bank_accounts`, and the `golden:cash` case asserts `£0` is **absent** from the answer. The eval suite passes 170 of 170.
+
+## 16. Known pre-existing issues
+
+- **`ai-eval-record` ordering flake.** `loadAlerts` orders by severity and timestamp with no identifier tiebreaker, and the shape comparison samples only the first array element, so equally ranked alerts can arrive in either order (`get_alerts #16 output shape`, 26 against 25 key paths). **It did not fire in this run** — integration was 668 of 668 — and it passes in isolation. Not fixed, not suppressed, not worked around: the alerts module and the test were left exactly as they are, per instruction.
+- **`ai-eval-job` live-model transient.** One "the model could not be called" in an earlier run, never reproduced; passed here. Environmental, not a code regression.
+- **Phase 13 MEDIUM-4:** the transactions table scrolls sideways at 375 px.
+
+## 17. Gates — clean database, `8f81dd3`
+
+`supabase db reset`, then in order:
+
+| Gate | Result |
+|---|---|
+| Typecheck (`tsc --noEmit`) | PASS |
+| Lint (`eslint .`) | PASS |
+| Unit | PASS — 70 files, 1,994 tests |
+| Integration | PASS — 41 files, **668 of 668** |
+| pgTAP | PASS — 16 files, 1,034 tests |
+| Playwright | PASS — 64 passed, 1 pre-existing skip |
+| AI eval | PASS — 170 |
+| Schema drift | PASS — 54 tables, 118 api functions, RLS forced, no write grants, no reachable server functions |
+| Authorization | PASS — permission matrix in sync, pgTAP RLS, Playwright `authz` project |
+| Tenant isolation | PASS — `rls-isolation` 42, `isolation-cases` 10 |
+| Production build | PASS |
+
+No gate is called PASS with an unexplained failure inside it.
+
+## Remaining findings
+
+| ID | Severity | Status |
+|---|---|---|
+| MEDIUM-7 | — | **CLOSED** by `8f81dd3`: Home hides the gross-profit card and gives the engine's reason |
+| MEDIUM-8 | — | **CLOSED** by `8f81dd3`: invoice-basis P&L evidence sums the net, and reconciles |
+| LOW-1…6 | LOW | open, unchanged (overview Why link not rendered; tool money values without per-figure assurance; GBP fallback; mixed minor units; duplicate reads; no Action Centre link) |
+| LOW-7 | LOW | open: VAT-fallback share counts purchase rows against revenue; over-flags, never understates |
+| LOW-8 | LOW | open: `computeCash` handed an `openingCarry` carrying `no_bank_accounts` keeps the series NULL; no production caller supplies one |
+| LOW-9 | LOW | open: `gross_margin` stores `no_cost_of_sales_accounts` where `cost_of_sales` stores `cost_of_sales_in_other_source` |
+| LOW-10 | LOW | open: NULL cash snapshots store `assurance_level = calculated`; the badge shows "—" |
+| Phase 13 MEDIUM-4 | MEDIUM (Phase 13) | open: transactions table scrolls sideways at 375 px |
+| `ai-eval-record` flake | — | open, deliberately untouched |
+
+## Scope check on the final tree
+
+`git diff b2a73ea..8f81dd3` introduces no Phase 15 surface: no Adviser or CFO Command Centre route, no portfolio table, no multi-client dashboard (`/portfolio` has existed since Phase 1 and no Phase 13 or 14 commit touches it). Three migrations, all Phase 13 and 14, and every grant statement in them revokes rather than widens. No policy dropped, no RLS disabled. `f8fdc58..8f81dd3` changes no migration, no schema, no precedence, no `app.invoice_net` semantics, no Phase 13 contract, no alerts module and no test expectation written to fit broken behaviour.
+
+## Phase 15
+
+**NOT STARTED.** The next step is the independent Fable 5.1 audit. Only that audit can declare Phase 14 ready for Phase 15.
+
+---
+
+# Part A — final independent re-audit of `f8fdc58`
 
 > **Commit audited: `f8fdc58`** on `main` (`HEAD`, `origin/main` and the working tree agree; `git status --porcelain` empty). Audit date: 2026-09-23. Method: code reading of the committed tree; the full gate suite on a clean database (`supabase db reset`); every adversarial probe from the two earlier audits re-run; new probes for the three previous blockers, for a business that imports history before adding banking, for the analyst's evidence tool, and for Home; a detached worktree at 55acbeb for before/after comparison. **No implementation code was modified.** Part B below is the implementation team's record, kept as submitted.
 
@@ -161,6 +301,8 @@ Clean database (`supabase db reset`), 2026-09-23:
 | Schema drift | PASS — 54 tables, 118 api functions (no schema change) |
 | Authorization / Tenant isolation | PASS |
 | Production build | PASS |
+
+> Corrected by Part D item 11: the probe suite is 13 files and 45 assertions, of which 40 pass; the "37 of 37" below counted only the assertions this pass re-ran by hand. The five failures are itemised there — one probe-fixture failure and four pre-existing cases (two assertions, each in a duplicated probe file), none a regression.
 
 **Re-verification of A–J from the brief, probes re-run against the remediated tree (37 of 37):** invoice-only P&L reconciles (13,000 / 4,000 / 9,000 / 7,500; golden 8,550 / 900 / 7,650); invoice-only without a cost basis keeps `cost_of_sales` NULL and Home shows no gross-profit card but the sentence "Profit after direct costs isn't shown: You have no direct-cost accounts, so this does not apply." (browser); the cost-of-sales drill-down now totals 3,000.00 behind a 3,000.00 figure and 10,000.00 behind a fully paid 10,000.00 sale; a partly paid invoice shows its net; bank + invoice precedence and cash unchanged (8,800 on bank, 4,000 on invoices); no bank account → cash NULL `no_bank_accounts`, "Cash —" on Home; history first then banking later still reaches 6,000; commercial rules, currency, isolation and the analyst's tool contexts unchanged; Phase 13 banking probes 10 of 10; RBAC and tenant suites green.
 
