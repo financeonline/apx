@@ -5,7 +5,7 @@ import { parseQueryDescriptor } from '@/modules/evidence';
 import {
   HIGH_UNATTRIBUTED_SHARE,
   UNATTRIBUTED_LABEL,
-  bankCommercialPopulation,
+  commercialPopulation,
   computeConcentration,
   resolveSurvivor,
   type BasisChoice,
@@ -40,7 +40,7 @@ const AGGREGATED_AT = '2026-09-05T09:00:00Z';
 const REVENUE_ACCOUNT = uuid(41);
 const EXPENSE_ACCOUNT = uuid(42);
 
-/** A chart with one revenue and one expense account, for the bank-basis populations (ADR-110). */
+/** A chart with one revenue and one expense account, for the bank and ledger populations (ADR-110, ADR-111). */
 const BANK_CHART: readonly AccountRef[] = [
   { id: REVENUE_ACCOUNT, code: null, name: 'Sales', standardCategory: 'revenue', accountType: 'income', isSystem: true },
   { id: uuid(43), code: null, name: 'Other income', standardCategory: 'other_income', accountType: 'income', isSystem: true },
@@ -48,8 +48,12 @@ const BANK_CHART: readonly AccountRef[] = [
   { id: uuid(44), code: null, name: 'Transfers', standardCategory: 'transfer', accountType: 'asset', isSystem: true },
 ];
 const BANK_POPULATIONS = {
-  customer: bankCommercialPopulation(BANK_CHART, 'customer'),
-  supplier: bankCommercialPopulation(BANK_CHART, 'supplier'),
+  customer: commercialPopulation(BANK_CHART, 'bank', 'customer'),
+  supplier: commercialPopulation(BANK_CHART, 'bank', 'supplier'),
+};
+const LEDGER_POPULATIONS = {
+  customer: commercialPopulation(BANK_CHART, 'ledger', 'customer'),
+  supplier: commercialPopulation(BANK_CHART, 'ledger', 'supplier'),
 };
 
 function period(index: number): PeriodRef {
@@ -125,8 +129,6 @@ function periodInput(overrides: Partial<ConcentrationPeriodInput> = {}): Concent
     customerRevenue: [],
     supplierSpend: [],
     revenue: null,
-    revenueAccountIds: [REVENUE_ACCOUNT],
-    expenseAccountIds: [EXPENSE_ACCOUNT],
     ...overrides,
   };
 }
@@ -507,12 +509,14 @@ describe('the shape of a counterparty snapshot', () => {
     expect(parsed.filters.counterparty_ids).toEqual([ACME]);
   });
 
-  it('resolves categories to concrete account ids on the ledger basis (ADR-034)', () => {
+  it('resolves categories to concrete account ids on the ledger basis: revenue only, not other income (ADR-034, ADR-111)', () => {
     const results = computeConcentration(ctx, [
       periodInput({
         basis: { basis: 'ledger', assurance: 'calculated', warnings: [], proxy: false },
         customerRevenue: [amount(ACME, '10.00')],
+        supplierSpend: [amount(SUPPLIER, '4.00')],
         revenue: revenueMetric('10.00'),
+        populations: LEDGER_POPULATIONS,
       }),
     ]);
     const evidence = forDimension(results, 'customer_revenue', ACME).evidenceQuery;
@@ -520,6 +524,22 @@ describe('the shape of a counterparty snapshot', () => {
     const parsed = parseQueryDescriptor(evidence.descriptor);
     expect(parsed.table).toBe('ledger_entries');
     expect(parsed.filters.account_ids).toEqual([REVENUE_ACCOUNT]);
+    // No direction: a ledger selection over both sides is totalled in reporting sign (ADR-111).
+    expect(parsed.filters.direction).toBeUndefined();
+    const supplier = forDimension(results, 'supplier_spend', SUPPLIER).evidenceQuery;
+    if (supplier?.kind !== 'leaf') throw new Error('expected a leaf');
+    expect(parseQueryDescriptor(supplier.descriptor).filters.account_ids).toEqual([EXPENSE_ACCOUNT]);
+  });
+
+  it('writes no ledger descriptor from a population built for another basis', () => {
+    const results = computeConcentration(ctx, [
+      periodInput({
+        basis: { basis: 'ledger', assurance: 'calculated', warnings: [], proxy: false },
+        supplierSpend: [amount(SUPPLIER, '4.00')],
+        populations: BANK_POPULATIONS,
+      }),
+    ]);
+    expect(forDimension(results, 'supplier_spend', SUPPLIER).evidenceQuery).toBeNull();
   });
 
   it('re-selects a bank-basis supplier from its population: expense outflows, no transfer of any kind (ADR-110)', () => {
@@ -527,7 +547,7 @@ describe('the shape of a counterparty snapshot', () => {
       periodInput({
         basis: { basis: 'bank', assurance: 'estimated', warnings: ['cash_basis_proxy'], proxy: true },
         supplierSpend: [amount(SUPPLIER, '10.00')],
-        bankPopulations: BANK_POPULATIONS,
+        populations: BANK_POPULATIONS,
       }),
     ]);
     const evidence = forDimension(results, 'supplier_spend', SUPPLIER).evidenceQuery;
@@ -547,7 +567,7 @@ describe('the shape of a counterparty snapshot', () => {
         basis: { basis: 'bank', assurance: 'estimated', warnings: ['cash_basis_proxy'], proxy: true },
         customerRevenue: [amount(ACME, '10.00')],
         revenue: revenueMetric('10.00'),
-        bankPopulations: BANK_POPULATIONS,
+        populations: BANK_POPULATIONS,
       }),
     ]);
     const evidence = forDimension(results, 'customer_revenue', ACME).evidenceQuery;

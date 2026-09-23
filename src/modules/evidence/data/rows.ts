@@ -244,3 +244,25 @@ export async function fetchAccountCategoryHistory(
   }
   return byAccount;
 }
+
+/**
+ * Each account's CURRENT `standard_category`. The fallback for a ledger line's sign when no
+ * `account_category_history` interval covers the as-of instant, or when there is no as-of at all.
+ */
+export async function fetchAccountCategories(
+  db: SupabaseClient,
+  orgId: string,
+  accountIds: readonly string[],
+): Promise<Map<string, string>> {
+  const out = new Map<string, string>();
+  for (const batch of batched(accountIds, ID_BATCH)) {
+    const { data, error } = await db
+      .from('accounts')
+      .select('id,standard_category')
+      .eq('organization_id', orgId)
+      .in('id', batch);
+    if (error) throw toMotionError(error);
+    for (const row of (data ?? []) as Row[]) out.set(String(row.id), String(row.standard_category));
+  }
+  return out;
+}

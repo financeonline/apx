@@ -2,8 +2,11 @@ import 'server-only';
 import { NotFound } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import { parseDecimalOrNull, sum, toMoneyString, type Decimal } from '@/core/money';
-import { invoiceNetOfTax, invoiceSignFor } from '@/modules/financial-engine';
-import type { InvoiceStatus, InvoiceType } from '@/modules/financials';
+import { invoiceNetOfTax, invoiceSignFor, ledgerLineAmount } from '@/modules/financial-engine';
+import {
+  CATEGORY_ACCOUNT_TYPE,
+  type AccountType, type EntryDirection, type InvoiceStatus, type InvoiceType, type StandardCategory,
+} from '@/modules/financials';
 import type { AccessContext } from '@/modules/tenancy';
 import {
   selectVisibleRecordIds,
@@ -14,6 +17,7 @@ import {
 import { parseQueryDescriptor, type DescriptorTable, type QueryDescriptorV1 } from '../domain/descriptor';
 import { compileDescriptor, type CompiledQuery, type PostFilter } from '../data/descriptor-compiler';
 import {
+  fetchAccountCategories,
   fetchAccountCategoryHistory,
   fetchCategoryHistory,
   fetchRecordStatusEvents,
@@ -268,7 +272,20 @@ const DESCRIPTION_COLUMN: Record<DescriptorTable, string | null> = {
  * basis the invoice-basis P&L summed, which is what makes Σ rows equal the figure. `column`: the
  * table's amount column (`balance_due` for receivables and payables, `amount` for ledger and bank).
  */
-function amountReader(compiled: CompiledQuery): (row: Row) => string | null {
+function amountReader(
+  compiled: CompiledQuery,
+  ledgerTypes: ReadonlyMap<string, AccountType>,
+): (row: Row) => string | null {
+  if (compiled.amountBasis === 'ledger_reporting') {
+    return (row) => {
+      const amount = str(row, 'amount');
+      const direction = str(row, 'direction') as EntryDirection | null;
+      const accountType = ledgerTypes.get(str(row, 'account_id') ?? '');
+      // An account the caller cannot see has no known sign: not known, which is not zero (§1.5).
+      if (amount === null || direction === null || accountType === undefined) return null;
+      return toMoneyString(ledgerLineAmount({ accountType, direction, amount }));
+    };
+  }
   if (compiled.amountBasis === 'invoice_net') {
     return (row) => {
       const totalAmount = str(row, 'total_amount');
@@ -346,6 +363,32 @@ function totalOf(rows: Row[], compiled: CompiledQuery, amountOf: (row: Row) => s
   return toMoneyString(sum(amounts));
 }
 
+/**
+ * The account type each ledger line is signed by (ADR-111): the account's category at the as-of
+ * instant when history covers it — the category the engine's run read — else its current one. An
+ * account's type is a function of its category (`accounts_type_matches_category`), so the category
+ * is all that is needed.
+ */
+async function ledgerAccountTypes(
+  ctx: AccessContext,
+  orgId: string,
+  compiled: CompiledQuery,
+  rows: Row[],
+  projection: AsOfProjection,
+): Promise<Map<string, AccountType>> {
+  const out = new Map<string, AccountType>();
+  if (compiled.amountBasis !== 'ledger_reporting') return out;
+  const ids = [...new Set(rows.map((row) => str(row, 'account_id')).filter((id): id is string => id !== null))];
+  const missing = ids.filter((id) => !projection.accountCategory.has(id));
+  const current = missing.length > 0 ? await fetchAccountCategories(ctx.db, orgId, missing) : new Map<string, string>();
+  for (const id of ids) {
+    const category = (projection.accountCategory.get(id) ?? current.get(id)) as StandardCategory | undefined;
+    const type = category === undefined ? undefined : CATEGORY_ACCOUNT_TYPE[category];
+    if (type !== undefined) out.set(id, type);
+  }
+  return out;
+}
+
 /** Resolve an already-compiled descriptor. Shared by `resolveDescriptor` and `resolveItem`. */
 export async function resolveCompiled(
   ctx: AccessContext,
@@ -361,7 +404,7 @@ export async function resolveCompiled(
   const pageRows = selection.slice(offset, offset + compiled.limit);
   const nextOffset = offset + pageRows.length;
 
-  const amountOf = amountReader(compiled);
+  const amountOf = amountReader(compiled, await ledgerAccountTypes(ctx, orgId, compiled, selection, projection));
   return {
     rows: pageRows.map((row) => toRecordView(compiled.table, row, amountOf, projection)),
     count: selection.length,

@@ -15,8 +15,8 @@ import { computeCash, type BankAggregateCell, type CashPeriodInput, type CashSer
 import type { TransferKind } from '@/modules/banking';
 import { computeConcentration, type ConcentrationPeriodInput } from './concentration';
 import {
-  bankCommercialPopulation, bankCommercialSelection, bankDirectedPart, bankLineDirection,
-} from './bank-commercial';
+  bankDirectedPart, bankLineDirection, commercialPopulation, commercialSelection,
+} from './commercial-population';
 import { computePnl, type AccountAmount, type PnlInput, type SnapshotIdResolver } from './pnl';
 import { choosePrecedence } from './coverage';
 import { isCashLikeBankAccount } from './categories';
@@ -298,8 +298,8 @@ function bankMovements(
 }
 
 /**
- * Revenue and spend per counterparty, for the concentration module, on the ledger and invoice bases.
- * The bank basis does not come here: it reads `bank-commercial.ts` (ADR-110).
+ * Revenue and spend per counterparty, for the concentration module, on the INVOICE basis. The bank and
+ * ledger bases do not come here: they read `commercial-population.ts` (ADR-110, ADR-111).
  */
 function counterpartyAmounts(
   cells: readonly AggregateCell[],
@@ -427,37 +427,32 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
   const revenueResult = results.find((r) => r.key === 'revenue' && r.dimensionType === 'none') ?? null;
 
   /*
-   * ADR-110: on the bank basis the figure and the descriptor are both read off one population value,
-   * so neither can select rows the other does not. Other bases keep their own rule unchanged.
+   * ADR-110 / ADR-111: on the bank and ledger bases the figure and the descriptor are both read off
+   * one population value, so neither can select rows the other does not. The invoice basis keeps its
+   * own rule, unchanged.
    */
-  const bankPopulations = counterpartySource === 'bank'
+  const populations = counterpartySource === 'bank' || counterpartySource === 'ledger'
     ? {
-        customer: bankCommercialPopulation(context.accounts, 'customer'),
-        supplier: bankCommercialPopulation(context.accounts, 'supplier'),
+        customer: commercialPopulation(context.accounts, counterpartySource, 'customer'),
+        supplier: commercialPopulation(context.accounts, counterpartySource, 'supplier'),
       }
     : undefined;
 
   const concentrationInput: ConcentrationPeriodInput = {
     period,
     basis: counterpartyBasis,
-    customerRevenue: bankPopulations
-      ? bankCommercialSelection(cells, period.id, bankPopulations.customer)
+    customerRevenue: populations
+      ? commercialSelection(cells, period.id, populations.customer)
       : counterpartySource
         ? counterpartyAmounts(cells, period.id, counterpartySource, context.accounts, 'revenue')
         : [],
-    supplierSpend: bankPopulations
-      ? bankCommercialSelection(cells, period.id, bankPopulations.supplier)
+    supplierSpend: populations
+      ? commercialSelection(cells, period.id, populations.supplier)
       : counterpartySource
         ? counterpartyAmounts(cells, period.id, counterpartySource, context.accounts, 'expense')
         : [],
-    bankPopulations,
+    populations,
     revenue: revenueResult,
-    revenueAccountIds: context.accounts
-      .filter((a) => a.standardCategory === 'revenue' || a.standardCategory === 'other_income')
-      .map((a) => a.id),
-    expenseAccountIds: context.accounts
-      .filter((a) => a.accountType === 'expense')
-      .map((a) => a.id),
   };
   for (const periodMetrics of computeConcentration(context, [concentrationInput])) {
     if (periodMetrics.periodId === period.id) results.push(...periodMetrics.metrics);

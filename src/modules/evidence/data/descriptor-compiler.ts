@@ -73,8 +73,15 @@ export interface CompiledQuery {
    * money out as a positive magnitude, as it does every expense, so the evidence does too. A
    * direction-filtered selection is all one way, so no row loses information by showing its size;
    * `transferKind` and the row's own description still say what each payment was.
+   *
+   * `ledger_reporting` reads a ledger line in REPORTING sign — the engine's account-type rule
+   * (`ledgerLineAmount`) applied to the line's `direction` and its account's type at the as-of
+   * instant. `ledger_entries.amount` is stored positive with the side in `direction`, so a plain
+   * column sum added a refund to revenue instead of subtracting it: `revenue` 19,400.00 had a
+   * drill-down of 21,400.00 (HIGH-6, ADR-111). A direction-filtered ledger selection is all one side
+   * and keeps `column`.
    */
-  readonly amountBasis: 'column' | 'invoice_net' | 'column_magnitude';
+  readonly amountBasis: 'column' | 'invoice_net' | 'column_magnitude' | 'ledger_reporting';
   readonly asOf: { readonly calculationRunId: string; readonly aggregatedAt: string } | null;
   readonly limit: number;
   /** True for the four tables with a `record_status_events` lifecycle. */
@@ -417,6 +424,10 @@ export function compileDescriptor(descriptor: QueryDescriptorV1): CompiledQuery 
   const bankDirectional = descriptor.table === 'bank_transactions'
     && descriptor.filters.direction !== undefined;
 
+  // A ledger selection over both sides is totalled in reporting sign (ADR-111).
+  const ledgerNetted = descriptor.table === 'ledger_entries'
+    && descriptor.filters.direction === undefined;
+
   return {
     table: descriptor.table,
     columns: spec.columns,
@@ -424,7 +435,9 @@ export function compileDescriptor(descriptor: QueryDescriptorV1): CompiledQuery 
     postFilters: post,
     order,
     amountColumn: invoicePnl ? null : spec.amountColumn,
-    amountBasis: invoicePnl ? 'invoice_net' : bankDirectional ? 'column_magnitude' : 'column',
+    amountBasis: invoicePnl
+      ? 'invoice_net'
+      : bankDirectional ? 'column_magnitude' : ledgerNetted ? 'ledger_reporting' : 'column',
     asOf: descriptor.as_of
       ? {
           calculationRunId: descriptor.as_of.calculation_run_id,

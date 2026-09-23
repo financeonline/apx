@@ -23,8 +23,9 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  * of the mistake.
  *
  * The fixture deliberately includes rows the figures exclude — voided invoices, a credit note, an
- * uncategorised payment, a matched transfer pair and an unpaired transfer candidate — so that a
- * descriptor which is merely too broad is caught rather than flattered.
+ * uncategorised payment, a matched transfer pair and an unpaired transfer candidate, ledger accounts
+ * with entries on both sides, and contacts on payables, receivables and bank lines — so that a
+ * descriptor which is merely too broad, or totalled in the wrong sign, is caught rather than flattered.
  *
  * The bank rows that carry a category are categorised by the USER. The banking pass re-derives `rule`
  * categories, and with no rule to match it cleared them, so every bank P&L and counterparty line in
@@ -96,6 +97,12 @@ beforeAll(async () => {
   entry('cost_of_sales', 'debit', '5200.00', ls); entry('marketing', 'debit', '900.00', ls);
   entry('payroll', 'debit', '4300.00', null); entry('interest_expense', 'debit', '150.00', null);
   entry('other_income', 'credit', '700.00', null);
+  // Both sides of one account, and a contact on the settling lines of its own journals, as a
+  // general-ledger export prints it: a refund, a supplier credit, and the payables and bank legs.
+  // Without these every ledger account was one-sided and HIGH-5 and HIGH-6 passed unseen (ADR-111).
+  entry('revenue', 'debit', '600.00', lc); entry('cost_of_sales', 'credit', '250.00', ls);
+  entry('payables', 'credit', '5200.00', ls); entry('payables', 'debit', '5200.00', ls); entry('cash', 'credit', '5200.00', ls);
+  entry('receivables', 'debit', '18000.00', lc);
   await calc(lOrg);
 
   // ---------- BANK basis, with a transfer pair and an UNPAIRED transfer candidate ----------

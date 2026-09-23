@@ -375,3 +375,51 @@ describe('the bank-basis population: one rule for the P&L lines and the counterp
     }
   });
 });
+
+describe('the ledger-basis population: the P&L accounts, in reporting sign (§3.5, ADR-111)', () => {
+  const party = (id: string, kind: 'customer' | 'supplier') =>
+    ({ id, name: id, kind, mergedIntoId: null, defaultExpenseCategory: null });
+  const ctx = context({ counterparties: [party('c1', 'customer'), party('s1', 'supplier')] });
+  const on = (cell: AggregateCell, counterpartyId: string | null): AggregateCell => ({ ...cell, counterpartyId });
+  const cells = [
+    // Customer c1: 18,000 of sales and a 1,000 refund on the revenue account; the receivable is not revenue.
+    on(ledgerCell('a-rev', 'revenue', '1000.00', '18000.00', 2), 'c1'),
+    on(ledgerCell('a-cash', 'cash', '18000.00', '0'), 'c1'),
+    // Revenue nobody is named on.
+    ledgerCell('a-rev', 'revenue', '0', '2400.00'),
+    // Supplier s1: cost of sales and marketing, a 200 credit on cost of sales, and the same contact on
+    // the settling lines of its own journals — a general-ledger export prints it on every line.
+    on(ledgerCell('a-cos', 'cost_of_sales', '5200.00', '200.00', 2), 's1'),
+    on(ledgerCell('a-mkt', 'marketing', '900.00', '0'), 's1'),
+    on(ledgerCell('a-card', 'credit_card', '5200.00', '5200.00', 2), 's1'),
+    on(ledgerCell('a-cash', 'cash', '0', '5200.00'), 's1'),
+  ];
+  const results = composePeriod({ period: may, coverage: ledgerCoverage(), cells, transferLegs: [], context: ctx });
+  const counterparty = (key: string, id: string | null) =>
+    results.find((r) => r.key === key && r.dimensionType === 'counterparty' && r.dimensionId === id);
+
+  it('a supplier is its expense lines net of credits, never its settling lines', () => {
+    // The old rule summed |every non-revenue cell|: 5,000 + 900 + 0 + 5,200 = 11,100.
+    expect(counterparty('supplier_spend', 's1')?.value).toBe('5900.00');
+  });
+
+  it('a customer is its revenue lines net of refunds, so Σ customers + Unattributed = revenue', () => {
+    expect(valueOf(results, 'revenue')).toBe('19400.00');
+    expect(counterparty('customer_revenue', 'c1')?.value).toBe('17000.00');
+    expect(counterparty('customer_revenue', null)?.value).toBe('2400.00');
+  });
+
+  it('builds each counterparty descriptor from the population the figure used', () => {
+    for (const [key, id, accounts] of [
+      ['customer_revenue', 'c1', ['a-rev']],
+      ['supplier_spend', 's1', ['a-cos', 'a-mkt', 'a-pay']],
+    ] as const) {
+      const evidence = counterparty(key, id)?.evidenceQuery;
+      if (evidence?.kind !== 'leaf') throw new Error(`expected a leaf for ${key}`);
+      expect(evidence.descriptor.table).toBe('ledger_entries');
+      expect(evidence.descriptor.filters).toEqual({
+        period_ids: [may.id], counterparty_ids: [id], account_ids: [...accounts],
+      });
+    }
+  });
+});

@@ -401,6 +401,21 @@ describe('descriptor compiler (§3.1)', () => {
     expect(ledger.amountBasis).toBe('column');
   });
 
+  it('totals a ledger selection over both sides in reporting sign (ADR-111)', () => {
+    // `ledger_entries.amount` is positive with the side in `direction`, so a plain column sum added a
+    // refund to the revenue it reduces: `revenue` 19,400.00 over a drill-down of 21,400.00 (HIGH-6).
+    const both = compileDescriptor(parseQueryDescriptor({
+      v: 1, table: 'ledger_entries', filters: { period_ids: [PERIOD_A] },
+    }));
+    expect(both.amountBasis).toBe('ledger_reporting');
+    expect(both.columns).toEqual(expect.arrayContaining(['account_id', 'direction', 'amount']));
+    // One side only: every line has the same sign, and the column is already that figure.
+    const credit = compileDescriptor(parseQueryDescriptor({
+      v: 1, table: 'ledger_entries', filters: { period_ids: [PERIOD_A], direction: 'credit' },
+    }));
+    expect(credit.amountBasis).toBe('column');
+  });
+
   it('excludes voided invoices from EVERY invoice shape, as the engine does (ADR-107)', () => {
     const notVoid = { column: 'status', op: 'neq', value: 'void' };
     // The P&L shapes, which carried record_status and superseded_by but never this.

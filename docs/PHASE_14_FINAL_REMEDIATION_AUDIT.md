@@ -1,12 +1,81 @@
 # Phase 14 — remediation, verification and closeout
 
-> **Final commit: the Phase 14 bank-basis invariant closure (ADR-110)** on `main`, pushed to `origin/main`, working tree clean. It closes HIGH-3 from Part G; Part H records it.
+> **Final commit: the Phase 14 ledger-basis invariant closure (ADR-111)** on `main`, pushed to `origin/main`, working tree clean. It closes HIGH-5 and HIGH-6 from Part H; Part I records it.
 >
-> **Status: HIGH-3 CLOSED AND VERIFIED — NOT READY FOR INDEPENDENT AUDIT.** Part H found two new HIGH findings on the ledger basis (HIGH-5, HIGH-6), reproduced and not fixed. Every part of this file was written by implementing sessions; none is an independent audit. Parts are in the order they were produced, newest first.
+> **Status: READY FOR INDEPENDENT AUDIT — NOT A RELEASE APPROVAL.** HIGH-3 (Part H) and HIGH-5 / HIGH-6 (Part I) are closed and verified by tests that fail on the previous commits. Every part of this file was written by implementing sessions; none is an independent audit. Parts are in the order they were produced, newest first.
 >
-> Commit chain: `55acbeb` (ADR-103) → `f8fdc58` (ADR-104) → `8f81dd3` (ADR-105) → `b6cac0b` (closeout record) → `33ae461` (ADR-106, ADR-107) → `621f9e6` (ADR-108, ADR-106 addendum) → `096aae9` (ADR-109) → this commit (ADR-110).
+> Commit chain: `55acbeb` (ADR-103) → `f8fdc58` (ADR-104) → `8f81dd3` (ADR-105) → `b6cac0b` (closeout record) → `33ae461` (ADR-106, ADR-107) → `621f9e6` (ADR-108, ADR-106 addendum) → `096aae9` (ADR-109) → `cad227c` (ADR-110) → this commit (ADR-111).
 >
-> **Phase 14 is NOT READY for Phase 15.** Open: HIGH-5 and HIGH-6 (ledger-basis counterparty population and ledger evidence sign, Part H).
+> **Phase 15 is not started** and waits on the independent Fable 5.1 audit of this commit.
+
+---
+
+# Part I — HIGH-5 and HIGH-6 closure: the ledger basis (ADR-111)
+
+Part H closed HIGH-3 on the bank basis and found the ledger basis had the same fault in two places. Both were reproduced through the real pipeline before any code changed.
+
+## HIGH-5 — the ledger counterparty figure took every non-revenue line
+
+**Root cause.** `compose.ts#counterpartyAmounts` served the ledger as well as the invoice basis. For the ledger it took Σ|cell| over every cell for the party that was not revenue- or other-income-categorised. A general-ledger import attaches the contact to every line of a journal (`imports/domain/pipeline.ts`), so a purchase's payables leg, its settlement's payables and bank legs, a loan repayment and drawings all counted as the supplier's spend; on the customer side `other_income` counted and a refund's magnitude was added as a sale. The descriptor meanwhile named expense (or revenue ∪ other-income) accounts. Measured on `cad227c`: Supplier One **12,500.00** of spend, of which 5,800.00 was spend; a party named only on payables and bank lines **1,300.00** over an empty drill-down.
+
+**Fix.** The ledger joins the population module ADR-110 built for the bank, renamed `commercial-population.ts`. On both bases: customer = `revenue` accounts, supplier = `expense`-type accounts (`cost_of_sales ∪ OPEX_SET`). On the ledger the figure is the **reporting-sign net** through the engine's own `ledgerAmount` rule — credits less debits for revenue, debits less credits for spend — so a refund or supplier credit reduces the party's figure as a credit note does on the invoice basis. The descriptor is `account_ids` from the same `CommercialPopulation` value; the loose `revenueAccountIds` / `expenseAccountIds` inputs are removed, and a population built for another basis produces no descriptor. The invoice basis still uses its own rule, unchanged.
+
+## HIGH-6 — ledger drill-downs were totalled unsigned
+
+**Root cause.** `ledger_entries.amount` is stored positive with the side in `direction`, and the resolver summed the column. Every ledger figure the engine writes is in reporting sign, so any account with entries on both sides — a refund, a reversal, a supplier credit — had a drill-down that added what the figure subtracted. Measured on `cad227c`: `revenue` **25,400.00** over **27,400.00**; `cost_of_sales` 4,900.00 over 5,500.00.
+
+**Fix.** A `ledger_entries` descriptor without `direction` compiles to `amountBasis: 'ledger_reporting'`. The resolver signs each line with `ledgerLineAmount` — the engine's rule — using its account's category at the as-of instant (`account_category_history`, else the current category; the type follows from the category by `accounts_type_matches_category`). Each record's `amount` carries that sign, so the rows the drawer and the analyst show add up to the figure. A descriptor with `direction` is one side and keeps the column. This covers every ledger descriptor: P&L lines, counterparties, and the expense-spike alert's pins.
+
+## Tests
+
+`test/integration/ledger-commercial-population.test.ts` — 10 tests, rows → `calculation.run` → snapshot → descriptor → the evidence service under the owner's RLS → an independent reporting-sign sum re-read from `ledger_entries`, asserting row identities:
+
+- Supplier One = stock + ads − credit note = **5,800.00**; never its payables, bank or loan lines. Supplier Two = rent, not drawings. A party named only on balance-sheet lines has no figure.
+- Customer One = sale − refund = **17,000.00**; not other income, the receivable or the bank line. Σ customers + Unattributed (2,400.00) = revenue (25,400.00).
+- `revenue` and `cost_of_sales` drill-downs total in reporting sign; every leaf descriptor on the organisation reconciles.
+- Analyst: `get_customer_profitability` states 17,000.00 / 6,000.00; `get_transactions_for_evidence` returns exactly the population, and its records sum to the figure.
+
+**Proved against `cad227c`** (`git stash` of `src/` only): **10 of 10 fail**, each on the defect it targets. The sweep's ledger fixture now has two-sided accounts and contacts on payables, receivables and bank lines: on `cad227c` it reports **6 ledger mismatches**, on this tree none. Unit: a ledger compose case (supplier 5,900.00, not 11,100.00; customer net of refund; identity), the ledger descriptor shape, the cross-basis guard, and the compiler basis.
+
+## Gates — clean database (`supabase db reset`), final tree
+
+Run sequentially after `supabase db reset`. The first attempt's reset failed with `supabase_storage_MOTION container is not ready: unhealthy` (the local stack under memory pressure; another project's database container was running alongside); the stack was stopped and restarted healthy and every gate below is from the second, complete run.
+
+| Gate | Result |
+|---|---|
+| Typecheck, Lint | PASS |
+| Unit | PASS, 72 files, **2,019** |
+| Schema drift | PASS, 54 tables, 118 api functions, RLS forced everywhere, no write grants, no reachable server functions |
+| pgTAP | PASS, 16 files, 1,034 |
+| Integration | **707 of 708**, 47 files. The one failure is the pre-existing nondeterministic `ai-eval-record` (`get_alerts #16 output shape`). `ledger-commercial-population` 10/10, `bank-commercial-population` 12/12, sweep 1/1, `banking` 20/20, `commercial` 11/11 |
+| Evidence reconciliation sweep | **100 leaf descriptors, 0 mismatches**, no exemption, with two-sided ledger accounts and contacts on balance-sheet lines in the fixture |
+| AI eval | PASS, 173 |
+| Authorization, tenant isolation | PASS — `rls-isolation` 42, `isolation-cases` 10, the role × tool matrix, pgTAP permission parity, Playwright `authz`. No migration, policy, grant or permission touched; the new account-category read goes through the caller's RLS client like every other evidence read |
+| Production build | PASS |
+| Playwright | PASS, 64 passed, 1 pre-existing skip |
+
+**`ai-eval-record`, measured, not altered:** 8 isolated runs on this tree, **4 pass / 4 fail**, every failure `get_alerts #16 output shape` (MEDIUM-2's missing tiebreaker). Part H measured 6/14 on the previous tree and 1/8 on the one before; it is nondeterministic and independent of this change.
+
+**Not verified:** the evidence drawer was not inspected by eye in a browser with a refund on screen. Ledger records now show signed amounts (a refund on revenue reads −1,000.00); Playwright's journeys render the drawer and pass, but none asserts a negative ledger row. The 15 adversarial probe files of Parts F and G no longer exist (Part H) and were not re-run.
+
+## Remaining findings after this pass
+
+| ID | Severity | Status |
+|---|---|---|
+| **HIGH-5** | HIGH | **CLOSED** (ADR-111): ledger counterparty figures are the P&L accounts' reporting-sign net; 10 regression tests fail on `cad227c` |
+| **HIGH-6** | HIGH | **CLOSED** (ADR-111): ledger drill-downs are totalled in reporting sign |
+| HIGH-3, MEDIUM-9, MEDIUM-10 | — | CLOSED in Part H (ADR-110), still passing |
+| MEDIUM-2 | MEDIUM (test) | open by instruction: nondeterministic `ai-eval-record` |
+| Phase 13 MEDIUM-4 | MEDIUM (layout) | open: the transactions table scrolls sideways at 375 px |
+| LOW-1…13 | LOW | open, unchanged |
+| LOW-14 | LOW | open: a bank P&L line's `components.row_count` counts rows on both sides of its category |
+| LOW-15 | LOW | open, pre-existing: bank-basis figures are not netted of VAT although `banking/domain/proxy.ts` nets them; flagged `vat_inclusive`, figure and evidence agree |
+
+No CRITICAL, HIGH or MEDIUM **financial** finding is open to this session's knowledge. The two open MEDIUMs are a nondeterministic test and a Phase 13 layout defect, both carried from earlier passes.
+
+## Status
+
+**READY FOR INDEPENDENT AUDIT.** Not a release approval: every part of this file, this one included, was written by implementing sessions. The independent Fable 5.1 audit against this commit decides whether Phase 14 is ready for Phase 15. Phase 15 is not started.
 
 ---
 

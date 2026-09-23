@@ -24,7 +24,7 @@ import {
   type PeriodMetrics,
 } from './cash';
 import { withMergedCounterparties } from './merged';
-import { bankCommercialFilters, type BankCommercialPopulation, type CommercialSide } from './bank-commercial';
+import { commercialFilters, type CommercialPopulation, type CommercialSide } from './commercial-population';
 import type {
   AssuranceLevel,
   BasisChoice,
@@ -81,16 +81,13 @@ export interface ConcentrationPeriodInput {
    * derived from it, so the reconciliation of §3.5 holds by construction rather than by luck.
    */
   readonly revenue: MetricResult | null;
-  /** Accounts carrying `revenue` when the run executed, for the descriptors (ADR-034). */
-  readonly revenueAccountIds: readonly string[];
-  /** Accounts carrying `cost_of_sales ∪ OPEX_SET` when the run executed. */
-  readonly expenseAccountIds: readonly string[];
   /**
-   * On the bank basis, the population the amounts above were summed from (ADR-110). The descriptor
-   * is read off this same value, so the drill-down re-selects exactly the rows behind the figure.
-   * Without it a bank-basis figure carries no descriptor rather than one built from another rule.
+   * On the bank and ledger bases, the population the amounts above were summed from, resolved
+   * against the chart as it stood when the run executed (ADR-034, ADR-110, ADR-111). The descriptor is
+   * read off this same value, so the drill-down re-selects exactly the rows behind the figure.
+   * Without it a figure on those bases carries no descriptor rather than one built from another rule.
    */
-  readonly bankPopulations?: Readonly<Record<CommercialSide, BankCommercialPopulation>>;
+  readonly populations?: Readonly<Record<CommercialSide, CommercialPopulation>>;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -195,7 +192,6 @@ function counterpartyEvidence(
   // without the filter would re-select every row — evidence that reconciles to the wrong number is
   // worse than none, so the synthetic snapshot carries none.
   if (counterpartyId === null) return null;
-  const accountIds = side === 'customer' ? input.revenueAccountIds : input.expenseAccountIds;
   // The figure is the SURVIVOR's, folded from every party merged into it; the rows keep their
   // original ids, so the descriptor names the survivor and all of them (ADR-108).
   const filters: LeafDescriptor['filters'] = {
@@ -213,12 +209,12 @@ function counterpartyEvidence(
             : ['purchase', 'purchase_credit_note'],
       });
     case 'ledger':
-      return leafEvidence(ctx, 'ledger_entries', { ...filters, account_ids: [...accountIds].sort() });
     case 'bank': {
-      // ADR-110: the same population value the figure was summed from — never a second rule.
-      const population = input.bankPopulations?.[side];
-      if (population === undefined) return null;
-      return leafEvidence(ctx, 'bank_transactions', { ...filters, ...bankCommercialFilters(population) });
+      // ADR-110 / ADR-111: the same population value the figure was summed from — never a second rule.
+      const population = input.populations?.[side];
+      if (population === undefined || population.basis !== input.basis.basis) return null;
+      const table = population.basis === 'ledger' ? 'ledger_entries' : 'bank_transactions';
+      return leafEvidence(ctx, table, { ...filters, ...commercialFilters(population) });
     }
     default:
       // `period_balances` carries no counterparty, so this family never resolves to it (§2.3).
