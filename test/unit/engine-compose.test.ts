@@ -303,3 +303,75 @@ describe('evidence metadata (§3, ADR-034)', () => {
     expect(grossProfit?.components).toHaveProperty('revenue');
   });
 });
+
+describe('the bank-basis population: one rule for the P&L lines and the counterparties (§4.4, ADR-110)', () => {
+  const bankOnly = computeCoverage({
+    period: may,
+    batches: [{
+      id: 'b-current', targetTable: 'bank_transactions', balanceKind: null, balanceBasis: null,
+      bankAccountId: current.id, invoiceListKind: null,
+      periodStart: '2026-05-01', periodEnd: '2026-05-31', committedAt: '2026-06-01T00:00:00Z',
+    }],
+    bankAccounts: [current], rowCounts: { bank: 9 }, asOf: '2026-06-15',
+  });
+  const party = (id: string, kind: 'customer' | 'supplier') =>
+    ({ id, name: id, kind, mergedIntoId: null, defaultExpenseCategory: null });
+  const ctx = context({
+    bankAccounts: [current],
+    counterparties: [party('c1', 'customer'), party('s1', 'supplier'), party('s3', 'supplier')],
+  });
+  const cells = [
+    // Customer c1: a receipt, and a refund in the same category (one cell carries both sides).
+    bankCell({ accountId: 'a-rev', standardCategory: 'revenue', counterpartyId: 'c1',
+               debit: '5000.00', credit: '300.00', amount: '4700.00', rowCount: 2 }),
+    // A revenue-categorised transfer leg, as a hand-marked pair keeps its category.
+    bankCell({ accountId: 'a-rev', standardCategory: 'revenue', counterpartyId: 'c1',
+               debit: '2000.00', amount: '2000.00', transferKind: 'cash_transfer' }),
+    // An uncategorised receipt from the same customer.
+    bankCell({ counterpartyId: 'c1', debit: '900.00', amount: '900.00' }),
+    // A receipt nobody is named on.
+    bankCell({ accountId: 'a-rev', standardCategory: 'revenue', debit: '600.00', amount: '600.00' }),
+    // Supplier s1: a payment and a refund in cost of sales; a card repayment leg carrying cost of sales.
+    bankCell({ accountId: 'a-cos', standardCategory: 'cost_of_sales', counterpartyId: 's1',
+               debit: '150.00', credit: '1200.00', amount: '-1050.00', rowCount: 2 }),
+    bankCell({ accountId: 'a-cos', standardCategory: 'cost_of_sales', counterpartyId: 's1',
+               credit: '700.00', amount: '-700.00', transferKind: 'card_repayment' }),
+    // Supplier s3: the HIGH-3 shape — only an uncategorised payment and a transfer.
+    bankCell({ counterpartyId: 's3', credit: '4100.00', amount: '-4100.00' }),
+    bankCell({ accountId: 'a-cash', standardCategory: 'cash', counterpartyId: 's3',
+               credit: '2020.00', amount: '-2020.00', transferKind: 'cash_transfer' }),
+  ];
+  const results = composePeriod({ period: may, coverage: bankOnly, cells, transferLegs: [], context: ctx });
+  const counterparty = (key: string, id: string | null) =>
+    results.find((r) => r.key === key && r.dimensionType === 'counterparty' && r.dimensionId === id);
+
+  it('counts revenue inflows and expense outflows, never a transfer and never the other side', () => {
+    expect(results.find((r) => r.key === 'revenue')?.basis).toBe('bank');
+    expect(valueOf(results, 'revenue')).toBe('5600.00');
+    expect(valueOf(results, 'cost_of_sales')).toBe('1200.00');
+  });
+
+  it('attributes the same rows to the counterparties, so Σ customers + Unattributed = revenue', () => {
+    expect(counterparty('customer_revenue', 'c1')?.value).toBe('5000.00');
+    expect(counterparty('customer_revenue', null)?.value).toBe('600.00');
+    expect(counterparty('supplier_spend', 's1')?.value).toBe('1200.00');
+  });
+
+  it('gives a party with only uncategorised and transfer rows no figure at all', () => {
+    // The old rule summed their magnitudes: 4,100 + 2,020 = 6,120 of "spend" behind an empty drill-down.
+    expect(counterparty('supplier_spend', 's3')).toBeUndefined();
+  });
+
+  it('builds each counterparty descriptor from the population the figure used', () => {
+    for (const [key, id, direction, accounts] of [
+      ['customer_revenue', 'c1', 'inflow', ['a-rev']],
+      ['supplier_spend', 's1', 'outflow', ['a-cos', 'a-mkt', 'a-pay']],
+    ] as const) {
+      const evidence = counterparty(key, id)?.evidenceQuery;
+      if (evidence?.kind !== 'leaf') throw new Error(`expected a leaf for ${key}`);
+      expect(evidence.descriptor.filters).toMatchObject({
+        category_account_ids: [...accounts], direction, exclude_transfers: 'all',
+      });
+    }
+  });
+});

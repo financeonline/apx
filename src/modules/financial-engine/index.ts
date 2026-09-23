@@ -93,6 +93,7 @@ export * from './domain/variance';
 export * from './domain/cash';
 export * from './domain/receivables';
 export * from './domain/concentration';
+export * from './domain/bank-commercial';
 
 export { composePeriod, type ComposeInput, type TransferLegCell } from './domain/compose';
 

@@ -529,7 +529,10 @@ describe('expense_by_account is only written where accounts exist (§3.1)', () =
       descriptor: {
         v: 1,
         table: 'bank_transactions',
-        filters: { period_ids: [PERIOD_ID], category_account_ids: ['acc-revenue'] },
+        // The side of the statement revenue counts, and no transfer of any kind (§4.4, ADR-110).
+        filters: {
+          period_ids: [PERIOD_ID], category_account_ids: ['acc-revenue'], direction: 'inflow', exclude_transfers: 'all',
+        },
         as_of: { calculation_run_id: RUN_ID, aggregated_at: AGGREGATED_AT },
       },
     });

@@ -24,6 +24,7 @@ import {
   type PeriodMetrics,
 } from './cash';
 import { withMergedCounterparties } from './merged';
+import { bankCommercialFilters, type BankCommercialPopulation, type CommercialSide } from './bank-commercial';
 import type {
   AssuranceLevel,
   BasisChoice,
@@ -84,6 +85,12 @@ export interface ConcentrationPeriodInput {
   readonly revenueAccountIds: readonly string[];
   /** Accounts carrying `cost_of_sales ∪ OPEX_SET` when the run executed. */
   readonly expenseAccountIds: readonly string[];
+  /**
+   * On the bank basis, the population the amounts above were summed from (ADR-110). The descriptor
+   * is read off this same value, so the drill-down re-selects exactly the rows behind the figure.
+   * Without it a bank-basis figure carries no descriptor rather than one built from another rule.
+   */
+  readonly bankPopulations?: Readonly<Record<CommercialSide, BankCommercialPopulation>>;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -207,13 +214,12 @@ function counterpartyEvidence(
       });
     case 'ledger':
       return leafEvidence(ctx, 'ledger_entries', { ...filters, account_ids: [...accountIds].sort() });
-    case 'bank':
-      return leafEvidence(ctx, 'bank_transactions', {
-        ...filters,
-        category_account_ids: [...accountIds].sort(),
-        direction: side === 'customer' ? 'inflow' : 'outflow',
-        exclude_cash_transfers: true,
-      });
+    case 'bank': {
+      // ADR-110: the same population value the figure was summed from — never a second rule.
+      const population = input.bankPopulations?.[side];
+      if (population === undefined) return null;
+      return leafEvidence(ctx, 'bank_transactions', { ...filters, ...bankCommercialFilters(population) });
+    }
     default:
       // `period_balances` carries no counterparty, so this family never resolves to it (§2.3).
       return null;

@@ -25,6 +25,11 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  * The fixture deliberately includes rows the figures exclude — voided invoices, a credit note, an
  * uncategorised payment, a matched transfer pair and an unpaired transfer candidate — so that a
  * descriptor which is merely too broad is caught rather than flattered.
+ *
+ * The bank rows that carry a category are categorised by the USER. The banking pass re-derives `rule`
+ * categories, and with no rule to match it cleared them, so every bank P&L and counterparty line in
+ * this fixture used to be a zero — which is how HIGH-3 and the negative bank expense drill-down both
+ * sat behind a green sweep (ADR-110). No family is exempt: HIGH-3 is closed.
  */
 const RUN = `sw${Date.now().toString(36)}`;
 const DOMAIN = `${RUN}.sweep.itest`;
@@ -105,7 +110,7 @@ beforeAll(async () => {
     m += 1;
     const row = one(`insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status) values ('${bOrg}','${bb}',${m},'t${m}','{}'::jsonb,'{}'::jsonb,'committed') returning id`);
     const t = one(`insert into public.bank_transactions (organization_id, bank_account_id, transaction_date, amount, currency, description_raw, description_normalized, period_id, category_source, record_status, assurance_level, duplicate_reviewed, source_document_id, import_batch_id, import_row_id, source_ref, counterparty_id, category_account_id, is_transfer, transfer_kind)
-      values ('${bOrg}','${bank}','2026-08-16',${amt},'GBP','${desc}','${desc}','00000000-0000-0000-0000-000000000000','rule','accepted','verified',false,'${bdoc}','${bb}','${row}','t${m}',${cat === 'revenue' ? `'${bc}'` : `'${bs}'`},${cat === null ? 'null' : `'${acct(bOrg, cat)}'`},${kind !== 'none'},'${kind}') returning id`);
+      values ('${bOrg}','${bank}','2026-08-16',${amt},'GBP','${desc}','${desc}','00000000-0000-0000-0000-000000000000','${cat === null ? 'none' : 'user'}','accepted','verified',false,'${bdoc}','${bb}','${row}','t${m}',${cat === 'revenue' ? `'${bc}'` : `'${bs}'`},${cat === null ? 'null' : `'${acct(bOrg, cat)}'`},${kind !== 'none'},'${kind}') returning id`);
     adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id) values ('${bOrg}','bank_transactions','${t}','accepted','${bb}')`);
     return t;
   };
@@ -124,17 +129,6 @@ afterAll(() => {
   adminSql(`delete from public.organizations where id in (${orgs.map((o) => `'${o.id}'`).join(',')}); delete from auth.users where email like '%@${DOMAIN}';`);
 });
 
-/*
- * The one family that does NOT reconcile today, named rather than skipped silently.
- *
- * On the BANK basis a counterparty's figure is Σ|amount| over every cell for that party that is not
- * revenue-categorised — uncategorised rows and transfer legs included, inflows included — while its
- * descriptor selects expense-category, outflow, non-transfer rows. The two populations differ by
- * construction and a v1 descriptor cannot express the first. Closing it means either narrowing the
- * figure or withdrawing the descriptor, which is a product decision, not a compiler change. Recorded
- * as HIGH-3 in `PHASE_14_FINAL_REMEDIATION_AUDIT.md`. Remove this entry when it is decided.
- */
-const KNOWN_UNRECONCILED = new Set(['customer_revenue|bank', 'supplier_spend|bank']);
 
 describe('every leaf descriptor reconciles to its figure (ADR-109)', () => {
   it('walks every leaf descriptor three organisations produce', async () => {
@@ -153,7 +147,7 @@ describe('every leaf descriptor reconciles to its figure (ADR-109)', () => {
         const tot = sel.total === null ? 'NULL' : new Decimal(sel.total).toFixed(2);
         const ok = fig === tot;
         const note = `${label} ${key}${dim === '-' ? '' : `[${dimType}]`} unit=${unit} basis=${basis} figure=${fig} evidence=${tot} rows=${sel.count}`;
-        if (!ok && !KNOWN_UNRECONCILED.has(`${key}|${basis}`)) mismatches.push(note);
+        if (!ok) mismatches.push(note);
       }
     }
     console.log(`SWEEP checked ${checked}, mismatches ${mismatches.length}`);

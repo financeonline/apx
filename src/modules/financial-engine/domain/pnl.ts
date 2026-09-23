@@ -306,7 +306,16 @@ function leafEvidence(
     return {
       kind: 'leaf',
       descriptor: {
-        v: 1, table, filters: { period_ids, category_account_ids: accountIds }, as_of: asOf,
+        // The rows the fold kept: this side of the statement, no transfer of any kind (§4.4, ADR-110).
+        v: 1,
+        table,
+        filters: {
+          period_ids,
+          category_account_ids: accountIds,
+          direction: side === 'income' ? 'inflow' : 'outflow',
+          exclude_transfers: 'all',
+        },
+        as_of: asOf,
       },
     };
   }

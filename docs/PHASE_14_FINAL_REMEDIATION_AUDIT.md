@@ -1,12 +1,105 @@
 # Phase 14 — remediation, verification and closeout
 
-> **Final commit: the Phase 14 invariant hardening (ADR-109)** on `main`, pushed to `origin/main`, working tree clean. It answers the release check of `621f9e6` recorded in Part G.
+> **Final commit: the Phase 14 bank-basis invariant closure (ADR-110)** on `main`, pushed to `origin/main`, working tree clean. It closes HIGH-3 from Part G; Part H records it.
 >
-> **Status: IMPLEMENTED AND VERIFIED — INDEPENDENT FABLE 5.1 SIGN-OFF PENDING.** Parts D and E were written by the implementing session under Opus 5. Part F's audit ran under Fable 5.1 in the same session, which is model independence and not context independence; its findings were reproduced against a clean database with fresh figures rather than recalled. Phase 14 is **not** declared ready for Phase 15 in this file. Parts are in the order they were produced, newest first.
+> **Status: HIGH-3 CLOSED AND VERIFIED — NOT READY FOR INDEPENDENT AUDIT.** Part H found two new HIGH findings on the ledger basis (HIGH-5, HIGH-6), reproduced and not fixed. Every part of this file was written by implementing sessions; none is an independent audit. Parts are in the order they were produced, newest first.
 >
-> Commit chain: `55acbeb` (ADR-103) → `f8fdc58` (ADR-104) → `8f81dd3` (ADR-105) → `b6cac0b` (closeout record) → `33ae461` (ADR-106, ADR-107) → `621f9e6` (ADR-108, ADR-106 addendum) → this commit (ADR-109).
+> Commit chain: `55acbeb` (ADR-103) → `f8fdc58` (ADR-104) → `8f81dd3` (ADR-105) → `b6cac0b` (closeout record) → `33ae461` (ADR-106, ADR-107) → `621f9e6` (ADR-108, ADR-106 addendum) → `096aae9` (ADR-109) → this commit (ADR-110).
 >
-> **Phase 14 is NOT READY for Phase 15.** One HIGH remains open and is not a defect this pass could close by itself: bank-basis counterparty evidence (HIGH-3 in Part G) needs a product decision between narrowing a figure and withdrawing a descriptor. Everything else raised across six passes is closed and verified.
+> **Phase 14 is NOT READY for Phase 15.** Open: HIGH-5 and HIGH-6 (ledger-basis counterparty population and ledger evidence sign, Part H).
+
+---
+
+# Part H — HIGH-3 closure: the bank basis gets one population rule (ADR-110)
+
+HIGH-3 was left open in Part G as needing a product decision. It did not: `FINANCIAL_ENGINE.md` §3.5 and §4.4 already state the population, and `banking/domain/proxy.ts` — the §4.4 reference implementation, never wired into the engine — already implements it. The engine had two private rules, one for the figure and one for the descriptor, and neither was the documented one. This pass replaces both with the documented rule, written once.
+
+## Root cause
+
+`compose.ts#counterpartyAmounts` built a bank-basis counterparty's figure as Σ|amount| over every cell for that party that was not revenue-categorised: uncategorised rows, transfer legs of every kind, inflows and non-P&L categories all counted. `concentration.ts` built its descriptor separately, from expense-category outflows excluding only cash transfers. The sweep fixture's 8,850.00 was exactly two uncategorised payments (3,400 + 800) and three transfer legs (2,000 + 2,000 + 650). The Phase 13 banking pass had cleared the two payments' `rule` categories and recategorised the legs as `transfer`, so the expense-outflow descriptor found nothing.
+
+## The rule, now in `financial-engine/domain/bank-commercial.ts`
+
+| | Bank-basis population |
+|---|---|
+| **Customer revenue** | the party's non-transfer **inflows** categorised `revenue` (§3.5 "inflows with `counterparty_id`"; §4.4 "inflows in `revenue` category to `revenue`") |
+| **Supplier spend** | the party's non-transfer **outflows** categorised in an expense category — `cost_of_sales ∪ OPEX_SET`, exactly the `expense` account type (§3.5 "bank outflows"; §4.4 "outflows by category to expenses") |
+| **Transfers** | every kind excluded from both, and from the bank P&L lines (§4.4, ADR-047.12). The engine checks the cell's `transfer_kind`; the descriptor carries `exclude_transfers: 'all'`, which filters `is_transfer`; the table constraint `is_transfer = (transfer_kind <> 'none')` makes them the same rows. The old supplier descriptor's `exclude_cash_transfers: true` had let a card-repayment leg into a drill-down. |
+| **Uncategorised** | excluded from both. §4.4 counts them "for completeness, never for a figure"; `NON_PNL_CATEGORIES` contains `uncategorised`; the bank P&L already excludes and flags them (`uncategorised_amounts`). A party whose only rows are uncategorised or transfers has **no figure**, rather than a figure over an empty drill-down. |
+| **Other categories** | `other_income`, equity (owner funding), loans, drawings, credit card and every other non-P&L category are in neither population, whoever the counterparty is. |
+| **Refunds** | a revenue-categorised outflow or an expense-categorised inflow enters no bank-basis figure — the §4.4 / `proxy.ts` behaviour ("left to the accrual bases rather than netted here on an assumption the document does not make"). |
+
+**One contract, two readers.** `bankCommercialPopulation(accounts, side)` returns a `BankCommercialPopulation`, a class with a private constructor. `bankCommercialSelection` sums the figure from it; `bankCommercialFilters` builds the descriptor from it; `ConcentrationPeriodInput.bankPopulations` carries that same value into `concentration.ts`, and without it a bank-basis counterparty figure gets **no** descriptor rather than one assembled from another account list. Direction is one function, `bankLineDirection` (income → inflow, expense → outflow), used by the populations and by the bank P&L fold.
+
+## Found on the way, fixed here (same invariant, same basis)
+
+**MEDIUM-9 — bank P&L expense drill-downs totalled the negative of their figures.** Hidden until the sweep's bank rows kept their categories: `operating_expenses` 800.00 over −800.00, `expense_by_category` 3,400.00 over −3,400.00. The fold netted signed amounts and the undirected descriptor summed them signed. The fold now takes each P&L category's own side, and every bank P&L descriptor carries that `direction` plus `exclude_transfers: 'all'`, so it totals as the positive magnitude its figure states.
+
+**MEDIUM-10 — a hand-marked transfer counted as bank-basis revenue.** `api.mark_transfer` keeps the row's category, and the bank P&L fold never looked at `transfer_kind`, so a revenue-categorised transfer leg was revenue. The fold now excludes transfer cells of every kind, as §4.4 requires.
+
+## Why the sweep missed both
+
+Its bank fixture wrote rows with `category_source = 'rule'`. The banking pass re-derives rule categories and, with no rule to match, cleared them — so every bank P&L and counterparty line in the fixture was a zero, and zero reconciles to nothing. The fixture now writes `category_source = 'user'` for categorised rows, and no family is exempt: `KNOWN_UNRECONCILED` is gone.
+
+## Tests
+
+`test/integration/bank-commercial-population.test.ts` — 12 tests, driving rows → `calculation.run` → snapshot → descriptor → the evidence service under the owner's RLS → an independent sum of the returned rows, and asserting the rows' identities, not only totals:
+
+- **A — supplier spend:** expense outflows only; excludes an uncategorised payment, a loan repayment, an expense-categorised card-repayment leg and its card-side leg, a supplier refund, drawings. Supplier One 4,350.00 = evidence = Σ rows.
+- **B — customer revenue:** revenue inflows only; excludes a refund, an uncategorised receipt, other income, owner funding and a revenue-categorised transfer leg. Customer One 12,500.00, Customer Two 4,000.00; `revenue` 17,700.00 = evidence, and Σ customers + Unattributed (1,200.00, the unnamed sale) = revenue.
+- **C — the HIGH-3 shape:** a supplier with only an uncategorised payment and a transfer pair (old figure 8,140.00 over 0 rows) and a customer with only an uncategorised receipt have no snapshot.
+- **D — every counterparty snapshot** on the organisation reconciles, and the set of snapshots is exactly the four expected.
+- **E — empty:** a bank organisation with only uncategorised and transfer rows writes no attributed figure; `revenue` and both Unattributed rows are a covered 0.00 with no descriptor.
+- **P&L lines:** `operating_expense` 1,850.00 and `marketing` 900.00, each equal to its evidence over the expected rows.
+- **Analyst:** `get_customer_profitability` states 12,500.00 / 4,000.00 and omits Customer Three; `get_transactions_for_evidence` returns exactly the eligible rows for a supplier and a customer, summing to the figure.
+
+**Proved against the previous engine** (`git stash` of `src/` only): **12 of 12 fail**, and the sweep reports 4 mismatches (the three negative expense drill-downs and supplier 8,850.00 over 4,200.00). Four new compose unit tests also fail on the previous engine. On this tree all pass.
+
+Unit tests updated to the new contract: the two bank-descriptor shape tests in `engine-concentration.test.ts` (now `exclude_transfers: 'all'`, and a new test that no population means no descriptor) and the bank revenue descriptor in `engine-pnl.test.ts`.
+
+## Gates — clean database (`supabase db reset`), final tree
+
+Run sequentially, one gate at a time, after `supabase db reset`:
+
+| Gate | Result |
+|---|---|
+| Typecheck, Lint | PASS |
+| Unit | PASS, 72 files, **2,014** (5 new) |
+| Schema drift | PASS, 54 tables, 118 api functions, RLS forced everywhere, no write grants, no reachable server functions |
+| pgTAP | PASS, 16 files, 1,034 |
+| Integration | **697 of 698**, 46 files. The one failure is the pre-existing nondeterministic `ai-eval-record` (`get_alerts #16 output shape`), below. `bank-commercial-population` 12/12, `evidence-reconciliation-sweep` 1/1, `banking` 20/20, `commercial` 11/11 |
+| Evidence reconciliation sweep | **100 leaf descriptors checked, 0 mismatches, no exemption** (97 before; the three more are the bank lines that are no longer zeros) |
+| AI eval | PASS, 173 |
+| Authorization, tenant isolation | PASS — `rls-isolation` 42, `isolation-cases` 10, the role × tool matrix, pgTAP permission parity, Playwright `authz` project. No migration, policy, grant or permission was touched by this pass |
+| Production build | PASS |
+| Playwright | PASS, 64 passed, 1 pre-existing skip |
+
+**Pre-existing nondeterministic `ai-eval-record`, measured, not altered.** On this tree: 8 isolated runs, **5 pass / 3 fail**; a further 6, **1 pass / 5 fail** — 6 of 14 overall. On the previous engine (`src/` stashed): 8 isolated runs, **1 pass / 7 fail**. Every failure on both trees is an output-shape mismatch at `get_alerts #16` (once, on the previous engine, `get_business_summary #20`) — the alert-ordering cause recorded as MEDIUM-2, where `loadAlerts` has no identifier tiebreaker. It is not caused by this change, and today it fails more often on both trees than earlier measurements (5/8, 3/5, 7/8, 8/8) did. It was not fixed, suppressed or altered.
+
+**Adversarial probes.** The 15 probe files Parts F and G re-ran lived in an earlier session's scratchpad and no longer exist, so they were **not** re-run and no result is claimed for them. What stands in for them is committed and ran above: the sweep (every leaf descriptor on three bases), the HIGH-3 suite, `banking` (Phase 13: accounts, transfers, balances, recurring, unusual, categorisation), `commercial` (products, campaigns, attribution, unattributed exclusion), the gross-profit availability, voided-invoice, merge and invoice-basis suites, and the isolation suites.
+
+**Invoice basis untouched.** The diff touches no SQL, no `app.invoice_net`, no invoice precedence or eligibility, void or supersession rule, and no invoice or ledger branch of the engine; the invoice and ledger rows of the sweep reconcile as before.
+
+## Remaining findings after this pass
+
+| ID | Severity | Status |
+|---|---|---|
+| **HIGH-3** | HIGH | **CLOSED** (ADR-110): bank-basis counterparty figure and evidence are one population; 12 regression tests fail without the fix |
+| **MEDIUM-9** | MEDIUM | **CLOSED** (ADR-110): bank P&L expense drill-downs totalled the negative of their figures |
+| **MEDIUM-10** | MEDIUM | **CLOSED** (ADR-110): a hand-marked transfer leg with a revenue category counted as bank-basis revenue |
+| **HIGH-5** | **HIGH** | **OPEN, NEW.** Ledger-basis counterparty figures take every non-revenue cell for the party by magnitude — the pattern HIGH-3 had on the bank. A general-ledger import attaches the contact to every line of a journal (`imports/domain/pipeline.ts:235`), so a supplier's payables and bank lines count as spend. Reproduced through the real pipeline: supplier with 5,200.00 cost of sales + 900.00 marketing, and the same supplier on its payables (Dr/Cr 5,200) and bank (Cr 5,200) lines → `supplier_spend` **11,300.00**, evidence **6,100.00**. The figure is wrong, not only the drill-down. Not fixed: this pass was scoped to the bank basis |
+| **HIGH-6** | **HIGH** | **OPEN, NEW.** A ledger descriptor totals `ledger_entries.amount` unsigned, so any P&L account with entries on both sides (a refund, a reversal) has a drill-down that adds what the figure subtracts. Same reproduction: `revenue` **19,400.00** (18,000 + 2,400 credit − 1,000 debit), evidence **21,400.00**; `customer_revenue` 17,000.00 figure, 19,000.00 evidence. The sweep's ledger fixture has one direction per account, which is why it passes. Fixing it is an evidence-compiler change (a reporting-sign amount basis for ledger selections), not an engine one |
+| MEDIUM-2 | MEDIUM | open by instruction: nondeterministic `ai-eval-record` (measured above) |
+| Phase 13 MEDIUM-4 | MEDIUM (Phase 13) | open: the transactions table scrolls sideways at 375 px |
+| LOW-1…13 | LOW | open, unchanged. LOW-13 (`evidence_query` stores JSON `null`) misled this pass's test author too |
+| LOW-14 | LOW | open, new: a bank P&L line's `components.row_count` still counts rows on both sides of its category, so it can exceed the drill-down's row count |
+| LOW-15 | LOW | open, pre-existing: the engine does not net bank-basis figures of VAT although `banking/domain/proxy.ts` does; the figures carry `vat_inclusive`, and figure and evidence agree (both gross) |
+
+## Status
+
+**HIGH-3 is closed and verified.** The bank basis now has one population rule, the figure and the evidence are read off the same typed value, and the sweep checks 100 descriptors with no exemption.
+
+**Phase 14 is NOT READY for independent audit.** This pass found two new HIGH findings on the **ledger** basis (HIGH-5, HIGH-6), reproduced through the real pipeline and not fixed, because this pass was scoped to the bank basis and HIGH-6 is an evidence-compiler change. The readiness rule — no CRITICAL, HIGH or MEDIUM financial issue remaining — is not met. Phase 15 is not started.
 
 ---
 

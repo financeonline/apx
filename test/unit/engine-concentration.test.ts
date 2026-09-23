@@ -5,11 +5,13 @@ import { parseQueryDescriptor } from '@/modules/evidence';
 import {
   HIGH_UNATTRIBUTED_SHARE,
   UNATTRIBUTED_LABEL,
+  bankCommercialPopulation,
   computeConcentration,
   resolveSurvivor,
   type BasisChoice,
   type ConcentrationPeriodInput,
   type CounterpartyAmount,
+  type AccountRef,
   type CounterpartyRef,
   type EngineContext,
   type MetricResult,
@@ -37,6 +39,18 @@ const RUN_ID = uuid(9001);
 const AGGREGATED_AT = '2026-09-05T09:00:00Z';
 const REVENUE_ACCOUNT = uuid(41);
 const EXPENSE_ACCOUNT = uuid(42);
+
+/** A chart with one revenue and one expense account, for the bank-basis populations (ADR-110). */
+const BANK_CHART: readonly AccountRef[] = [
+  { id: REVENUE_ACCOUNT, code: null, name: 'Sales', standardCategory: 'revenue', accountType: 'income', isSystem: true },
+  { id: uuid(43), code: null, name: 'Other income', standardCategory: 'other_income', accountType: 'income', isSystem: true },
+  { id: EXPENSE_ACCOUNT, code: null, name: 'Stock', standardCategory: 'cost_of_sales', accountType: 'expense', isSystem: true },
+  { id: uuid(44), code: null, name: 'Transfers', standardCategory: 'transfer', accountType: 'asset', isSystem: true },
+];
+const BANK_POPULATIONS = {
+  customer: bankCommercialPopulation(BANK_CHART, 'customer'),
+  supplier: bankCommercialPopulation(BANK_CHART, 'supplier'),
+};
 
 function period(index: number): PeriodRef {
   const month = index % 12;
@@ -508,11 +522,12 @@ describe('the shape of a counterparty snapshot', () => {
     expect(parsed.filters.account_ids).toEqual([REVENUE_ACCOUNT]);
   });
 
-  it('excludes cash transfers from a bank-basis supplier descriptor', () => {
+  it('re-selects a bank-basis supplier from its population: expense outflows, no transfer of any kind (ADR-110)', () => {
     const results = computeConcentration(ctx, [
       periodInput({
         basis: { basis: 'bank', assurance: 'estimated', warnings: ['cash_basis_proxy'], proxy: true },
         supplierSpend: [amount(SUPPLIER, '10.00')],
+        bankPopulations: BANK_POPULATIONS,
       }),
     ]);
     const evidence = forDimension(results, 'supplier_spend', SUPPLIER).evidenceQuery;
@@ -520,16 +535,19 @@ describe('the shape of a counterparty snapshot', () => {
     const parsed = parseQueryDescriptor(evidence.descriptor);
     expect(parsed.table).toBe('bank_transactions');
     expect(parsed.filters.direction).toBe('outflow');
-    expect(parsed.filters.exclude_cash_transfers).toBe(true);
+    // Every kind, not only cash transfers: a card repayment is nobody's spend either (§4.4).
+    expect(parsed.filters.exclude_transfers).toBe('all');
+    expect(parsed.filters.category_account_ids).toEqual([EXPENSE_ACCOUNT]);
     expect(forDimension(results, 'supplier_spend', SUPPLIER).dataQuality.proxy).toBe(true);
   });
 
-  it('reads a bank-basis customer from the inflow side', () => {
+  it('reads a bank-basis customer from revenue-category inflows only, not other income (ADR-110)', () => {
     const results = computeConcentration(ctx, [
       periodInput({
         basis: { basis: 'bank', assurance: 'estimated', warnings: ['cash_basis_proxy'], proxy: true },
         customerRevenue: [amount(ACME, '10.00')],
         revenue: revenueMetric('10.00'),
+        bankPopulations: BANK_POPULATIONS,
       }),
     ]);
     const evidence = forDimension(results, 'customer_revenue', ACME).evidenceQuery;
@@ -537,7 +555,19 @@ describe('the shape of a counterparty snapshot', () => {
     const parsed = parseQueryDescriptor(evidence.descriptor);
     expect(parsed.table).toBe('bank_transactions');
     expect(parsed.filters.direction).toBe('inflow');
+    expect(parsed.filters.exclude_transfers).toBe('all');
     expect(parsed.filters.category_account_ids).toEqual([REVENUE_ACCOUNT]);
+  });
+
+  it('writes no bank-basis descriptor without the population the figure came from', () => {
+    // A descriptor built from any other account list is the defect ADR-110 closed; none is better.
+    const results = computeConcentration(ctx, [
+      periodInput({
+        basis: { basis: 'bank', assurance: 'estimated', warnings: ['cash_basis_proxy'], proxy: true },
+        supplierSpend: [amount(SUPPLIER, '10.00')],
+      }),
+    ]);
+    expect(forDimension(results, 'supplier_spend', SUPPLIER).evidenceQuery).toBeNull();
   });
 
   it('writes no descriptor when the basis carries no counterparty', () => {

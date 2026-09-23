@@ -14,6 +14,9 @@ import { invoiceSignFor, ledgerAmount, naturalToReporting } from './sign';
 import { computeCash, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions } from './cash';
 import type { TransferKind } from '@/modules/banking';
 import { computeConcentration, type ConcentrationPeriodInput } from './concentration';
+import {
+  bankCommercialPopulation, bankCommercialSelection, bankDirectedPart, bankLineDirection,
+} from './bank-commercial';
 import { computePnl, type AccountAmount, type PnlInput, type SnapshotIdResolver } from './pnl';
 import { choosePrecedence } from './coverage';
 import { isCashLikeBankAccount } from './categories';
@@ -76,14 +79,30 @@ function accountAmounts(
   for (const cell of cells) {
     if (cell.periodId !== periodId || cell.source !== source) continue;
     if (!cell.accountId) continue;
+    /*
+     * §4.4 / ADR-047.12: the bank-basis P&L excludes `is_transfer` rows of EVERY kind. The banking
+     * pass recategorises the legs it pairs into a non-P&L category, but a pair marked by hand
+     * (`api.mark_transfer`) keeps its category, so the kind is checked here rather than trusted to
+     * the category (ADR-110). The descriptor carries `exclude_transfers: 'all'` to match.
+     */
+    if (source === 'bank' && (cell.transferKind ?? 'none') !== 'none') continue;
     const account = byAccount.get(cell.accountId);
     if (!account) continue;
 
-    const reporting = source === 'bank'
-      // A bank amount is already signed: positive is an inflow. The account-type rule turns it into
-      // the reporting sign for its category.
-      ? naturalToReporting(account.accountType, new Decimal(cell.amount).negated())
-      : ledgerAmount({ accountType: account.accountType, debit: cell.debit, credit: cell.credit });
+    const direction = source === 'bank' ? bankLineDirection(account.accountType) : null;
+    const reporting = source !== 'bank'
+      ? ledgerAmount({ accountType: account.accountType, debit: cell.debit, credit: cell.credit })
+      : direction !== null
+        /*
+         * §4.4: "maps inflows in `revenue` category to `revenue` and outflows by category to
+         * expenses". A P&L category counts its own side only; a refund on the other side enters no
+         * figure, as in `banking/domain/proxy.ts`. It also means every bank P&L descriptor can carry
+         * a `direction` and total as the positive figure it sits behind (ADR-110).
+         */
+        ? bankDirectedPart(cell, direction)
+        // Not a P&L line: a bank amount is already signed, and the account-type rule turns it into
+        // the reporting sign for its category.
+        : naturalToReporting(account.accountType, new Decimal(cell.amount).negated());
 
     const existing = totals.get(cell.accountId);
     totals.set(cell.accountId, {
@@ -278,7 +297,10 @@ function bankMovements(
       || a.transferKind.localeCompare(b.transferKind));
 }
 
-/** Revenue and spend per counterparty, for the concentration module. */
+/**
+ * Revenue and spend per counterparty, for the concentration module, on the ledger and invoice bases.
+ * The bank basis does not come here: it reads `bank-commercial.ts` (ADR-110).
+ */
 function counterpartyAmounts(
   cells: readonly AggregateCell[],
   periodId: string,
@@ -404,15 +426,31 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
   const counterpartySource = sourceForBasis(counterpartyBasis.basis);
   const revenueResult = results.find((r) => r.key === 'revenue' && r.dimensionType === 'none') ?? null;
 
+  /*
+   * ADR-110: on the bank basis the figure and the descriptor are both read off one population value,
+   * so neither can select rows the other does not. Other bases keep their own rule unchanged.
+   */
+  const bankPopulations = counterpartySource === 'bank'
+    ? {
+        customer: bankCommercialPopulation(context.accounts, 'customer'),
+        supplier: bankCommercialPopulation(context.accounts, 'supplier'),
+      }
+    : undefined;
+
   const concentrationInput: ConcentrationPeriodInput = {
     period,
     basis: counterpartyBasis,
-    customerRevenue: counterpartySource
-      ? counterpartyAmounts(cells, period.id, counterpartySource, context.accounts, 'revenue')
-      : [],
-    supplierSpend: counterpartySource
-      ? counterpartyAmounts(cells, period.id, counterpartySource, context.accounts, 'expense')
-      : [],
+    customerRevenue: bankPopulations
+      ? bankCommercialSelection(cells, period.id, bankPopulations.customer)
+      : counterpartySource
+        ? counterpartyAmounts(cells, period.id, counterpartySource, context.accounts, 'revenue')
+        : [],
+    supplierSpend: bankPopulations
+      ? bankCommercialSelection(cells, period.id, bankPopulations.supplier)
+      : counterpartySource
+        ? counterpartyAmounts(cells, period.id, counterpartySource, context.accounts, 'expense')
+        : [],
+    bankPopulations,
     revenue: revenueResult,
     revenueAccountIds: context.accounts
       .filter((a) => a.standardCategory === 'revenue' || a.standardCategory === 'other_income')
