@@ -45,6 +45,11 @@ const ROUTES = [
    * (Phase 12, ADR-100).
    */
   { name: 'What if', path: () => `/app/${slug()}/what-if` },
+  // The Command Centre (ADR-112, ADR-114): the seeded owner has a portfolio of one.
+  { name: 'Command Centre', path: () => '/portfolio' },
+  { name: 'Command Centre alerts', path: () => '/portfolio/alerts' },
+  { name: 'Command Centre actions', path: () => '/portfolio/actions' },
+  { name: 'Adviser analyst', path: () => '/portfolio/analyst' },
 ];
 
 test.describe('axe-core: zero serious or critical violations', () => {

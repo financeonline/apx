@@ -4,6 +4,8 @@ export {
   type AttentionEntry,
   type AttentionReason,
   type AttentionReasonKind,
+  type CappedList,
+  type ClientCounts,
   type ClientRow,
   type PortfolioAction,
   type PortfolioAlert,
@@ -33,7 +35,9 @@ export {
   dueLabel,
   priorityTone,
   reasonTone,
+  seriousAlerts,
   severityTone,
+  truncationNote,
   type Tone,
 } from './domain/presentation';
 
@@ -45,20 +49,24 @@ export {
   type PortfolioContext,
 } from './services/access';
 
-export { ATTENTION_CAP, RECENT_DAYS, hrefs, loadPortfolio, sortAlerts } from './services/portfolio';
+export {
+  ATTENTION_CAP, RECENT_DAYS, hrefs, lensTotal, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts,
+} from './services/portfolio';
+export { ACTION_DETAIL_CAP, ALERT_DETAIL_CAP, type OpenLens } from './data/repository';
 
 export {
   BRIEFING_PROMPT_VERSION,
   BRIEFING_TOOL,
   BriefingSchema,
+  DIGEST_DETAIL_PER_CLIENT,
   MAX_QUESTION_CHARS,
   buildDigest,
-  digestNumbers,
-  digestRefs,
   groundBriefing,
   type Briefing,
   type Digest,
   type DigestClient,
+  type Fact,
+  type FactUnit,
   type GroundedBriefing,
 } from './domain/briefing';
 

@@ -1,6 +1,6 @@
 import Link from 'next/link';
-import { getPortfolioContext, loadPortfolio } from '@/modules/portfolio';
-import { PageHeader, Card, CardBody, CardHeader } from '@/components/ui/surfaces';
+import { ATTENTION_CAP, getPortfolioContext, loadPortfolio } from '@/modules/portfolio';
+import { PageHeader, Card, CardBody, CardHeader, EmptyState } from '@/components/ui/surfaces';
 import { Disclaimer } from '@/components/dashboard';
 import { AttentionQueue, ClientTable, CountsStrip, RecentChanges } from '@/components/portfolio';
 
@@ -12,8 +12,21 @@ export const dynamic = 'force-dynamic';
  */
 export default async function PortfolioPage() {
   const ctx = await getPortfolioContext();
+  // ADR-114 §6: an employee before their first assignment has an empty Command Centre, not a 404.
+  if (ctx.organisations.length === 0) {
+    return (
+      <>
+        <PageHeader eyebrow="Command Centre" title="Your client organisations" />
+        <EmptyState title="You haven't been assigned to any organisations yet.">
+          A MOTION administrator assigns organisations to you. When that happens they&apos;ll appear here, with their health, alerts and actions.
+        </EmptyState>
+      </>
+    );
+  }
+
   const view = await loadPortfolio(ctx);
   const now = ctx.now();
+  const shown = view.attention.slice(0, ATTENTION_CAP);
 
   return (
     <>
@@ -28,7 +41,12 @@ export default async function PortfolioPage() {
 
       <section aria-labelledby="attention" className="mb-10">
         <h2 id="attention" className="mb-3 font-serif text-lg">Clients needing attention</h2>
-        <AttentionQueue rows={view.attention} today={view.today} now={now} />
+        <AttentionQueue rows={shown} today={view.today} now={now} />
+        {shown.length < view.attention.length ? (
+          <p className="mt-3 text-sm text-ink-muted" role="status">
+            Showing the {shown.length} most pressing of {view.attention.length}. Every client is in the list below.
+          </p>
+        ) : null}
       </section>
 
       <section aria-labelledby="overview" className="mb-10">

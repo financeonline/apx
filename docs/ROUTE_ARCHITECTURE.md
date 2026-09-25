@@ -156,6 +156,23 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 |---|---|---|---|---|---|---|---|
 | `/portfolio` | The Command Centre (ADR-112): attention queue, portfolio counts, client list, recent changes; `/portfolio/alerts`, `/portfolio/actions`, `/portfolio/clients/[orgId]`, `/portfolio/analyst` | `platform_employee`, `platform_super_admin` (TOTP enrolled), and any member holding `owner` or `admin` in at least one organisation | the adviser roles, i.e. the holders of `assignments.view` | — | Server | `portfolio.list(ctx)` — one aggregate projection per data type filtered by `organization_id IN (select app.accessible_org_ids())`, cached per organization tag (ADR-038.13) | No assignments → "No client organizations assigned yet" |
 
+### 5.1 `/portfolio` — who gets what (ADR-112, ADR-114)
+
+| Caller | `/portfolio` | `/portfolio/clients/[id]` | Scope |
+|---|---|---|---|
+| Platform employee, active, aal2, with assignments | 200 — Command Centre | 200 for an assigned id; 404 for any other | active, in-window assignments |
+| Platform employee, active, aal2, with no assignment | 200 — empty state ("You haven't been assigned to any organisations yet.") | 404 | none |
+| Platform account at aal1 | 302 → `/account/mfa` (middleware step 4a) | same | none |
+| Platform account, suspended | 404 | 404 | none |
+| Super admin, aal2 | 200 | 200 for any non-deleted id | every organisation |
+| Owner or admin of at least one organisation | 200 | 200 for an organisation they own or administer; 404 otherwise | organisations held as owner/admin |
+| Member who is only a client (or suspended) everywhere | 404 | 404, including their own organisation's id | none |
+| Client in A and owner/admin in B | 200 | 200 for B; 404 for A | B only |
+| Stranger (signed in, no membership) | 404 | 404 | none |
+| Anonymous | 302 → sign-in | 302 → sign-in | — |
+
+`/portfolio/alerts`, `/portfolio/actions` and `/portfolio/analyst` follow the `/portfolio` column. The analyst form is hidden when the scope is empty.
+
 ## 6. Platform family `/platform/*`
 
 All routes: `platform_super_admin` only with `aal2` (TOTP verified, ADR-038.8); everyone else 404; a super admin without TOTP is redirected to `/account/mfa`. Suspend, purge, role grants and assignment creation require re-authentication within the last 10 minutes.
@@ -247,7 +264,7 @@ Expected HTTP status for a representative set. `member-B` = member of another or
 | `/app/A/settings/billing` (flag off) | 404 | 404 | 404 | 404 | 404 | 404 | 404 | 302 |
 | `/app/A/settings/danger` | 200 | 403* | 403* | 403* | 404 | 404 | 200 | 302 |
 | `/app/A/evidence/[bundle-of-B]` | 404 | 404 | 404 | 404 | 404 | 404 | 404 | 302 |
-| `/portfolio` (ADR-112) | 200 | 200 | 404 | 200 | 200 | 404 | 200 | 302 |
+| `/portfolio` (ADR-112, ADR-114) | 200 | 200 | 404 | 200 | 200 (empty state) | 200 if owner/admin of B, else 404 | 200 | 302 |
 | `/platform/organizations` | 404 | 404 | 404 | 404 | 404 | 404 | 200 | 302 |
 | `POST /api/imports/upload` (org A) | 200 | 200 | 403 | 200 | 404 | 404 | 200 | 401 |
 | `GET /api/documents/[A-doc]/url` | 200 | 200 | 403 | 200 | 404 | 404 | 200 | 401 |

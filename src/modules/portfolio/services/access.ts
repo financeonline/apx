@@ -4,7 +4,8 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { NotFound } from '@/core/errors';
 import { newRequestId } from '@/core/logging';
 import { createUserClient } from '@/core/db/user-client';
-import { listMyOrganizations, type OrganizationSummary } from '@/modules/tenancy';
+import { permissionsFor } from '@/core/permissions';
+import { listMyOrganizations, resolvePlatformRole, type OrganizationSummary } from '@/modules/tenancy';
 import { ADVISER_ROLES, type AdviserRole, type PortfolioOrganisation } from '../domain/types';
 
 /**
@@ -55,7 +56,16 @@ export async function resolvePortfolioContext(
 ): Promise<PortfolioContext> {
   const rows = await listMyOrganizations(db);
   const organisations = adviserOrganisations(rows);
-  if (organisations.length === 0) throw new NotFound();
+  if (organisations.length === 0) {
+    /*
+     * ADR-114 §6: an ACTIVE platform account at aal2 with nothing to advise yet — an employee before
+     * their first assignment — has an empty Command Centre, the state UX_ARCHITECTURE.md specifies,
+     * not the uniform 404. Everyone else without a portfolio (a client-only member, a stranger, an
+     * aal1 platform session, a suspended or revoked employee) still gets NotFound.
+     */
+    const platformRole = await resolvePlatformRole(db, requestId);
+    if (!permissionsFor(platformRole).has('assignments.view')) throw new NotFound();
+  }
   return {
     userId,
     db,

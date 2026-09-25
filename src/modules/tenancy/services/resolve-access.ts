@@ -1,4 +1,5 @@
 import 'server-only';
+import type { SupabaseClient } from '@supabase/supabase-js';
 import { cache } from 'react';
 import { createUserClient } from '@/core/db/user-client';
 import { permissionsFor, type EffectiveRole } from '@/core/permissions';
@@ -83,6 +84,20 @@ export async function resolveAccessFresh(orgSlug: string): Promise<AccessContext
  */
 export const getAccessContext = cache(resolveAccessFresh);
 
+/**
+ * The caller's platform role, from the database: `super_admin` or `employee` for an ACTIVE platform
+ * account at aal2, else `none`. The same rule `getPlatformContext` applies, callable with any client
+ * (the Command Centre's resolver and its tests pass their own).
+ */
+export async function resolvePlatformRole(db: SupabaseClient, requestId?: string): Promise<EffectiveRole> {
+  const { data, error } = await db.schema('api').rpc('my_platform_role');
+  if (error) throw toMotionError(error, requestId);
+  const row = (data as Array<{ platform_role: string; status: string; has_aal2: boolean }> | null)?.[0];
+  if (row?.platform_role === 'super_admin' && row.status === 'active' && row.has_aal2) return 'super_admin';
+  if (row?.platform_role === 'employee' && row.status === 'active' && row.has_aal2) return 'employee';
+  return 'none';
+}
+
 /** Context with no organization, for /platform, /portfolio and /account. */
 export const getPlatformContext = cache(async (): Promise<AccessContext> => {
   const requestId = newRequestId();
@@ -90,20 +105,9 @@ export const getPlatformContext = cache(async (): Promise<AccessContext> => {
   if (!user) throw new NotFound();
 
   const db = await createUserClient();
-  const { data, error } = await db.schema('api').rpc('my_platform_role');
-  if (error) throw toMotionError(error, requestId);
-
-  const row = (data as Array<{ platform_role: string; status: string; has_aal2: boolean }> | null)?.[0];
-  const isActiveSuperAdmin =
-    row?.platform_role === 'super_admin' && row.status === 'active' && row.has_aal2;
-  const isActiveEmployee =
-    row?.platform_role === 'employee' && row.status === 'active' && row.has_aal2;
-
-  const effectiveRole: EffectiveRole = isActiveSuperAdmin
-    ? 'super_admin'
-    : isActiveEmployee
-      ? 'employee'
-      : 'none';
+  const effectiveRole = await resolvePlatformRole(db, requestId);
+  const isActiveSuperAdmin = effectiveRole === 'super_admin';
+  const isActiveEmployee = effectiveRole === 'employee';
 
   return {
     userId: user.id,

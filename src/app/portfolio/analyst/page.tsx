@@ -31,7 +31,11 @@ export default async function PortfolioAnalystPage() {
         description="Summaries of what MOTION has already established about the clients you advise: health, alerts, actions and what needs attention. The analyst does not work out figures; for a figure, open the client."
       />
       <Card>
-        <CardBody><AskForm /></CardBody>
+        <CardBody>
+          {ctx.organisations.length === 0
+            ? <p className="text-sm text-ink-muted">There is nothing to ask about until an organisation is assigned to you.</p>
+            : <AskForm />}
+        </CardBody>
       </Card>
 
       <section aria-labelledby="answers" className="mt-8 flex flex-col gap-4">
@@ -54,7 +58,7 @@ export default async function PortfolioAnalystPage() {
                   </p>
                 ) : (
                   <>
-                    <p className="text-base">{answer.briefing.headline}</p>
+                    <p className="text-base">{answer.briefing.headline.text}</p>
                     {answer.briefing.clients.length > 0 ? (
                       <ul className="mt-4 flex flex-col gap-3">
                         {answer.briefing.clients.map((client) => {
@@ -89,7 +93,7 @@ export default async function PortfolioAnalystPage() {
                     ) : null}
                     {answer.briefing.notes.length > 0 ? (
                       <ul className="mt-4 list-disc pl-5 text-sm">
-                        {answer.briefing.notes.map((note) => <li key={note}>{note}</li>)}
+                        {answer.briefing.notes.map((note) => <li key={note.text}>{note.text}</li>)}
                       </ul>
                     ) : null}
                     {answer.briefing.limitations.length > 0 ? (

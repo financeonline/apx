@@ -1,115 +1,142 @@
 # Phase 15 — Adviser / CFO Command Centre
 
-Status: implemented on `main` from the Phase 14 baseline `f5334be`. Decisions: ADR-112 (access, read model, attention, surfaces), ADR-113 (adviser analyst). Not independently audited: this file was written by the implementing session and says what was built and what was verified, and nothing more.
+Status: implemented on `main`. The Phase 14 baseline was `f5334be`, the first implementation `bab3a68`, and the remediation of that commit's independent audit is ADR-114. Decisions: ADR-112 (access, attention, surfaces), ADR-113 (adviser analyst), ADR-114 (integrity closure). This file was written by the implementing session. It says what was built and what was verified, and is not an independent audit.
 
 ## 1. Objective
 
-Give every adviser-capable user — a MOTION employee, a super admin, and an owner or admin of several organisations — one secure screen over the organisations they may manage, answering first "which clients need my attention?", then what alerts and actions stand, and letting them drill into each client's existing pages. It is a projection over what MOTION already established. It is not a CRM, a second engine, a second alert or action lifecycle, or an unrestricted admin screen.
+Give every adviser-capable user one secure screen over the organisations they may manage. That means a MOTION employee, a super admin, and an owner or admin of several organisations. The screen answers first "which clients need my attention?", then what alerts and actions stand. From there the user drills into each client's existing pages. It is a projection over what MOTION already established. It is not a CRM, a second engine, a second alert or action lifecycle, a second evidence store, or an unrestricted admin screen.
 
 ## 2. Architecture
 
 ```
-api.my_organizations()  ──►  services/access.ts        the resolver: adviser roles only, else NotFound
-        (RLS)                       │
-                                    ▼
-health_current ─┐            services/portfolio.ts     five scoped statements → PortfolioView
-alerts ─────────┼──(ids + RLS)──►   │                   counts · attention queue · client rows · recent
-actions ────────┘                   ▼
-                             domain/attention.ts       fixed weights, deterministic order
-                                    │
-        /portfolio  /portfolio/alerts  /portfolio/actions  /portfolio/clients/[orgId]
-                                    │
-                             domain/briefing.ts        digest → model → groundBriefing
-                             services/adviser.ts       begin turn (DB re-checks scope) · call · finish
-                                    ▼
-                             portfolio_ai_turns        own rows; written by api_server only
+api.my_organizations()        services/access.ts        adviser roles only; else, for an active aal2
+        (RLS resolver)  ──►   (+ resolvePlatformRole)   platform account, an EMPTY portfolio; else NotFound
+                                     │
+api.portfolio_summary  ──(ids, one statement, uncapped)──►  counts · health (latest 2 complete) · attention
+alerts / actions       ──(ids + RLS, ordered, capped 500)──►  detail lists that carry their full total
+recent alerts / actions ─(ids + RLS, 7 days, capped 50)───►  recent changes
+                                     │
+     /portfolio   /portfolio/alerts   /portfolio/actions   /portfolio/clients/[orgId]   /portfolio/analyst
+                                     │
+                     domain/briefing.ts   digest of facts → forced submit_briefing → fact-specific grounding
+                     services/adviser.ts  begin turn (DB re-checks scope, throttles) · model · finish turn
+                                     ▼
+                     portfolio_ai_turns   readable only while the author CURRENTLY advises the whole scope
 ```
 
-Module: `src/modules/portfolio` (`domain/` pure, `data/` reads, `services/` the resolver, the read model and the analyst). Pages: `src/app/portfolio/**`. Components: `src/components/portfolio`. One migration: `20260924000001_portfolio_ai.sql`.
+Code: `src/modules/portfolio` (`domain/` pure, `data/` reads, `services/` resolver, read model, analyst), `src/app/portfolio/**`, `src/components/portfolio`. Migrations: `20260924000001_portfolio_ai.sql`, `20260925000001_portfolio_integrity.sql`.
 
-## 3. Role model and authorisation contract (ADR-112 §1–2)
+## 3. Role model and authorisation contract
+
+See `ROUTE_ARCHITECTURE.md §5.1` for every caller. In short:
 
 | Role | Command Centre | Over |
 |---|---|---|
 | Super admin (aal2) | yes | every organisation not deleted |
-| Employee (aal2) | yes | organisations with an active, in-window assignment |
-| Owner | yes | organisations where the membership role is `owner` |
-| Admin | yes | organisations where the membership role is `admin` |
-| Client | **no** — uniform 404 on every `/portfolio` path | — (own organisation's pages only, unchanged) |
-| Stranger / signed out | 404 / redirect to sign-in | — |
+| Employee (active, aal2) | yes — an empty state until the first assignment | active, in-window assignments |
+| Owner / admin | yes | organisations held in that role |
+| Client | no — uniform 404 on every `/portfolio` path | — (own organisation's pages, unchanged) |
+| aal1 platform account / suspended / stranger | no (MFA redirect / 404 / 404) | — |
 
-The set is the database's (`app.accessible_org_roles()` through `api.my_organizations()`), filtered to those four roles. Middleware no longer 404s members on `/portfolio`; the layout does, after asking the database. No new role, no new permission, no permission changed.
+The set is the database's own: `app.accessible_org_roles()` through `api.my_organizations()`, filtered to the four adviser roles. The database twin used by the aggregate and by the AI-turn policy is `app.adviser_org_ids()`. No role or permission was added or changed.
 
 ## 4. Employee assignment
 
-`organization_assignments` is reused unchanged. An employee's portfolio is exactly the assigned organisations; revoking an assignment removes the organisation and its facts on the next request (no new sign-in), and revoking the last one removes the portfolio (proved in `portfolio.test.ts`). An employee at aal1 has no portfolio, because `app.accessible_org_roles()` grants a platform employee nothing at aal1.
+`organization_assignments` is reused unchanged:
+- An employee's portfolio is exactly the assigned organisations.
+- Revoking one removes it, its counts and its facts on the next request.
+- Revoking the last leaves an empty Command Centre.
+- Reassigning restores access.
+
+All of this is proved in `portfolio.test.ts` and `portfolio-ai.test.ts`.
 
 ## 5. Tenant isolation
 
-Three layers agree, and the tests exercise all three:
-1. the resolver never hands a page an organisation the caller does not advise (the client-detail page 404s on any other id);
-2. every read statement carries the authorised ids;
-3. RLS decides the rows. `portfolio.test.ts` bypasses the resolver and puts a foreign organisation's id straight into the statements: the employee gets none of its health, alerts or actions, and the counts move by nothing.
+Every read is scoped three ways, and the tests exercise each:
+1. **The resolver.** No page is handed an organisation the caller does not advise, and a client page 404s on any other id.
+2. **The statements.** Every statement carries the authorised ids, and the aggregate intersects them with `app.adviser_org_ids()`.
+3. **RLS.** It decides the rows.
 
-The adviser analyst's scope is re-checked in the database (`api_server.portfolio_ai_begin_turn` with `app.org_role_of`) before any row exists.
+The tests put foreign ids straight into the statements with the resolver bypassed, and nothing of the foreign organisation is returned or counted. An unauthorised organisation with hundreds of critical alerts and overdue actions changes no count (`portfolio-scale.test.ts`).
 
-## 6. Portfolio queries (ADR-112 §3)
+## 6. Portfolio reads (ADR-114)
 
-| Statement | Table | Predicate | Cap |
+| Read | Source | Scope | Size |
 |---|---|---|---|
-| organisations | `api.my_organizations()` | RLS | — |
-| health | `health_current ⋈ health_scores`, `fiscal_periods` (complete) | `organization_id in (ids)` + RLS | latest 2 complete months per org, in memory |
-| standing alerts | `alerts` | ids, `status in (open, acknowledged)` | 1,000 |
-| open actions | `actions` | ids, `status in (open, in_progress)` | 1,000 |
-| recently finished | `actions` | ids, `status in (completed, dismissed)`, `updated_at ≥ now − 7 days` | 50 |
+| organisations | `api.my_organizations()` | RLS resolver | one row per organisation |
+| **all counts + health** | `api.portfolio_summary(orgs, today, due_soon_until)` | `orgs ∩ app.adviser_org_ids()` | one row per organisation; **uncapped**; health = latest and previous complete scored month, ranked in SQL |
+| alert detail | `alerts` | ids + RLS, open/acknowledged | worst first, ≤ 500, with the full total |
+| action detail | `actions` | ids + RLS, open, lens as predicate | `byUrgency` order, ≤ 500, with the full total |
+| recent feeds | `alerts`, `actions` | ids + RLS, last 7 days | ≤ 50 each |
 
-Indexes used: `alerts_status_severity (organization_id, status, severity)`, `actions_worklist (organization_id, status, priority, due_date)`, `health_scores_by_period`. The statement count is the same for four clients and forty; no per-organisation loop exists anywhere in the module. Measured on the journey fixture and the integration fixtures the page renders in well under a second; no query plan was profiled on a large portfolio (§16 of this file).
+**Aggregate strategy:**
+- No count anywhere in the Command Centre is derived from a detail list: not the page headings, the strip, the lens tabs, the client rows, or the attention reasons.
+- A capped list says so in the page: "Showing the first N of M, worst first. Every count on this page is the full number."
+- PostgREST's `max_rows` (1,000) is never relied on for correctness. Detail reads set their own limit below it, and the aggregate returns one row per organisation.
 
 ## 7. Health, alerts, actions — integration, not duplication
 
-- **Health**: the Phase 6 score as written (`health_scores` via `health_current`), band from the health module's own `bandFor`, trend from the previous complete month. No score → "Not yet scored", never a zero.
-- **Alerts**: the alert engine's rows; severity and status as written; drill-down to `/app/[slug]/insights/alerts/[id]` where acknowledging and resolving live; evidence via the alert's current revision bundle.
-- **Actions**: the Phase 10 rows; lenses reuse `inView`, `isOverdue`, `byUrgency`; drill-down to `/app/[slug]/actions/[id]` where the lifecycle lives. Nothing is created, assigned or moved from the Command Centre.
-- **Attention** (ADR-112 §4): weights 100 critical alert · 80 health band fell · 70 health at risk · 60 overdue action · 50 high alert · 45 suspended · 40 urgent action · 30 score fell ≥ 10 · 20 needs attention; order = max, sum, name.
+- **Health** is the Phase 6 score as written, with the band from the health module's `bandFor`. The trend compares against the previous complete *scored* month, which the page names. A client with no scored complete month reads "Not yet scored", never zero; a score on an incomplete month is ignored.
+- **Alerts** are the alert engine's rows. Severity and status are as written; open and acknowledged count as standing. The drill-down goes to `/app/[slug]/insights/alerts/[id]`, where the lifecycle lives.
+- **Actions** are the Phase 10 rows. Overdue, due soon (`DUE_SOON_DAYS`) and urgent are the Action Centre's rules, evaluated in the aggregate and the lens predicates. The drill-down goes to `/app/[slug]/actions/[id]`. Nothing is created, assigned or moved from the Command Centre.
+- **Attention** (ADR-112 §4) uses fixed weights: 100 critical alert · 80 health band fell · 70 at risk · 60 overdue action · 50 high alert · 45 suspended · 40 urgent action · 30 score fell ≥ 10 · 20 needs attention. Order is max, then sum, then name. Every reason comes from the aggregate.
 
-## 8. AI (ADR-113)
+## 8. AI (ADR-113, ADR-114 §5)
 
-Digest built from the authorised view → one model call with the briefing tool forced → references and numbers held to the digest → recorded. The model has no tools. Eight eval cases; ten integration cases with a recording fake model, including the model being handed a scope of two while a third organisation with a "secret" alert exists, and the database refusing a forged scope.
+- **Data boundary.** The server loads the caller's authorised view and builds a digest of it. The model sees that digest and nothing else. It has **no data or database tools** and exactly **one forced structured-output tool**, `submit_briefing`.
+- **Scope re-check.** The turn opens in the database, which re-checks the scope against the actor with `app.org_role_of` and charges a **10 per minute per user** throttle before any model call.
+- **Grounding.** Every number the digest states is a fact with an id, subject, metric, period, unit and value. The model cites fact ids per headline, summary and note. A number survives only when a cited fact matches it exactly in value, unit, subject, metric word and named period; otherwise its sentence is removed and the turn is `degraded`. Foreign clients and citations are dropped. A malformed answer is `failed` and never rendered.
+- **Stored turns** are readable only while the author currently advises every organisation in the turn's scope (or by a super admin at aal2).
+- **No daily quota** exists for adviser questions. That is a documented limitation, not a control: quotas are per organisation.
+- **No financial figures** are in the digest beyond health scores and counts. The analyst says so and points to the client's pages.
 
 ## 9. Evidence
 
-No new evidence store. Every alert and action row links to its organisation's existing evidence bundle (`/app/[slug]/evidence/[bundleId]`); health links to the organisation's Home, where the explainability panel and its bundle live; the analyst's citations resolve to real alert and action ids in the scoped organisations and render as links into those pages. Any financial number an adviser reaches from here is shown on the organisation's own pages, with their basis, assurance and drill-down.
+There is no new evidence store:
+- Alert and action rows link to their organisation's existing evidence bundles.
+- Health links to the organisation's Home, where the explainability panel and its bundle live.
+- The analyst's citations resolve to real alert and action ids in the scoped organisations.
 
 ## 10. Performance
 
-See §6. Server-side parallel loading (`Promise.all` over the four data statements after the resolver). Caps are stated on the page as counts so nothing is silently truncated. Not done: profiling on a portfolio of hundreds of organisations; pagination of the client list (25 in the queue, the full list rendered).
+- **Overview:** 1 resolver call + 1 aggregate + 2 recent feeds.
+- **Alerts / actions pages:** the overview reads plus one capped detail read.
+- **Client page:** the overview reads plus two capped detail reads for that organisation only.
+
+No statement loops per organisation. The aggregate uses the existing `alerts_status_severity`, `actions_worklist` and `health_scores_by_period` indexes. **No latency benchmark has been run**, so no timing claim is made. The scale tests (1,053 alerts, 1,023 actions, 49 organisations with 24 scored months each) prove correctness, not speed.
 
 ## 11. UX
 
-First screen: the attention queue, then the counts, then every client, then recent changes (brief §15). At `< md` the client list renders as cards; the alert and action tables scroll inside their wrapper, not the page. Verified by the journey at 375 and 768 px: page-level horizontal overflow is 0 on `/portfolio`, `/portfolio/alerts`, `/portfolio/actions`, `/portfolio/analyst` and a client page; screenshots at 1440/768/375 in `e2e/.shots` (ignored). The Command Centre is reachable from the tenant header ("Command Centre", shown to holders of `assignments.view`) and from the organisation picker.
+The first screen shows the attention queue (the first 25, with a note if more), then counts, then every client, then recent changes. Below `md` the client list renders as cards; the alert and action tables scroll inside their wrapper, never the page. At 375, 768 and 1440 px page-level horizontal overflow is 0 on every Command Centre page (journey-15; the audit probe). The four main pages are in the permanent axe and overflow sweep (`e2e/accessibility.spec.ts`). The counts strip is a list (the earlier `dl` misuse is fixed).
 
 ## 12. Test strategy
 
 | Suite | File | What it proves |
 |---|---|---|
-| Unit | `test/unit/portfolio-attention.test.ts` | attention rules, order, band/score rules, adviser-role filter |
-| Integration | `test/integration/portfolio.test.ts` (14) | role × portfolio matrix (six callers), aggregate counts over the authorised population only, adversarial foreign ids with the resolver bypassed, assignment revoked mid-session |
-| Integration | `test/integration/portfolio-ai.test.ts` (10) | what the model is handed, what the database accepts as a scope, what the server keeps of an answer |
-| Eval | `test/eval/portfolio-eval.test.ts` (8) | the brief's eight cases against the digest/grounding contract |
-| pgTAP | `supabase/tests/14_portfolio.test.sql` (9) | table privileges, forced RLS, policies, api_server grants |
-| Playwright | `e2e/journey-15-command-centre.spec.ts` | owner of two organisations: queue, drill-down, alerts, actions, analyst page, 375/768 px; client: 404 on every `/portfolio` path |
+| Unit | `test/unit/portfolio-attention.test.ts` | attention rules over aggregate counts, order, band/score rules, adviser-role filter |
+| Integration | `test/integration/portfolio.test.ts` | role × portfolio matrix, counts over the authorised population, forged ids with the resolver bypassed, revocation, the unassigned employee's empty state (aal2) vs 404 (aal1, suspended) |
+| Integration | `test/integration/portfolio-scale.test.ts` | > 1,000 alerts and actions (counts, attention, capped lists that say so), unauthorised volume, 45 × 24 scored months, health edge cases |
+| Integration | `test/integration/portfolio-ai.test.ts` | what the model is handed, what the database accepts as a scope, what the server keeps, stored-turn access after revocation / reassignment / multi-organisation / client / other adviser |
+| Eval | `test/eval/portfolio-eval.test.ts` | the eight brief cases and the fact-specific grounding cases (wrong revenue/runway rejected, correct margin kept, same number in another organisation, wrong metric, wrong period, uncited fact, number in a limitation) |
+| pgTAP | `supabase/tests/14_portfolio.test.sql` | privileges, forced RLS, policies (incl. current-access read), api/api_server grants |
+| Playwright | `e2e/journey-15-command-centre.spec.ts`, `e2e/accessibility.spec.ts` | owner of two organisations end to end; client refused; 375/768 px; axe and overflow on the Command Centre |
 
-Not covered in the browser: a platform employee's session (needs TOTP), covered at the database and API instead.
+Every ADR-114 blocker test was run against `bab3a68` (its code and its migrations) and failed there for the defect it targets.
 
 ## 13. Security model
 
-No migration touches an existing table, policy, grant or permission. The new table has forced RLS (own rows or super admin), no user write privilege, and is written only by two `api_server` functions callable by the service role, which re-validate the actor. The model receives no data outside the caller's resolved scope. Middleware keeps the session and MFA gates for the `/portfolio` family; the layout renders the uniform 404 for anyone without a portfolio.
+- **Existing tables and policies.** No migration changes an existing table's policy or grant, except the Phase 15 table's own read policy (ADR-114 §4).
+- **New objects.** `api.portfolio_summary` is security definer and scopes itself to the caller's adviser organisations. `app.adviser_org_ids()` reads the one resolver.
+- **The turn table.** It has forced RLS, no user write privilege, and `api_server`-only writes that re-validate the actor.
+- **Middleware.** It keeps the session and MFA gates. The portfolio layout renders the uniform 404 for anyone without a portfolio and the empty state for an eligible platform account without clients.
 
 ## 14. Known limitations
 
-- No daily quota on adviser questions (the AI quota is per organisation); a 10/min per-user throttle only.
-- The adviser analyst carries no financial figures beyond the health score by design; it points to the client's pages.
-- A platform employee's browser journey is not e2e-tested (TOTP); the boundary is proven at the database and API.
-- No pagination of the client list; caps are portfolio-wide and stated as counts.
-- "Last data date" is not shown; the client row states the latest scored month instead.
-- Journeys create the second organisation through `api.create_organization` with the owner's JWT claims set on the SQL session, because onboarding is a first-organisation form.
+- No daily quota on adviser questions; the 10/min per-user throttle is the only limit.
+- The adviser analyst carries no financial figures beyond health scores and counts.
+- Grounding checks metric and period per sentence, not per number. A sentence naming two metrics could pair a number with the wrong one when values coincide; subject, unit and exact value still apply.
+- A platform employee's browser session is not e2e-tested because it needs TOTP; the boundary is proven at the database and API.
+- No pagination of the client list, and no "last data date" column; the latest scored month is shown.
+- Health trend compares with the previous complete *scored* month, which may not be the calendar month before; the page names both months.
+- Acknowledged alerts count as standing and can place a client in the attention queue. Tenant Home's top risks show open alerts only (ADR-112 choice).
+- No latency benchmark has been run (§10).

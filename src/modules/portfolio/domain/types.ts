@@ -106,16 +106,31 @@ export interface AttentionEntry {
   readonly rank: readonly [number, number];
 }
 
+/**
+ * One client's authoritative counts, from `api.portfolio_summary` over the FULL population
+ * (ADR-114). Never derived from a capped detail list.
+ */
+export interface ClientCounts {
+  readonly alertsStanding: number;
+  readonly alertsCritical: number;
+  readonly alertsHigh: number;
+  readonly actionsOpen: number;
+  readonly actionsOverdue: number;
+  readonly actionsDueSoon: number;
+  /** Critical/high priority, open — the Action Centre's `high` lens. */
+  readonly actionsUrgent: number;
+  /** The same, not overdue — the attention queue's `urgent_action` reason. */
+  readonly actionsUrgentOnTime: number;
+  readonly actionsMine: number;
+}
+
 export interface ClientRow {
   readonly organisation: PortfolioOrganisation;
   readonly health: PortfolioHealth | null;
   readonly trend: 'up' | 'down' | 'flat' | null;
-  readonly openAlerts: number;
-  readonly criticalOrHighAlerts: number;
-  readonly openActions: number;
-  readonly overdueActions: number;
+  readonly counts: ClientCounts;
   readonly attention: AttentionEntry | null;
-  /** The most recent of: an alert first seen, an action finished, a month scored. */
+  /** The most recent change inside the recent window, when one is in the recent list. */
   readonly latestChange: RecentChange | null;
 }
 
@@ -136,19 +151,30 @@ export interface PortfolioCounts {
   readonly healthy: number;
   /** No complete month has been scored yet. Not zero health: no health. */
   readonly unscored: number;
+  readonly alertsStanding: number;
   readonly criticalAlerts: number;
   readonly highAlerts: number;
   readonly openActions: number;
   readonly overdueActions: number;
+  readonly dueSoonActions: number;
+  readonly urgentActions: number;
+  readonly myActions: number;
+}
+
+/** A capped detail list, with the size of the population it was taken from. */
+export interface CappedList<T> {
+  readonly rows: readonly T[];
+  /** The authoritative count of the whole population the rows were drawn from. */
+  readonly total: number;
+  readonly truncated: boolean;
 }
 
 export interface PortfolioView {
   readonly today: string;
   readonly organisations: readonly PortfolioOrganisation[];
   readonly clients: readonly ClientRow[];
+  /** Every client that needs attention, ordered; the page shows the first `ATTENTION_CAP`. */
   readonly attention: readonly ClientRow[];
   readonly counts: PortfolioCounts;
-  readonly alerts: readonly PortfolioAlert[];
-  readonly actions: readonly PortfolioAction[];
   readonly recent: readonly RecentChange[];
 }

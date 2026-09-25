@@ -43,13 +43,29 @@ const ctxFor = async (user: string, aal: 'aal1' | 'aal2' = 'aal1'): Promise<Port
   return { ...ctx, now: () => new Date('2026-09-15T12:00:00Z') };
 };
 
+/**
+ * The v2 briefing shape (ADR-114 §5) from a compact one: a string headline or note becomes
+ * `{ text, facts: [] }` and a client without `facts` cites none — so a number in it must fail.
+ */
+function v2(reply: unknown): unknown {
+  if (reply === null || typeof reply !== 'object' || !('mode' in reply)) return reply;
+  const r = reply as unknown as { headline: unknown; clients: Array<Record<string, unknown>>; notes: unknown[]; headline_facts?: string[] };
+  return {
+    ...r,
+    headline: typeof r.headline === 'string' ? { text: r.headline, facts: r.headline_facts ?? [] } : r.headline,
+    clients: r.clients.map((c) => ({ facts: [], ...c })),
+    notes: r.notes.map((n) => (typeof n === 'string' ? { text: n, facts: [] } : n)),
+    headline_facts: undefined,
+  };
+}
+
 /** A model that answers with whatever the test hands it, and records the call it was given. */
 function fakeModel(reply: (call: ModelCall) => unknown): { transport: ModelTransport; calls: ModelCall[] } {
   const calls: ModelCall[] = [];
   const transport: ModelTransport = async (call) => {
     calls.push(call);
     return {
-      content: [{ type: 'tool_use', id: 'tu_1', name: BRIEFING_TOOL, input: reply(call) }] as unknown as ModelResponse['content'],
+      content: [{ type: 'tool_use', id: 'tu_1', name: BRIEFING_TOOL, input: v2(reply(call)) }] as unknown as ModelResponse['content'],
       stopReason: 'tool_use', usage: { inputTokens: 100, outputTokens: 50 }, model: 'fake-model',
     };
   };
@@ -201,5 +217,66 @@ describe('what the server keeps of an answer', () => {
     const turn = (await listAdviserTurns(ctx))[0]!;
     expect(result.status).toBe('passed');
     expect(turn.answer!.refs).toEqual([{ ref: 'alert:1', kind: 'alert', id: alertA, organizationId: A, title: 'Alpha cash runway is short' }]);
+  });
+});
+
+describe('HIGH-C — a stored turn is readable only while its author CURRENTLY advises its whole scope', () => {
+  let adviser: string; let clientOfA: string;
+  const answer = () => ({ mode: 'answer', headline: 'Alpha first.', clients: [{ ref: 'client:1', summary: 'A critical alert stands.', because: ['alert:1'] }], notes: [], limitations: [] });
+  const readById = async (user: string, turnId: string, aal: 'aal1' | 'aal2' = 'aal2') => {
+    const { data, error } = await clientFor(user, { aal, email: `${user}@${DOMAIN}` }).from('portfolio_ai_turns').select('id, answer').eq('id', turnId);
+    expect(error).toBeNull();
+    return data ?? [];
+  };
+  const assign = (org: string, status: 'active' | 'revoked') =>
+    adminSql(`insert into public.organization_assignments (organization_id, employee_user_id, status) values ('${org}','${adviser}','${status}')
+              on conflict (organization_id, employee_user_id) do update set status = excluded.status`);
+
+  beforeAll(() => {
+    adviser = createAuthUser(`adviser2@${DOMAIN}`);
+    clientOfA = createAuthUser(`client-of-a@${DOMAIN}`);
+    adminSql(`insert into public.platform_users (user_id, platform_role) values ('${adviser}','employee')`);
+    adminSql(`update public.profiles set mfa_enrolled_at = now() where id = '${adviser}'`);
+    adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${A}','${clientOfA}','client','active')`);
+  });
+  afterAll(() => { adminSql(`delete from public.platform_users where user_id='${adviser}'`); });
+
+  it('A–C: readable while assigned; gone on the next request after revocation; back on reassignment', async () => {
+    assign(A, 'active'); assign(B, 'revoked');
+    const ctx = await ctxFor(adviser, 'aal2');
+    expect(ctx.organisationIds).toEqual([A]);
+    const turn = await askAdviser(ctx, 'Where first?', { transport: fakeModel(answer).transport });
+    expect(await readById(adviser, turn.turnId)).toHaveLength(1);
+    expect((await listAdviserTurns(ctx)).map((t) => t.id)).toContain(turn.turnId);
+
+    assign(A, 'revoked');
+    // G: the database itself, with the adviser's own JWT, returns nothing — and so does the service.
+    expect(await readById(adviser, turn.turnId)).toEqual([]);
+    expect((await listAdviserTurns({ ...ctx, organisations: [], organisationIds: [] })).map((t) => t.id)).not.toContain(turn.turnId);
+
+    assign(A, 'active');
+    expect(await readById(adviser, turn.turnId)).toHaveLength(1);
+  });
+
+  it('D: a turn over two organisations is unreadable once either leaves the author\'s scope', async () => {
+    assign(A, 'active'); assign(B, 'active');
+    const ctx = await ctxFor(adviser, 'aal2');
+    expect([...ctx.organisationIds].sort()).toEqual([A, B].sort());
+    const turn = await askAdviser(ctx, 'Both?', { transport: fakeModel(answer).transport });
+    expect(await readById(adviser, turn.turnId)).toHaveLength(1);
+    assign(B, 'revoked');
+    expect(await readById(adviser, turn.turnId)).toEqual([]);
+    assign(B, 'active');
+    expect(await readById(adviser, turn.turnId)).toHaveLength(1);
+  });
+
+  it('E–F: a client of the organisation, and another adviser of the same organisations, cannot read it by id', async () => {
+    assign(A, 'active'); assign(B, 'revoked');
+    const turn = await askAdviser(await ctxFor(adviser, 'aal2'), 'Mine?', { transport: fakeModel(answer).transport });
+    expect(await readById(clientOfA, turn.turnId, 'aal1')).toEqual([]);
+    // ownerC owns A, B and C — a current adviser of the scope, but not the author.
+    expect(await readById(ownerC, turn.turnId, 'aal1')).toEqual([]);
+    // The author's own aal1 session advises nothing, so reads nothing.
+    expect(await readById(adviser, turn.turnId, 'aal1')).toEqual([]);
   });
 });

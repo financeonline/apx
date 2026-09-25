@@ -1,19 +1,25 @@
 import 'server-only';
-import { isOverdue } from '@/modules/actions';
+import { DUE_SOON_DAYS, addDays } from '@/modules/actions';
 import { attentionEntry, attentionReasons, compareAttention, trendOf } from '../domain/attention';
 import type {
-  ClientRow, PortfolioAction, PortfolioAlert, PortfolioCounts, PortfolioHealth, PortfolioOrganisation,
-  PortfolioView, RecentChange,
+  CappedList, ClientCounts, ClientRow, PortfolioAction, PortfolioAlert, PortfolioCounts,
+  PortfolioOrganisation, PortfolioView, RecentChange,
 } from '../domain/types';
 import * as repo from '../data/repository';
+import type { OpenLens } from '../data/repository';
 import type { PortfolioContext } from './access';
 
 /** "Recent" on the Command Centre: the last seven days. */
 export const RECENT_DAYS = 7;
-/** The attention queue is a queue, not an archive. */
+/** The attention queue SHOWN on the overview. Every client that needs attention is still counted. */
 export const ATTENTION_CAP = 25;
 
 const isoDay = (date: Date) => date.toISOString().slice(0, 10);
+
+const ZERO: ClientCounts = {
+  alertsStanding: 0, alertsCritical: 0, alertsHigh: 0, actionsOpen: 0, actionsOverdue: 0,
+  actionsDueSoon: 0, actionsUrgent: 0, actionsUrgentOnTime: 0, actionsMine: 0,
+};
 
 export function hrefs(org: PortfolioOrganisation) {
   return {
@@ -25,57 +31,43 @@ export function hrefs(org: PortfolioOrganisation) {
   };
 }
 
-/**
- * The whole Command Centre in five statements, whatever the client count (ADR-112 §4).
- *
- * Organisations come from the resolver (`api.my_organizations`), health from `health_current`,
- * alerts and actions from their own tables; every statement carries the authorised ids and runs
- * under RLS. What follows is counting and sorting in memory over a bounded set — no money is
- * summed and no figure is derived, because the portfolio reports what other modules established.
- */
-export async function loadPortfolio(ctx: PortfolioContext): Promise<PortfolioView> {
+function dates(ctx: PortfolioContext) {
   const now = ctx.now();
   const today = isoDay(now);
-  const since = new Date(now.getTime() - RECENT_DAYS * 86_400_000).toISOString();
+  return { now, today, dueSoonUntil: addDays(today, DUE_SOON_DAYS), since: new Date(now.getTime() - RECENT_DAYS * 86_400_000).toISOString() };
+}
+
+/**
+ * The overview (ADR-112, ADR-114): the aggregate, then two small recent feeds.
+ *
+ * Every count and every attention reason comes from `api.portfolio_summary` over the FULL authorised
+ * population — never from a list of rows, which is how a cap once hid a client's critical alerts. The
+ * only rows read here are the recent feeds, which are recent by definition and capped at 50.
+ */
+export async function loadPortfolio(ctx: PortfolioContext): Promise<PortfolioView> {
+  const { today, dueSoonUntil, since } = dates(ctx);
   const ids = ctx.organisationIds;
 
-  const [health, alerts, actions, finished] = await Promise.all([
-    repo.loadPortfolioHealth(ctx.db, ids, ctx.requestId),
-    repo.loadStandingAlerts(ctx.db, ids, ctx.requestId),
-    repo.loadOpenActions(ctx.db, ids, ctx.requestId),
+  const [summary, recentAlerts, finished] = await Promise.all([
+    repo.loadPortfolioSummary(ctx.db, ids, today, dueSoonUntil, ctx.requestId),
+    repo.loadRecentAlerts(ctx.db, ids, since, ctx.requestId),
     repo.loadRecentlyFinishedActions(ctx.db, ids, since, ctx.requestId),
   ]);
 
-  const byOrg = <T extends { organizationId: string }>(rows: readonly T[]) => {
-    const map = new Map<string, T[]>();
-    for (const row of rows) map.set(row.organizationId, [...(map.get(row.organizationId) ?? []), row]);
-    return map;
-  };
-  const alertsByOrg = byOrg(alerts);
-  const actionsByOrg = byOrg(actions);
-  const finishedByOrg = byOrg(finished);
+  const orgById = new Map(ctx.organisations.map((o) => [o.id, o]));
+  const recent = recentChanges(orgById, recentAlerts, finished).slice(0, repo.RECENT_CAP);
 
-  const recent: RecentChange[] = [];
   const clients: ClientRow[] = ctx.organisations.map((organisation) => {
-    const orgAlerts = alertsByOrg.get(organisation.id) ?? [];
-    const orgActions = actionsByOrg.get(organisation.id) ?? [];
-    const orgHealth = health.get(organisation.id) ?? null;
-    const links = hrefs(organisation);
-
-    const changes = recentChanges(organisation, orgHealth, orgAlerts, finishedByOrg.get(organisation.id) ?? [], since, links);
-    recent.push(...changes);
-
-    const reasons = attentionReasons({ organisation, health: orgHealth, alerts: orgAlerts, actions: orgActions, today });
+    const row = summary.get(organisation.id);
+    const counts = row?.counts ?? ZERO;
+    const health = row?.health ?? null;
     return {
       organisation,
-      health: orgHealth,
-      trend: trendOf(orgHealth),
-      openAlerts: orgAlerts.length,
-      criticalOrHighAlerts: orgAlerts.filter((a) => a.severity === 'critical' || a.severity === 'high').length,
-      openActions: orgActions.length,
-      overdueActions: orgActions.filter((a) => isOverdue(a, today)).length,
-      attention: attentionEntry(organisation.id, reasons),
-      latestChange: changes[0] ?? null,
+      health,
+      trend: trendOf(health),
+      counts,
+      attention: attentionEntry(organisation.id, attentionReasons({ organisation, health, counts })),
+      latestChange: recent.find((change) => change.organizationId === organisation.id) ?? null,
     };
   });
 
@@ -84,67 +76,81 @@ export async function loadPortfolio(ctx: PortfolioContext): Promise<PortfolioVie
     .sort((a, b) => compareAttention(
       { entry: a.attention, name: a.organisation.name },
       { entry: b.attention, name: b.organisation.name },
-    ))
-    .slice(0, ATTENTION_CAP);
+    ));
 
+  const sum = (key: keyof ClientCounts) => clients.reduce((total, c) => total + c.counts[key], 0);
   const counts: PortfolioCounts = {
     clients: clients.length,
-    needingAttention: clients.filter((c) => c.attention !== null).length,
+    needingAttention: attention.length,
     healthy: clients.filter((c) => c.health?.band === 'stable' || c.health?.band === 'strong').length,
     unscored: clients.filter((c) => c.health === null || c.health.score === null).length,
-    criticalAlerts: alerts.filter((a) => a.severity === 'critical').length,
-    highAlerts: alerts.filter((a) => a.severity === 'high').length,
-    openActions: actions.length,
-    overdueActions: actions.filter((a) => isOverdue(a, today)).length,
+    alertsStanding: sum('alertsStanding'),
+    criticalAlerts: sum('alertsCritical'),
+    highAlerts: sum('alertsHigh'),
+    openActions: sum('actionsOpen'),
+    overdueActions: sum('actionsOverdue'),
+    dueSoonActions: sum('actionsDueSoon'),
+    urgentActions: sum('actionsUrgent'),
+    myActions: sum('actionsMine'),
   };
 
-  recent.sort((a, b) => b.at.localeCompare(a.at));
-
-  return {
-    today,
-    organisations: ctx.organisations,
-    clients,
-    attention,
-    counts,
-    alerts: sortAlerts(alerts),
-    actions,
-    recent: recent.slice(0, repo.RECENT_CAP),
-  };
+  return { today, organisations: ctx.organisations, clients, attention, counts, recent };
 }
 
-const SEVERITY_RANK: Record<PortfolioAlert['severity'], number> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
+function capped<T>(rows: readonly T[], total: number): CappedList<T> {
+  return { rows, total, truncated: rows.length < total };
+}
 
-/** Worst first, then longest standing: the alert engine's own order (§8.3). */
-export function sortAlerts(alerts: readonly PortfolioAlert[]): PortfolioAlert[] {
-  return [...alerts].sort((a, b) =>
-    SEVERITY_RANK[a.severity] - SEVERITY_RANK[b.severity] || a.firstSeenAt.localeCompare(b.firstSeenAt));
+/** Standing alerts across the portfolio (or one client), worst first, with the full count. */
+export async function loadPortfolioAlerts(
+  ctx: PortfolioContext, view: PortfolioView, organisationIds: readonly string[] = ctx.organisationIds,
+): Promise<CappedList<PortfolioAlert>> {
+  const rows = await repo.loadStandingAlerts(ctx.db, organisationIds, repo.ALERT_DETAIL_CAP, ctx.requestId);
+  const total = view.clients
+    .filter((c) => organisationIds.includes(c.organisation.id))
+    .reduce((n, c) => n + c.counts.alertsStanding, 0);
+  return capped(rows, total);
+}
+
+/** The count behind each open-work lens, from the aggregate. */
+export function lensTotal(view: PortfolioView, lens: OpenLens, organisationIds?: readonly string[]): number {
+  const key: Record<OpenLens, keyof ClientCounts> = {
+    attention: 'actionsOpen', overdue: 'actionsOverdue', due_soon: 'actionsDueSoon', high: 'actionsUrgent', mine: 'actionsMine',
+  };
+  return view.clients
+    .filter((c) => organisationIds === undefined || organisationIds.includes(c.organisation.id))
+    .reduce((n, c) => n + c.counts[key[lens]], 0);
+}
+
+/** Open actions in one lens across the portfolio (or one client), in `byUrgency` order, with the full count. */
+export async function loadPortfolioActions(
+  ctx: PortfolioContext, view: PortfolioView, lens: OpenLens, organisationIds: readonly string[] = ctx.organisationIds,
+): Promise<CappedList<PortfolioAction>> {
+  const { today, dueSoonUntil } = dates(ctx);
+  const rows = await repo.loadOpenActions(
+    ctx.db, organisationIds, lens, { today, dueSoonUntil, userId: ctx.userId }, repo.ACTION_DETAIL_CAP, ctx.requestId,
+  );
+  return capped(rows, lensTotal(view, lens, organisationIds));
 }
 
 function recentChanges(
-  organisation: PortfolioOrganisation,
-  health: PortfolioHealth | null,
+  orgById: ReadonlyMap<string, PortfolioOrganisation>,
   alerts: readonly PortfolioAlert[],
   finished: readonly PortfolioAction[],
-  since: string,
-  links: ReturnType<typeof hrefs>,
 ): RecentChange[] {
   const out: RecentChange[] = [];
   for (const alert of alerts) {
-    if (alert.firstSeenAt >= since) {
-      out.push({ kind: 'alert_raised', organizationId: organisation.id, at: alert.firstSeenAt, label: alert.title, href: links.alert(alert.id) });
-    }
+    const org = orgById.get(alert.organizationId);
+    if (org) out.push({ kind: 'alert_raised', organizationId: org.id, at: alert.firstSeenAt, label: alert.title, href: hrefs(org).alert(alert.id) });
   }
   for (const action of finished) {
-    out.push({
-      kind: action.status === 'completed' ? 'action_completed' : 'action_dismissed',
-      organizationId: organisation.id,
-      at: action.completedAt ?? action.updatedAt,
-      label: action.title,
-      href: links.action(action.id),
-    });
+    const org = orgById.get(action.organizationId);
+    if (org) {
+      out.push({
+        kind: action.status === 'completed' ? 'action_completed' : 'action_dismissed',
+        organizationId: org.id, at: action.completedAt ?? action.updatedAt, label: action.title, href: hrefs(org).action(action.id),
+      });
+    }
   }
-  // A month scored is a change too, but its instant is the period, which has no timestamp here;
-  // the client row states the month instead. Nothing is invented.
-  void health;
-  return out.sort((a, b) => b.at.localeCompare(a.at));
+  return out.sort((a, b) => b.at.localeCompare(a.at) || a.href.localeCompare(b.href));
 }

@@ -5,7 +5,7 @@
 
 import type { ActionPriority } from '@/modules/actions';
 import type { AlertSeverity } from '@/modules/alerts';
-import type { AttentionReasonKind } from './types';
+import type { AttentionReasonKind, CappedList, ClientCounts } from './types';
 
 const DAY_MS = 86_400_000;
 
@@ -73,3 +73,14 @@ export const PRIORITY_LABELS: Readonly<Record<ActionPriority, string>> = {
 };
 
 export const TREND_LABELS = { up: 'Rising', down: 'Falling', flat: 'Unchanged' } as const;
+
+/** Critical plus high standing alerts, for the client row's badge. */
+export function seriousAlerts(counts: Pick<ClientCounts, 'alertsCritical' | 'alertsHigh'>): number {
+  return counts.alertsCritical + counts.alertsHigh;
+}
+
+/** "Showing the first 500 of 1,053, worst first." — or null when the list is complete. */
+export function truncationNote(list: CappedList<unknown>, order: string): string | null {
+  if (!list.truncated) return null;
+  return `Showing the first ${list.rows.length.toLocaleString('en-GB')} of ${list.total.toLocaleString('en-GB')}, ${order}. Every count on this page is the full number.`;
+}

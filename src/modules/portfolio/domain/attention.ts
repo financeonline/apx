@@ -7,12 +7,8 @@
  * portfolio's own and no model in the loop: the same facts always produce the same queue.
  */
 
-import { isOverdue, type ActionPriority } from '@/modules/actions';
 import { BANDS, bandLabel, type HealthBand } from '@/modules/health';
-import type {
-  AttentionEntry, AttentionReason, PortfolioAction, PortfolioAlert, PortfolioHealth,
-  PortfolioOrganisation,
-} from './types';
+import type { AttentionEntry, AttentionReason, ClientCounts, PortfolioHealth, PortfolioOrganisation } from './types';
 
 /** A fall of at least this many points inside the same band is worth a look (ADR-112). */
 export const SCORE_FALL_POINTS = 10;
@@ -29,8 +25,6 @@ export const REASON_WEIGHTS = {
   health_score_fell: 30,
   health_needs_attention: 20,
 } as const;
-
-const URGENT_PRIORITIES: readonly ActionPriority[] = ['critical', 'high'];
 
 function bandRank(band: HealthBand): number {
   // BANDS is ordered best first; a lower index is a better band.
@@ -58,27 +52,24 @@ export function trendOf(health: PortfolioHealth | null): 'up' | 'down' | 'flat' 
 
 const plural = (n: number, one: string, many: string) => `${n} ${n === 1 ? one : many}`;
 
-/** Every reason this organisation has, or none. */
+/**
+ * Every reason this organisation has, or none — from its AUTHORITATIVE counts (`api.portfolio_summary`,
+ * ADR-114), never from a capped list of rows. Overdue and urgent are the Action Centre's own rules,
+ * evaluated in that statement: overdue = open with a due date before today; urgent = open,
+ * critical/high priority, not overdue.
+ */
 export function attentionReasons(input: {
   readonly organisation: PortfolioOrganisation;
   readonly health: PortfolioHealth | null;
-  readonly alerts: readonly PortfolioAlert[];
-  readonly actions: readonly PortfolioAction[];
-  readonly today: string;
+  readonly counts: Pick<ClientCounts, 'alertsCritical' | 'alertsHigh' | 'actionsOverdue' | 'actionsUrgentOnTime'>;
 }): AttentionReason[] {
   const reasons: AttentionReason[] = [];
   const add = (kind: keyof typeof REASON_WEIGHTS, label: string, count = 1) =>
     reasons.push({ kind, weight: REASON_WEIGHTS[kind], label, count });
 
-  const critical = input.alerts.filter((a) => a.severity === 'critical').length;
-  const high = input.alerts.filter((a) => a.severity === 'high').length;
+  const { alertsCritical: critical, alertsHigh: high, actionsOverdue: overdue, actionsUrgentOnTime: urgent } = input.counts;
   if (critical > 0) add('critical_alert', plural(critical, 'critical alert', 'critical alerts'), critical);
   if (high > 0) add('high_alert', plural(high, 'high alert', 'high alerts'), high);
-
-  const overdue = input.actions.filter((a) => isOverdue(a, input.today)).length;
-  const urgent = input.actions.filter(
-    (a) => URGENT_PRIORITIES.includes(a.priority) && !isOverdue(a, input.today),
-  ).length;
   if (overdue > 0) add('overdue_action', plural(overdue, 'overdue action', 'overdue actions'), overdue);
   if (urgent > 0) add('urgent_action', plural(urgent, 'urgent action', 'urgent actions'), urgent);
 

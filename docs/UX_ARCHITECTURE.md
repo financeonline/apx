@@ -248,7 +248,7 @@ Copy is UK English, second person, no exclamation marks. Each has one primary ac
 > **No open alerts.**
 > That means nothing crossed the thresholds we watch this month. You can see resolved and dismissed alerts under *History*.
 
-**Portfolio (employee), no assignments**
+**Portfolio (employee), no assignments** — rendered at `/portfolio` for an active platform account at aal2 whose scope is empty (ADR-114 §6); a client-only member or a stranger gets the uniform 404 instead.
 > **You haven't been assigned to any organisations yet.**
 > A MOTION administrator assigns organisations to you. When that happens they'll appear here.
 

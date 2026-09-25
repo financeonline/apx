@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getPortfolioContext, hrefs, loadPortfolio } from '@/modules/portfolio';
+import { getPortfolioContext, hrefs, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts } from '@/modules/portfolio';
 import { bandLabel } from '@/modules/health';
 import { PageHeader, Card, CardBody, CardHeader, Badge } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
@@ -26,8 +26,11 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
   const row = view.clients.find((c) => c.organisation.id === orgId);
   if (row === undefined) notFound();
   const links = hrefs(organisation);
-  const alerts = view.alerts.filter((a) => a.organizationId === orgId);
-  const actions = view.actions.filter((a) => a.organizationId === orgId);
+  // This client's own detail, read for this client alone; the counts are the aggregate's (ADR-114).
+  const [alerts, actions] = await Promise.all([
+    loadPortfolioAlerts(ctx, view, [orgId]),
+    loadPortfolioActions(ctx, view, 'attention', [orgId]),
+  ]);
 
   return (
     <>
@@ -85,13 +88,13 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
       </div>
 
       <section aria-labelledby="client-alerts" className="mt-8">
-        <h2 id="client-alerts" className="mb-3 font-serif text-lg">Alerts standing ({alerts.length})</h2>
-        <AlertsTable alerts={alerts} organisations={[organisation]} now={ctx.now()} />
+        <h2 id="client-alerts" className="mb-3 font-serif text-lg">Alerts standing ({alerts.total.toLocaleString('en-GB')})</h2>
+        <AlertsTable list={alerts} organisations={[organisation]} now={ctx.now()} />
       </section>
 
       <section aria-labelledby="client-actions" className="mt-8">
-        <h2 id="client-actions" className="mb-3 font-serif text-lg">Open actions ({actions.length})</h2>
-        <ActionsTable actions={actions} organisations={[organisation]} today={view.today} viewerUserId={ctx.userId} />
+        <h2 id="client-actions" className="mb-3 font-serif text-lg">Open actions ({actions.total.toLocaleString('en-GB')})</h2>
+        <ActionsTable list={actions} organisations={[organisation]} today={view.today} viewerUserId={ctx.userId} />
       </section>
 
       <p className="mt-8 flex flex-wrap gap-x-4 gap-y-1 text-sm">

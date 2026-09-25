@@ -1,6 +1,8 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { isMotionError } from '@/core/errors';
-import { loadPortfolio, resolvePortfolioContext, type PortfolioContext } from '@/modules/portfolio';
+import {
+  loadPortfolio, loadPortfolioActions, loadPortfolioAlerts, resolvePortfolioContext, type PortfolioContext, type PortfolioView,
+} from '@/modules/portfolio';
 import { adminSql, clientFor, createAuthUser } from './setup';
 
 /**
@@ -103,6 +105,11 @@ afterAll(() => {
 });
 
 const names = (ctx: PortfolioContext) => ctx.organisations.map((o) => o.name).sort();
+/** The capped detail lists, as the alerts and actions pages read them. */
+async function details(ctx: PortfolioContext, view: PortfolioView) {
+  const [alerts, actions] = await Promise.all([loadPortfolioAlerts(ctx, view), loadPortfolioActions(ctx, view, 'attention')]);
+  return { alerts: alerts.rows, actions: actions.rows };
+}
 
 describe('who has a portfolio, and over what (ADR-112 §2)', () => {
   it('an employee: assigned organisations only, at aal2', async () => {
@@ -144,13 +151,18 @@ describe('who has a portfolio, and over what (ADR-112 §2)', () => {
 
 describe('the read model counts over the authorised population only (ADR-112 §4)', () => {
   it('the employee\'s counts are A and B\'s, and never C\'s', async () => {
-    const view = await loadPortfolio(await ctxFor(employee, 'aal2'));
+    const ctx = await ctxFor(employee, 'aal2');
+    const view = await loadPortfolio(ctx);
     expect(view.counts).toEqual({
-      clients: 2, needingAttention: 1, healthy: 1, unscored: 0,
+      clients: 2, needingAttention: 1, healthy: 1, unscored: 0, alertsStanding: 3,
       criticalAlerts: 1, highAlerts: 1, openActions: 2, overdueActions: 1,
+      dueSoonActions: 0, urgentActions: 1, myActions: 1,
     });
-    expect(view.alerts.map((a) => a.title).sort()).toEqual(['A critical', 'A high', 'B low']);
-    expect(view.actions.map((a) => a.title).sort()).toEqual(['A overdue', 'A undated urgent']);
+    const { alerts, actions } = await details(ctx, view);
+    // Worst first: the alert engine's own order.
+    expect(alerts.map((a) => a.title)).toEqual(['A critical', 'A high', 'B low']);
+    // `byUrgency`: critical first, then by due date.
+    expect(actions.map((a) => a.title)).toEqual(['A undated urgent', 'A overdue']);
     // B's week: an action finished just now, and an alert first seen three days ago — newest first.
     expect(view.recent.filter((r) => r.organizationId === B).map((r) => [r.kind, r.label]))
       .toEqual([['action_completed', 'B done'], ['alert_raised', 'B low']]);
@@ -172,9 +184,10 @@ describe('the read model counts over the authorised population only (ADR-112 §4
   });
 
   it('a resolved alert is not standing, and a completed action is not open', async () => {
-    const view = await loadPortfolio(await ctxFor(ownerAB));
-    expect(view.alerts.some((a) => a.title === 'A resolved')).toBe(false);
-    expect(view.actions.some((a) => a.title === 'B done')).toBe(false);
+    const ctx = await ctxFor(ownerAB);
+    const { alerts, actions } = await details(ctx, await loadPortfolio(ctx));
+    expect(alerts.some((a) => a.title === 'A resolved')).toBe(false);
+    expect(actions.some((a) => a.title === 'B done')).toBe(false);
   });
 
   it('the super admin\'s counts include C and an unscored organisation is not a zero', async () => {
@@ -198,10 +211,11 @@ describe('the adversarial path: the resolver bypassed, a foreign id in the state
     const view = await loadPortfolio(forged);
     const c = view.clients.find((row) => row.organisation.id === C)!;
     expect(c.health).toBeNull();
-    expect(c.openAlerts).toBe(0);
-    expect(c.openActions).toBe(0);
-    expect(view.alerts.some((a) => a.organizationId === C)).toBe(false);
-    expect(view.actions.some((a) => a.organizationId === C)).toBe(false);
+    expect(c.counts.alertsStanding).toBe(0);
+    expect(c.counts.actionsOpen).toBe(0);
+    const { alerts, actions } = await details(forged, view);
+    expect(alerts.some((a) => a.organizationId === C)).toBe(false);
+    expect(actions.some((a) => a.organizationId === C)).toBe(false);
     // The counts moved by exactly the forged (empty) client, and by nothing of C's.
     expect(view.counts.criticalAlerts).toBe(1);
     expect(view.counts.overdueActions).toBe(1);
@@ -216,8 +230,9 @@ describe('the adversarial path: the resolver bypassed, a foreign id in the state
     };
     adminSql(`insert into public.actions (organization_id, title, priority, status, source_type) values ('${E}','E secret','critical','open','user')`);
     const view = await loadPortfolio(forged);
-    expect(view.alerts).toEqual([]);
-    expect(view.actions).toEqual([]);
+    const { alerts, actions } = await details(forged, view);
+    expect(alerts).toEqual([]);
+    expect(actions).toEqual([]);
     expect(view.counts.openActions).toBe(0);
     expect(view.clients.find((row) => row.organisation.id === E)!.health).toBeNull();
   });
@@ -231,12 +246,47 @@ describe('an assignment revoked stops working on the next request', () => {
       expect(names(ctx)).toEqual([named.get(A)]);
       const view = await loadPortfolio(ctx);
       expect(view.counts.clients).toBe(1);
-      expect(view.alerts.some((a) => a.organizationId === B)).toBe(false);
-      // And with A revoked too, the employee has no portfolio at all.
+      expect((await details(ctx, view)).alerts.some((a) => a.organizationId === B)).toBe(false);
+      // And with A revoked too, the employee has an EMPTY Command Centre (ADR-114 §6) — no organisation,
+      // no count, no row — not a 404.
       adminSql(`update public.organization_assignments set status='revoked' where organization_id='${A}' and employee_user_id='${employee}'`);
-      await expect(ctxFor(employee, 'aal2')).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
+      const empty = await ctxFor(employee, 'aal2');
+      expect(empty.organisations).toEqual([]);
+      const emptyView = await loadPortfolio(empty);
+      expect(emptyView.counts.clients).toBe(0);
+      expect(emptyView.counts.criticalAlerts).toBe(0);
     } finally {
       adminSql(`update public.organization_assignments set status='active' where employee_user_id='${employee}'`);
+    }
+  });
+});
+
+describe('an eligible employee with no assignment has an empty Command Centre (ADR-114 §6)', () => {
+  let unassigned: string;
+  beforeAll(() => {
+    unassigned = createAuthUser(`unassigned@${DOMAIN}`);
+    adminSql(`insert into public.platform_users (user_id, platform_role) values ('${unassigned}','employee')`);
+  });
+  afterAll(() => { adminSql(`delete from public.platform_users where user_id='${unassigned}'`); });
+
+  it('at aal2: an empty portfolio — no organisation, no count — not the uniform 404', async () => {
+    const ctx = await ctxFor(unassigned, 'aal2');
+    expect(ctx.organisations).toEqual([]);
+    const view = await loadPortfolio(ctx);
+    expect(view.counts).toMatchObject({ clients: 0, criticalAlerts: 0, openActions: 0, needingAttention: 0 });
+    expect(view.clients).toEqual([]);
+  });
+
+  it('at aal1: still NOT_FOUND', async () => {
+    await expect(ctxFor(unassigned, 'aal1')).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
+  });
+
+  it('a suspended platform account: NOT_FOUND', async () => {
+    adminSql(`update public.platform_users set status='suspended' where user_id='${unassigned}'`);
+    try {
+      await expect(ctxFor(unassigned, 'aal2')).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
+    } finally {
+      adminSql(`update public.platform_users set status='active' where user_id='${unassigned}'`);
     }
   });
 });

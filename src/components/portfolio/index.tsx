@@ -6,8 +6,8 @@ import { ORG_STATUS_LABELS } from '@/components/labels';
 import { bandLabel } from '@/modules/health';
 import {
   PRIORITY_LABELS, SEVERITY_LABELS, TREND_LABELS, ageLabel, dueLabel, hrefs, priorityTone, reasonTone,
-  severityTone, type ClientRow, type PortfolioAction, type PortfolioAlert, type PortfolioCounts,
-  type PortfolioOrganisation, type RecentChange,
+  seriousAlerts, severityTone, truncationNote, type CappedList, type ClientRow, type PortfolioAction,
+  type PortfolioAlert, type PortfolioCounts, type PortfolioOrganisation, type RecentChange,
 } from '@/modules/portfolio';
 
 /**
@@ -29,23 +29,23 @@ export function CountsStrip({ counts }: { counts: PortfolioCounts }) {
     { label: 'Overdue actions', value: counts.overdueActions, tone: counts.overdueActions > 0 ? 'danger' : undefined, href: '/portfolio/actions?view=overdue' },
   ];
   return (
-    <dl className="grid grid-cols-2 gap-3 sm:grid-cols-4">
+    <ul className="grid grid-cols-2 gap-3 sm:grid-cols-4">
       {items.map((item) => {
         const body = (
           <>
-            <dt className="text-xs font-medium uppercase tracking-[0.12em] text-ink-faint">{item.label}</dt>
-            <dd className={`mt-1 text-2xl tabular-nums ${item.tone === 'danger' ? 'text-danger' : item.tone === 'warn' ? 'text-warn' : 'text-ink'}`}>
-              {item.value}
-            </dd>
+            <span className="block text-xs font-medium uppercase tracking-[0.12em] text-ink-faint">{item.label}</span>
+            <span className={`mt-1 block text-2xl tabular-nums ${item.tone === 'danger' ? 'text-danger' : item.tone === 'warn' ? 'text-warn' : 'text-ink'}`}>
+              {item.value.toLocaleString('en-GB')}
+            </span>
           </>
         );
         return (
-          <div key={item.label} className="rounded-lg border border-line bg-surface px-4 py-3">
+          <li key={item.label} className="rounded-lg border border-line bg-surface px-4 py-3">
             {item.href ? <Link href={item.href} className="block">{body}</Link> : body}
-          </div>
+          </li>
         );
       })}
-    </dl>
+    </ul>
   );
 }
 
@@ -125,9 +125,9 @@ export function ClientTable({ rows }: { rows: readonly ClientRow[] }) {
                     <dt className="text-ink-muted">Trend</dt>
                     <dd>{row.trend === null ? <span className="text-ink-faint">—</span> : TREND_LABELS[row.trend]}</dd>
                     <dt className="text-ink-muted">Alerts</dt>
-                    <dd className="tabular-nums">{row.openAlerts}{row.criticalOrHighAlerts > 0 ? <span className="ml-2"><Badge tone="danger">{row.criticalOrHighAlerts} serious</Badge></span> : null}</dd>
+                    <dd className="tabular-nums">{row.counts.alertsStanding}{seriousAlerts(row.counts) > 0 ? <span className="ml-2"><Badge tone="danger">{seriousAlerts(row.counts)} serious</Badge></span> : null}</dd>
                     <dt className="text-ink-muted">Open actions</dt>
-                    <dd className="tabular-nums">{row.openActions}{row.overdueActions > 0 ? <span className="ml-2"><Badge tone="warn">{row.overdueActions} overdue</Badge></span> : null}</dd>
+                    <dd className="tabular-nums">{row.counts.actionsOpen}{row.counts.actionsOverdue > 0 ? <span className="ml-2"><Badge tone="warn">{row.counts.actionsOverdue} overdue</Badge></span> : null}</dd>
                     {row.latestChange !== null ? (
                       <>
                         <dt className="text-ink-muted">Latest change</dt>
@@ -169,12 +169,12 @@ export function ClientTable({ rows }: { rows: readonly ClientRow[] }) {
                 </TD>
                 <TD>{row.trend === null ? <span className="text-ink-faint">—</span> : TREND_LABELS[row.trend]}</TD>
                 <TD className="tabular-nums">
-                  {row.openAlerts}
-                  {row.criticalOrHighAlerts > 0 ? <span className="ml-2"><Badge tone="danger">{row.criticalOrHighAlerts} serious</Badge></span> : null}
+                  {row.counts.alertsStanding}
+                  {seriousAlerts(row.counts) > 0 ? <span className="ml-2"><Badge tone="danger">{seriousAlerts(row.counts)} serious</Badge></span> : null}
                 </TD>
                 <TD className="tabular-nums">
-                  {row.openActions}
-                  {row.overdueActions > 0 ? <span className="ml-2"><Badge tone="warn">{row.overdueActions} overdue</Badge></span> : null}
+                  {row.counts.actionsOpen}
+                  {row.counts.actionsOverdue > 0 ? <span className="ml-2"><Badge tone="warn">{row.counts.actionsOverdue} overdue</Badge></span> : null}
                 </TD>
                 <TD>
                   {row.latestChange === null ? <span className="text-ink-faint">—</span> : (
@@ -194,13 +194,17 @@ export function ClientTable({ rows }: { rows: readonly ClientRow[] }) {
 }
 
 export function AlertsTable({
-  alerts, organisations, now,
-}: { alerts: readonly PortfolioAlert[]; organisations: readonly PortfolioOrganisation[]; now: Date }) {
+  list, organisations, now,
+}: { list: CappedList<PortfolioAlert>; organisations: readonly PortfolioOrganisation[]; now: Date }) {
   const orgs = byId(organisations);
+  const alerts = list.rows;
+  const note = truncationNote(list, 'worst first');
   if (alerts.length === 0) {
     return <EmptyState title="No alert is standing across your clients">Alerts that are open or acknowledged appear here, worst first.</EmptyState>;
   }
   return (
+    <>
+    {note ? <p className="mb-2 text-sm text-ink-muted" role="status">{note}</p> : null}
     <TableWrap>
       <table className="w-full text-sm">
         <THead columns={['Severity', 'Client', 'Alert', 'Status', 'Standing since', 'Evidence']} />
@@ -223,17 +227,22 @@ export function AlertsTable({
         </TBody>
       </table>
     </TableWrap>
+    </>
   );
 }
 
 export function ActionsTable({
-  actions, organisations, today, viewerUserId,
-}: { actions: readonly PortfolioAction[]; organisations: readonly PortfolioOrganisation[]; today: string; viewerUserId: string }) {
+  list, organisations, today, viewerUserId,
+}: { list: CappedList<PortfolioAction>; organisations: readonly PortfolioOrganisation[]; today: string; viewerUserId: string }) {
   const orgs = byId(organisations);
+  const actions = list.rows;
+  const note = truncationNote(list, 'most urgent first');
   if (actions.length === 0) {
     return <EmptyState title="No action in this view">Open actions across your clients appear here.</EmptyState>;
   }
   return (
+    <>
+    {note ? <p className="mb-2 text-sm text-ink-muted" role="status">{note}</p> : null}
     <TableWrap>
       <table className="w-full text-sm">
         <THead columns={['Priority', 'Client', 'Action', 'Owner', 'Due', 'Evidence']} />
@@ -257,6 +266,7 @@ export function ActionsTable({
         </TBody>
       </table>
     </TableWrap>
+    </>
   );
 }
 
