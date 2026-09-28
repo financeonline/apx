@@ -71,6 +71,15 @@ export {
 } from './domain/briefing';
 
 export {
+  readQuantities,
+  type PeriodMention,
+  type Quantity,
+  type QuantityUnit,
+  type Reading,
+  type ReadingContext,
+} from './domain/quantities';
+
+export {
   askAdviser,
   listAdviserTurns,
   type AdviserAnswer,

@@ -384,6 +384,11 @@ Alerts also show the threshold that fired in the tooltip ("We flag expense categ
 - **Inside an organisation** sees Home through AI Analyst, the Data menu (Add data, Imports, Documents, Accounts), documents, exports; **does not see** the Settings gear at all, invite or role controls, or the member list (assignee pickers show names only).
 - **Distinctive** Persistent context banner at the top of every tenant page: "You are viewing **Acme Ltd** as a MOTION adviser" with a *Back to portfolio* link. Org switcher lists assigned organisations grouped separately with an "adviser" badge. Their name appears with a "MOTION adviser" badge wherever it is shown to tenant users (assignee lists, audit entries).
 - **Primary tasks** Import and review client files; run analysis; raise and assign actions; generate the monthly report.
+- **Command Centre (Phase 15, ADR-112–115).** `/portfolio` is now the Command Centre: attention queue, portfolio counts, every client, recent changes, with Alerts, Actions, client pages and an adviser analyst. The card list above describes the pre-Phase-15 design.
+- **Adviser analyst badges (ADR-115).** Each answer shows the server's grounding status, never a client-side judgement:
+  - *Grounded*: every quantitative claim, in digits or in words, was bound to a fact MOTION holds.
+  - *Partly grounded*: one or more sentences stated something the data does not, and were removed. Removed sentences are never shown.
+  - Alert and action titles appear in quotation marks and are never treated as figures.
 
 ### 9.5 Super Admin
 - **Lands on** `/platform` (organisations overview with counts, failed jobs, open AI feedback). Platform users must have enrolled TOTP; without it every `/platform` and `/portfolio` request redirects to `/account/mfa` (ADR-038.8).

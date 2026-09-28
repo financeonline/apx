@@ -87,6 +87,28 @@ test('an owner of two organisations sees both on the Command Centre; a client se
   await expect(page.getByRole('heading', { level: 1 })).toContainText(/adviser analyst/i);
   await expect(page.getByRole('button', { name: /^ask$/i })).toBeVisible();
 
+  // The badge is the server's stored grounding status, never a client-side judgement (ADR-115). No
+  // model runs in this environment, so two answered turns are stored the way the server finishes
+  // them — one the grounder degraded, one it passed — and the page must label each accordingly.
+  const storeTurn = (question: string, grounding: 'passed' | 'degraded') => {
+    const answer = JSON.stringify({
+      briefing: { mode: 'answer', headline: { text: `${ORG_A} needs attention.`, facts: [] }, clients: [], notes: [], limitations: [] },
+      clients: [], refs: [],
+    });
+    sql(`with q as (insert into public.portfolio_ai_turns (user_id, question, scope_organization_ids, status, answer, grounding_status, prompt_version, finished_at)
+         values ('${owner.userId}', '${question}', array['${orgA}']::uuid[], 'answered', '${answer}'::jsonb, '${grounding}', 'adviser-v2.1', now())
+         returning id) select id from q`);
+  };
+  storeTurn('What changed at Alpha this month', 'degraded');
+  storeTurn('Which clients need attention', 'passed');
+  await page.reload();
+  const answerCard = (question: string) => page.locator('section')
+    .filter({ has: page.getByRole('heading', { level: 2, name: question, exact: true }) })
+    .filter({ hasNot: page.getByRole('heading', { name: /recent answers/i }) });
+  await expect(answerCard('What changed at Alpha this month').getByText('Partly grounded', { exact: true })).toBeVisible();
+  await expect(answerCard('What changed at Alpha this month').getByText('Grounded', { exact: true })).toHaveCount(0);
+  await expect(answerCard('Which clients need attention').getByText('Grounded', { exact: true })).toBeVisible();
+
   // ---- Small screens: usable, no sideways scrolling --------------------------------------------
   for (const [label, width] of [['375', 375], ['768', 768]] as const) {
     await page.setViewportSize({ width, height: 900 });

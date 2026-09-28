@@ -18,7 +18,8 @@ recent alerts / actions ─(ids + RLS, 7 days, capped 50)───►  recent ch
                                      │
      /portfolio   /portfolio/alerts   /portfolio/actions   /portfolio/clients/[orgId]   /portfolio/analyst
                                      │
-                     domain/briefing.ts   digest of facts → forced submit_briefing → fact-specific grounding
+                     domain/briefing.ts   digest of facts → forced submit_briefing → claim-level grounding (ADR-115)
+                     domain/quantities.ts every quantitative claim a sentence makes (digits, words, fractions, multipliers)
                      services/adviser.ts  begin turn (DB re-checks scope, throttles) · model · finish turn
                                      ▼
                      portfolio_ai_turns   readable only while the author CURRENTLY advises the whole scope
@@ -81,11 +82,17 @@ The tests put foreign ids straight into the statements with the resolver bypasse
 - **Actions** are the Phase 10 rows. Overdue, due soon (`DUE_SOON_DAYS`) and urgent are the Action Centre's rules, evaluated in the aggregate and the lens predicates. The drill-down goes to `/app/[slug]/actions/[id]`. Nothing is created, assigned or moved from the Command Centre.
 - **Attention** (ADR-112 §4) uses fixed weights: 100 critical alert · 80 health band fell · 70 at risk · 60 overdue action · 50 high alert · 45 suspended · 40 urgent action · 30 score fell ≥ 10 · 20 needs attention. Order is max, then sum, then name. Every reason comes from the aggregate.
 
-## 8. AI (ADR-113, ADR-114 §5)
+## 8. AI (ADR-113, ADR-114 §5, ADR-115)
 
 - **Data boundary.** The server loads the caller's authorised view and builds a digest of it. The model sees that digest and nothing else. It has **no data or database tools** and exactly **one forced structured-output tool**, `submit_briefing`.
 - **Scope re-check.** The turn opens in the database, which re-checks the scope against the actor with `app.org_role_of` and charges a **10 per minute per user** throttle before any model call.
-- **Grounding.** Every number the digest states is a fact with an id, subject, metric, period, unit and value. The model cites fact ids per headline, summary and note. A number survives only when a cited fact matches it exactly in value, unit, subject, metric word and named period; otherwise its sentence is removed and the turn is `degraded`. Foreign clients and citations are dropped. A malformed answer is `failed` and never rendered.
+- **Grounding (ADR-115).** Every number the digest states is a fact with an id, subject, metric, period, unit and value (and, where it applies, a required noun, excluded qualifiers and a direction). The model cites fact ids per headline, summary and note.
+  - **What counts as a claim.** `domain/quantities.ts` reads every quantitative claim in a sentence: digits and number words through the AI module's claim grammar (one grammar, §7.9), then fractions ("one and a half"), multipliers ("doubled", "halved", "3x" — unit `multiple`), "one"/"zero"/"no" before a counted noun or unit, and each claim's unit (`%`, `pc`, `pct`, months, points, money; `pp` and days are units no fact has).
+  - **Binding.** Each claim must be bound to ONE cited fact with the same exact value, unit, metric (read from the claim's own clause), subject (the client the sentence names), period and direction.
+  - **Unbindable claims.** Hedged figures ("about 20%"), claims with no exact value ("a third", "three times higher") and magnitudes with no figure ("sharply", "significantly") bind to nothing.
+  - **Titles.** A cited alert or action title may be quoted, exactly and in quotation marks; it is text, never a fact, and a title with a unit against it is refused.
+  - **Removal.** A sentence with any unbound claim is removed and the turn is `degraded`; one valid claim never rescues another. Foreign clients and citations are dropped. A malformed answer is `failed` and never rendered.
+- **The badge.** *Grounded* is shown only for a turn the server stored `passed`; *Partly grounded* for `degraded`. The page reads `grounding_status`; nothing on the client decides it.
 - **Stored turns** are readable only while the author currently advises every organisation in the turn's scope (or by a super admin at aal2).
 - **No daily quota** exists for adviser questions. That is a documented limitation, not a control: quotas are per organisation.
 - **No financial figures** are in the digest beyond health scores and counts. The analyst says so and points to the client's pages.
@@ -116,12 +123,13 @@ The first screen shows the attention queue (the first 25, with a note if more), 
 | Unit | `test/unit/portfolio-attention.test.ts` | attention rules over aggregate counts, order, band/score rules, adviser-role filter |
 | Integration | `test/integration/portfolio.test.ts` | role × portfolio matrix, counts over the authorised population, forged ids with the resolver bypassed, revocation, the unassigned employee's empty state (aal2) vs 404 (aal1, suspended) |
 | Integration | `test/integration/portfolio-scale.test.ts` | > 1,000 alerts and actions (counts, attention, capped lists that say so), unauthorised volume, 45 × 24 scored months, health edge cases |
-| Integration | `test/integration/portfolio-ai.test.ts` | what the model is handed, what the database accepts as a scope, what the server keeps, stored-turn access after revocation / reassignment / multi-organisation / client / other adviser |
-| Eval | `test/eval/portfolio-eval.test.ts` | the eight brief cases and the fact-specific grounding cases (wrong revenue/runway rejected, correct margin kept, same number in another organisation, wrong metric, wrong period, uncited fact, number in a limitation) |
+| Integration | `test/integration/portfolio-ai.test.ts` | what the model is handed, what the database accepts as a scope, what the server keeps (incl. a figure in words stored `degraded`, and a numeric title that cannot launder a figure), stored-turn access after revocation / reassignment / multi-organisation / client / other adviser |
+| Unit | `test/unit/portfolio-quantities.test.ts` | the quantity reader (ADR-115): digits, every percent spelling, number words, fractions, multipliers, "one"/"no" before a counted noun, approximation and unquantified magnitude, periods/ordinals/references/names that are not quantities, quoted titles set aside and a title used as a figure refused, clauses |
+| Eval | `test/eval/portfolio-eval.test.ts` | the eight brief cases; the fact-specific grounding cases (MEDIUM-D); and the claim-level cases (ADR-115): figures in words with and without their fact (A–F), multipliers, direction, two claims in one sentence, wrong metric/period/organisation with a matching number, hedged and unquantified language, alert and action titles containing numbers, and honest answers that must still pass |
 | pgTAP | `supabase/tests/14_portfolio.test.sql` | privileges, forced RLS, policies (incl. current-access read), api/api_server grants |
-| Playwright | `e2e/journey-15-command-centre.spec.ts`, `e2e/accessibility.spec.ts` | owner of two organisations end to end; client refused; 375/768 px; axe and overflow on the Command Centre |
+| Playwright | `e2e/journey-15-command-centre.spec.ts`, `e2e/accessibility.spec.ts` | owner of two organisations end to end; client refused; the analyst labels a stored `degraded` turn *Partly grounded* and never *Grounded* (ADR-115); 375/768 px; axe and overflow on the Command Centre |
 
-Every ADR-114 blocker test was run against `bab3a68` (its code and its migrations) and failed there for the defect it targets.
+Every ADR-114 blocker test was run against `bab3a68` (its code and its migrations) and failed there for the defect it targets. The ADR-115 tests were run against `71fd748`'s grounder: 33 of the new eval cases and both new integration cases fail there; the independent audit's ten grounding probes (3 of which failed on `71fd748`) all pass.
 
 ## 13. Security model
 
@@ -134,7 +142,10 @@ Every ADR-114 blocker test was run against `bab3a68` (its code and its migration
 
 - No daily quota on adviser questions; the 10/min per-user throttle is the only limit.
 - The adviser analyst carries no financial figures beyond health scores and counts.
-- Grounding checks metric and period per sentence, not per number. A sentence naming two metrics could pair a number with the wrong one when values coincide; subject, unit and exact value still apply.
+- Grounding reads metric, period and subject per clause (ADR-115). Two claims inside ONE clause with no break between them share that clause's words, so two same-unit values could cross only when both exist in cited facts of metrics that clause names.
+- "None" is not read as zero, and relative periods ("this quarter", "last month") are not read as periods.
+- The grounder fails closed: an unquoted title containing a number, two counts joined without a clause break, or a pronoun-only sentence in the headline or notes stating a client's figure is removed. The prompt (`adviser-v2.1`) steers the model away from each.
+- No live Claude model has been run against the adviser analyst (no API key in the build environment). Every grounding test uses the deterministic validator and a fake transport; the validator does not depend on the model.
 - A platform employee's browser session is not e2e-tested because it needs TOTP; the boundary is proven at the database and API.
 - No pagination of the client list, and no "last data date" column; the latest scored month is shown.
 - Health trend compares with the previous complete *scored* month, which may not be the calendar month before; the page names both months.

@@ -194,6 +194,41 @@ describe('what the server keeps of an answer', () => {
     expect(stored).not.toContain('23%');
   });
 
+  it('M-1: a figure written in words is removed, and the turn is stored degraded — never "Grounded"', async () => {
+    // The independent audit's P7: this sentence was persisted with grounding_status = passed and
+    // rendered under the Grounded badge. The badge is read from grounding_status (analyst/page.tsx).
+    const model = fakeModel(() => ({
+      mode: 'answer', headline: 'Alpha needs attention.',
+      clients: [{ ref: 'client:1', summary: 'Revenue fell by twenty per cent and cash runway is one and a half months. Costs doubled.', because: ['alert:1'] }],
+      notes: ['Margin halved across the portfolio.'], limitations: [],
+    }));
+    const ctx = await ctxFor(employee, 'aal2');
+    const result = await askAdviser(ctx, 'What changed?', { transport: model.transport });
+    expect(result.status).toBe('degraded');
+    const stored = adminSql(`select grounding_status || '|' || answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
+    expect(stored.startsWith('degraded|')).toBe(true);
+    for (const words of ['twenty per cent', 'one and a half', 'doubled', 'halved']) expect(stored).not.toContain(words);
+    const turns = await listAdviserTurns(ctx);
+    expect(turns.find((t) => t.id === result.turnId)?.groundingStatus).toBe('degraded');
+  });
+
+  it('L-2: a cited title that is a number does not launder a figure', async () => {
+    const titled = seedAlert(A, 'high', '3');
+    try {
+      const model = fakeModel((call) => {
+        // Every digest string arrives wrapped as <data name="…">…</data> (untrustedJson).
+        const ref = /(alert:\d+)<\/data>[^{}]*?title[^{}]*?>3<\/data>/.exec(handed(call))?.[1];
+        if (ref === undefined) throw new Error('the seeded title is not in the digest');
+        return { mode: 'answer', headline: 'Alpha needs attention.', clients: [{ ref: 'client:1', summary: 'Revenue fell 3% this quarter.', because: [ref] }], notes: [], limitations: [] };
+      });
+      const result = await askAdviser(await ctxFor(employee, 'aal2'), 'Revenue?', { transport: model.transport });
+      expect(result.status).toBe('degraded');
+      expect(adminSql(`select answer::text from public.portfolio_ai_turns where id='${result.turnId}'`)).not.toContain('3%');
+    } finally {
+      adminSql(`delete from public.alerts where id='${titled}'`);
+    }
+  });
+
   it('a refusal carries no clients and is not_applicable', async () => {
     const model = fakeModel(() => ({ mode: 'refusal', headline: 'That is outside this portfolio.', clients: [], notes: [], limitations: [] }));
     const result = await askAdviser(await ctxFor(employee, 'aal2'), 'Write me a poem', { transport: model.transport });
