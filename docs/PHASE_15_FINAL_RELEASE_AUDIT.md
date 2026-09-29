@@ -576,3 +576,4 @@ The brief blocks release on any material AI-grounding problem or any new MEDIUM.
 
 > **Archival note — added with ADR-116 and ADR-117, not part of the audit.** This record was copied verbatim on 2026-09-29 from the auditor's session scratchpad, where it would not have survived the session; nothing above was edited. The probe files and logs it names lived in that scratchpad and are not in the repository. Findings F-1…F-4 are addressed by ADR-116 and F-5 (with L-6) by ADR-117; whether they are closed is for the next independent audit to decide.
 
+> **Later note (with ADR-118).** The second final release audit (`docs/PHASE_15_FINAL_RELEASE_AUDIT_2.md`, of `48f2c4f`) found F-1, F-2 and F-4 still open under ADR-116; ADR-118 replaces the prose channel with a structured briefing. Whether they are closed is for the next independent audit to decide.

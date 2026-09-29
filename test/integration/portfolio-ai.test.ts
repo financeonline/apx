@@ -44,23 +44,26 @@ const ctxFor = async (user: string, aal: 'aal1' | 'aal2' = 'aal1'): Promise<Port
 };
 
 /**
- * The v3 submission (ADR-116) from a compact one: a string headline, client summary or note is ONE
- * text statement — the model's own prose, which may carry nothing quantitative. A client may give
- * `statements` instead, to cite facts ({ kind: 'facts', facts: [ids] }), which the server renders.
+ * The v4 submission (ADR-118) from a compact one. The model's contract is blocks of references;
+ * a string headline, client `summary` or note stands for what a misbehaving model might send in
+ * their place — its own words — and becomes ONE text block, which the server never renders.
  */
-type Statement = { kind: 'text'; text: string } | { kind: 'facts'; facts: string[]; text?: string };
-function v3(reply: unknown): unknown {
+type Block = Record<string, unknown> & { kind: string };
+function v4(reply: unknown): unknown {
   if (reply === null || typeof reply !== 'object' || !('mode' in reply)) return reply;
-  const r = reply as { headline: string | Statement[]; clients: Array<{ ref: string; summary?: string; statements?: Statement[]; because: string[] }>; notes: Array<string | Statement[]>; limitations: string[]; mode: string };
-  const text = (t: string): Statement[] => [{ kind: 'text', text: t }];
+  const r = reply as { mode: string; headline: string | Block[]; clients: Array<{ ref: string; summary?: string; blocks?: Block[]; because: string[] }>; notes: Array<string | Block[]>; limitations: string[] };
+  const words = (t: string): Block[] => [{ kind: 'text', text: t }];
   return {
     mode: r.mode,
-    headline: typeof r.headline === 'string' ? text(r.headline) : r.headline,
-    clients: r.clients.map((c) => ({ ref: c.ref, statements: c.statements ?? text(c.summary ?? ''), because: c.because })),
-    notes: r.notes.map((n) => ({ statements: typeof n === 'string' ? text(n) : n })),
+    headline: typeof r.headline === 'string' ? words(r.headline) : r.headline,
+    clients: r.clients.map((c) => ({ ref: c.ref, blocks: c.blocks ?? words(c.summary ?? ''), because: c.because })),
+    notes: r.notes.map((n) => ({ blocks: typeof n === 'string' ? words(n) : n })),
     limitations: r.limitations,
   };
 }
+
+/** MOTION's own attention reason for Alpha's critical alert, as a block. */
+const ALPHA_CRITICAL = { kind: 'attention', reasons: ['client:1/attention/critical_alert'] };
 
 /** A model that answers with whatever the test hands it, and records the call it was given. */
 function fakeModel(reply: (call: ModelCall) => unknown): { transport: ModelTransport; calls: ModelCall[] } {
@@ -68,7 +71,7 @@ function fakeModel(reply: (call: ModelCall) => unknown): { transport: ModelTrans
   const transport: ModelTransport = async (call) => {
     calls.push(call);
     return {
-      content: [{ type: 'tool_use', id: 'tu_1', name: BRIEFING_TOOL, input: v3(reply(call)) }] as unknown as ModelResponse['content'],
+      content: [{ type: 'tool_use', id: 'tu_1', name: BRIEFING_TOOL, input: v4(reply(call)) }] as unknown as ModelResponse['content'],
       stopReason: 'tool_use', usage: { inputTokens: 100, outputTokens: 50 }, model: 'fake-model',
     };
   };
@@ -101,7 +104,7 @@ afterAll(() => {
 
 describe('what the model is handed', () => {
   it('an employee with two assigned clients: the digest names those two and nothing of the third', async () => {
-    const model = fakeModel(() => ({ mode: 'answer', headline: 'Alpha needs attention.', clients: [{ ref: 'client:1', summary: 'A critical alert stands.', because: ['alert:1'] }], notes: [], limitations: [] }));
+    const model = fakeModel(() => ({ mode: 'answer', headline: [{ kind: 'facts', facts: ['portfolio/needing_attention'] }], clients: [{ ref: 'client:1', blocks: [ALPHA_CRITICAL], because: ['alert:1'] }], notes: [], limitations: [] }));
     const ctx = await ctxFor(employee, 'aal2');
     const result = await askAdviser(ctx, 'Which clients need attention?', { transport: model.transport });
     expect(model.calls).toHaveLength(1);
@@ -215,48 +218,60 @@ describe('what the server keeps of an answer', () => {
     expect(turns.find((t) => t.id === result.turnId)?.groundingStatus).toBe('degraded');
   });
 
-  it('ADR-116: the model cites facts; the server writes every figure, and the answer is Grounded', async () => {
+  it('ADR-118: the model chooses references; the server writes every sentence, stores it, and the answer is Grounded', async () => {
     const model = fakeModel(() => ({
       mode: 'answer',
-      headline: [{ kind: 'facts', facts: ['portfolio/needing_attention'] }, { kind: 'text', text: 'Alpha needs attention first.' }],
+      headline: [{ kind: 'facts', facts: ['portfolio/needing_attention'] }, { kind: 'phrase', phrase: 'look_first', ref: 'client:1' }],
       clients: [{
         ref: 'client:1',
-        statements: [
-          // The model tries to put its own figure beside the fact; it is never shown.
-          { kind: 'facts', facts: ['client:1/critical_alerts', 'client:1/open_actions'], text: 'Alpha has 40 critical alerts' },
-          { kind: 'text', text: 'Its cash alert is the one to act on.' },
+        blocks: [
+          { kind: 'facts', facts: ['client:1/critical_alerts', 'client:1/open_actions'] },
+          ALPHA_CRITICAL,
+          { kind: 'source', ref: 'alert:1' },
+          { kind: 'phrase', phrase: 'health_unavailable' },
         ],
-        because: ['alert:1'],
+        because: [],
       }],
-      notes: [], limitations: [],
+      notes: [], limitations: ['figures_elsewhere'],
     }));
     const ctx = await ctxFor(employee, 'aal2');
     const result = await askAdviser(ctx, 'Where first?', { transport: model.transport });
     expect(result.status).toBe('passed');
     const alpha = result.briefing!.clients[0]!;
-    expect(alpha.summary).toBe(`PA Alpha ${RUN} has 1 standing critical alert and 0 open actions. Its cash alert is the one to act on.`);
-    expect(alpha.facts).toEqual(['client:1/critical_alerts', 'client:1/open_actions']);
-    // What the model was shown of each fact is the sentence the server writes — not a number to reuse.
-    expect(handed(model.calls[0]!)).toContain(`PA Alpha ${RUN} has 1 standing critical alert.`);
+    expect(alpha.summary).toBe(
+      `PA Alpha ${RUN} has 1 standing critical alert and 0 open actions. PA Alpha ${RUN}: 1 critical alert. `
+      + `PA Alpha ${RUN}: alert “Alpha cash runway is short” (critical, open). PA Alpha ${RUN} has not been scored yet, so its health is not available.`,
+    );
+    expect(alpha.because).toEqual(['alert:1']);
+    expect(result.briefing!.headline.text).toBe(`1 client needs attention. Look at PA Alpha ${RUN} first.`);
+    // What the model was shown: each fact as the sentence the server writes, and the phrase library.
+    const shown = handed(model.calls[0]!);
+    expect(shown).toContain(`PA Alpha ${RUN} has 1 standing critical alert.`);
+    expect(shown).toContain('Look at {client} first.');
+    // Stored as rendered, passed; the page shows the stored status (journey 15).
     const stored = adminSql(`select grounding_status || '|' || answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
     expect(stored.startsWith('passed|')).toBe(true);
-    expect(stored).not.toContain('40 critical');
+    expect((await listAdviserTurns(ctx)).find((t) => t.id === result.turnId)?.groundingStatus).toBe('passed');
   });
 
-  it('F-1/F-3: prose that states or swaps a figure is removed, and the turn is not Grounded', async () => {
+  it('brief §22: fabricated text and values beside a correct fact are discarded, and the turn is not Grounded', async () => {
     const model = fakeModel(() => ({
-      mode: 'answer', headline: 'Alpha needs attention first.',
-      clients: [{ ref: 'client:1', statements: [
-        { kind: 'text', text: 'It has 3 critical alerts as well as 1 open action.' },
-        { kind: 'facts', facts: ['client:1/critical_alerts'] },
+      mode: 'answer', headline: [{ kind: 'facts', facts: ['portfolio/needing_attention'] }],
+      clients: [{ ref: 'client:1', blocks: [
+        { kind: 'facts', facts: ['client:1/critical_alerts'], text: 'Alpha has 40 critical alerts', value: 40 },
+        { kind: 'text', text: 'They have been resolved.' },
+        { kind: 'facts', facts: ['client:2/open_actions'] },
       ], because: [] }],
-      notes: ['Twelve clients need attention.'], limitations: [],
+      notes: ['Twelve clients need attention.', [{ kind: 'phrase', phrase: 'portfolio_clear' }]], limitations: [],
     }));
     const result = await askAdviser(await ctxFor(employee, 'aal2'), 'Summarise', { transport: model.transport });
     expect(result.status).toBe('degraded');
     expect(result.briefing!.clients[0]!.summary).toBe(`PA Alpha ${RUN} has 1 standing critical alert.`);
     expect(result.briefing!.notes).toEqual([]);
-    expect(adminSql(`select grounding_status from public.portfolio_ai_turns where id='${result.turnId}'`).trim()).toBe('degraded');
+    const stored = adminSql(`select grounding_status || '|' || answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
+    expect(stored.startsWith('degraded|')).toBe(true);
+    // Word-bounded: the stored JSON carries random UUIDs, which may contain "40" (…-400b-…).
+    for (const words of [/\b40\b/, /resolved/, /Twelve/, /Nothing in the portfolio/]) expect(stored).not.toMatch(words);
   });
 
   it('L-2: a cited title that is a number does not launder a figure', async () => {
@@ -277,9 +292,10 @@ describe('what the server keeps of an answer', () => {
   });
 
   it('a refusal carries no clients and is not_applicable', async () => {
-    const model = fakeModel(() => ({ mode: 'refusal', headline: 'That is outside this portfolio.', clients: [], notes: [], limitations: [] }));
+    const model = fakeModel(() => ({ mode: 'refusal', headline: [{ kind: 'phrase', phrase: 'outside_scope' }], clients: [], notes: [], limitations: [] }));
     const result = await askAdviser(await ctxFor(employee, 'aal2'), 'Write me a poem', { transport: model.transport });
     expect(result.status).toBe('not_applicable');
+    expect(result.briefing!.headline.text).toBe('That is outside what the Command Centre can answer.');
     expect(result.briefing!.clients).toEqual([]);
   });
 
@@ -293,7 +309,7 @@ describe('what the server keeps of an answer', () => {
   });
 
   it('cites only the digest\'s own references, resolved to real alert ids', async () => {
-    const model = fakeModel(() => ({ mode: 'answer', headline: 'Alpha first.', clients: [{ ref: 'client:1', summary: 'A critical alert stands.', because: ['alert:1'] }], notes: [], limitations: ['Financial figures are not in the data.'] }));
+    const model = fakeModel(() => ({ mode: 'answer', headline: [{ kind: 'phrase', phrase: 'look_first', ref: 'client:1' }], clients: [{ ref: 'client:1', blocks: [ALPHA_CRITICAL], because: ['alert:1'] }], notes: [], limitations: ['figures_elsewhere'] }));
     const ctx = await ctxFor(employee, 'aal2');
     const result = await askAdviser(ctx, 'Where first?', { transport: model.transport });
     const turn = (await listAdviserTurns(ctx))[0]!;
@@ -304,7 +320,7 @@ describe('what the server keeps of an answer', () => {
 
 describe('HIGH-C — a stored turn is readable only while its author CURRENTLY advises its whole scope', () => {
   let adviser: string; let clientOfA: string;
-  const answer = () => ({ mode: 'answer', headline: 'Alpha first.', clients: [{ ref: 'client:1', summary: 'A critical alert stands.', because: ['alert:1'] }], notes: [], limitations: [] });
+  const answer = () => ({ mode: 'answer', headline: [{ kind: 'phrase', phrase: 'look_first', ref: 'client:1' }], clients: [{ ref: 'client:1', blocks: [ALPHA_CRITICAL], because: ['alert:1'] }], notes: [], limitations: [] });
   const readById = async (user: string, turnId: string, aal: 'aal1' | 'aal2' = 'aal2') => {
     const { data, error } = await clientFor(user, { aal, email: `${user}@${DOMAIN}` }).from('portfolio_ai_turns').select('id, answer').eq('id', turnId);
     expect(error).toBeNull();

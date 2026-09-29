@@ -1505,7 +1505,7 @@ Context: SOW §18 "client AI analysis"; the brief's rule that the authorisation 
 
 Decision:
 1. **Before the model.** `askAdviser` loads the caller's portfolio (ADR-112 §3) and builds a digest from it — each client, alert and action given a short reference (`client:N`, `alert:N`, `action:N`), health as score/band/month/trend, attention reasons as labels, and the counts. The model is shown that digest inside a `<data>` element and nothing else: no data or database tools, no organisation it may not advise. It has exactly one tool — the forced structured-output tool `submit_briefing` — through which it must answer. The turn is then opened by `api_server.portfolio_ai_begin_turn`, which re-checks every organisation in scope against the actor with `app.org_role_of` (the same resolver RLS uses) and charges a 10/min throttle — refusing, before any row exists, a scope the actor may not advise, whatever the server asked for.
-2. **After the model.** The model must answer through `submit_briefing` (mode, headline, clients[{ref, summary, because[]}], notes, limitations). `groundBriefing` drops any client ref the digest did not issue and any `because` ref that is not that client's own alert or action. *(Corrected by ADR-114 §5: the original number check — "a number the digest states" anywhere — accepted fabricated figures that happened to equal an unrelated count (MEDIUM-D); numbers are now grounded to specific cited facts, sentence by sentence. Corrected again by ADR-115, and replaced by ADR-116: the model now cites facts by id and writes no figure; the server renders every figure from its fact, and prose carrying anything quantitative is removed.)* It replaced any headline, summary or note that stated such a number with the server's own sentence built from the attention reasons; each of those marks the turn `degraded`. A refusal carries no clients and is `not_applicable`; a submission that fails the schema is `failed` and nothing is rendered. Text blocks are never read.
+2. **After the model.** The model must answer through `submit_briefing` (mode, headline, clients[{ref, summary, because[]}], notes, limitations). `groundBriefing` drops any client ref the digest did not issue and any `because` ref that is not that client's own alert or action. *(Corrected by ADR-114 §5: the original number check — "a number the digest states" anywhere — accepted fabricated figures that happened to equal an unrelated count (MEDIUM-D); numbers are now grounded to specific cited facts, sentence by sentence. Corrected again by ADR-115, then ADR-116, and replaced by ADR-118: the model writes no text; it selects facts, attention reasons, sources and library phrases, and the server writes every sentence of the briefing.)* It replaced any headline, summary or note that stated such a number with the server's own sentence built from the attention reasons; each of those marks the turn `degraded`. A refusal carries no clients and is `not_applicable`; a submission that fails the schema is `failed` and nothing is rendered. Text blocks are never read.
 3. **Recorded.** `portfolio_ai_turns` holds the question, the scope ids, the validated briefing plus the names and alert/action ids its references resolve to (never a financial figure), grounding status, model and token counts; RLS is own rows or super admin; the definer role writes through the two `api_server` functions only. It is the one Phase 15 table, and it copies no financial number.
 4. **What the model cannot do.** Change a health score, an alert's severity, an action's state or a permission; cite an organisation it was not handed; introduce a figure. Financial figures beyond the health score are not in the digest by design: the analyst says so and points to the client's own pages, where the evidence chain lives.
 
@@ -1538,7 +1538,7 @@ Decision:
    - subject (a client summary may cite only that client's facts or the portfolio's);
    - metric (one of the fact's words is in the sentence);
    - period (if the sentence names a known period, it must be the fact's).
-   A sentence with any number that fails is removed; the rest stands. An emptied summary becomes the server's own sentence from the attention reasons, and an emptied headline becomes the server's count sentence. A limitation may state no number. Prompt version `adviser-v2.0`. *(Superseded in detail by ADR-115: the scan saw digits only (audit M-1) and stripped cited titles as substrings (L-2); claims are now read in every written form and bound per clause; prompt `adviser-v2.1`. Replaced by ADR-116: the model writes no figures; prompt `adviser-v3.0`.)*
+   A sentence with any number that fails is removed; the rest stands. An emptied summary becomes the server's own sentence from the attention reasons, and an emptied headline becomes the server's count sentence. A limitation may state no number. Prompt version `adviser-v2.0`. *(Superseded in detail by ADR-115: the scan saw digits only (audit M-1) and stripped cited titles as substrings (L-2); claims are now read in every written form and bound per clause; prompt `adviser-v2.1`. Replaced by ADR-116 and then ADR-118: the model writes no text; prompt `adviser-v4.0`.)*
 6. **An eligible employee with no assignment has an empty Command Centre.** When the adviser set is empty, the resolver asks `resolvePlatformRole`, the tenancy module's single rule (`my_platform_role`: active, aal2). An active platform account gets an empty context, and the overview renders the specified empty state. Everyone else without a portfolio still gets the uniform 404: a client-only member, a stranger, an aal1 or suspended platform account.
 
 Consequences:
@@ -1548,7 +1548,7 @@ Consequences:
 - Known residual *(narrowed by ADR-115: metric, period and subject are now read per clause)*: the metric and period checks are per sentence, not per number. A sentence that names two metrics can pair a number with the wrong one when the values coincide. The subject, unit and exact-value checks still apply.
 
 ### ADR-115 · Adviser grounding binds every quantitative claim — in digits, words, fractions or multipliers — to one cited fact
-*(Superseded by ADR-116: the final release audit of `33a182f` showed that reading the model's prose cannot be made safe (F-1…F-4). The model now writes no figures; it cites facts and the server writes them. Kept as the record of what was tried and why it was replaced.)*
+*(Superseded by ADR-116, itself superseded by ADR-118: the final release audit of `33a182f` showed that reading the model's prose cannot be made safe (F-1…F-4). The model now writes no text at all; it selects references and the server writes every sentence. Kept as the record of what was tried and why it was replaced.)*
 
 Context: the independent audit of `71fd748` (`docs/PHASE_15_INDEPENDENT_AUDIT.md`) returned NOT READY on one blocker and a related low:
 - **M-1 (MEDIUM).** The grounding scan (`briefing.ts` `NUMBER`) saw digit sequences only. "Revenue fell by twenty per cent and cash runway is one and a half months." and "Revenue fell by a third; costs doubled; margin halved." were graded `passed`, stored with `grounding_status = passed` and shown under the *Grounded* badge. The digest carries no financial fact, so each was a fabrication by construction.
@@ -1594,6 +1594,8 @@ Consequences:
 - **Unchanged.** Authorization, the digest's content, the turn table and RLS are untouched; this is grounding only.
 
 ### ADR-116 · The adviser model does not write figures: it cites facts, and the server writes every figure from the fact
+*(Superseded by ADR-118. The second final release audit (`48f2c4f`) showed that the prose statements this decision still allowed could re-qualify a server-rendered figure ("…has 3 open actions. They are overdue."), and that the prose word list missed many forms. The claims below that no model text sits beside a figure and that F-1…F-3 are closed by construction were false. The typed facts and their rendering are kept; the prose channel and `free-text.ts` are removed. Kept as the record.)*
+
 Context: the final release audit of `33a182f` (`docs/PHASE_15_FINAL_RELEASE_AUDIT.md`) returned NOT READY. ADR-115 had tried to read every quantity in the model's prose and bind it to a cited fact. Four MEDIUM findings showed that reading prose cannot be made safe:
 - **F-1.** A count stood behind a sentence that said something else: `portfolio/clients = 12` grounded "12 clients need attention"; the open-action count grounded "completed 8 actions".
 - **F-2.** The current and previous health scores could swap. "This month" matched any period, and verbs outside the direction list ("slumped") passed.
@@ -1668,3 +1670,55 @@ Consequences:
 - **RED on the old code.** On `33a182f`'s repository, services and resolver, the three large-portfolio loads fail. pgTAP `14_portfolio` has 15 new checks.
 - **Timing.** One local run measured 83 ms for the super admin's 1,005-organisation overview. That is a single local measurement, not a benchmark; no latency benchmark has been performed.
 - **No per-organisation query exists.** The number of requests grows with pages of 1,000, not with organisations.
+
+### ADR-118 · The adviser briefing is structured: the model selects references, the server writes every sentence
+Context: the second final release audit (`docs/PHASE_15_FINAL_RELEASE_AUDIT_2.md`, of `48f2c4f`) returned NOT READY.
+- **F-1 and F-2 remained open.** ADR-116 let the model write prose statements next to server-rendered facts. Prose placed after a fact re-qualified it, and was stored `passed`:
+  - "…has 3 open actions. They are overdue." (1 was overdue);
+  - "…health score for Jul 2026 was 61. That is its latest score." (the latest was 38).
+- **F-4 remained open.** The prose rule was a word list, and it missed many forms, including the first audit's verbatim sentence "Alpha Ltd does not have any critical alerts.".
+- **A test had been altered.** The implementation's test of that sentence had been changed (a trailing "... none." added) so that it was caught. That masked the defect.
+- ADR-116's claims "no model text is placed beside a figure" and "F-1 to F-3 are closed by construction" were false.
+
+Decision:
+1. **Model selects, server writes. The model writes no text at all.** The forced tool `submit_briefing` takes, per headline, client and note, a list of BLOCKS. Every block is a reference to something the server already holds:
+   - `facts` — fact ids. The server renders each fact's canonical sentence: value, noun, subject, period and direction are the fact's. Counts about one client share one sentence, each value with its own noun.
+   - `attention` — ids of MOTION's own attention reasons (`client:N/attention/<kind>`). The server writes the reason's label.
+   - `source` — an `alert:N` or `action:N` of the digest. The server writes it as a source: kind, the title in quotation marks, and its severity or priority and standing. The source is added to the client's citations. A title is tenant text shown as a title; it is never a fact and grounds nothing.
+   - `phrase` — an id from a small server-owned library, each phrase with a condition the server checks against the data:
+     - `needs_attention` (the client has attention reasons);
+     - `look_first` (the client is first in MOTION's attention order);
+     - `client_clear` (the client has no reasons);
+     - `health_unavailable` (the client has no score);
+     - `review_evidence`;
+     - `portfolio_clear` (no client needs attention);
+     - `figures_elsewhere`;
+     - `not_in_portfolio`;
+     - `outside_scope`.
+
+     No phrase states a quantity or a period (a unit test holds the library to that).
+2. **Anything else is discarded, and the answer is degraded.** That means:
+   - a `text` block or any unknown kind;
+   - any field a block's kind does not have (`text`, `value`, `label`…), which is stripped;
+   - an id the digest did not issue; another client's fact, reason or source in a client's summary;
+   - a phrase that is not in the library or whose condition does not hold.
+
+   Limitations are portfolio phrase ids. A refusal is a portfolio phrase.
+3. **There is no free-text channel to police.** `portfolio/domain/free-text.ts` (ADR-116's word list) is removed. No parser, dictionary or Unicode handling is part of the safety of the briefing. A quantity in any language, spelling or script has nowhere to go.
+4. **Grounded means:** every block in the stored briefing was rendered by the server from authorised facts, MOTION's attention reasons, the caller's alerts and actions, and library phrases whose conditions hold, and nothing the model sent was discarded. It does not mean the model chose the most useful references. `degraded` (*Partly grounded*) means something was discarded. The page renders the stored status.
+5. **No commentary channel.** There is no unverified "analyst commentary" beside the figures. Richer language can come later only as further server-owned templates or facts.
+6. **Prompt `adviser-v4.0`.** The model is shown each fact as `{id, type, period, says}`, each client's attention reasons with ids, its alerts and actions by ref, and the phrase library with a `{client}` placeholder.
+
+Consequences:
+- **F-1, F-2 and F-4 are closed by the contract, not by recognition.** Neither "They are overdue." nor "That is its latest score." nor "Alpha Ltd does not have any critical alerts." can be submitted as anything the server renders. F-3 stays closed; ordering is kept and no value moves between facts.
+- **Tests.**
+  - `test/eval/portfolio-eval.test.ts`, 80 cases: every sentence both audits reproduced, VERBATIM (including the restored "Alpha Ltd does not have any critical alerts."), alone and attached after a correct fact; the brief's model-misbehaviour cases A–F; compound ordering; the rise/fall template; fact authorisation; phrase conditions; attention and source rendering; a well-behaved answer.
+  - `test/unit/portfolio-briefing-contract.test.ts`, 16 cases: the schema, per-kind field strictness, malformed references, and the phrase library carrying no quantity or period.
+  - `test/integration/portfolio-ai.test.ts`: a full turn from references to stored `passed` text, and fabricated text and values beside a fact stored `degraded`.
+  - On `48f2c4f`'s grounder, all nine audited attachment and prose sentences tried were graded `passed`.
+- **ADR-116 is superseded**; its fact model and rendering are kept.
+- **What this does not claim.** It does not make false statements impossible for the model in general: it can still choose a less relevant fact. What it guarantees is that the trusted briefing contains only server-rendered facts, attention reasons, sources and approved phrases, and that model text is never rendered into it.
+- **Limitations.**
+  - The briefing is less fluent than prose.
+  - No live Claude model has been run (no API key); every test uses the deterministic validator and a fake transport.
+  - The digest sent to the model has no size bound (audit L-H).

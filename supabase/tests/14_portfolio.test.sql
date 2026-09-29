@@ -32,8 +32,8 @@ select has_function('app', 'adviser_org_ids', 'app.adviser_org_ids exists');
 select ok((select pg_get_expr(polqual, polrelid) from pg_policy where polname = 'portfolio_ai_turns_select') like '%adviser_org_ids%',
           'the turn read policy checks CURRENT adviser access, not authorship alone');
 
--- ADR-117 (audit F-5): the detail reads are RPCs over a scope the database derives, and read under
--- the caller's own RLS (SECURITY INVOKER); no id list in a URL.
+-- ADR-117 (audit F-5): the detail reads are RPCs over a scope the database derives — SECURITY DEFINER
+-- like every api.* function (R2-A-06), reading only rows of app.portfolio_scope; no id list in a URL.
 select has_function('app', 'portfolio_scope', array['uuid[]'], 'app.portfolio_scope exists');
 select ok((select prosecdef from pg_proc where oid = 'app.portfolio_scope(uuid[])'::regprocedure),
           'app.portfolio_scope is security definer (it reads the resolver)');

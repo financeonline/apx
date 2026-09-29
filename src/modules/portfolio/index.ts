@@ -60,9 +60,11 @@ export {
   BriefingSchema,
   DIGEST_DETAIL_PER_CLIENT,
   MAX_QUESTION_CHARS,
+  PHRASES,
   SubmissionSchema,
   buildDigest,
   factForModel,
+  phrasesForModel,
   groundBriefing,
   renderFacts,
   type Briefing,
@@ -72,10 +74,10 @@ export {
   type Fact,
   type GroundedBriefing,
   type Submission,
-  type SubmittedStatement,
+  type SubmittedBlock,
+  type DigestReason,
+  type PhraseId,
 } from './domain/briefing';
-
-export { quantitativeContent } from './domain/free-text';
 
 export {
   askAdviser,

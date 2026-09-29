@@ -385,10 +385,11 @@ Alerts also show the threshold that fired in the tooltip ("We flag expense categ
 - **Distinctive** Persistent context banner at the top of every tenant page: "You are viewing **Acme Ltd** as a MOTION adviser" with a *Back to portfolio* link. Org switcher lists assigned organisations grouped separately with an "adviser" badge. Their name appears with a "MOTION adviser" badge wherever it is shown to tenant users (assignee lists, audit entries).
 - **Primary tasks** Import and review client files; run analysis; raise and assign actions; generate the monthly report.
 - **Command Centre (Phase 15, ADR-112–115).** `/portfolio` is now the Command Centre: attention queue, portfolio counts, every client, recent changes, with Alerts, Actions, client pages and an adviser analyst. The card list above describes the pre-Phase-15 design.
-- **Adviser analyst badges (ADR-116).** Each answer shows the server's grounding status, never a client-side judgement:
-  - *Grounded*: nothing was removed. Every figure in the answer was written by MOTION from a fact it holds (the model cites facts and never writes a number), and the analyst's own words carry no quantity.
+- **Adviser analyst (ADR-118).** The answer is a structured briefing: every sentence is written by MOTION from its facts, its attention reasons, the client's alerts and actions (shown as quoted titles), and a small set of fixed phrases. The model chooses and orders them and writes no text.
+- **Badges.** Each answer shows the server's grounding status, never a client-side judgement:
+  - *Grounded*: every sentence was rendered from authorised facts, reasons, sources and phrases whose conditions hold, and nothing the model sent was discarded.
   - *Partly grounded*: one or more sentences stated something the data does not, and were removed. Removed sentences are never shown.
-  - Alert and action titles are shown by the page from the answer's citations and are never treated as figures.
+  - Alert and action titles appear as quoted source titles and in the citations, and are never treated as figures.
 
 ### 9.5 Super Admin
 - **Lands on** `/platform` (organisations overview with counts, failed jobs, open AI feedback). Platform users must have enrolled TOTP; without it every `/platform` and `/portfolio` request redirects to `/account/mfa` (ADR-038.8).
