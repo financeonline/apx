@@ -1505,7 +1505,7 @@ Context: SOW §18 "client AI analysis"; the brief's rule that the authorisation 
 
 Decision:
 1. **Before the model.** `askAdviser` loads the caller's portfolio (ADR-112 §3) and builds a digest from it — each client, alert and action given a short reference (`client:N`, `alert:N`, `action:N`), health as score/band/month/trend, attention reasons as labels, and the counts. The model is shown that digest inside a `<data>` element and nothing else: no data or database tools, no organisation it may not advise. It has exactly one tool — the forced structured-output tool `submit_briefing` — through which it must answer. The turn is then opened by `api_server.portfolio_ai_begin_turn`, which re-checks every organisation in scope against the actor with `app.org_role_of` (the same resolver RLS uses) and charges a 10/min throttle — refusing, before any row exists, a scope the actor may not advise, whatever the server asked for.
-2. **After the model.** The model must answer through `submit_briefing` (mode, headline, clients[{ref, summary, because[]}], notes, limitations). `groundBriefing` drops any client ref the digest did not issue and any `because` ref that is not that client's own alert or action. *(Corrected by ADR-114 §5: the original number check — "a number the digest states" anywhere — accepted fabricated figures that happened to equal an unrelated count (MEDIUM-D); numbers are now grounded to specific cited facts, sentence by sentence. Corrected again by ADR-115: every quantitative claim — in digits, words, fractions or multipliers — is bound to one cited fact, clause by clause; titles are never facts.)* It replaced any headline, summary or note that stated such a number with the server's own sentence built from the attention reasons; each of those marks the turn `degraded`. A refusal carries no clients and is `not_applicable`; a submission that fails the schema is `failed` and nothing is rendered. Text blocks are never read.
+2. **After the model.** The model must answer through `submit_briefing` (mode, headline, clients[{ref, summary, because[]}], notes, limitations). `groundBriefing` drops any client ref the digest did not issue and any `because` ref that is not that client's own alert or action. *(Corrected by ADR-114 §5: the original number check — "a number the digest states" anywhere — accepted fabricated figures that happened to equal an unrelated count (MEDIUM-D); numbers are now grounded to specific cited facts, sentence by sentence. Corrected again by ADR-115, and replaced by ADR-116: the model now cites facts by id and writes no figure; the server renders every figure from its fact, and prose carrying anything quantitative is removed.)* It replaced any headline, summary or note that stated such a number with the server's own sentence built from the attention reasons; each of those marks the turn `degraded`. A refusal carries no clients and is `not_applicable`; a submission that fails the schema is `failed` and nothing is rendered. Text blocks are never read.
 3. **Recorded.** `portfolio_ai_turns` holds the question, the scope ids, the validated briefing plus the names and alert/action ids its references resolve to (never a financial figure), grounding status, model and token counts; RLS is own rows or super admin; the definer role writes through the two `api_server` functions only. It is the one Phase 15 table, and it copies no financial number.
 4. **What the model cannot do.** Change a health score, an alert's severity, an action's state or a permission; cite an organisation it was not handed; introduce a figure. Financial figures beyond the health score are not in the digest by design: the analyst says so and points to the client's own pages, where the evidence chain lives.
 
@@ -1520,7 +1520,7 @@ Context: the independent audit of `bab3a68` returned NOT READY with five blocker
 - **MEDIUM-E.** An employee with no assignment, whom middleware routes to `/portfolio`, received the uniform 404 instead of the empty state `UX_ARCHITECTURE.md` specifies. The route matrix still said 200.
 
 Decision:
-1. **Counts are aggregates, never derived from a list.** `api.portfolio_summary(orgs, today, due_soon_until)` computes, in one grouped statement over the full population: standing alerts (total, critical, high); open actions (total, overdue, due soon, urgent, urgent-and-not-overdue, the caller's own); and each organisation's health. Every count on every Command Centre page, every client row and every attention reason reads it. Overdue, due-soon and urgent are the Action Centre's own rules; the due-soon window is passed in from `DUE_SOON_DAYS`, so the rule has one source. The function is security definer and scopes itself to `orgs ∩ app.adviser_org_ids()`, so a forged id or a client-only organisation contributes no row.
+1. **Counts are aggregates, never derived from a list.** *(Transport corrected by ADR-117: the scope is derived in the database, a NULL list is the whole scope, and the aggregate is read in pages.)* `api.portfolio_summary(orgs, today, due_soon_until)` computes, in one grouped statement over the full population: standing alerts (total, critical, high); open actions (total, overdue, due soon, urgent, urgent-and-not-overdue, the caller's own); and each organisation's health. Every count on every Command Centre page, every client row and every attention reason reads it. Overdue, due-soon and urgent are the Action Centre's own rules; the due-soon window is passed in from `DUE_SOON_DAYS`, so the rule has one source. The function is security definer and scopes itself to `orgs ∩ app.adviser_org_ids()`, so a forged id or a client-only organisation contributes no row.
 2. **Detail lists are capped independently and say so.**
    - Alerts are read worst first (severity, then oldest).
    - Actions are read with the lens as a predicate in the statement, in `byUrgency` order.
@@ -1538,7 +1538,7 @@ Decision:
    - subject (a client summary may cite only that client's facts or the portfolio's);
    - metric (one of the fact's words is in the sentence);
    - period (if the sentence names a known period, it must be the fact's).
-   A sentence with any number that fails is removed; the rest stands. An emptied summary becomes the server's own sentence from the attention reasons, and an emptied headline becomes the server's count sentence. A limitation may state no number. Prompt version `adviser-v2.0`. *(Superseded in detail by ADR-115: the scan saw digits only (audit M-1) and stripped cited titles as substrings (L-2); claims are now read in every written form and bound per clause; prompt `adviser-v2.1`.)*
+   A sentence with any number that fails is removed; the rest stands. An emptied summary becomes the server's own sentence from the attention reasons, and an emptied headline becomes the server's count sentence. A limitation may state no number. Prompt version `adviser-v2.0`. *(Superseded in detail by ADR-115: the scan saw digits only (audit M-1) and stripped cited titles as substrings (L-2); claims are now read in every written form and bound per clause; prompt `adviser-v2.1`. Replaced by ADR-116: the model writes no figures; prompt `adviser-v3.0`.)*
 6. **An eligible employee with no assignment has an empty Command Centre.** When the adviser set is empty, the resolver asks `resolvePlatformRole`, the tenancy module's single rule (`my_platform_role`: active, aal2). An active platform account gets an empty context, and the overview renders the specified empty state. Everyone else without a portfolio still gets the uniform 404: a client-only member, a stranger, an aal1 or suspended platform account.
 
 Consequences:
@@ -1548,6 +1548,8 @@ Consequences:
 - Known residual *(narrowed by ADR-115: metric, period and subject are now read per clause)*: the metric and period checks are per sentence, not per number. A sentence that names two metrics can pair a number with the wrong one when the values coincide. The subject, unit and exact-value checks still apply.
 
 ### ADR-115 · Adviser grounding binds every quantitative claim — in digits, words, fractions or multipliers — to one cited fact
+*(Superseded by ADR-116: the final release audit of `33a182f` showed that reading the model's prose cannot be made safe (F-1…F-4). The model now writes no figures; it cites facts and the server writes them. Kept as the record of what was tried and why it was replaced.)*
+
 Context: the independent audit of `71fd748` (`docs/PHASE_15_INDEPENDENT_AUDIT.md`) returned NOT READY on one blocker and a related low:
 - **M-1 (MEDIUM).** The grounding scan (`briefing.ts` `NUMBER`) saw digit sequences only. "Revenue fell by twenty per cent and cash runway is one and a half months." and "Revenue fell by a third; costs doubled; margin halved." were graded `passed`, stored with `grounding_status = passed` and shown under the *Grounded* badge. The digest carries no financial fact, so each was a fabrication by construction.
 - **L-2 (LOW).** The titles of cited alerts and actions were removed from the sentence as substrings before the scan. An action titled `3` erased the `3` of "Revenue fell 3%", which then passed.
@@ -1590,3 +1592,79 @@ Consequences:
   - A relative period ("this quarter", "last month") is not read as a period.
   - No live Claude model was run: there is no API key in this environment. The validator is deterministic and model-independent; the fake transport is the evidence.
 - **Unchanged.** Authorization, the digest's content, the turn table and RLS are untouched; this is grounding only.
+
+### ADR-116 · The adviser model does not write figures: it cites facts, and the server writes every figure from the fact
+Context: the final release audit of `33a182f` (`docs/PHASE_15_FINAL_RELEASE_AUDIT.md`) returned NOT READY. ADR-115 had tried to read every quantity in the model's prose and bind it to a cited fact. Four MEDIUM findings showed that reading prose cannot be made safe:
+- **F-1.** A count stood behind a sentence that said something else: `portfolio/clients = 12` grounded "12 clients need attention"; the open-action count grounded "completed 8 actions".
+- **F-2.** The current and previous health scores could swap. "This month" matched any period, and verbs outside the direction list ("slumped") passed.
+- **F-3.** Two figures in one clause could swap values. "As well as", "as" and "of" did not break a clause.
+- **F-4.** "A couple of", "a single", "a dozen", "both", "all", "none of", Roman numerals and Arabic-Indic digits were not read at all.
+
+Every fix of this kind leaves the next phrasing through.
+
+Decision:
+1. **Facts are authoritative, typed and self-describing.** Each digest fact carries id, subject, organisation, metric, claim type, period, exact value, direction, source, and the canonical sentence that states it.
+   - Claim types: `count`, `score`, `score_change`, `percent_change`, `amount`, `duration`, `multiplier`. The Phase 15 digest emits the first three.
+   - Example sentences: "Alpha Ltd has 3 open actions"; "Alpha Ltd's health score fell 23 points, from 61 in Jul 2026 to 38 in Aug 2026"; "12 actions are open across the portfolio".
+   - The sentence is written when the digest is built, from the view's aggregates, and never from anything the model sends.
+2. **The model's output is statements, and a statement is prose OR facts.** The forced tool `submit_briefing` takes, per headline, client summary and note, a list of `{kind: 'text', text}` or `{kind: 'facts', facts: [ids]}`.
+   - The model is shown each fact as `{id, type, period, says}`, where `says` is the sentence the server will write, and chooses ids.
+   - It never supplies a value, and no model text is placed beside a fact. Text sent with a facts statement is recorded and never shown.
+   - A modifier beside a server figure ("8 open actions *that are overdue*") would re-qualify it. So a fact statement is the server's whole sentence.
+   - Counts about one client share a sentence ("Alpha Ltd has 8 standing critical alerts and 3 open actions."). Each value stays with its own noun, in whatever order the ids arrive.
+3. **The server validates and renders.**
+   - Each fact id must be one the digest issued. A client summary may cite only that client's and the portfolio's facts.
+   - Invalid ids are dropped. The valid facts in the same statement still render, because no fact can lend its value to another.
+   - The rendered text, the fact ids it contains, and the status are what is stored. The page renders the stored text, and its shape is unchanged.
+4. **Prose is untrusted, so a rejection rule replaces the parser.** `portfolio/domain/free-text.ts` does not try to understand prose. It asks whether the text carries anything quantitative, and if so the sentence is removed. It looks for:
+   - any numeral in any script (`\p{N}`) and Roman numerals;
+   - number, ordinal (from "second"), fraction, multiplier and cardinality words ("a dozen", "a couple", "a single", "both", "all", "every", "none", "no alerts");
+   - percent and point words, and magnitude words ("sharply", "significantly");
+   - any period ("August", "this month", "year to date", "Q3"), because periods belong to facts;
+   - letters outside the Latin script.
+
+   Vague non-numeric quantifiers ("several", "some", "a few"), "first", "one of" and "the one" are allowed. Client names are set aside whole, and only when they contain a letter. A false positive costs one sentence; the rule errs that way on purpose.
+5. **Titles are metadata.** A cited alert or action is shown by the page from its `because` ref. Its title is never a fact, and a title quoted in prose is prose (its numerals remove the sentence).
+6. **The badge.** `passed` is stored only when nothing was dropped: every fact valid and every prose statement free of quantities. A figure shown under *Grounded* is therefore always a figure the server wrote from a fact in the caller's digest. The badge is read from `grounding_status`, never decided on the client.
+7. **Prompt `adviser-v3.0`.** The model is told it does not write numbers, how to cite facts, and what prose may contain. The server does not rely on it.
+
+Consequences:
+- **F-1 to F-3 are closed by construction.** A figure's noun, subject, period and direction are part of its fact's sentence. The model cannot attach a figure to another meaning, swap two figures, or reverse a direction, because it writes none of them.
+- **F-4 is closed by the rejection rule.** It is a fail-closed filter over untrusted text, not the source of any figure.
+- **Tests.**
+  - `test/eval/portfolio-eval.test.ts`, 51 cases: the brief's 20-case matrix, each of the audit's F-1 to F-4 sentences, fact authorisation, and honest answers.
+  - `test/unit/portfolio-free-text.test.ts`: 73 cases.
+  - `test/integration/portfolio-ai.test.ts`, +2 cases: a model citing facts is stored `passed` with the server's sentences, and never the value it tried to write; swapped and number-word prose is stored `degraded`.
+  - On `33a182f`'s grounder, every one of ten of the audit's bad sentences (F-1 to F-4), with the citations a model would send, was graded `passed`.
+- **ADR-115 is superseded.** `portfolio/domain/quantities.ts` and its test are removed. The organisation analyst's claim grammar (AI_ARCHITECTURE §7.9) is untouched.
+- **Limitations, recorded.**
+  - Qualitative prose is not verified against facts. "Cash pressure is increasing" is allowed and is the model's statement, not MOTION's. It cannot carry a figure, a period or a cardinality.
+  - The rejection rule is a vocabulary. A quantity written in a form it does not list would stay in prose. It would still be the model's words, never presented as a server figure. The rule covers every form the audits and briefs name.
+  - No live Claude model has been run (no API key in this environment). Every test uses the deterministic validator and a fake transport.
+
+### ADR-117 · The Command Centre's reads derive their scope in the database and carry no id list in a URL
+Context: final release audit of `33a182f`, finding **F-5** (MEDIUM):
+- The four detail reads (standing alerts, recent alerts, open actions by lens, finished actions) were PostgREST GETs with `organization_id=in.(…every id…)` in the URL.
+- At 201 organisations the gateway answered 414 URI Too Long. `/portfolio`, its alerts and actions pages, the client pages and the analyst all failed for any adviser that large, including every super admin once the platform passes 200 organisations.
+- Separately (**L-6**), the resolver `api.my_organizations()` and the aggregate were cut at PostgREST's 1,000 rows.
+
+Decision:
+1. **One scope, derived in the database.** `app.portfolio_scope(orgs)` is the caller's current adviser organisations (`app.adviser_org_ids()`, from `app.accessible_org_roles()`, the resolver every RLS policy reads), narrowed to `orgs` when a list is given.
+   - `NULL` means the whole scope.
+   - A list can only narrow the scope; a forged, foreign or client-only id selects nothing. A list in a request body is never authorisation.
+2. **The detail reads are RPCs (POST):** `api.portfolio_standing_alerts`, `api.portfolio_recent_alerts`, `api.portfolio_open_actions` and `api.portfolio_finished_actions`.
+   - Like every `api.*` function they are security definers with an empty `search_path` (R2-A-06). They read only rows of organisations in `app.portfolio_scope`, bound to the caller's own `app.uid()`, exactly as `api.portfolio_summary` does.
+   - They order and cap at 500 in the statement.
+   - The action lens predicates are the ones the aggregate counts with.
+3. **`api.portfolio_summary` reads through the same scope.** A whole-portfolio read sends `NULL`: the overview, the alerts and actions pages and the analyst's digest send no id list at all. A client page sends its one id.
+4. **Pages, not caps.** The aggregate (one row per organisation) and `my_organizations` (name order, id tiebreak) are read in pages of 1,000 until a short page. A super admin's portfolio of any size is read whole.
+
+Consequences:
+- **Evidence.** `test/integration/portfolio-transport.test.ts` holds 1,005 organisations:
+  - a super admin reads all of them in 6 POSTs (resolver ×2, aggregate ×2, feeds ×2), with counts from the last page;
+  - an employee with 250 assignments reads exactly those;
+  - an owner who asks for foreign ids, a client, and an owner over the organisation they are only a client of all read nothing foreign;
+  - the 500 cap cannot be raised; anon cannot call the reads.
+- **RED on the old code.** On `33a182f`'s repository, services and resolver, the three large-portfolio loads fail. pgTAP `14_portfolio` has 15 new checks.
+- **Timing.** One local run measured 83 ms for the super admin's 1,005-organisation overview. That is a single local measurement, not a benchmark; no latency benchmark has been performed.
+- **No per-organisation query exists.** The number of requests grows with pages of 1,000, not with organisations.

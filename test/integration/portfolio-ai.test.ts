@@ -44,18 +44,21 @@ const ctxFor = async (user: string, aal: 'aal1' | 'aal2' = 'aal1'): Promise<Port
 };
 
 /**
- * The v2 briefing shape (ADR-114 §5) from a compact one: a string headline or note becomes
- * `{ text, facts: [] }` and a client without `facts` cites none — so a number in it must fail.
+ * The v3 submission (ADR-116) from a compact one: a string headline, client summary or note is ONE
+ * text statement — the model's own prose, which may carry nothing quantitative. A client may give
+ * `statements` instead, to cite facts ({ kind: 'facts', facts: [ids] }), which the server renders.
  */
-function v2(reply: unknown): unknown {
+type Statement = { kind: 'text'; text: string } | { kind: 'facts'; facts: string[]; text?: string };
+function v3(reply: unknown): unknown {
   if (reply === null || typeof reply !== 'object' || !('mode' in reply)) return reply;
-  const r = reply as unknown as { headline: unknown; clients: Array<Record<string, unknown>>; notes: unknown[]; headline_facts?: string[] };
+  const r = reply as { headline: string | Statement[]; clients: Array<{ ref: string; summary?: string; statements?: Statement[]; because: string[] }>; notes: Array<string | Statement[]>; limitations: string[]; mode: string };
+  const text = (t: string): Statement[] => [{ kind: 'text', text: t }];
   return {
-    ...r,
-    headline: typeof r.headline === 'string' ? { text: r.headline, facts: r.headline_facts ?? [] } : r.headline,
-    clients: r.clients.map((c) => ({ facts: [], ...c })),
-    notes: r.notes.map((n) => (typeof n === 'string' ? { text: n, facts: [] } : n)),
-    headline_facts: undefined,
+    mode: r.mode,
+    headline: typeof r.headline === 'string' ? text(r.headline) : r.headline,
+    clients: r.clients.map((c) => ({ ref: c.ref, statements: c.statements ?? text(c.summary ?? ''), because: c.because })),
+    notes: r.notes.map((n) => ({ statements: typeof n === 'string' ? text(n) : n })),
+    limitations: r.limitations,
   };
 }
 
@@ -65,7 +68,7 @@ function fakeModel(reply: (call: ModelCall) => unknown): { transport: ModelTrans
   const transport: ModelTransport = async (call) => {
     calls.push(call);
     return {
-      content: [{ type: 'tool_use', id: 'tu_1', name: BRIEFING_TOOL, input: v2(reply(call)) }] as unknown as ModelResponse['content'],
+      content: [{ type: 'tool_use', id: 'tu_1', name: BRIEFING_TOOL, input: v3(reply(call)) }] as unknown as ModelResponse['content'],
       stopReason: 'tool_use', usage: { inputTokens: 100, outputTokens: 50 }, model: 'fake-model',
     };
   };
@@ -210,6 +213,50 @@ describe('what the server keeps of an answer', () => {
     for (const words of ['twenty per cent', 'one and a half', 'doubled', 'halved']) expect(stored).not.toContain(words);
     const turns = await listAdviserTurns(ctx);
     expect(turns.find((t) => t.id === result.turnId)?.groundingStatus).toBe('degraded');
+  });
+
+  it('ADR-116: the model cites facts; the server writes every figure, and the answer is Grounded', async () => {
+    const model = fakeModel(() => ({
+      mode: 'answer',
+      headline: [{ kind: 'facts', facts: ['portfolio/needing_attention'] }, { kind: 'text', text: 'Alpha needs attention first.' }],
+      clients: [{
+        ref: 'client:1',
+        statements: [
+          // The model tries to put its own figure beside the fact; it is never shown.
+          { kind: 'facts', facts: ['client:1/critical_alerts', 'client:1/open_actions'], text: 'Alpha has 40 critical alerts' },
+          { kind: 'text', text: 'Its cash alert is the one to act on.' },
+        ],
+        because: ['alert:1'],
+      }],
+      notes: [], limitations: [],
+    }));
+    const ctx = await ctxFor(employee, 'aal2');
+    const result = await askAdviser(ctx, 'Where first?', { transport: model.transport });
+    expect(result.status).toBe('passed');
+    const alpha = result.briefing!.clients[0]!;
+    expect(alpha.summary).toBe(`PA Alpha ${RUN} has 1 standing critical alert and 0 open actions. Its cash alert is the one to act on.`);
+    expect(alpha.facts).toEqual(['client:1/critical_alerts', 'client:1/open_actions']);
+    // What the model was shown of each fact is the sentence the server writes — not a number to reuse.
+    expect(handed(model.calls[0]!)).toContain(`PA Alpha ${RUN} has 1 standing critical alert.`);
+    const stored = adminSql(`select grounding_status || '|' || answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
+    expect(stored.startsWith('passed|')).toBe(true);
+    expect(stored).not.toContain('40 critical');
+  });
+
+  it('F-1/F-3: prose that states or swaps a figure is removed, and the turn is not Grounded', async () => {
+    const model = fakeModel(() => ({
+      mode: 'answer', headline: 'Alpha needs attention first.',
+      clients: [{ ref: 'client:1', statements: [
+        { kind: 'text', text: 'It has 3 critical alerts as well as 1 open action.' },
+        { kind: 'facts', facts: ['client:1/critical_alerts'] },
+      ], because: [] }],
+      notes: ['Twelve clients need attention.'], limitations: [],
+    }));
+    const result = await askAdviser(await ctxFor(employee, 'aal2'), 'Summarise', { transport: model.transport });
+    expect(result.status).toBe('degraded');
+    expect(result.briefing!.clients[0]!.summary).toBe(`PA Alpha ${RUN} has 1 standing critical alert.`);
+    expect(result.briefing!.notes).toEqual([]);
+    expect(adminSql(`select grounding_status from public.portfolio_ai_turns where id='${result.turnId}'`).trim()).toBe('degraded');
   });
 
   it('L-2: a cited title that is a number does not launder a figure', async () => {

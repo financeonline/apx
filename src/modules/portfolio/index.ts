@@ -60,24 +60,22 @@ export {
   BriefingSchema,
   DIGEST_DETAIL_PER_CLIENT,
   MAX_QUESTION_CHARS,
+  SubmissionSchema,
   buildDigest,
+  factForModel,
   groundBriefing,
+  renderFacts,
   type Briefing,
+  type ClaimType,
   type Digest,
   type DigestClient,
   type Fact,
-  type FactUnit,
   type GroundedBriefing,
+  type Submission,
+  type SubmittedStatement,
 } from './domain/briefing';
 
-export {
-  readQuantities,
-  type PeriodMention,
-  type Quantity,
-  type QuantityUnit,
-  type Reading,
-  type ReadingContext,
-} from './domain/quantities';
+export { quantitativeContent } from './domain/free-text';
 
 export {
   askAdviser,

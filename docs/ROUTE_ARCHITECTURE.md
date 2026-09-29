@@ -154,7 +154,7 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 
 | Route | Purpose | Roles | Permissions | Flag | Render | Data loaded | Empty / denied |
 |---|---|---|---|---|---|---|---|
-| `/portfolio` | The Command Centre (ADR-112): attention queue, portfolio counts, client list, recent changes; `/portfolio/alerts`, `/portfolio/actions`, `/portfolio/clients/[orgId]`, `/portfolio/analyst` | `platform_employee`, `platform_super_admin` (TOTP enrolled), and any member holding `owner` or `admin` in at least one organisation | the adviser roles, i.e. the holders of `assignments.view` | — | Server | `getPortfolioContext()` (the resolver's adviser organisations) → `loadPortfolio(ctx)`: one uncapped aggregate `api.portfolio_summary(orgs, today, due_soon_until)` scoped to `orgs ∩ app.adviser_org_ids()`, plus the two recent feeds (7 days, capped 50), under the caller's RLS; detail pages add their own capped list (500) with its authoritative total (ADR-112, ADR-114) | No assignments → "No client organizations assigned yet" |
+| `/portfolio` | The Command Centre (ADR-112): attention queue, portfolio counts, client list, recent changes; `/portfolio/alerts`, `/portfolio/actions`, `/portfolio/clients/[orgId]`, `/portfolio/analyst` | `platform_employee`, `platform_super_admin` (TOTP enrolled), and any member holding `owner` or `admin` in at least one organisation | the adviser roles, i.e. the holders of `assignments.view` | — | Server | `getPortfolioContext()` (the resolver's adviser organisations, read in pages) → `loadPortfolio(ctx)`: one uncapped aggregate `api.portfolio_summary(NULL, today, due_soon_until)` over `app.portfolio_scope` (the caller's current adviser organisations, derived in the database), plus the two recent feeds (7 days, capped 50); detail pages add their own capped list (500) with its authoritative total. Every read is an RPC (POST); no id list travels in a URL, and a client page's one id can only narrow the scope (ADR-112, ADR-114, ADR-117) | No assignments → "No client organizations assigned yet" |
 
 ### 5.1 `/portfolio` — who gets what (ADR-112, ADR-114)
 
@@ -171,7 +171,7 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 | Stranger (signed in, no membership) | 404 | 404 | none |
 | Anonymous | 302 → sign-in | 302 → sign-in | — |
 
-`/portfolio/alerts`, `/portfolio/actions` and `/portfolio/analyst` follow the `/portfolio` column. The analyst form is hidden when the scope is empty. Each stored answer carries the server's grounding status: *Grounded* only when every quantitative claim was bound to a cited fact (`passed`, ADR-115), *Partly grounded* when sentences were removed (`degraded`).
+`/portfolio/alerts`, `/portfolio/actions` and `/portfolio/analyst` follow the `/portfolio` column. The analyst form is hidden when the scope is empty. Each stored answer carries the server's grounding status: *Grounded* only when nothing was dropped — every figure in it was written by the server from a fact in the caller's digest, and no prose carried a quantity (`passed`, ADR-116) — *Partly grounded* when something was removed (`degraded`).
 
 ## 6. Platform family `/platform/*`
 

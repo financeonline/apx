@@ -1,7 +1,7 @@
 import 'server-only';
 import { z } from 'zod';
 import { assertCan } from '@/core/permissions';
-import { ValidationError } from '@/core/errors';
+import { ValidationError, toMotionError } from '@/core/errors';
 import { callApi } from '../data/rpc';
 import type { AccessContext } from '../context';
 import type { SupabaseClient } from '@supabase/supabase-js';
@@ -85,10 +85,25 @@ export async function cancelDeletion(ctx: AccessContext): Promise<string> {
   return callApi<string>(ctx.db, 'cancel_deletion', { p_org: ctx.orgId }, ctx.requestId);
 }
 
-/** One statement regardless of organization count (ADR-038.13). */
+/** Rows per page when reading the accessible set: PostgREST's `max_rows`. */
+const ORGANIZATION_PAGE = 1_000;
+
+/**
+ * One statement regardless of organization count (ADR-038.13), read in pages of `max_rows` so an
+ * accessible set larger than one page — a super admin's, past 1,000 organisations — is read whole
+ * rather than silently cut (ADR-117). Name order, with the id as the tiebreaker that makes pages stable.
+ */
 export async function listMyOrganizations(db: SupabaseClient): Promise<OrganizationSummary[]> {
-  const rows = await callApi<Array<Record<string, string>>>(db, 'my_organizations', {});
-  return (rows ?? []).map((r) => ({
+  const rows: Array<Record<string, string>> = [];
+  for (let from = 0; ; from += ORGANIZATION_PAGE) {
+    const { data, error } = await db.schema('api').rpc('my_organizations', {})
+      .order('name').order('organization_id').range(from, from + ORGANIZATION_PAGE - 1);
+    if (error) throw toMotionError(error);
+    const page = (data ?? []) as Array<Record<string, string>>;
+    rows.push(...page);
+    if (page.length < ORGANIZATION_PAGE) break;
+  }
+  return rows.map((r) => ({
     organizationId: r.organization_id!,
     slug: r.slug!,
     name: r.name!,

@@ -1,6 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { toMotionError } from '@/core/errors';
-import { OPEN_STATUSES, type ActionPriority, type ActionStatus } from '@/modules/actions';
+import type { ActionPriority, ActionStatus } from '@/modules/actions';
 import type { AlertSeverity } from '@/modules/alerts';
 import { bandFor } from '@/modules/health';
 import type { ClientCounts, PortfolioAction, PortfolioAlert, PortfolioHealth } from '../domain/types';
@@ -17,14 +17,28 @@ import type { ClientCounts, PortfolioAction, PortfolioAlert, PortfolioHealth } f
  *  - DETAIL LISTS — alerts and actions to show, each explicitly ordered and capped. A cap limits what
  *    is SHOWN; the list travels with the authoritative total so the page can say so.
  *
- * Every statement carries the authorised ids and runs under the caller's RLS; none loops per
- * organisation. PostgREST's `max_rows` (1,000 locally) is never relied on: every detail read sets a
- * limit at or below it, and the aggregate returns one row per organisation.
+ * Transport (ADR-117, audit F-5). Every read is an RPC — a POST — and none carries the portfolio's
+ * ids in a URL, where 201 organisations overflowed the gateway (414). `orgIds === null` means "every
+ * organisation the caller advises": the database derives that scope itself (`app.portfolio_scope`,
+ * from `app.adviser_org_ids()`), so the overview sends no list at all. A list narrows the scope and
+ * is intersected with it; it can never widen it. Like every `api.*` function the reads are
+ * definers, and they read only rows of that scope — derived from `app.accessible_org_roles()`, the
+ * resolver every RLS policy reads. None loops per organisation.
+ *
+ * PostgREST's `max_rows` (1,000 locally) is never relied on: every detail read is capped at or
+ * below it in the statement, and the aggregate — one row per organisation — is read in pages of
+ * 1,000 in organisation order until a short page, so a portfolio of any size is read whole.
  */
 
 export const ALERT_DETAIL_CAP = 500;
 export const ACTION_DETAIL_CAP = 500;
 export const RECENT_CAP = 50;
+/** PostgREST's row cap; a paged read asks for exactly this many rows at a time. */
+export const PAGE_ROWS = 1_000;
+
+/** `null`: the whole adviser scope, derived in the database. A list narrows it (one client's page). */
+export type Scope = readonly string[] | null;
+const scopeArg = (orgIds: Scope) => (orgIds === null ? null : [...orgIds]);
 
 function unwrap<T>(data: T[] | null, error: unknown, requestId?: string): T[] {
   if (error) throw toMotionError(error, requestId);
@@ -53,13 +67,22 @@ export interface OrganisationSummary {
 }
 
 export async function loadPortfolioSummary(
-  db: SupabaseClient, orgIds: readonly string[], today: string, dueSoonUntil: string, requestId?: string,
+  db: SupabaseClient, orgIds: Scope, today: string, dueSoonUntil: string, requestId?: string,
 ): Promise<Map<string, OrganisationSummary>> {
-  if (orgIds.length === 0) return new Map();
-  const { data, error } = await db.schema('api').rpc('portfolio_summary', {
-    p_orgs: [...orgIds], p_today: today, p_due_soon_until: dueSoonUntil,
-  });
-  const rows = unwrap(data as SummaryRow[] | null, error, requestId);
+  if (orgIds !== null && orgIds.length === 0) return new Map();
+  const rows: SummaryRow[] = [];
+  for (let from = 0; ; from += PAGE_ROWS) {
+    const { data, error } = await db.schema('api').rpc('portfolio_summary', {
+      p_orgs: scopeArg(orgIds), p_today: today, p_due_soon_until: dueSoonUntil,
+    }).order('organization_id').range(from, from + PAGE_ROWS - 1);
+    const page = unwrap(data as SummaryRow[] | null, error, requestId);
+    rows.push(...page);
+    if (page.length < PAGE_ROWS) break;
+  }
+  return summaries(rows);
+}
+
+function summaries(rows: readonly SummaryRow[]): Map<string, OrganisationSummary> {
   return new Map(rows.map((row) => [row.organization_id, {
     organizationId: row.organization_id,
     counts: {
@@ -100,11 +123,8 @@ export async function loadPortfolioSummary(
 interface AlertRow {
   id: string; organization_id: string; rule_key: string; severity: AlertSeverity;
   status: 'open' | 'acknowledged'; title: string; period_id: string; first_seen_at: string;
-  last_evaluated_at: string; action_id: string | null;
-  alert_revisions: { evidence_bundle_id: string | null } | null;
+  last_evaluated_at: string; action_id: string | null; evidence_bundle_id: string | null;
 }
-
-const ALERT_SELECT = 'id, organization_id, rule_key, severity, status, title, period_id, first_seen_at, last_evaluated_at, action_id, alert_revisions!alerts_current_revision_fk (evidence_bundle_id)';
 
 function toAlert(row: AlertRow): PortfolioAlert {
   return {
@@ -117,41 +137,27 @@ function toAlert(row: AlertRow): PortfolioAlert {
     periodId: row.period_id,
     firstSeenAt: row.first_seen_at,
     lastEvaluatedAt: row.last_evaluated_at,
-    evidenceBundleId: row.alert_revisions?.evidence_bundle_id ?? null,
+    evidenceBundleId: row.evidence_bundle_id,
     actionId: row.action_id,
   };
 }
 
 /** Standing alerts to SHOW: severity (the enum orders critical first), then oldest, then id. */
 export async function loadStandingAlerts(
-  db: SupabaseClient, orgIds: readonly string[], limit = ALERT_DETAIL_CAP, requestId?: string,
+  db: SupabaseClient, orgIds: Scope, limit = ALERT_DETAIL_CAP, requestId?: string,
 ): Promise<PortfolioAlert[]> {
-  if (orgIds.length === 0) return [];
-  const { data, error } = await db.from('alerts')
-    .select(ALERT_SELECT)
-    .in('organization_id', [...orgIds])
-    .in('status', ['open', 'acknowledged'])
-    .order('severity', { ascending: true })
-    .order('first_seen_at', { ascending: true })
-    .order('id', { ascending: true })
-    .limit(limit);
-  return unwrap(data as unknown as AlertRow[] | null, error, requestId).map(toAlert);
+  if (orgIds !== null && orgIds.length === 0) return [];
+  const { data, error } = await db.schema('api').rpc('portfolio_standing_alerts', { p_orgs: scopeArg(orgIds), p_limit: limit });
+  return unwrap(data as AlertRow[] | null, error, requestId).map(toAlert);
 }
 
 /** Alerts first seen since `sinceIso`, newest first — the "recent changes" feed only. */
 export async function loadRecentAlerts(
-  db: SupabaseClient, orgIds: readonly string[], sinceIso: string, requestId?: string,
+  db: SupabaseClient, orgIds: Scope, sinceIso: string, requestId?: string,
 ): Promise<PortfolioAlert[]> {
-  if (orgIds.length === 0) return [];
-  const { data, error } = await db.from('alerts')
-    .select(ALERT_SELECT)
-    .in('organization_id', [...orgIds])
-    .in('status', ['open', 'acknowledged'])
-    .gte('first_seen_at', sinceIso)
-    .order('first_seen_at', { ascending: false })
-    .order('id', { ascending: true })
-    .limit(RECENT_CAP);
-  return unwrap(data as unknown as AlertRow[] | null, error, requestId).map(toAlert);
+  if (orgIds !== null && orgIds.length === 0) return [];
+  const { data, error } = await db.schema('api').rpc('portfolio_recent_alerts', { p_orgs: scopeArg(orgIds), p_since: sinceIso, p_limit: RECENT_CAP });
+  return unwrap(data as AlertRow[] | null, error, requestId).map(toAlert);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -163,8 +169,6 @@ interface ActionRow {
   owner_user_id: string | null; due_date: string | null; source_type: string;
   evidence_bundle_id: string | null; created_at: string; completed_at: string | null; updated_at: string;
 }
-
-const ACTION_SELECT = 'id, organization_id, title, priority, status, owner_user_id, due_date, source_type, evidence_bundle_id, created_at, completed_at, updated_at';
 
 function toAction(row: ActionRow): PortfolioAction {
   return {
@@ -186,45 +190,31 @@ function toAction(row: ActionRow): PortfolioAction {
 /** The Action Centre's open-work lenses, as statement predicates (ADR-098; `domain/views.ts`). */
 export type OpenLens = 'attention' | 'overdue' | 'due_soon' | 'high' | 'mine';
 
+/**
+ * Open actions in one lens. The lens is a predicate in the statement (`api.portfolio_open_actions`)
+ * — the same predicates `api.portfolio_summary` counts with; `mine` is the caller, `app.uid()`.
+ * Order is `byUrgency`: priority (the enum orders critical first), due date with undated last, oldest.
+ */
 export async function loadOpenActions(
   db: SupabaseClient,
-  orgIds: readonly string[],
+  orgIds: Scope,
   lens: OpenLens,
-  context: { today: string; dueSoonUntil: string; userId: string },
+  context: { today: string; dueSoonUntil: string },
   limit = ACTION_DETAIL_CAP,
   requestId?: string,
 ): Promise<PortfolioAction[]> {
-  if (orgIds.length === 0) return [];
-  let query = db.from('actions')
-    .select(ACTION_SELECT)
-    .in('organization_id', [...orgIds])
-    .in('status', [...OPEN_STATUSES]);
-  if (lens === 'overdue') query = query.lt('due_date', context.today);
-  if (lens === 'due_soon') query = query.gte('due_date', context.today).lte('due_date', context.dueSoonUntil);
-  if (lens === 'high') query = query.in('priority', ['critical', 'high']);
-  if (lens === 'mine') query = query.eq('owner_user_id', context.userId);
-  // `byUrgency`: priority (the enum orders critical first), then due date with undated last, then oldest.
-  const { data, error } = await query
-    .order('priority', { ascending: true })
-    .order('due_date', { ascending: true, nullsFirst: false })
-    .order('created_at', { ascending: true })
-    .order('id', { ascending: true })
-    .limit(limit);
-  return unwrap(data as unknown as ActionRow[] | null, error, requestId).map(toAction);
+  if (orgIds !== null && orgIds.length === 0) return [];
+  const { data, error } = await db.schema('api').rpc('portfolio_open_actions', {
+    p_orgs: scopeArg(orgIds), p_lens: lens, p_today: context.today, p_due_soon_until: context.dueSoonUntil, p_limit: limit,
+  });
+  return unwrap(data as ActionRow[] | null, error, requestId).map(toAction);
 }
 
 /** Work finished since `sinceIso`, newest first, for "recent changes". */
 export async function loadRecentlyFinishedActions(
-  db: SupabaseClient, orgIds: readonly string[], sinceIso: string, requestId?: string,
+  db: SupabaseClient, orgIds: Scope, sinceIso: string, requestId?: string,
 ): Promise<PortfolioAction[]> {
-  if (orgIds.length === 0) return [];
-  const { data, error } = await db.from('actions')
-    .select(ACTION_SELECT)
-    .in('organization_id', [...orgIds])
-    .in('status', ['completed', 'dismissed'])
-    .gte('updated_at', sinceIso)
-    .order('updated_at', { ascending: false })
-    .order('id', { ascending: true })
-    .limit(RECENT_CAP);
-  return unwrap(data as unknown as ActionRow[] | null, error, requestId).map(toAction);
+  if (orgIds !== null && orgIds.length === 0) return [];
+  const { data, error } = await db.schema('api').rpc('portfolio_finished_actions', { p_orgs: scopeArg(orgIds), p_since: sinceIso, p_limit: RECENT_CAP });
+  return unwrap(data as ActionRow[] | null, error, requestId).map(toAction);
 }

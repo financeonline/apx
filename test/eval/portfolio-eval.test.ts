@@ -1,17 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
   buildDigest, groundBriefing,
-  type Briefing, type ClientCounts, type ClientRow, type Digest, type Fact, type PortfolioAlert,
-  type PortfolioOrganisation, type PortfolioView,
+  type ClientCounts, type ClientRow, type Digest, type Fact, type PortfolioAction, type PortfolioAlert,
+  type PortfolioOrganisation, type PortfolioView, type Submission, type SubmittedStatement,
 } from '@/modules/portfolio';
 
 /**
- * Phase 15 adviser-analyst evaluation (brief §20; ADR-113, ADR-114 §5).
+ * Phase 15 adviser-analyst evaluation (ADR-113, ADR-116).
  *
- * The cases hold the contract the server enforces AROUND the model. What the model is handed is
- * decided by construction (the digest is built from the authorised view and nothing else); what it
- * may say is decided by fact-specific grounding, which is deterministic. The live-model behaviour
- * behind both boundaries is exercised in `test/integration/portfolio-ai.test.ts` with a recording fake.
+ * The model does not write figures. It chooses facts by id; the server writes every figure from the
+ * fact — value, noun, subject, period, direction — and removes any prose that carries a quantity.
+ * These cases hold that contract. What the model is handed is decided by construction (the digest
+ * is built from the authorised view); what an answer can say is decided here, deterministically.
+ * The model behind both boundaries is a fake: no live Claude model has been run (no API key).
  */
 
 const org = (id: string, name: string): PortfolioOrganisation => ({ id, slug: id, name, status: 'active', role: 'employee' });
@@ -21,447 +22,265 @@ const alpha: ClientRow = {
   organisation: org('a', 'Alpha Ltd'),
   health: { organizationId: 'a', scoreId: 's', periodId: 'p', periodStart: '2026-08-01', periodLabel: 'Aug 2026', score: 38, band: 'at_risk', dimensionsUsed: 5, dimensionsTotal: 6, previous: { periodStart: '2026-07-01', periodLabel: 'Jul 2026', score: 61, band: 'stable' } },
   trend: 'down',
-  counts: { ...zero, alertsStanding: 1, alertsCritical: 1 },
+  counts: { ...zero, alertsStanding: 8, alertsCritical: 8, actionsOpen: 3, actionsOverdue: 1 },
   attention: { organizationId: 'a', rank: [100, 250], reasons: [
-    { kind: 'critical_alert', weight: 100, label: '1 critical alert', count: 1 },
+    { kind: 'critical_alert', weight: 100, label: '8 critical alerts', count: 8 },
     { kind: 'health_band_fell', weight: 80, label: 'Health fell from Stable to At risk', count: 1 },
-    { kind: 'health_at_risk', weight: 70, label: 'Health is At risk', count: 1 },
   ] },
   latestChange: null,
 };
-const beta: ClientRow = { organisation: org('b', 'Beta Ltd'), health: null, trend: null, counts: zero, attention: null, latestChange: null };
-const alphaAlert: PortfolioAlert = { id: 'al-1', organizationId: 'a', ruleKey: 'cash.runway_low', severity: 'critical', status: 'open', title: 'Cash runway under two months', periodId: 'p', firstSeenAt: '2026-09-10T00:00:00Z', lastEvaluatedAt: '2026-09-14T00:00:00Z', evidenceBundleId: null, actionId: null };
+const beta: ClientRow = { organisation: org('b', 'Beta Ltd'), health: null, trend: null, counts: { ...zero, actionsOpen: 9 }, attention: null, latestChange: null };
+const alertRow = (id: string, title: string): PortfolioAlert => ({ id, organizationId: 'a', ruleKey: 'cash.runway_low', severity: 'critical', status: 'open', title, periodId: 'p', firstSeenAt: '2026-09-10T00:00:00Z', lastEvaluatedAt: '2026-09-14T00:00:00Z', evidenceBundleId: null, actionId: null });
+const actionRow = (id: string, title: string): PortfolioAction => ({ id, organizationId: 'a', title, priority: 'high', status: 'open', ownerUserId: null, dueDate: null, sourceType: 'manual', evidenceBundleId: null, createdAt: '2026-09-01T00:00:00Z', completedAt: null, updatedAt: '2026-09-01T00:00:00Z' });
 
 const view: PortfolioView = {
   today: '2026-09-15',
   organisations: [alpha.organisation, beta.organisation],
   clients: [alpha, beta],
   attention: [alpha],
-  counts: { clients: 2, needingAttention: 1, healthy: 0, unscored: 1, alertsStanding: 1, criticalAlerts: 1, highAlerts: 0, openActions: 0, overdueActions: 0, dueSoonActions: 0, urgentActions: 0, myActions: 0 },
+  counts: { clients: 2, needingAttention: 1, healthy: 0, unscored: 1, alertsStanding: 8, criticalAlerts: 8, highAlerts: 0, openActions: 12, overdueActions: 1, dueSoonActions: 0, urgentActions: 0, myActions: 0 },
   recent: [],
 };
-const digest = buildDigest(view, [alphaAlert], []);
+const digest = buildDigest(view, [alertRow('al-1', 'Revenue issue 3')], [actionRow('ac-1', 'Follow up 12')]);
 
-const answer = (partial: Partial<Briefing>): Briefing => ({
-  mode: 'answer', headline: { text: 'Alpha needs attention.', facts: [] }, clients: [], notes: [], limitations: [], ...partial,
+/** Facts a later digest could carry, stated by the server exactly as these statements say. */
+const REVENUE: Fact = { id: 'client:1/revenue_change', subject: 'client:1', organizationId: 'a', metric: 'revenue_change', type: 'percent_change', period: 'Sep 2026', value: '8', direction: 'decrease', source: 'test', statement: "Alpha Ltd's revenue fell 8% in Sep 2026" };
+const RUNWAY: Fact = { id: 'client:1/cash_runway', subject: 'client:1', organizationId: 'a', metric: 'cash_runway', type: 'duration', period: 'Sep 2026', value: '1.5', direction: null, source: 'test', statement: "Alpha Ltd's cash runway at the end of Sep 2026 was 1.5 months" };
+const COSTS: Fact = { id: 'client:1/cost_multiple', subject: 'client:1', organizationId: 'a', metric: 'cost_multiple', type: 'multiplier', period: 'Sep 2026', value: '2', direction: 'increase', source: 'test', statement: "Alpha Ltd's costs in Sep 2026 were 2 times those of Aug 2026" };
+const B_REVENUE: Fact = { ...REVENUE, id: 'client:2/revenue_change', subject: 'client:2', organizationId: 'b', statement: "Beta Ltd's revenue fell 8% in Sep 2026" };
+const financial: Digest = { ...digest, facts: [...digest.facts, REVENUE, RUNWAY, COSTS, B_REVENUE] };
+
+const T = (text: string): SubmittedStatement => ({ kind: 'text', text });
+const F = (...facts: string[]): SubmittedStatement => ({ kind: 'facts', facts });
+const submit = (partial: Partial<Submission>): Submission => ({
+  mode: 'answer', headline: [T('Alpha Ltd needs attention first.')], clients: [], notes: [], limitations: [], ...partial,
 });
+const summaryOf = (d: Digest, statements: SubmittedStatement[], because: string[] = []) => {
+  const g = groundBriefing(submit({ clients: [{ ref: 'client:1', statements, because }] }), d);
+  return { ...g, summary: g.briefing.clients[0]!.summary };
+};
+const noteOf = (d: Digest, statements: SubmittedStatement[]) => {
+  const g = groundBriefing(submit({ notes: [{ statements }] }), d);
+  return { ...g, note: g.briefing.notes[0]?.text ?? null };
+};
 
-describe('Phase 15 adviser eval — scope and citations', () => {
-  it('1. an employee with two assigned clients: the digest holds exactly those two, with facts for each', () => {
+describe('the digest: facts with their meaning, stated by the server', () => {
+  it('holds exactly the assigned clients, each figure a typed fact with its own sentence', () => {
     expect(digest.clients.map((c) => c.name)).toEqual(['Alpha Ltd', 'Beta Ltd']);
-    expect(digest.facts.find((f) => f.id === 'client:1/health_score')).toMatchObject({ value: '38', unit: 'score', period: 'Aug 2026' });
+    const byId = new Map(digest.facts.map((f) => [f.id, f]));
+    expect(byId.get('client:1/health_score')).toMatchObject({ type: 'score', value: '38', period: 'Aug 2026', statement: "Alpha Ltd's health score for Aug 2026 is 38 (At risk)" });
+    expect(byId.get('client:1/health_score_change')).toMatchObject({ type: 'score_change', value: '23', direction: 'decrease', statement: "Alpha Ltd's health score fell 23 points, from 61 in Jul 2026 to 38 in Aug 2026" });
+    expect(byId.get('portfolio/open_actions')?.statement).toBe('12 actions are open across the portfolio');
+    expect(byId.get('portfolio/needing_attention')?.statement).toBe('1 client needs attention');
     expect(digest.facts.some((f) => f.subject === 'client:2' && f.metric === 'health_score')).toBe(false);
   });
 
-  it('2. the employee asks about an unassigned client: the model cannot introduce one', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:3', summary: 'Gamma has a critical alert.', facts: [], because: ['alert:9'] }] }), digest);
+  it('a title is metadata: its numbers are in no fact', () => {
+    expect(digest.facts.some((f) => f.value === '12' && f.metric !== 'open_actions')).toBe(false);
+    expect(digest.facts.every((f) => !f.statement.includes('Revenue issue') && !f.statement.includes('Follow up'))).toBe(true);
+  });
+});
+
+describe('scope and citations (ADR-113)', () => {
+  it('the model cannot introduce a client', () => {
+    const g = groundBriefing(submit({ clients: [{ ref: 'client:3', statements: [T('Gamma has a critical alert.')], because: ['alert:9'] }] }), digest);
     expect(g.briefing.clients).toEqual([]);
     expect(g.status).toBe('degraded');
     expect(g.removed).toContain('client client:3: not in the portfolio');
   });
 
-  it('3. a foreign citation cannot survive', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:2', summary: 'Beta.', facts: [], because: ['alert:1'] }] }), digest);
+  it('a citation of another client\'s alert is dropped', () => {
+    const g = groundBriefing(submit({ clients: [{ ref: 'client:2', statements: [T('Beta Ltd is steady.')], because: ['alert:1'] }] }), digest);
     expect(g.briefing.clients[0]!.because).toEqual([]);
     expect(g.status).toBe('degraded');
   });
 
-  it('4. which clients need attention: a faithful answer, citing its facts, passes', () => {
-    const g = groundBriefing(answer({
-      headline: { text: '1 of 2 clients needs attention.', facts: ['portfolio/needing_attention', 'portfolio/clients'] },
-      clients: [{ ref: 'client:1', summary: 'Alpha Ltd has 1 critical alert. Its health score fell from 61 in Jul 2026 to 38 in Aug 2026.', facts: ['client:1/critical_alerts', 'client:1/previous_health_score', 'client:1/health_score'], because: ['alert:1'] }],
-    }), digest);
-    expect(g.removed).toEqual([]);
-    expect(g.status).toBe('passed');
-  });
-
-  it('5. a health change may state the scores the data holds; a derived percentage may not', () => {
-    const invented = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'Health fell 38%. It has 1 critical alert.', facts: ['client:1/health_score', 'client:1/critical_alerts'], because: [] }] }), digest);
-    expect(invented.status).toBe('degraded');
-    expect(invented.briefing.clients[0]!.summary).toBe('It has 1 critical alert.');
-  });
-
-  it('6. quoting a cited alert title verbatim, in quotation marks, carries the title\'s own words', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'The alert “Cash runway under two months” stands.', facts: [], because: ['alert:1'] }] }), digest);
-    expect(g.removed).toEqual([]);
-    expect(g.status).toBe('passed');
-  });
-
-  it('6b. the same title unquoted is prose, and its "two months" is a claim no fact states (ADR-115)', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'Cash runway under two months is the alert that stands.', facts: [], because: ['alert:1'] }] }), digest);
+  it('a client summary cannot state another client\'s fact, and a fact the digest did not issue grounds nothing', () => {
+    const g = summaryOf(financial, [F('client:2/open_actions', 'client:1/made_up')]);
     expect(g.status).toBe('degraded');
+    expect(g.removed).toEqual(expect.arrayContaining([
+      'client:1 statement 0: cites client:2/open_actions, a fact about client:2',
+      'client:1 statement 0: cites client:1/made_up, not a fact the digest issued',
+    ]));
+    expect(g.summary).not.toContain('9 open');
   });
 
-  it('7. an unsupported financial figure is removed, and the headline falls back to the server\'s', () => {
-    const g = groundBriefing(answer({ headline: { text: 'Portfolio revenue is £412,000 this month.', facts: [] }, notes: [{ text: 'Cash is £58,000.', facts: [] }] }), digest);
-    expect(g.status).toBe('degraded');
-    expect(g.briefing.headline.text).toBe('1 of 2 clients need attention.');
-    expect(g.briefing.notes).toEqual([]);
+  it('a refusal carries no clients, no notes and no facts', () => {
+    const g = groundBriefing(submit({ mode: 'refusal', headline: [F('portfolio/clients'), T('That is outside this portfolio.')], clients: [{ ref: 'client:1', statements: [], because: [] }] }), digest);
+    expect(g.status).toBe('not_applicable');
+    expect(g.briefing.headline.text).toBe('That is outside this portfolio.');
+    expect(g.briefing.clients).toEqual([]);
   });
 
-  it('8. an unavailable metric stays unavailable: no score fact exists for Beta, so no score survives', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:2', summary: 'Beta Ltd has a health score of 0.', facts: ['client:2/standing_alerts'], because: [] }] }), digest);
+  it('an unavailable metric stays unavailable: Beta has no score fact, and prose cannot supply one', () => {
+    expect(summaryOf(digest, [F('client:2/health_score')]).status).toBe('degraded');
+    const g = groundBriefing(submit({ clients: [{ ref: 'client:2', statements: [T('Beta Ltd has a health score of zero.')], because: [] }] }), digest);
     expect(g.status).toBe('degraded');
     expect(g.briefing.clients[0]!.summary).toBe('Beta Ltd: nothing needs attention.');
   });
 });
 
-/**
- * MEDIUM-D (audit of bab3a68): "a number that appears somewhere in the digest" was accepted as
- * grounding — "Revenue fell 1%" passed because some count was 1. These digests carry financial facts
- * so that the rule is tested on the claims it exists for.
- */
-const f = (subject: string, metric: string, words: string[], value: string, unit: Fact['unit'], period: string | null): Fact =>
-  ({ id: `${subject}/${metric}`, subject, metric, words, value, unit, period });
-
-const financial: Digest = {
-  today: '2026-09-15',
-  clients: [
-    { ref: 'client:1', id: 'a', name: 'Alpha Ltd', status: 'active', health: null, attention: [], alerts: [], actions: [] },
-    { ref: 'client:2', id: 'b', name: 'Beta Ltd', status: 'active', health: null, attention: [], alerts: [], actions: [] },
-  ],
-  facts: [
-    f('client:1', 'revenue_change', ['revenue'], '8', 'percent', 'Aug 2026'),
-    f('client:1', 'cash_runway', ['runway'], '3', 'months', 'Aug 2026'),
-    f('client:1', 'net_margin', ['margin'], '14', 'percent', 'Aug 2026'),
-    f('client:1', 'open_actions', ['action'], '1', 'count', null),
-    f('client:2', 'critical_alerts', ['critical'], '1', 'count', null),
-    f('portfolio', 'clients', ['client'], '2', 'count', null),
-    f('portfolio', 'needing_attention', ['attention', 'need'], '1', 'count', null),
-  ],
-};
-
-describe('MEDIUM-D — grounding is fact-specific, not number-presence', () => {
-  const cites = ['client:1/revenue_change', 'client:1/cash_runway', 'client:1/net_margin', 'client:1/open_actions'];
-
-  it('the audit\'s case: revenue, runway and margin claims of "1" are all removed', () => {
-    const g = groundBriefing(answer({
-      clients: [{ ref: 'client:1', summary: 'Revenue fell 1%. Cash runway is 1 month. Profit margin is 1%.', facts: cites, because: [] }],
-    }), financial);
-    expect(g.status).toBe('degraded');
-    expect(g.briefing.clients[0]!.summary).toBe('Alpha Ltd: nothing needs attention.');
-  });
-
-  it('wrong revenue and wrong runway are removed; the correct margin survives', () => {
-    const g = groundBriefing(answer({
-      clients: [{ ref: 'client:1', summary: 'Revenue declined 3%. Cash runway is 8 months. Profit margin is 14%.', facts: cites, because: [] }],
-    }), financial);
-    expect(g.status).toBe('degraded');
-    expect(g.briefing.clients[0]!.summary).toBe('Profit margin is 14%.');
-    expect(g.removed.filter((r) => r.startsWith('client:1 summary'))).toHaveLength(2);
-  });
-
-  it('correct figures with their units, metrics and period all survive', () => {
-    const g = groundBriefing(answer({
-      clients: [{ ref: 'client:1', summary: 'Revenue fell 8% in Aug 2026. Cash runway is 3 months. Net margin is 14%.', facts: cites, because: [] }],
-    }), financial);
-    expect(g.removed).toEqual([]);
+describe('brief §16 — the adversarial matrix', () => {
+  it('1. a correct count is the server\'s sentence', () => {
+    const g = noteOf(digest, [F('portfolio/open_actions')]);
     expect(g.status).toBe('passed');
+    expect(g.note).toBe('12 actions are open across the portfolio.');
   });
 
-  it('the same number in another organisation does not ground a claim about this one', () => {
-    // Alpha cites Beta's "1 critical alert" to support "1 critical alert" about Alpha.
-    const g = groundBriefing(answer({
-      clients: [{ ref: 'client:1', summary: 'Alpha Ltd has 1 critical alert.', facts: ['client:2/critical_alerts'], because: [] }],
-    }), financial);
-    expect(g.status).toBe('degraded');
-    expect(g.removed).toEqual(expect.arrayContaining(['client:1: cites client:2/critical_alerts, a fact about client:2']));
-    expect(g.briefing.clients[0]!.summary).not.toContain('1 critical');
+  it('2. "12 clients need attention" cannot be said when 12 is the open-action count (F-1)', () => {
+    const prose = noteOf(digest, [T('12 clients need attention.')]);
+    expect(prose.status).toBe('degraded');
+    expect(prose.note).toBeNull();
+    // The only way to state the 12 is its own fact, which says what it measures.
+    expect(noteOf(digest, [F('portfolio/open_actions')]).note).not.toMatch(/need attention/);
   });
 
-  it('a number with the right value but the wrong metric word is removed', () => {
-    // Alpha's open-action count is 1; that does not make "margin is 1" true.
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'Margin is 1.', facts: ['client:1/open_actions'], because: [] }] }), financial);
-    expect(g.status).toBe('degraded');
+  it('3. a correct percentage is the server\'s sentence', () => {
+    const g = summaryOf(financial, [F(REVENUE.id)]);
+    expect(g.status).toBe('passed');
+    expect(g.summary).toBe("Alpha Ltd's revenue fell 8% in Sep 2026.");
   });
 
-  it('a figure stated for a different period is removed', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'Revenue fell 8% in Jul 2026.', facts: ['client:1/revenue_change'], because: [] }] }), {
-      ...financial,
-      // Jul 2026 is a period the digest knows (another fact carries it), so naming it is a claim about it.
-      facts: [...financial.facts, f('client:1', 'previous_health_score', ['health'], '61', 'score', 'Jul 2026')],
-    });
-    expect(g.status).toBe('degraded');
+  it('4. wrong metric: "Cash fell 8%" cannot be written, and the 8% can only be stated as revenue', () => {
+    expect(summaryOf(financial, [T('Cash fell 8%.')]).status).toBe('degraded');
+    expect(summaryOf(financial, [F(REVENUE.id)]).summary).toMatch(/^Alpha Ltd's revenue/);
   });
 
-  it('an uncited fact grounds nothing, even with the right value, unit and word', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'Revenue fell 8%.', facts: [], because: [] }] }), financial);
-    expect(g.status).toBe('degraded');
-  });
-
-  it('a limitation may not state a number', () => {
-    const g = groundBriefing(answer({ limitations: ['Revenue is down 40% but we cannot see why.'] }), financial);
-    expect(g.briefing.limitations).toEqual([]);
-    expect(g.status).toBe('degraded');
-  });
-});
-
-/**
- * M-1 and L-2 (independent audit of 71fd748; ADR-115). Grounding binds every quantitative CLAIM —
- * in digits, in words, as a fraction or a multiplier — to one cited fact of the same value, unit,
- * metric, subject, period and direction. These digests carry financial facts the Phase 15 digest
- * does not, so that each rule is tested on the claims it exists for: with the fact, the claim
- * survives; without it, a coincidental number elsewhere never grounds it.
- */
-const withFacts = (facts: Fact[], clients: Digest['clients'] = financial.clients): Digest => ({ today: '2026-09-15', clients, facts });
-const summaryOf = (d: Digest, text: string, facts: string[], because: string[] = []) =>
-  groundBriefing(answer({ clients: [{ ref: 'client:1', summary: text, facts, because }] }), d);
-const noteOf = (d: Digest, text: string, facts: string[]) => groundBriefing(answer({ notes: [{ text, facts }] }), d);
-const fx = (fact: Fact, extra: Partial<Fact>): Fact => ({ ...fact, ...extra });
-
-const REVENUE_20 = fx(f('client:1', 'revenue_change', ['revenue'], '20', 'percent', 'Sep 2026'), { direction: 'decrease' });
-const RUNWAY_1_5 = f('client:1', 'cash_runway', ['runway'], '1.5', 'months', 'Sep 2026');
-const COSTS_X2 = fx(f('client:1', 'cost_multiple', ['cost'], '2', 'multiple', 'Sep 2026'), { direction: 'increase' });
-const MARGIN_HALF = fx(f('client:1', 'margin_multiple', ['margin'], '0.5', 'multiple', 'Sep 2026'), { direction: 'decrease' });
-const COUNT_OF = (metric: string, value: string, words: string[], extra: Partial<Fact> = {}) => fx(f('client:1', metric, words, value, 'count', null), extra);
-
-describe('M-1 — a figure in words is a claim, bound to a fact or removed (brief §6)', () => {
-  it('A. "Revenue fell by twenty per cent" survives only with a 20% revenue-decline fact', () => {
-    expect(summaryOf(withFacts([REVENUE_20]), 'Revenue fell by twenty per cent.', [REVENUE_20.id]).status).toBe('passed');
-    const other = COUNT_OF('open_actions', '20', ['action']);
-    expect(summaryOf(withFacts([other]), 'Revenue fell by twenty per cent.', [other.id]).status).toBe('degraded');
-  });
-
-  it('B. "Runway is one and a half months" survives only with a 1.5-month runway fact', () => {
-    expect(summaryOf(withFacts([RUNWAY_1_5]), 'Runway is one and a half months.', [RUNWAY_1_5.id]).status).toBe('passed');
-    const twoMonths = f('client:1', 'cash_runway', ['runway'], '2', 'months', 'Sep 2026');
-    expect(summaryOf(withFacts([twoMonths]), 'Runway is one and a half months.', [twoMonths.id]).status).toBe('degraded');
-  });
-
-  it('C. "Costs doubled" needs a fact that states a doubling; a raw 2 elsewhere is not one', () => {
-    expect(summaryOf(withFacts([COSTS_X2]), 'Costs doubled.', [COSTS_X2.id]).status).toBe('passed');
-    const two = COUNT_OF('open_actions', '2', ['action', 'cost']);
-    const g = summaryOf(withFacts([two]), 'Costs doubled.', [two.id]);
-    expect(g.status).toBe('degraded');
-    expect(g.briefing.clients[0]!.summary).not.toContain('doubled');
-  });
-
-  it('D. "Revenue declined twenty-five percent": a 25% fact grounds it, a 20% fact does not', () => {
-    const r25 = fx(REVENUE_20, { value: '25' });
-    expect(summaryOf(withFacts([r25]), 'Revenue declined twenty-five percent.', [r25.id]).status).toBe('passed');
-    expect(summaryOf(withFacts([REVENUE_20]), 'Revenue declined twenty-five percent.', [REVENUE_20.id]).status).toBe('degraded');
-  });
-
-  it('E. "Runway is one month": a 1-month runway grounds it; an unrelated count of 1 does not', () => {
-    const r1 = f('client:1', 'cash_runway', ['runway'], '1', 'months', 'Sep 2026');
-    expect(summaryOf(withFacts([r1]), 'Runway is one month.', [r1.id]).status).toBe('passed');
-    const count1 = COUNT_OF('open_actions', '1', ['action']);
-    expect(summaryOf(withFacts([count1]), 'Runway is one month.', [count1.id]).status).toBe('degraded');
-  });
-
-  it('F. "Revenue fell by one percent" is not grounded by open actions = 1 or another metric = 1', () => {
-    const actions1 = COUNT_OF('open_actions', '1', ['action']);
-    const margin1 = f('client:1', 'net_margin', ['margin'], '1', 'percent', 'Sep 2026');
-    const g = summaryOf(withFacts([actions1, margin1]), 'Revenue fell by one percent.', [actions1.id, margin1.id]);
-    expect(g.status).toBe('degraded');
-  });
-});
-
-describe('brief §8 — multiplier language', () => {
-  it('"halved" needs a 0.5 multiple of that metric', () => {
-    expect(summaryOf(withFacts([MARGIN_HALF]), 'Margin halved.', [MARGIN_HALF.id]).status).toBe('passed');
-    expect(summaryOf(withFacts([MARGIN_HALF]), 'Costs halved.', [MARGIN_HALF.id]).status).toBe('degraded');
-    expect(summaryOf(withFacts([COSTS_X2]), 'Costs halved.', [COSTS_X2.id]).status).toBe('degraded');
-  });
-
-  it('"Costs doubled from 10,000 to 20,000" needs the doubling AND both values', () => {
-    const before = f('client:1', 'costs_before', ['cost'], '10000', 'money', 'Aug 2026');
-    const after = f('client:1', 'costs_after', ['cost'], '20000', 'money', 'Sep 2026');
-    const all = [COSTS_X2, before, after];
-    expect(summaryOf(withFacts(all), 'Costs doubled from £10,000 to £20,000.', all.map((x) => x.id)).status).toBe('passed');
-    expect(summaryOf(withFacts([COSTS_X2]), 'Costs doubled from £10,000 to £20,000.', [COSTS_X2.id]).status).toBe('degraded');
-  });
-
-  it('twice as high, three times as high, twofold — only with the multiple', () => {
-    for (const s of ['Costs are twice as high.', 'Costs increased twofold.', 'Costs are 2x last month.']) {
-      expect(summaryOf(withFacts([COSTS_X2]), s, [COSTS_X2.id]).status, s).toBe('passed');
+  it('5. wrong period: prose cannot name a period at all (F-2)', () => {
+    for (const s of ['Revenue declined 8% last month.', 'Revenue declined last month.', 'Its health score is lower this month.', 'Revenue fell in August.']) {
+      expect(summaryOf(financial, [T(s)]).status, s).toBe('degraded');
     }
-    expect(summaryOf(withFacts([COSTS_X2]), 'Costs are three times as high.', [COSTS_X2.id]).status).toBe('degraded');
   });
 
-  it('a stated direction must agree with the fact\'s', () => {
-    expect(summaryOf(withFacts([REVENUE_20]), 'Revenue rose 20%.', [REVENUE_20.id]).status).toBe('degraded');
-    expect(summaryOf(withFacts([REVENUE_20]), 'Revenue fell 20%.', [REVENUE_20.id]).status).toBe('passed');
+  it('6. wrong direction: prose cannot state the change, and the fact states its own direction', () => {
+    expect(summaryOf(financial, [T('Revenue increased 8%.')]).status).toBe('degraded');
+    expect(summaryOf(financial, [F(REVENUE.id)]).summary).toContain('fell 8%');
+    expect(summaryOf(digest, [F('client:1/health_score_change')]).summary).toBe("Alpha Ltd's health score fell 23 points, from 61 in Jul 2026 to 38 in Aug 2026.");
   });
-});
 
-describe('brief §9 — each claim in a sentence is validated on its own', () => {
-  const REVENUE_8 = fx(REVENUE_20, { value: '8' });
-  const RUNWAY_3 = f('client:1', 'cash_runway', ['runway'], '3', 'months', 'Sep 2026');
-
-  it('two claims, both true: the sentence stands', () => {
-    const g = summaryOf(withFacts([REVENUE_8, RUNWAY_3]), 'Revenue fell 8% while runway is 3 months.', [REVENUE_8.id, RUNWAY_3.id]);
-    expect(g.removed).toEqual([]);
+  it('7. two facts in one sentence, each with its own noun', () => {
+    const g = summaryOf(digest, [F('client:1/critical_alerts', 'client:1/open_actions')]);
     expect(g.status).toBe('passed');
+    expect(g.summary).toBe('Alpha Ltd has 8 standing critical alerts and 3 open actions.');
   });
 
-  it('one true claim cannot rescue a false one; the other sentences stand', () => {
-    const g = summaryOf(withFacts([REVENUE_8, RUNWAY_3]), 'Revenue fell 8% while runway is 5 months. Runway is 3 months.', [REVENUE_8.id, RUNWAY_3.id]);
-    expect(g.status).toBe('degraded');
-    expect(g.briefing.clients[0]!.summary).toBe('Runway is 3 months.');
+  it('8. swapped values cannot be expressed (F-3)', () => {
+    expect(summaryOf(digest, [T('Alpha Ltd has 3 critical alerts and 8 open actions.')]).status).toBe('degraded');
+    expect(summaryOf(digest, [T('Alpha Ltd has critical alerts as well as open actions.')]).status).toBe('passed');
+    // Whatever order the ids come in, each value stays with its own noun.
+    expect(summaryOf(digest, [F('client:1/open_actions', 'client:1/critical_alerts')]).summary).toBe('Alpha Ltd has 3 open actions and 8 standing critical alerts.');
   });
 
-  it('a claim cannot borrow the metric of another clause (audit L-3)', () => {
-    const actions8 = COUNT_OF('open_actions', '8', ['action']);
-    expect(summaryOf(withFacts([actions8]), 'Runway is 8, per the open action list.', [actions8.id]).status).toBe('degraded');
-    expect(summaryOf(withFacts([actions8]), 'Runway is 8 open actions.', [actions8.id]).status).toBe('degraded');
-  });
-
-  it('swapped counts in one sentence are both caught', () => {
-    const critical1 = COUNT_OF('critical_alerts', '1', ['critical'], { noun: 'alert' });
-    const overdue2 = COUNT_OF('overdue_actions', '2', ['overdue'], { noun: 'action' });
-    const ids = [critical1.id, overdue2.id];
-    expect(summaryOf(withFacts([critical1, overdue2]), 'Alpha Ltd has 1 critical alert and 2 overdue actions.', ids).status).toBe('passed');
-    expect(summaryOf(withFacts([critical1, overdue2]), 'Alpha Ltd has 2 critical alerts and 1 overdue action.', ids).status).toBe('degraded');
-  });
-
-  it('a generic count does not state a specific one: 3 open actions are not 3 overdue actions', () => {
-    const open3 = COUNT_OF('open_actions', '3', ['action'], { excludes: ['overdue', 'urgent', 'due'] });
-    expect(summaryOf(withFacts([open3]), 'Alpha Ltd has 3 overdue actions.', [open3.id]).status).toBe('degraded');
-  });
-});
-
-describe('brief §11 — wrong metric, period or organisation with a matching number', () => {
-  const A_REV_8 = fx(f('client:1', 'revenue_change', ['revenue'], '8', 'percent', 'Sep 2026'), { direction: 'decrease' });
-  const A_RUNWAY_3 = f('client:1', 'cash_runway', ['runway'], '3', 'months', 'Sep 2026');
-  const B_REV_2 = fx(f('client:2', 'revenue_change', ['revenue'], '2', 'percent', 'Sep 2026'), { direction: 'decrease' });
-  const d = withFacts([A_REV_8, A_RUNWAY_3, B_REV_2]);
-  const all = [A_REV_8.id, A_RUNWAY_3.id, B_REV_2.id];
-
-  it('the true statements pass, in a summary and in a note', () => {
-    expect(summaryOf(d, 'Alpha Ltd revenue declined 8% in September.', [A_REV_8.id]).status).toBe('passed');
-    expect(noteOf(d, 'Beta Ltd revenue declined 2% in Sep 2026.', all).status).toBe('passed');
-  });
-
-  it('"Alpha revenue declined 2%" fails: 2% is Beta\'s', () => {
-    expect(summaryOf(d, 'Alpha Ltd revenue declined 2%.', all).status).toBe('degraded');
-    expect(noteOf(d, 'Alpha Ltd revenue declined 2%.', all).status).toBe('degraded');
-  });
-
-  it('"Alpha revenue declined 8% in August" fails: the fact is for September', () => {
-    expect(summaryOf(d, 'Alpha Ltd revenue declined 8% in August.', [A_REV_8.id]).status).toBe('degraded');
-    expect(summaryOf(d, 'Alpha Ltd revenue declined 8% in Aug 2026.', [A_REV_8.id]).status).toBe('degraded');
-  });
-
-  it('"Beta revenue declined 8%" fails: 8% is Alpha\'s', () => {
-    expect(noteOf(d, 'Beta Ltd revenue declined 8%.', all).status).toBe('degraded');
-    // In Beta's own summary Alpha's fact cannot even be cited.
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:2', summary: 'Beta Ltd revenue declined 8%.', facts: all, because: [] }] }), d);
-    expect(g.status).toBe('degraded');
-  });
-
-  it('runway 3 months does not make revenue 3%', () => {
-    expect(summaryOf(d, 'Alpha Ltd revenue declined 3%.', all).status).toBe('degraded');
-  });
-
-  it('a note about a client that names no client is not grounded by that client\'s fact', () => {
-    expect(noteOf(d, 'Revenue declined 8%.', all).status).toBe('degraded');
-  });
-});
-
-describe('brief §12 — hedged and unquantified language is never coerced into an exact claim', () => {
   it.each([
-    'Revenue fell significantly.', 'Revenue fell materially.', 'Costs roughly doubled.', 'About half of revenue was lost.',
-    'Runway is nearly one and a half months.', 'Revenue fell more than twenty percent.', 'Revenue fell by about 20%.', 'Revenue fell by a third.',
-    'Costs are three times higher.',
-  ])('"%s" is removed even beside the exact fact', (sentence) => {
-    const g = summaryOf(withFacts([REVENUE_20, RUNWAY_1_5, COSTS_X2]), sentence, [REVENUE_20.id, RUNWAY_1_5.id, COSTS_X2.id]);
+    ['9 number words', 'Revenue fell by twenty per cent.'],
+    ['10 a fraction', 'Runway is one and a half months.'],
+    ['11 a multiplier', 'Costs doubled.'],
+    ['12 a dozen', 'It has a dozen overdue actions.'],
+    ['13 a couple', 'It has a couple of critical alerts.'],
+    ['14 a Roman numeral', 'It has III critical alerts.'],
+    ['15 an Arabic-Indic numeral', 'It has ٥ critical alerts.'],
+    ['18 unsupported quantitative prose', 'Portfolio revenue is £412,000.'],
+  ])('%s is removed from prose', (_name, sentence) => {
+    const g = summaryOf(financial, [T(sentence), T('Alpha Ltd needs attention first.')]);
     expect(g.status).toBe('degraded');
-  });
-});
-
-describe('L-2 — alert and action titles are text, not facts', () => {
-  const alertRow: PortfolioAlert = { ...alphaAlert, id: 'al-8', title: 'Revenue issue 8' };
-  const actionRow = {
-    id: 'ac-12', organizationId: 'a', title: 'Chase 12 overdue invoices', priority: 'high', status: 'open', ownerUserId: null,
-    dueDate: null, sourceType: 'manual', evidenceBundleId: null, createdAt: '2026-09-01T00:00:00Z', completedAt: null, updatedAt: '2026-09-01T00:00:00Z',
-  } as const;
-  const titled = buildDigest({ ...view, clients: [{ ...alpha, counts: { ...alpha.counts, actionsOpen: 1, actionsOverdue: 3 } }, beta] }, [alertRow], [actionRow]);
-
-  it('an alert titled with 8 does not ground "Revenue fell 8%"', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'Revenue fell 8%.', facts: [], because: ['alert:1'] }] }), titled);
-    expect(g.status).toBe('degraded');
+    expect(g.summary).toBe('Alpha Ltd needs attention first.');
   });
 
-  it('an action titled with 12 does not ground "12 overdue actions"', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'Alpha Ltd has 12 overdue actions.', facts: ['client:1/overdue_actions'], because: ['action:1'] }] }), titled);
-    expect(g.status).toBe('degraded');
+  it('11 (bis). a multiplier is stated only by a fact that states one', () => {
+    expect(summaryOf(financial, [F(COSTS.id)]).summary).toBe("Alpha Ltd's costs in Sep 2026 were 2 times those of Aug 2026.");
   });
 
-  it('the real count still grounds, with the title quoted beside it', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'Alpha Ltd has 3 overdue actions, including “Chase 12 overdue invoices”.', facts: ['client:1/overdue_actions'], because: ['action:1'] }] }), titled);
-    expect(g.removed).toEqual([]);
+  it('16. a title containing a number grounds nothing (L-2)', () => {
+    const g = summaryOf(digest, [T('Revenue declined 3%.')], ['alert:1']);
+    expect(g.status).toBe('degraded');
+    expect(g.briefing.clients[0]!.because).toEqual(['alert:1']);
+    // Cited, the alert is shown by the page from its ref; the prose need not repeat its title.
+    expect(summaryOf(digest, [T('The revenue alert is the one to act on.')], ['alert:1', 'action:1']).status).toBe('passed');
+  });
+
+  it('17. a number inside quoted metadata is still a number in prose', () => {
+    expect(summaryOf(digest, [T('The alert “Revenue issue 3” stands.')], ['alert:1']).status).toBe('degraded');
+    expect(summaryOf(digest, [T('The action "Follow up 12" is open.')], ['action:1']).status).toBe('degraded');
+  });
+
+  it('19. two valid quantitative claims of different kinds in one statement', () => {
+    const g = summaryOf(financial, [F(REVENUE.id, RUNWAY.id)]);
     expect(g.status).toBe('passed');
+    expect(g.summary).toBe("Alpha Ltd's revenue fell 8% in Sep 2026. Alpha Ltd's cash runway at the end of Sep 2026 was 1.5 months.");
   });
 
-  it('a title used as a figure is refused (the old grounder erased "3" from "3%")', () => {
-    const three = buildDigest(view, [{ ...alphaAlert, title: '3' }], []);
-    for (const s of ['Revenue fell 3% this quarter.', 'Revenue fell “3”% this quarter.']) {
-      const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: s, facts: [], because: ['alert:1'] }] }), three);
-      expect(g.status, s).toBe('degraded');
-    }
-  });
-
-  it('a title the summary does not cite is not quotable', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'The action “Chase 12 overdue invoices” stands.', facts: [], because: [] }] }), titled);
-    expect(g.status).toBe('degraded');
+  it('20. one valid and one invalid claim: the valid one stands, the answer is not Grounded', () => {
+    const facts = summaryOf(financial, [F(REVENUE.id, 'client:2/revenue_change')]);
+    expect(facts.status).toBe('degraded');
+    expect(facts.summary).toBe("Alpha Ltd's revenue fell 8% in Sep 2026.");
+    const mixed = summaryOf(financial, [F(REVENUE.id), T('Runway is three months.')]);
+    expect(mixed.status).toBe('degraded');
+    expect(mixed.summary).toBe("Alpha Ltd's revenue fell 8% in Sep 2026.");
   });
 });
 
-describe('brief §14 — the adviser eval set', () => {
-  const base = [REVENUE_20, RUNWAY_1_5, COSTS_X2, MARGIN_HALF];
-  const ids = base.map((x) => x.id);
-  const cases: Array<[string, Digest, string, string[], 'passed' | 'degraded']> = [
-    ['1 twenty percent, fact present', withFacts(base), 'Revenue fell twenty percent.', ids, 'passed'],
-    ['1 twenty percent, no fact', withFacts([COUNT_OF('open_actions', '20', ['action'])]), 'Revenue fell twenty percent.', ['client:1/open_actions'], 'degraded'],
-    ['2 one and a half months, fact present', withFacts(base), 'Runway is one and a half months.', ids, 'passed'],
-    ['2 one and a half months, no fact', withFacts([COUNT_OF('open_actions', '1.5', ['action'])]), 'Runway is one and a half months.', ['client:1/open_actions'], 'degraded'],
-    ['3 doubled, fact present', withFacts(base), 'Costs doubled.', ids, 'passed'],
-    ['3 doubled, only a count of 2', withFacts([COUNT_OF('open_actions', '2', ['action'])]), 'Costs doubled.', ['client:1/open_actions'], 'degraded'],
-    ['4 halved, fact present', withFacts(base), 'Margin halved.', ids, 'passed'],
-    ['4 halved, no fact', withFacts([REVENUE_20]), 'Margin halved.', [REVENUE_20.id], 'degraded'],
-    ['7 wrong metric, matching value', withFacts(base), 'Margin fell 20%.', ids, 'degraded'],
-    ['8 wrong period, matching value', withFacts(base), 'Revenue fell 20% in Jul 2026.', ids, 'degraded'],
-    ['10 two claims, both supported', withFacts(base), 'Revenue fell 20% and runway is 1.5 months.', ids, 'passed'],
-    ['11 one supported, one not', withFacts(base), 'Revenue fell 20% and runway is 2 months.', ids, 'degraded'],
-    ['12 uncited quantitative claim', withFacts(base), 'Revenue fell 20%.', [], 'degraded'],
-  ];
-  it.each(cases)('%s', (_name, d, text, facts, expected) => {
-    expect(summaryOf(d, text, facts).status).toBe(expected);
+describe('the final audit\'s F-1…F-4 cases, as the model could submit them', () => {
+  it.each([
+    'Twelve clients need attention.', '12 clients are healthy.', 'Alpha Ltd completed 8 actions.', 'It resolved 3 critical alerts.',
+    'Its health score rose from 38 to 61.', 'Its current health score is 61.', 'Its health score slumped 2 points.',
+    'It has 8 critical alerts as well as 3 open actions.', 'It has 1 critical alert as well as 3 high alerts.',
+    'It has a single critical alert.', 'It has a pair of overdue actions.', 'None of its actions are overdue.',
+    'It does not have any critical alerts... none.', 'Both clients need attention.', 'All clients are healthy.',
+    'This is the third consecutive month of decline.', 'Revenue fell 20%-plus.', 'Revenue fell 3 per-cent.',
+  ])('"%s" never reaches the answer', (sentence) => {
+    const g = summaryOf(digest, [T(sentence)]);
+    expect(g.status).toBe('degraded');
+    expect(g.summary).not.toContain(sentence);
   });
 
-  it('9 wrong organisation, matching value', () => {
-    const betaRevenue = fx(REVENUE_20, { id: 'client:2/revenue_change', subject: 'client:2' });
-    expect(noteOf(withFacts([REVENUE_20, betaRevenue]), 'Beta Ltd revenue fell 20%.', [REVENUE_20.id]).status).toBe('degraded');
-    expect(noteOf(withFacts([REVENUE_20, betaRevenue]), 'Beta Ltd revenue fell 20%.', [betaRevenue.id]).status).toBe('passed');
+  it('the wrong organisation cannot be named beside a figure: the server names the subject', () => {
+    expect(noteOf(financial, [T('Beta Ltd revenue declined 8%.')]).status).toBe('degraded');
+    expect(noteOf(financial, [F(REVENUE.id)]).note).toBe("Alpha Ltd's revenue fell 8% in Sep 2026.");
+    expect(noteOf(financial, [F(B_REVENUE.id)]).note).toBe("Beta Ltd's revenue fell 8% in Sep 2026.");
   });
-  // Cases 5 and 6 (alert title 8, action title 12) are the L-2 block above.
+
+  it('a value cannot be altered: text sent with facts is never shown, and the value comes from the digest', () => {
+    const g = summaryOf(digest, [{ kind: 'facts', facts: ['client:1/open_actions'], text: 'Alpha Ltd has 99 open actions' }]);
+    expect(g.summary).toBe('Alpha Ltd has 3 open actions.');
+    expect(g.removed).toContain('client:1 statement 0: text beside facts is never shown');
+  });
 });
 
 describe('honest answers still pass (a check that fails correct answers gets switched off)', () => {
-  it('the Command Centre\'s own statements', () => {
-    const g = groundBriefing(answer({
-      headline: { text: '1 of 2 clients needs attention across the portfolio.', facts: ['portfolio/needing_attention', 'portfolio/clients'] },
+  it('qualitative prose and server-rendered facts together', () => {
+    const g = groundBriefing(submit({
+      headline: [F('portfolio/needing_attention', 'portfolio/clients'), T('Alpha Ltd needs attention first.')],
       clients: [{
         ref: 'client:1',
-        summary: 'Alpha Ltd has 1 critical alert. Its health score fell 23 points, from 61 in Jul 2026 to 38 in Aug 2026. The alert “Cash runway under two months” stands.',
-        facts: ['client:1/critical_alerts', 'client:1/health_score_change', 'client:1/previous_health_score', 'client:1/health_score'],
-        because: ['alert:1'],
+        statements: [
+          F('client:1/critical_alerts', 'client:1/overdue_actions'),
+          F('client:1/health_score_change'),
+          T('Cash pressure is increasing, and several actions need an owner.'),
+        ],
+        because: ['alert:1', 'action:1'],
       }],
-      notes: [{ text: 'Beta Ltd has no critical alerts.', facts: ['client:2/critical_alerts'] }],
-      limitations: ['Financial figures are not in the data.'],
-    }), buildDigest({ ...view, clients: [alpha, { ...beta, counts: zero }] }, [alphaAlert], []));
+      notes: [{ statements: [T('One of the clients is at risk; look at Alpha Ltd first.')] }],
+      limitations: ['Financial figures beyond counts and health scores are not in the data.'],
+    }), digest);
     expect(g.removed).toEqual([]);
     expect(g.status).toBe('passed');
+    expect(g.briefing.headline.text).toBe('1 client needs attention. The portfolio has 2 clients. Alpha Ltd needs attention first.');
+    expect(g.briefing.clients[0]!.summary).toBe(
+      "Alpha Ltd has 8 standing critical alerts and 1 overdue action. Alpha Ltd's health score fell 23 points, from 61 in Jul 2026 to 38 in Aug 2026. Cash pressure is increasing, and several actions need an owner.",
+    );
+    expect(g.briefing.clients[0]!.facts).toEqual(['client:1/critical_alerts', 'client:1/overdue_actions', 'client:1/health_score_change']);
   });
 
-  it('a health change stated the wrong way round is removed', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'Its health score rose 23 points.', facts: ['client:1/health_score_change'], because: [] }] }), digest);
+  it('an empty headline becomes the server\'s count sentence; an emptied summary, the attention reasons', () => {
+    const g = groundBriefing(submit({ headline: [T('Two clients.')], clients: [{ ref: 'client:1', statements: [T('It has a dozen alerts.')], because: [] }] }), digest);
+    expect(g.briefing.headline.text).toBe('1 client needs attention. The portfolio has 2 clients.');
+    expect(g.briefing.clients[0]!.summary).toBe('Alpha Ltd: 8 critical alerts; Health fell from Stable to At risk.');
     expect(g.status).toBe('degraded');
   });
 
-  it('"one of" and "no one" are English, not figures', () => {
-    const g = groundBriefing(answer({ clients: [{ ref: 'client:1', summary: 'Alpha Ltd is one of the clients to look at first.', facts: [], because: [] }] }), digest);
-    expect(g.status).toBe('passed');
+  it('a limitation is prose under the same rule', () => {
+    const g = groundBriefing(submit({ limitations: ['Revenue is down forty percent but we cannot see why.', 'Cash figures are not in the data.'] }), digest);
+    expect(g.briefing.limitations).toEqual(['Cash figures are not in the data.']);
+    expect(g.status).toBe('degraded');
   });
 });

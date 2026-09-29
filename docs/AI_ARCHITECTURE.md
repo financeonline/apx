@@ -244,13 +244,7 @@ The extractor is a fixed regular grammar shipped with a fixed-corpus unit test (
 | Reference (exempt) | a span equal to a returned `invoice_number`, `reference`, `source_ref` | matched as a string in step (3) and removed; never a claim |
 | Entity name (exempt) | a span equal to a returned `name` | matched in step (2); names containing a currency amount or a percentage are rejected at naming time (`api.update_counterparty`, `api.merge_counterparties`, import mapping `IMPORT_ENGINE.md §6.6`), so this exemption cannot carry a figure |
 
-**Reuse by the adviser analyst (Phase 15, ADR-115).** `portfolio/domain/quantities.ts` hands its residue to this grammar rather than keeping a second one. Before that, it reads what the adviser contract needs and this grammar leaves alone:
-- fractions and multipliers;
-- "one", "zero" and "no" before a counted noun or a unit;
-- `pc`/`pct`/`pp`, months and days;
-- approximation, and magnitudes with no figure.
-
-It binds each claim to a cited digest fact per clause. Its client-name and title exemptions refuse a name or a title with a unit or a currency against it (`“3”%`). This grammar's own entity-name exemption does not; the organisation analyst relies instead on names being rejected at naming time (row above).
+**The adviser analyst does not use this grammar (Phase 15, ADR-116).** ADR-115 briefly reused it to read the adviser model's prose; the final release audit showed that reading prose cannot be made safe. The adviser model writes no figures: it cites digest facts by id and the server writes every figure from the fact; prose carrying anything quantitative is removed by `portfolio/domain/free-text.ts`, a rejection rule rather than a grammar. This grammar remains the organisation analyst's, unchanged.
 
 Count precision: a `Count` or `Days` field compares at its own display precision (integer for counts of records and days; 1 dp for `cash_runway_months`), so "about 2.4 months" is decidable and "three overdue invoices" is a claim against an integer field. Two numbers in one sentence each need their own `NumberRef`, `metric_key` binding and (where named) `entity_id`; the nearest-span rule assigns names to numbers independently.
 

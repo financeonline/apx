@@ -46,7 +46,7 @@ function dates(ctx: PortfolioContext) {
  */
 export async function loadPortfolio(ctx: PortfolioContext): Promise<PortfolioView> {
   const { today, dueSoonUntil, since } = dates(ctx);
-  const ids = ctx.organisationIds;
+  const ids = scopeFor(ctx, ctx.organisationIds);
 
   const [summary, recentAlerts, finished] = await Promise.all([
     repo.loadPortfolioSummary(ctx.db, ids, today, dueSoonUntil, ctx.requestId),
@@ -97,6 +97,18 @@ export async function loadPortfolio(ctx: PortfolioContext): Promise<PortfolioVie
   return { today, organisations: ctx.organisations, clients, attention, counts, recent };
 }
 
+/**
+ * What a read sends as its scope (ADR-117): nothing when it covers the whole portfolio — the
+ * database derives the caller's adviser organisations itself, so no list of ids travels — else the
+ * ids it narrows to (one client's page). An empty portfolio reads nothing.
+ */
+function scopeFor(ctx: PortfolioContext, organisationIds: readonly string[]): repo.Scope {
+  if (ctx.organisationIds.length === 0 || organisationIds.length === 0) return [];
+  const asked = new Set(organisationIds);
+  const whole = asked.size === ctx.organisationIds.length && ctx.organisationIds.every((id) => asked.has(id));
+  return whole ? null : organisationIds;
+}
+
 function capped<T>(rows: readonly T[], total: number): CappedList<T> {
   return { rows, total, truncated: rows.length < total };
 }
@@ -105,7 +117,7 @@ function capped<T>(rows: readonly T[], total: number): CappedList<T> {
 export async function loadPortfolioAlerts(
   ctx: PortfolioContext, view: PortfolioView, organisationIds: readonly string[] = ctx.organisationIds,
 ): Promise<CappedList<PortfolioAlert>> {
-  const rows = await repo.loadStandingAlerts(ctx.db, organisationIds, repo.ALERT_DETAIL_CAP, ctx.requestId);
+  const rows = await repo.loadStandingAlerts(ctx.db, scopeFor(ctx, organisationIds), repo.ALERT_DETAIL_CAP, ctx.requestId);
   const total = view.clients
     .filter((c) => organisationIds.includes(c.organisation.id))
     .reduce((n, c) => n + c.counts.alertsStanding, 0);
@@ -128,7 +140,7 @@ export async function loadPortfolioActions(
 ): Promise<CappedList<PortfolioAction>> {
   const { today, dueSoonUntil } = dates(ctx);
   const rows = await repo.loadOpenActions(
-    ctx.db, organisationIds, lens, { today, dueSoonUntil, userId: ctx.userId }, repo.ACTION_DETAIL_CAP, ctx.requestId,
+    ctx.db, scopeFor(ctx, organisationIds), lens, { today, dueSoonUntil }, repo.ACTION_DETAIL_CAP, ctx.requestId,
   );
   return capped(rows, lensTotal(view, lens, organisationIds));
 }

@@ -96,7 +96,7 @@ test('an owner of two organisations sees both on the Command Centre; a client se
       clients: [], refs: [],
     });
     sql(`with q as (insert into public.portfolio_ai_turns (user_id, question, scope_organization_ids, status, answer, grounding_status, prompt_version, finished_at)
-         values ('${owner.userId}', '${question}', array['${orgA}']::uuid[], 'answered', '${answer}'::jsonb, '${grounding}', 'adviser-v2.1', now())
+         values ('${owner.userId}', '${question}', array['${orgA}']::uuid[], 'answered', '${answer}'::jsonb, '${grounding}', 'adviser-v3.0', now())
          returning id) select id from q`);
   };
   storeTurn('What changed at Alpha this month', 'degraded');
