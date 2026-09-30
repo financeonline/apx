@@ -1997,7 +1997,7 @@ Status: **open. Not fixed by ADR-120; each needs its own decision.** Listed so n
 
 | # | Defect | Evidence | Recommendation |
 |---|---|---|---|
-| FU-1 | P&L `invoices` coverage accepts a batch committed before the period, and uses the AR/AP freshness gate as revenue coverage. A month no full list spans reports revenue 0.00 with no reason, and a complete month inside a gap between two lists would be scored by Health as a zero-revenue month. | `coverage.ts` `arApBatch` (negative day gap accepted; `invoices.covers` true on it); ADR-120 probe INVBANK Sep–Dec revenue 0.00 before and after | Fix before Phase 16: revenue needs a `full` list spanning P (ADR-047.10); the freshness gate is the AR/AP family's only. |
+| FU-1 | P&L `invoices` coverage accepts a batch committed before the period, and uses the AR/AP freshness gate as revenue coverage. A month no full list spans reports revenue 0.00 with no reason, and a complete month inside a gap between two lists would be scored by Health as a zero-revenue month. | `coverage.ts` `arApBatch` (negative day gap accepted; `invoices.covers` true on it); ADR-120 probe INVBANK Sep–Dec revenue 0.00 before and after | Fix before Phase 16: revenue needs a `full` list spanning P (ADR-047.10); the freshness gate is the AR/AP family's only. **FIXED (ADR-125, engine 4.0.0).** |
 | FU-2 | Alert and health record readers unpaged (1,000-row cap) | ADR-120 H-8 | Page as `loadOpenInvoices` does. |
 | FU-3 | Fingerprint source lists unpaged | ADR-120 H-9 | Page, or fingerprint from counts/max timestamps. |
 | FU-4 | Statement closing cross-check and unreconciled-statement flag never supplied to cash | `compose.ts` passes neither `statementClosing` nor `unreconciledStatement` | Wire before Phase 16 F3.4 relies on `unreconciled_statement`. |
@@ -2005,6 +2005,12 @@ Status: **open. Not fixed by ADR-120; each needs its own decision.** Listed so n
 | FU-6 | No daily `scheduled` calculation is enqueued | no caller of the `scheduled` trigger | Enqueue per organisation from the nightly route (as-of-only runs, ADR-047.8). |
 | FU-7 | P&L trial-balance drill-down totals ≠ monthly figure | cumulative differencing | Descriptor over the two statements, or a derived descriptor. |
 | FU-8 | `uuid` moderate advisory via `exceljs` | `npm audit` | Upgrade `exceljs` deliberately (breaking). |
+| FU-12 | Cost-side mirror of FU-1: with only a full SALES list establishing P, the invoice-basis P&L states `cost_of_sales`/`operating_expenses` 0.00 and profit = revenue; conversely a purchase-only list's costs are now NULL | ADR-125 | **OPEN.** Decide per-side P&L coverage for the invoice basis before Phase 16 relies on profit or cost figures from invoice-only organisations. |
+| FU-13 | The import pipeline never wrote `invoice_list_kind = full`; every list committed through the app had a NULL kind | ADR-125 D-5 | **FIXED (ADR-125):** the kind is written at commit (trigger `app.invoice_list_kind_at_commit`) and committed batches were backfilled. |
+| FU-14 | A period that stops being complete kept the `health_current` pointer an earlier run left | ADR-125 D-6 | **FIXED (ADR-125):** `api_server.set_period_completeness` withdraws the pointer. Known limit: not restored if the run then fails. |
+| FU-15 | `invoiceSideCoverage` (AR/AP) does not yet limit a list to its commit date | ADR-125 | **OPEN.** Out of FU-1's scope by the owner's instruction (AR/AP unchanged). |
+
+FU-1, FU-13 and FU-14 are fixed by ADR-125 (below); FU-12 and FU-15 are open. FU-9 to FU-11 are in the ADR-122 amendment of 2026-09-30.
 
 ### ADR-121 · Funding Readiness is calculated only while enabled, with eligible historical backfill on enablement
 Status: **decided by the product owner, 2026-09-30 (Phase 16 U-4, U-5).** The earlier proposal (calculate for every organisation and let the flag gate visibility only) is **REJECTED**.
@@ -2081,11 +2087,14 @@ Context: the independent audit of ADR-120 (`docs/ADR-120_INDEPENDENT_AUDIT.md`, 
   - **FU-9:** `payables_days` VAT consistency (L-1);
   - **FU-10:** paged-aggregate performance (L-7);
   - **FU-11:** `*_days` derived evidence naming the three-month denominator (L-8).
-- **FU-1 remains: fix before Phase 16 F1.**
+- **FU-1 remains: fix before Phase 16 F1.** *(Fixed since by ADR-125.)*
 
+### ADR-122 amendment (2026-09-30) — FU-1
+- **FU-1, FU-13 and FU-14 are FIXED by ADR-125** (engine 4.0.0; migration `20260930000004`). An earlier draft of this amendment recorded FU-13 and FU-14 as open blockers awaiting an owner decision; that is superseded — both are fixed, and ADR-125 records how.
+- New follow-ups: **FU-12** (cost-side mirror of FU-1) and **FU-15** (AR/AP lists not yet limited to their commit date) — both OPEN, in the register above.
 
 ### ADR-124 · Second ADR-120 remediation: per-account cash balances, period-aware AR/AP freshness, dated opening journals
-Status: **APPROVED by the product owner (2026-09-30) and IMPLEMENTED — engine 3.0.0.** Implementation record, tests, gates and the 27-organisation Health/alert regression record: `docs/ADR-124.md`. Not independently audited: by the owner's process decision the comprehensive independent audit follows once the remaining approved phases are built. Phase 16 not started.
+Status: **APPROVED by the product owner (2026-09-30) and IMPLEMENTED — engine 3.0.0. Owner sign-off (2026-09-30): the 27-organisation Health/alert change set (`docs/ADR-124.md` §6) is APPROVED** — that sign-off covers ADR-124's change set, not ADR-123's F-11 table. Implementation record, tests, gates and the 27-organisation Health/alert regression record: `docs/ADR-124.md`. Not independently audited: by the owner's process decision the comprehensive independent audit follows once the remaining approved phases are built. Phase 16 not started.
 
 **Context.** The second independent audit of `8493362` (`docs/ADR-120_SECOND_INDEPENDENT_AUDIT.md`) returned **NOT READY**. Blocking:
 - **HIGH:** N-1 and N-2.
@@ -2191,3 +2200,77 @@ Expected outcomes on the audit's reproductions:
 - *D-4:* implemented as proposed (date-aware), not the NULL fallback.
 - *D-5:* without the invoice population (no `openInvoices`), a net share above 100 % is withheld rather than stated.
 - *D-6:* the sweep keys on the LATEST succeeded run; Home shows figures from another engine version under "Updating your numbers"; the golden hash test enforces the bump.
+
+### ADR-125 · FU-1: revenue is stated only from a source that establishes the month
+Status: **IMPLEMENTED — engine 4.0.0** (with migration `20260930000004` for FU-13 and FU-14). Not independently audited: the owner has deferred the comprehensive independent audit until the remaining approved phases are built. Phase 16 not started. Implementation record: `docs/FU-1_IMPLEMENTATION.md`; regression record: `docs/FU-1_ENGINE_REGRESSION_RECORD.md`.
+
+**Context.** ADR-120's hardening registered FU-1 (ADR-122; ADR-120 finding H-7). An organisation's invoice list could make the engine state revenue **0.00, calculated, complete, with no missing reason** for months the list says nothing about: INVBANK September–December read 0.00 before and after ADR-120. Health would then score such a month as a zero-revenue month, and Phase 16 F1 would score `no_revenue` −30 on the same fabricated zero. FU-1 had to be fixed before Phase 16.
+
+**Root cause.** In `coverage.ts` `computeCoverage`, the invoices block set `arApBatch` for any invoice batch that spanned P **or** had `daysBetween(P.end, committedAt) <= 45`. That second test is true for every batch committed BEFORE P (the gap is negative) and so for months far in the future. The invoices source therefore covered P, with warning `open_items_only`. §2.3's P&L precedence (`period_balances` > `ledger` > `invoices` > `bank`) chose invoices, and `composePeriod` summed zero invoice cells: revenue 0.00, `calculated`, completeness 1, no missing reason. The same coverage fed the counterparty (customer) family and `isPeriodComplete`.
+
+**Decisions.**
+1. **The rule.** The invoices source covers P for the P&L and customer families, and for `is_complete`, only from committed **full sales lists**: target `invoices`, `invoice_list_kind = full`, import type `sales_invoices` or `sales_report` (`invoiceRevenueCoverage`). An `open_items` list (ADR-047.10) and a purchase-only list never cover revenue. The `arApBatch` branch is deleted. The 45-day freshness gate belongs only to `invoiceSideCoverage` (AR/AP, ADR-124 D-3), which is unchanged.
+2. **The commit-date limit.** A list's **effective range** runs from its declared start to the EARLIER of its declared end and its commit date. A list knows nothing after the day it was committed: the upload form accepts any end date, and a new batch defaults to the whole current month.
+3. **Combining lists.** Effective ranges that meet or overlap combine into one run, as statements do (ADR-124 D-1, `revenueRuns`). A completed P is covered if and only if the combined runs contain every day of P. Two contiguous halves cover a month; halves with a gap do not.
+4. **Current and future months.**
+   - A period not yet begun (after the as-of) is never covered.
+   - The current period is stated as revenue **to date**, through the earlier of the run's end and the as-of: warning `partial_month`, completeness = days reached ÷ days in P. It is complete only when the run reaches P's end.
+   - `latestDataDate.invoices` is the latest effective end, capped at the as-of (`revenueDataDate`), so a current month stated to date is not `is_complete`.
+   - For the current month's invoice revenue to date, the days-figure denominators (`revenue`, `invoiceSalesTotal`, `payablesExpenseBase` in `receivables-input.ts` `denominatorInputsFor`) are NULL: days figures are not computed from a few days of flow.
+5. **FU-13 · The list kind is written at commit.**
+   - *The defect:* the import pipeline never wrote `invoice_list_kind = full`. Its only writer, `api.record_batch_confirmation`, copies `p_value ->> 'invoice_list_kind'`. The review page never sends that key: it confirms IMP-INV-012 with `{answer: 'yes'}`. The column has no default. So every list committed through the app had a NULL kind, and under decision 1 would have stated no revenue. Adversarial review found this and rated it a blocker.
+   - *The fix:* trigger `app.invoice_list_kind_at_commit` (`BEFORE INSERT OR UPDATE OF status, invoice_list_kind` on `import_batches`). When an invoice batch reaches `committed` with a NULL kind, it sets `open_items` if `confirmations ? 'IMP-INV-012'`, else `full`. An explicit kind is left as it is.
+   - `app.backfill_invoice_list_kind()` applies the same rule to batches already committed; the migration calls it.
+   - This makes IMPORT_ENGINE's batch-level kind ∈ {`full`, `open_items`} true of the data. It is not a rule change.
+6. **FU-14 · An incomplete period shows no Health score.**
+   - *The defect:* a period that stopped being complete kept the Health pointer an earlier run had left in `health_current`. Adversarial review rated this major.
+   - *The fix:* `api_server.set_period_completeness` now deletes the `health_current` row of any period it marks incomplete. The `health_scores` rows (history) are kept.
+   - No Health rule, weight or threshold changed (ADR-030.4).
+   - *Known limit:* a run that FAILS after withdrawing a pointer does not restore it. The failed-run restore only restores that run's own pointers, and `is_complete` was never restored on failure either.
+
+**NULL, not zero.**
+- Months no full sales list establishes fall through §2.3 unchanged: to the bank as a cash proxy, else NULL with `no_source_covers_period`.
+- A covered month with no sales is a genuine, stated 0.00.
+- Margins on an uncovered month carry `no_source_covers_period`, not `comparison_is_zero` / `no_cost_of_sales_accounts`.
+- The AI tool layer returns no value, with the reason, for an uncovered month.
+
+**What did not change.**
+- §2.3 precedence and fallthrough.
+- AR/AP coverage (`invoiceSideCoverage`, ADR-124 D-3).
+- Cash, receivables, payables and working-capital figures: none changed in the 27-organisation record.
+- Health rules, weights and thresholds; alert rules and thresholds.
+- RLS and grants. The only additions are the two new `app` functions, which are revoked from clients; the trigger runs as definer.
+
+**Consequences.**
+- **Engine 4.0.0** (major: existing values change). The golden hash was re-recorded, and the golden corpus includes the FU-1 cases. The upgrade sweep recomputes every organisation's whole history.
+- **27-organisation record (3.0.0 → 4.0.0).** 17 organisations are unchanged. In the other 10 (INVBANK, INVONLY, CREDITHEAVY, PARTIALPD, LONG, BIGINV, CNFUTURE, CURRENT, BSREV, BSLIST), every change is P&L 0.00 → NULL `no_source_covers_period`, in months no full sales list establishes.
+- **Health and alerts.** Only BSREV February's Health score is withdrawn: it rested on manufactured revenue and opex, and February is no longer complete. No alert was added or removed.
+- **FU-13's consequence on the AR/AP side (recorded, not hidden).** Existing imported lists now read as `full` (or `open_items`), so the change reaches AR/AP too:
+  - For real organisations, `receivables_days` can now be computed from these lists. With a NULL kind, `fullListSpans` was always false.
+  - A list confirmed under IMP-INV-012 states a completed month only when its as-at date is that month's end (ADR-124 D-3).
+  - This is the import specification finally being true of the data. The regression fixtures always set the kind, so the 27-organisation record cannot show this change.
+- **Month rollover.** A current month's stored revenue to date stays until the next recalculation. There is no daily scheduled run (FU-6).
+- **P&L snapshot completeness** reflects categorisation, not coverage. This is pre-existing and applies to all bases.
+
+**Tests and gates** (details and figures in `docs/FU-1_IMPLEMENTATION.md`):
+- *New tests:*
+  - `test/unit/fu1-revenue-coverage.test.ts` (25).
+  - `test/integration/fu1-remediation.test.ts` (27) over the 16 organisations in `test/fixtures/fu1-orgs.ts`. It includes FU-13 through the real commit path and FU-14.
+  - `supabase/tests/16_fu1_list_kind.test.sql` (14).
+- *Meaningfulness:* 15 of the 27 integration tests fail on the 3.0.0 engine.
+- *Gates* on the final code, clean database, run one at a time:
+  - tsc, eslint and next build: pass.
+  - Unit 2,161 / 2,161, with the coverage gate passing.
+  - Eval 253 / 253.
+  - Integration 867 / 868. The one failure is the pre-existing `ai-eval-record` flake.
+  - pgTAP 1,102 / 1,102.
+  - Schema drift: pass.
+  - Playwright: 69 passed, 1 skipped.
+  - Evidence sweep: 54 → 42 checked, 0 mismatches.
+
+**Remaining.**
+- FU-12 (cost side) OPEN.
+- FU-15 (AR/AP commit-date limit) OPEN.
+- FU-14's failed-run restore limit.
+- Month rollover (FU-6).
+- FU-2, FU-3 and FU-5 to FU-11: unchanged.

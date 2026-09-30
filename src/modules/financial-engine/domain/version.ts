@@ -29,7 +29,17 @@
  * The bump is ENFORCED, not remembered: `test/unit/engine-version-golden.test.ts` hashes the engine's
  * outputs over a fixed corpus and fails when they change while this string does not.
  */
-export const ENGINE_VERSION = '3.0.0';
+/**
+ * 4.0.0 (ADR-122 FU-1): MAJOR. The invoices source covers a month's P&L and customer figures only
+ * when a FULL SALES list establishes it — its declared range spans the month, or, in the current
+ * month, reaches into it (revenue to date, `partial_month`). The AR/AP freshness branch that used to
+ * hand the P&L to any invoice list committed within 45 days of a month — including lists committed
+ * BEFORE it — and to open-items and purchase lists, is gone. Those months stated revenue 0.00 no list
+ * established; they now fall through §2.3 to the bank (a cash proxy) or to NULL with
+ * `no_source_covers_period`. §6: existing values change, so the first run recomputes every
+ * organisation's history. Record: docs/FU-1_ENGINE_REGRESSION_RECORD.md; ADR-122 amendment (FU-1).
+ */
+export const ENGINE_VERSION = '4.0.0';
 
 /** Bumped independently of the engine (§6). */
 export const HEALTH_CONFIG_VERSION = 'health.config.v1';

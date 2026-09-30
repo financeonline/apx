@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { Decimal } from '@/core/money';
 
 import {
-  buildCashHistory, composePeriod, computeCoverage, ENGINE_VERSION, invoiceSideCoverage, variancesForPeriod,
+  buildCashHistory, composePeriod, computeCoverage, ENGINE_VERSION, invoiceSideCoverage, isPeriodComplete, variancesForPeriod,
   type AccountRef, type AggregateCell, type AgingInvoice, type BankAccountRef, type CoverageBatch,
   type DailyMovement, type EngineContext, type MetricResult, type PeriodRef, type StatementRef,
 } from '@/modules/financial-engine';
@@ -21,7 +21,8 @@ import {
  *
  * This test is. It runs the pure engine over a fixed corpus — every family: P&L on a ledger, cash
  * from per-account statement histories, receivables and payables from invoices, a balance sheet and
- * a dated opening journal, the AR/AP freshness matrix, and the variance pass — and hashes the
+ * a dated opening journal, the AR/AP freshness matrix, the variance pass, and (ADR-122 FU-1) when an
+ * invoice list may state a month's revenue — and hashes the
  * canonical output. The hash is recorded beside the version it was produced by, in
  * `test/fixtures/engine-golden.json`:
  *
@@ -240,7 +241,64 @@ function corpus(): unknown {
   for (const [name, over] of boundary) {
     freshness[`boundary/${name}`] = [false, true].map((current) => invoiceSideCoverage([batch(90, over)], july, 'sales', current));
   }
-  return { periods: out, freshness, history: [...history.entries()], tolerance, lastDayJournal };
+  return { periods: out, freshness, history: [...history.entries()], tolerance, lastDayJournal, fu1: fu1Corpus(ctx) };
+}
+
+/**
+ * ADR-122 FU-1: when an invoice list may state a month's revenue. Each case is the invoice basis on
+ * its own (no ledger, no balances, no bank), so the invoices source's coverage alone decides the
+ * P&L — a regression that lets a list cover a month it does not establish turns a NULL here into a
+ * 0.00 and changes the hash.
+ */
+const OCT = month('2026-10', 10);
+const MAR = month('2026-03', 13);
+const FU1_CELLS: AggregateCell[] = [
+  cell({ periodId: JUL.id, source: 'invoices', invoiceType: 'sales', counterpartyId: CUSTOMER, amount: '4000.00', debit: '800.00' }),
+  cell({ periodId: JUL.id, source: 'invoices', invoiceType: 'purchase', counterpartyId: SUPPLIER, amount: '900.00', debit: '180.00' }),
+  cell({ periodId: MAR.id, source: 'invoices', invoiceType: 'sales', counterpartyId: CUSTOMER, amount: '3000.00' }),
+  cell({ periodId: SEP.id, source: 'invoices', invoiceType: 'sales', counterpartyId: CUSTOMER, amount: '500.00', debit: '100.00' }),
+];
+const FU1_CASES: Array<[string, PeriodRef, Partial<CoverageBatch> | Array<Partial<CoverageBatch>>]> = [
+  // A full sales list spanning the month: its sales (July) and a genuine, stated zero (August).
+  ['spanned', JUL, {}],
+  ['genuine zero', AUG, {}],
+  // Months the list's range does not span: before it, after it (committed before the month ends).
+  ['before the range', MAY, {}],
+  ['after the range', OCT, {}],
+  // Committed during a completed month, its range stopping short of the month's end.
+  ['stops short', JUL, { periodEnd: '2026-07-20', committedAt: '2026-07-20T12:00:00Z' }],
+  // Committed BEFORE the month (the negative-gap bug, BSREV).
+  ['committed before', MAY, { periodStart: '2026-03-01', periodEnd: '2026-03-31', committedAt: '2026-04-05T09:00:00Z' }],
+  // Lists that establish no revenue whatever their range.
+  ['purchase only', JUL, { importType: 'purchase_invoices' }],
+  ['open items', JUL, { invoiceListKind: 'open_items' }],
+  // The current month (as of 15 September): to date from a list reaching the 10th; not from one
+  // ending before it; whole from one spanning it.
+  ['current to date', SEP, { periodEnd: '2026-09-10' }],
+  ['current unreached', SEP, {}],
+  ['current spanned', SEP, { periodEnd: '2026-09-30' }],
+  // A list knows nothing after the day it was committed: committed mid-July with a range to August.
+  ['committed mid-month', JUL, { committedAt: '2026-07-20T12:00:00Z' }],
+  // Lists that meet combine, as statements do; a day missing between them does not.
+  ['contiguous halves', JUL, [{ periodStart: '2026-07-01', periodEnd: '2026-07-15' }, { periodStart: '2026-07-16', periodEnd: '2026-07-31' }]],
+  ['halves with a gap', JUL, [{ periodStart: '2026-07-01', periodEnd: '2026-07-14' }, { periodStart: '2026-07-16', periodEnd: '2026-07-31' }]],
+];
+
+function fu1Corpus(ctx: EngineContext): unknown {
+  return Object.fromEntries(FU1_CASES.map(([name, period, over]) => {
+    const batches = (Array.isArray(over) ? over : [over]).map((o, i) => batch(80 + i, o));
+    const coverage = computeCoverage({ period, batches, bankAccounts: [], rowCounts: {}, asOf: ctx.asOf });
+    const results = composePeriod({
+      period, coverage, cells: FU1_CELLS, transferLegs: [], context: { ...ctx, bankAccounts: [] },
+      receivables: { invoices: [], batches, asOfIsPeriodEnd: period.id !== SEP.id, priorDenominators: [], ledger: null },
+    }).map((r, i) => ({ ...r, id: `fu1-${name}-${i}` }));
+    return [name, {
+      invoices: coverage.bySource.invoices,
+      latest: coverage.latestDataDate.invoices ?? null,
+      complete: isPeriodComplete(coverage, period, []),
+      results,
+    }];
+  }));
 }
 
 /** Canonical JSON: keys sorted at every level, so the hash depends on content and not on insertion order. */
@@ -291,6 +349,22 @@ describe('engine version golden (ADR-124 D-6)', () => {
       ['2026-08', 'receivables'], ['2026-08', 'payables'], ['2026-08', 'working_capital'], ['2026-07', 'receivables'],
     ] as const) {
       expect(known(ym, key), `${ym} ${key}`).toBe(true);
+    }
+  });
+
+  it('the FU-1 cases state revenue exactly where a full sales list establishes it', () => {
+    // The corpus must exercise both sides of the rule, or a regression could not move the hash.
+    const out = corpus() as { fu1: Record<string, { results: MetricResult[] }> };
+    const revenue = (name: string): string | null =>
+      out.fu1[name]!.results.find((r) => r.key === 'revenue' && r.dimensionType === 'none')?.value ?? null;
+    expect(revenue('spanned')).toBe('4000.00');
+    expect(revenue('genuine zero')).toBe('0.00');
+    expect(revenue('current to date')).toBe('500.00');
+    expect(revenue('current spanned')).toBe('500.00');
+    expect(revenue('contiguous halves')).toBe('4000.00');
+    for (const name of ['before the range', 'after the range', 'stops short', 'committed before', 'purchase only', 'open items', 'current unreached',
+      'committed mid-month', 'halves with a gap']) {
+      expect(revenue(name), name).toBeNull();
     }
   });
 });

@@ -158,38 +158,53 @@ describe('bank coverage needs every active cash-like account (§2.2)', () => {
 
 describe('invoice coverage distinguishes a full list from an aged-debtors list (ADR-047.10)', () => {
   it('covers revenue only from a full list', () => {
+    // FU-1: the list must also be a SALES list — only that states revenue — so the batch says so.
     const coverage = coverageOf({
-      batches: [batch({ targetTable: 'invoices', invoiceListKind: 'full' })],
+      batches: [batch({ targetTable: 'invoices', invoiceListKind: 'full', importType: 'sales_invoices' })],
     });
     expect(coverage.bySource.invoices.covers).toBe(true);
     expect(coverage.bySource.invoices.warnings).toHaveLength(0);
   });
 
-  it('accepts an open-items list for receivables but flags it', () => {
-    // An open-items list defines what is owed; it must never define revenue.
+  it('never lets an open-items list cover the invoices source', () => {
+    // An open-items list defines what is owed; it must never define revenue. FU-1 changed this
+    // expectation: it used to cover with `open_items_only`, which handed the P&L to the list and
+    // stated revenue 0.00. Its receivables acceptance lives in `invoiceSideCoverage`
+    // (engine-receivables-wiring.test.ts), which FU-1 does not touch.
     const coverage = coverageOf({
-      batches: [batch({ targetTable: 'invoices', invoiceListKind: 'open_items' })],
+      batches: [batch({ targetTable: 'invoices', invoiceListKind: 'open_items', importType: 'sales_invoices' })],
     });
-    expect(coverage.bySource.invoices.covers).toBe(true);
-    expect(coverage.bySource.invoices.warnings).toContain('open_items_only');
+    expect(coverage.bySource.invoices.covers).toBe(false);
+    expect(coverage.bySource.invoices.warnings).toHaveLength(0);
   });
 
-  it('accepts a list committed within the freshness window after the period', () => {
+  it('does not cover a month from a list merely committed within the 45-day window', () => {
+    // FU-1 changed this expectation (it was `true`): the list is declared for JULY and committed on
+    // 20 June — BEFORE May's end is even 45 days past — and states nothing about May's revenue. The
+    // freshness gate is an AR/AP rule and stays tested on `invoiceSideCoverage`.
     const coverage = coverageOf({
+      // A FULL SALES list, so the only thing that can refuse it is the rule under test.
       batches: [batch({
-        targetTable: 'invoices', invoiceListKind: null,
+        targetTable: 'invoices', invoiceListKind: 'full', importType: 'sales_invoices',
         periodStart: '2026-07-01', periodEnd: '2026-07-31',
         committedAt: '2026-06-20T10:00:00Z',
       })],
     });
-    expect(coverage.bySource.invoices.covers).toBe(true);
+    expect(coverage.bySource.invoices.covers).toBe(false);
+    // The same list, declared over May, does cover it — the commit date is not what decides.
+    expect(coverageOf({ batches: [batch({
+      targetTable: 'invoices', invoiceListKind: 'full', importType: 'sales_invoices',
+      periodStart: '2026-05-01', periodEnd: '2026-05-31', committedAt: '2026-06-20T10:00:00Z',
+    })] }).bySource.invoices.covers).toBe(true);
   });
 
-  it('rejects a list uploaded long after the period', () => {
-    // Last May's receivables must not be answered from a list uploaded a year later.
+  it('rejects a list whose range does not reach the period, whenever it was uploaded', () => {
+    // Last May's revenue must not be answered from a list declared for, and uploaded in, a later
+    // year. Since FU-1 the reason is the range, not the upload date: a full sales list, declared for
+    // a later May, states nothing about this May.
     const coverage = coverageOf({
       batches: [batch({
-        targetTable: 'invoices', invoiceListKind: null,
+        targetTable: 'invoices', invoiceListKind: 'full', importType: 'sales_invoices',
         periodStart: '2027-05-01', periodEnd: '2027-05-31',
         committedAt: '2027-06-01T10:00:00Z',
       })],
@@ -255,7 +270,8 @@ describe('every family and source pairing carries the right assurance (§2.3)', 
     batches: [
       batch({ targetTable: 'period_balances', balanceKind: 'trial_balance' }),
       batch({ id: 'b-gl', targetTable: 'ledger_entries' }),
-      batch({ id: 'b-inv', targetTable: 'invoices', invoiceListKind: 'full' }),
+      // FU-1: a full SALES list — the only invoice list that establishes the P&L and customer families.
+      batch({ id: 'b-inv', targetTable: 'invoices', invoiceListKind: 'full', importType: 'sales_invoices' }),
       batch({ id: 'b-bank', targetTable: 'bank_transactions', bankAccountId: 'ba-1' }),
     ],
     bankAccounts: [current],
@@ -298,6 +314,9 @@ describe('every family and source pairing carries the right assurance (§2.3)', 
   });
 
   it('treats counterparty figures from invoices as calculated and from the bank as estimated', () => {
+    // The basis too: without it a counterparty family that fell to the ledger would also read
+    // 'calculated', and this would silently test the wrong source.
+    expect(choosePrecedence(withAll(), 'counterparty').basis).toBe('invoices');
     expect(choosePrecedence(withAll(), 'counterparty').assurance).toBe('calculated');
 
     const bankOnly = coverageOf({

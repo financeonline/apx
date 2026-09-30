@@ -314,19 +314,24 @@ export function denominatorInputsFor(
   }
 
   /*
-   * Revenue the P&L stated from an invoice list that does not state the month's sales (warning
-   * `open_items_only` — the P&L family's own coverage defect, ADR-122 FU-1) is not a sales figure:
-   * dividing a receivables balance by it gave 91 "days to get paid" over months whose revenue nobody
-   * stated (ADR-123, audit F-5). It is unknown here, so the days figure is too.
+   * Revenue that is not the month's sales is no DSO denominator. ADR-123 (audit F-5) nulled the
+   * `open_items_only` 0.00s the invoices source used to state for months no list covered; FU-1 removed
+   * them at the source — such a month's revenue is now NULL, or a bank cash proxy as for any month
+   * without a list. What FU-1 adds is the CURRENT month's invoice revenue TO DATE (`partial_month`):
+   * a few days of sales, which would understate the window's flow and overstate the days, so it is
+   * unknown here as the flagged 0.00 was before, and the days figure is too. The same holds for the
+   * other two flows the days divide by — the sales list's own total and the expense base — since they
+   * are that month's figures to date as well (review finding).
    */
   const revenueResult = results.find((r) => r.key === 'revenue' && r.dimensionType === 'none');
-  const revenue = revenueResult === undefined || revenueResult.dataQuality.warnings.includes('open_items_only')
-    ? null : revenueResult.value;
+  const toDate = revenueResult !== undefined && revenueResult.basis === 'invoices'
+    && revenueResult.dataQuality.warnings.includes('partial_month');
+  const revenue = revenueResult === undefined || toDate ? null : revenueResult.value;
 
   return {
     revenue,
-    invoiceSalesTotal,
-    payablesExpenseBase,
+    invoiceSalesTotal: toDate ? null : invoiceSalesTotal,
+    payablesExpenseBase: toDate ? null : payablesExpenseBase,
     hasOpenItemsList: sales.openItemsSpans,
   };
 }

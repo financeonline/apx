@@ -1,7 +1,7 @@
 /**
  * The engine regression record (ADR-124): compares two dumps written by `npm run engine:compare`
  * (test/regression/engine-comparison.test.ts) and prints, per organisation, every change in the
- * headline cash, receivables, payables and working-capital figures, every Health score and rule
+ * headline cash, receivables, payables, working-capital and P&L figures (revenue and what derives from it), every Health score and rule
  * result that moved, and every alert that appeared or went away.
  *
  *   npx tsx scripts/engine-compare.ts before.json after.json > record.md
@@ -29,6 +29,9 @@ interface Dump {
 const FIGURES = [
   'opening_cash', 'net_cash_movement', 'closing_cash', 'cash_runway_months',
   'receivables', 'receivables_overdue', 'payables', 'payables_overdue', 'working_capital',
+  // The P&L family (FU-1): revenue and what is derived from it.
+  'revenue', 'cost_of_sales', 'gross_profit', 'operating_expenses', 'operating_profit', 'net_profit',
+  'gross_margin', 'net_margin', 'customer_concentration_top1',
 ] as const;
 
 const [beforePath, afterPath] = process.argv.slice(2);
@@ -45,7 +48,7 @@ function figures(metrics: readonly string[]): Map<string, string> {
   for (const line of metrics) {
     const [period, key, value, , , , missing] = line.split('|');
     if (!(FIGURES as readonly string[]).includes(key!)) continue;
-    const shown = value === 'NULL' ? 'NULL' : new Decimal(value!).toFixed(key === 'cash_runway_months' ? 1 : 2);
+    const shown = value === 'NULL' ? 'NULL' : new Decimal(value!).toFixed(key === 'cash_runway_months' ? 1 : key!.endsWith('margin') || key!.startsWith('customer_concentration') ? 4 : 2);
     const reason = missing?.startsWith('m=') && missing !== 'm=[]' ? ` ${missing.slice(2).replace(/"/g, '')}` : '';
     out.set(`${period!.slice(0, 7)}|${key}`, `${shown}${value === 'NULL' ? reason : ''}`);
   }

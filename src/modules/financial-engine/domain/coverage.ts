@@ -16,7 +16,7 @@
  */
 
 import { bankCoverageFromRatio, completenessHolds } from '@/core/periods';
-import { bankCoverageFor } from './cash-history';
+import { bankCoverageFor, coveredRuns, runsCover } from './cash-history';
 
 import type {
   BankAccountRef, BasisChoice, DataQualityWarning, PeriodCoverage, PeriodRef, SourceCoverage,
@@ -32,8 +32,10 @@ export interface CoverageBatch {
   readonly bankAccountId: string | null;
   readonly invoiceListKind: 'full' | 'open_items' | null;
   /**
-   * What was imported (`import_batches.import_type`). Optional because only the AR/AP test reads it:
-   * a sales list and a purchase list are both `invoices`, and only this says which side was covered.
+   * What was imported (`import_batches.import_type`). A sales list and a purchase list are both
+   * `invoices`, and only this says which side was covered: the AR/AP test reads it per side, and the
+   * invoices P&L source needs a SALES list (FU-1). Optional for the other tables; an invoice batch
+   * without it is a list of unknown side and establishes no revenue.
    */
   readonly importType?: string | null;
   /** The DECLARED range the reviewer confirmed, not the min/max posting date. */
@@ -48,7 +50,10 @@ export interface CoverageInput {
   readonly bankAccounts: readonly BankAccountRef[];
   /** Periods that actually carry accepted rows, per source, so an empty declared range is caught. */
   readonly rowCounts: Readonly<Partial<Record<SourceKind, number>>>;
-  /** Today, for the invoice freshness gate. Explicit, never read from a clock (§1.1). */
+  /**
+   * Today, to tell the CURRENT period (the one containing it) for the invoices source's revenue-to-date
+   * rule (FU-1). Explicit, never read from a clock (§1.1).
+   */
   readonly asOf: string;
   /**
    * Every committed statement of the organisation, all history (ADR-124). An account's scope — when
@@ -191,6 +196,101 @@ export function invoiceSideCoverage(
   };
 }
 
+/** A committed FULL list of SALES invoices: the only list that states a month's revenue (FU-1). */
+function isFullSalesList(b: CoverageBatch): boolean {
+  return b.targetTable === 'invoices'
+    && b.invoiceListKind === 'full'
+    && SIDE_IMPORT_TYPES.sales.includes(b.importType ?? '');
+}
+
+/** Whole days from `a` to `b`, both inclusive. */
+function daysInclusive(a: string, b: string): number {
+  return daysBetween(a, b) + 1;
+}
+
+/**
+ * The days a full sales list can state, as runs of consecutive days (FU-1). A list knows the invoices
+ * of its declared range only up to the day it was COMMITTED: a range a reviewer declared past that day
+ * — the upload form lets any end date be typed, and a new batch defaults to the whole current month —
+ * describes days the list had not seen. So a list's effective range is its declared start to the
+ * earlier of its declared end and its commit date, and lists that meet or overlap combine, as a
+ * month's statements do (ADR-124 D-1).
+ */
+function revenueRuns(batches: readonly CoverageBatch[]): ReadonlyArray<{ readonly start: string; readonly end: string }> {
+  return coveredRuns(batches.filter(isFullSalesList).flatMap((b) => {
+    const committed = b.committedAt.slice(0, 10);
+    const end = b.periodEnd < committed ? b.periodEnd : committed;
+    return end >= b.periodStart ? [{ periodStart: b.periodStart, periodEnd: end }] : [];
+  }));
+}
+
+/**
+ * §2.2, "`invoices` (P&L and customer families)", as decided for ADR-122 FU-1 (ADR-125).
+ *
+ * A source that does not cover a period must never manufacture a financial zero for it: once the
+ * invoices source "covers" P, precedence hands it the whole P&L (§2.3) and a month with no invoice
+ * cells reads as revenue 0.00, calculated and complete. So the invoices source covers P ONLY when
+ * committed `full` lists of SALES invoices (`sales_invoices` / `sales_report`) ESTABLISH P's revenue —
+ * when their effective ranges (`revenueRuns`: declared start to the earlier of declared end and
+ * commit date, lists that meet combined) contain:
+ *
+ *   - every day of P, for a COMPLETED period. When a list was committed matters only as the last day
+ *     it can know: a list committed on 10 September states nothing about 11–30 September, whatever
+ *     range was declared, and a list committed before a month states nothing about it at all.
+ *
+ *   - for the CURRENT period (it contains the run's as-of date), P's first day and on: revenue TO
+ *     DATE, through the earlier of that run's end and the as-of date. The figure carries
+ *     `partial_month`, and its completeness is the share of P's days it reaches. It is complete only
+ *     once it reaches P's last day.
+ *
+ * Never covers P:
+ *   - a period that has not begun (after the as-of date) — nothing can state its revenue yet;
+ *   - an `open_items` (aged-debtors) list — it defines what is owed, never revenue (ADR-047.10);
+ *   - a PURCHASE-only list — revenue would be a zero no list states;
+ *   - any list merely committed near P. The AR/AP freshness gate (45 days, ADR-124 D-3) is a rule
+ *     about a month-END POSITION and belongs to `invoiceSideCoverage` alone. Here it used to hand the
+ *     P&L to lists committed BEFORE P (a negative gap is "within 45 days") and to months far in the
+ *     future, each stating revenue 0.00 with `open_items_only` (FU-1).
+ *
+ * A batch's `invoice_list_kind` is `full` unless the reviewer confirmed it as open items (IMP-INV-012):
+ * the import pipeline writes it at commit (migration 20260930000004, FU-13).
+ *
+ * When the invoices source does not cover P, the families fall through their §2.3 order unchanged:
+ * the P&L to the bank (a cash proxy), else NULL with `no_source_covers_period` — never zero. Lists
+ * covering P with no sales in P still state a genuine, stated 0.00.
+ */
+function invoiceRevenueCoverage(
+  batches: readonly CoverageBatch[],
+  period: PeriodRef,
+  asOf: string,
+): SourceCoverage {
+  const today = asOf.slice(0, 10);
+  if (period.periodStart > today) return NO_COVERAGE;
+  const runs = revenueRuns(batches);
+
+  if (today > period.periodEnd) {
+    return runsCover(runs, period.periodStart, period.periodEnd)
+      ? { covers: true, warnings: [], completeness: 1 }
+      : NO_COVERAGE;
+  }
+
+  // The current period: the run holding P's first day, never past today.
+  const run = runs.find((r) => r.start <= period.periodStart && r.end >= period.periodStart);
+  if (run === undefined) return NO_COVERAGE;
+  const reach = run.end < today ? run.end : today;
+  if (reach >= period.periodEnd) return { covers: true, warnings: [], completeness: 1 };
+  const covered = daysInclusive(period.periodStart, reach);
+  const days = daysInclusive(period.periodStart, period.periodEnd);
+  return { covers: true, warnings: ['partial_month'], completeness: covered / days };
+}
+
+/** The last day full sales lists state revenue for, never past the as-of date (`isPeriodComplete`). */
+function revenueDataDate(batches: readonly CoverageBatch[], asOf: string): string | null {
+  const today = asOf.slice(0, 10);
+  const ends = revenueRuns(batches).map((r) => (r.end < today ? r.end : today)).sort();
+  return ends[ends.length - 1] ?? null;
+}
+
 /** Cash-like account types. Credit-card and loan accounts are tracked but are not cash (§4.4). */
 const CASH_LIKE = new Set(['current', 'savings']);
 
@@ -224,23 +324,7 @@ export function computeCoverage(input: CoverageInput): PeriodCoverage {
       : NO_COVERAGE;
 
   // ---- invoices ----
-  // The revenue family needs a `full` list: an aged-debtors list never defines revenue (ADR-047.10).
-  const fullInvoiceBatch = batches.find(
-    (b) => b.targetTable === 'invoices' && b.invoiceListKind === 'full' && spans(b, period),
-  );
-  // The AR/AP families accept any kind, and also accept a batch committed within 45 days after the
-  // period ends — the freshness gate, so last month's receivables are not answered from a list
-  // uploaded a year later.
-  const arApBatch = batches.find(
-    (b) => b.targetTable === 'invoices'
-      && (spans(b, period) || daysBetween(period.periodEnd, b.committedAt.slice(0, 10)) <= 45),
-  );
-
-  const invoices: SourceCoverage = fullInvoiceBatch
-    ? { covers: true, warnings: [], completeness: 1 }
-    : arApBatch
-      ? { covers: true, warnings: ['open_items_only'], completeness: 0.7 }
-      : NO_COVERAGE;
+  const invoices = invoiceRevenueCoverage(batches, period, asOf);
 
   // ---- bank ----
   // EVERY in-scope cash-like account needs its statements to cover every day of the period it
@@ -270,12 +354,18 @@ export function computeCoverage(input: CoverageInput): PeriodCoverage {
     const table = source === 'period_balances' ? 'period_balances'
       : source === 'ledger' ? 'ledger_entries'
       : source === 'invoices' ? 'invoices' : 'bank_transactions';
+    // FU-1: the invoices source's data reaches only as far as a FULL SALES list can state revenue —
+    // no further than it was committed, and never past the as-of date, so a current month stated to
+    // date is not complete (`isPeriodComplete`). An open-items or purchase list states no revenue.
+    if (source === 'invoices') {
+      const reach = revenueDataDate(batches, asOf);
+      if (reach) latestDataDate.invoices = reach;
+      continue;
+    }
     const dates = batches.filter((b) => b.targetTable === table).map((b) => b.periodEnd).sort();
     const latest = dates[dates.length - 1];
     if (latest) latestDataDate[source] = latest;
   }
-
-  void asOf;
 
   return {
     periodId: period.id,

@@ -204,7 +204,13 @@ describe('tenancy · the new reads stay inside the organisation', () => {
 describe('D-6 · figures an earlier engine wrote are found, flagged and recomputed', () => {
   it('every run of this suite ran on the current engine, and says so', () => {
     for (const k of KEYS) expect(latestVersion(o(k)), k).toBe(ENGINE_VERSION);
-    expect(ENGINE_VERSION).toBe('3.0.0');
+    // ADR-124 shipped engine 3.0.0. FU-1 (ADR-122 follow-up register, R5) changes existing values, so
+    // FINANCIAL_ENGINE.md §6 required a MAJOR bump to 4.0.0, which made the literal '3.0.0' pin stale.
+    // What this test guards is that the engine carries ADR-124's fixes (major 3 or later) and that
+    // every run above ran on the current ENGINE_VERSION; it no longer hard-codes a later bump.
+    // FU-1's own suite pins that the version moved past 3.0.0 (fu1-remediation.test.ts).
+    expect(ENGINE_VERSION).toMatch(/^\d+\.\d+\.\d+$/);
+    expect(Number(ENGINE_VERSION.split('.')[0])).toBeGreaterThanOrEqual(3);
   });
 
   it('an organisation left on 2.0.0 is shown as updating, queued by the sweep, and recomputed to the truth', async () => {

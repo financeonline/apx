@@ -82,6 +82,9 @@ const invoiceCoverage = () => computeCoverage({
   batches: [{
     id: 'b-inv', targetTable: 'invoices', balanceKind: null, balanceBasis: null,
     bankAccountId: null, invoiceListKind: 'full',
+    // FU-1: only a list of SALES invoices establishes revenue, so the fixture says what its docstring
+    // always meant. Without the side the list states no revenue and every figure below would be NULL.
+    importType: 'sales_invoices',
     periodStart: '2026-05-01', periodEnd: '2026-05-31', committedAt: '2026-06-02T00:00:00Z',
   }],
   bankAccounts: [], rowCounts: { invoices: 6 }, asOf: '2026-06-15',
