@@ -95,11 +95,30 @@ describe('the AR/AP invoice test is per side, and "after" means after (§2.2, AD
     expect(invoiceSideCoverage([batch({})], aug, 'sales').covers).toBe(true);
   });
 
-  it('covers a period whose list was committed within 45 days AFTER it ended', () => {
-    const late = batch({ periodStart: '2026-09-01', periodEnd: '2026-09-10', committedAt: '2026-10-15T09:00:00Z' });
-    expect(invoiceSideCoverage([late], aug, 'sales').covers).toBe(true); // 45 days after 08-31
-    const tooLate = batch({ periodStart: '2026-09-01', periodEnd: '2026-09-10', committedAt: '2026-10-16T09:00:00Z' });
+  it('covers a period whose list was committed within 45 days after it ended, when the list reaches back into it', () => {
+    const asAt = batch({ periodStart: '2026-08-15', periodEnd: '2026-09-10', committedAt: '2026-10-15T09:00:00Z' });
+    expect(invoiceSideCoverage([asAt], aug, 'sales').covers).toBe(true); // 45 days after 08-31
+    const tooLate = batch({ periodStart: '2026-08-15', periodEnd: '2026-09-10', committedAt: '2026-10-16T09:00:00Z' });
     expect(invoiceSideCoverage([tooLate], aug, 'sales').covers).toBe(false); // 46 days
+  });
+
+  it('F-4 · a list whose range starts AFTER the period says nothing about it — never a verified zero', () => {
+    // A March-only list committed 5 April used to "cover" February.
+    const feb: PeriodRef = { ...aug, id: 'p-feb', periodStart: '2026-02-01', periodEnd: '2026-02-28', label: 'Feb 2026' };
+    const march = batch({ periodStart: '2026-03-01', periodEnd: '2026-03-31', committedAt: '2026-04-05T09:00:00Z' });
+    expect(invoiceSideCoverage([march], feb, 'sales')).toMatchObject({ covers: false, anyBatch: true });
+  });
+
+  it('and a list that ENDED before the period says nothing about it either', () => {
+    const apr: PeriodRef = { ...aug, id: 'p-apr', periodStart: '2026-04-01', periodEnd: '2026-04-30', label: 'Apr 2026' };
+    const march = batch({ periodStart: '2026-03-01', periodEnd: '2026-03-31', committedAt: '2026-04-05T09:00:00Z' });
+    expect(invoiceSideCoverage([march], apr, 'sales').covers).toBe(false);
+  });
+
+  it('F-9 · a list uploaded DURING the current month covers it', () => {
+    const sep: PeriodRef = { ...aug, id: 'p-sep', periodStart: '2026-09-01', periodEnd: '2026-09-30', label: 'Sep 2026', isComplete: false };
+    const midMonth = batch({ periodStart: '2026-06-01', periodEnd: '2026-09-10', committedAt: '2026-09-10T10:00:00Z' });
+    expect(invoiceSideCoverage([midMonth], sep, 'sales').covers).toBe(true);
   });
 
   it('never covers a period with a list committed BEFORE it ended', () => {
@@ -354,5 +373,50 @@ describe('opening cash: the statement\'s own opening balance comes first (CD-06,
     const results = run([]);
     expect(metric(results, 'opening_cash').value).toBe('5000.00');
     expect(metric(results, 'opening_cash').assurance).toBe('calculated');
+  });
+});
+
+describe('the chain restart takes only a balance stated exactly at the period start (ADR-123, F-1/F-2)', () => {
+  const statement = batch({ targetTable: 'bank_transactions', importType: 'bank_statement', bankAccountId: 'ba', invoiceListKind: null, periodStart: '2026-08-01', periodEnd: '2026-08-31' });
+  const run = (bank: BankAccountRef, over: Partial<Parameters<typeof composePeriod>[0]> = {}) => {
+    const ctx = context({ bankAccounts: [bank] });
+    const coverage = computeCoverage({ period: aug, batches: [statement], bankAccounts: [bank], rowCounts: {}, asOf: ctx.asOf });
+    return composePeriod({ period: aug, coverage, cells: [], transferLegs: [], context: ctx, coveredBankAccountIds: ['ba'], ...over });
+  };
+  const typedLongAgo: BankAccountRef = { id: 'ba', name: 'Main', accountType: 'current', openingBalance: '10000.00', openingBalanceDate: '2026-05-31', isActive: true };
+
+  it('refuses a typed balance from months earlier on a restart — unknown, not a stale figure', () => {
+    const results = run(typedLongAgo, { openingExactOnly: true });
+    expect(metric(results, 'opening_cash').value).toBeNull();
+    expect(metric(results, 'opening_cash').dataQuality.missing).toContain('no_opening_cash');
+  });
+
+  it('accepts a typed balance dated the day before the restart', () => {
+    const results = run({ ...typedLongAgo, openingBalanceDate: '2026-07-31' }, { openingExactOnly: true });
+    expect(metric(results, 'opening_cash').value).toBe('10000.00');
+  });
+
+  it('accepts the statement that starts that day, and prefers it', () => {
+    const results = run(typedLongAgo, {
+      openingExactOnly: true,
+      statementOpenings: [{ bankAccountId: 'ba', source: 'statement_opening_balance', value: '4000.00', asAtDate: '2026-08-01' }],
+    });
+    expect(metric(results, 'opening_cash').value).toBe('4000.00');
+    expect(metric(results, 'opening_cash').assurance).toBe('verified');
+  });
+
+  it('the printed closing cross-checks the computed close; a mismatch is flagged, not overwritten', () => {
+    const results = run({ ...typedLongAgo, openingBalanceDate: '2026-07-31' }, {
+      statementClosing: [{ bankAccountId: 'ba', balanceAfter: '9000.00' }],
+    });
+    const closing = metric(results, 'closing_cash');
+    expect(closing.value).toBe('10000.00');
+    expect(closing.dataQuality.warnings).toContain('statement_balance_mismatch');
+    expect(closing.components).toMatchObject({ statement_closing_cash: '9000.00', statement_delta: '-1000.00' });
+  });
+
+  it('a statement that did not reconcile at import marks the month', () => {
+    const results = run({ ...typedLongAgo, openingBalanceDate: '2026-07-31' }, { unreconciledStatement: true });
+    expect(metric(results, 'closing_cash').dataQuality.warnings).toContain('unreconciled_statement');
   });
 });

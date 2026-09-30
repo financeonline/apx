@@ -7,7 +7,7 @@ import { log } from '@/core/logging';
 import { affectedRange, chunkPeriods, chunkWindow, type CalculationTrigger } from '../domain/chunking';
 import { computeCoverage, isPeriodComplete, type CoverageBatch } from '../domain/coverage';
 import { isCashLikeBankAccount } from '../domain/categories';
-import type { CashSeriesOptions, OpeningCashCandidate } from '../domain/cash';
+import type { CashSeriesOptions, OpeningCashCandidate, StatementClosingBalance } from '../domain/cash';
 import type { DenominatorInputs } from '../domain/receivables';
 import { denominatorInputsFor, type ReceivablesComposeInput } from '../domain/receivables-input';
 import { computeFingerprint } from '../domain/fingerprint';
@@ -353,30 +353,34 @@ export async function runCalculation(
     .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType)).map((a) => a.id).sort();
 
   /*
-   * CD-06 / §3.3: the statement's own opening balance is the first source of opening cash. Only the
-   * EARLIEST statement per cash-like account can supply one — it starts that account's chain; every
-   * later month opens at the carried close — and only when that statement starts on the first day
-   * of a fiscal period: a statement from 15 May states the balance at 15 May, not at 1 June.
+   * The organisation's bank statements (ADR-123): CD-06's first opening source, the §3.3 closing
+   * cross-check and the "does not reconcile" flag are all facts about a statement batch.
+   *
+   * A statement's printed OPENING is a candidate only for the period starting on the statement's own
+   * first day — a statement from 1 June states the balance at 1 June, and nothing about 1 July; one
+   * from 21 June states nothing about any period start (audit F-2: a 1–20 June statement's opening
+   * was taken for July, a verified 10,000 against a true 5,000). Two statements starting the same day:
+   * the latest committed wins, as a re-upload supersedes (ADR-029.2; audit L-4).
    */
-  const periodStartSet = new Set(allPeriods.map((p) => p.periodStart));
   const cashLikeIds = new Set(bankAccounts.filter((a) => isCashLikeBankAccount(a.accountType)).map((a) => a.id));
-  const earliestStatement = new Map<string, repo.StatementOpening>();
-  for (const statement of await repo.loadStatementOpenings(scoped, orgId)) {
-    if (!cashLikeIds.has(statement.bankAccountId)) continue;
-    const held = earliestStatement.get(statement.bankAccountId);
-    if (held === undefined || statement.periodStart < held.periodStart
-      || (statement.periodStart === held.periodStart && statement.batchId < held.batchId)) {
-      earliestStatement.set(statement.bankAccountId, statement);
+  const statements = (await repo.loadStatements(scoped, orgId)).filter((st) => cashLikeIds.has(st.bankAccountId));
+  const latestPerAccount = (list: readonly repo.StatementBatch[]): repo.StatementBatch[] => {
+    const byAccount = new Map<string, repo.StatementBatch>();
+    for (const st of [...list].sort((a, b) => b.committedAt.localeCompare(a.committedAt) || a.batchId.localeCompare(b.batchId))) {
+      if (!byAccount.has(st.bankAccountId)) byAccount.set(st.bankAccountId, st);
     }
-  }
-  const statementOpenings: OpeningCashCandidate[] = [...earliestStatement.values()]
-    .filter((statement) => periodStartSet.has(statement.periodStart))
-    .map((statement) => ({
-      bankAccountId: statement.bankAccountId,
-      source: 'statement_opening_balance',
-      value: statement.openingBalance,
-      asAtDate: statement.periodStart,
-    }));
+    return [...byAccount.values()];
+  };
+  const statementOpeningsAt = (period: PeriodRef): OpeningCashCandidate[] =>
+    latestPerAccount(statements.filter((st) => st.periodStart === period.periodStart && st.openingBalance !== null))
+      .map((st) => ({ bankAccountId: st.bankAccountId, source: 'statement_opening_balance', value: st.openingBalance!, asAtDate: st.periodStart }));
+  /** Printed closings of statements ending on P's last day: §3.3's cross-check against the computed close. */
+  const statementClosingAt = (period: PeriodRef): StatementClosingBalance[] =>
+    latestPerAccount(statements.filter((st) => st.periodEnd === period.periodEnd && st.closingBalance !== null))
+      .map((st) => ({ bankAccountId: st.bankAccountId, balanceAfter: st.closingBalance! }));
+  /** A statement overlapping P did not add up to its printed balances at import (IMP-BAL-006/007). */
+  const unreconciledIn = (period: PeriodRef): boolean =>
+    statements.some((st) => st.unreconciled && st.periodStart <= period.periodEnd && st.periodEnd >= period.periodStart);
 
   // The carries' starting point: what the last run left for the two periods before this range.
   const firstIndex = allPeriods.findIndex((p) => p.id === toWrite[0]!.id);
@@ -500,18 +504,27 @@ export async function runCalculation(
           const inP = cashCoveredIn(p, allBatches, bankAccounts);
           return cashLikeActive.length > 0 && inP.length === cashLikeActive.length;
         };
+        /*
+         * The chain RESTARTS when the month before is no opening (ADR-123, audit F-1): it was not fully
+         * stated (a statement missing, or ending mid-month), or its close is unknown. Carrying across a
+         * missing month turned 9,000 into August's opening when August's own statement printed 4,000,
+         * and reported the result at completeness 1. On a restart only a balance stated exactly at P's
+         * start may open it (`openingExactOnly`); without one the opening is unknown, never a guess.
+         */
+        const chainStarted = covered.length > 0;
+        const prevStated = prev !== undefined && fullyCovered(prev)
+          && prevClosing !== undefined && prevClosing.value !== null;
+        const restart = chainStarted && !prevStated;
         const cashOptions: CashSeriesOptions = {
-          openingCarry: covered.length === 0 || prev === undefined
+          openingCarry: !chainStarted || restart
             ? null
-            : prevClosing === undefined
-              ? { value: null, basis: 'none', assurance: 'calculated', missing: ['no_opening_cash'], coveredBankAccountIds: covered }
-              : {
-                  value: prevClosing.value,
-                  basis: prevClosing.basis,
-                  assurance: prevClosing.assurance,
-                  missing: prevClosing.dataQuality.missing,
-                  coveredBankAccountIds: covered,
-                },
+            : {
+                value: prevClosing!.value,
+                basis: prevClosing!.basis,
+                assurance: prevClosing!.assurance,
+                missing: prevClosing!.dataQuality.missing,
+                coveredBankAccountIds: covered,
+              },
           // Runway needs three consecutive months (§3.3); the two before P, oldest first. A month no
           // statement fully covered did not state its movement, so it is unknown — never a 0.00 burn.
           priorNetMovements: [prev2, prev]
@@ -541,7 +554,10 @@ export async function runCalculation(
           aggregates: {
             aggregates, transferLegs, coverage, cashOptions, receivables,
             coveredBankAccountIds: cashCoveredIn(period, allBatches, bankAccounts),
-            statementOpenings,
+            statementOpenings: statementOpeningsAt(period),
+            openingExactOnly: restart,
+            statementClosing: statementClosingAt(period),
+            unreconciledStatement: unreconciledIn(period),
           },
           context,
         });

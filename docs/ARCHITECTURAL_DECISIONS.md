@@ -2020,3 +2020,66 @@ Decision:
 2. **Enablement** sets the flag, writes the audit event and enqueues `funding.assess` on the EXISTING job queue, all in one transaction. The job assesses every eligible period (each complete fiscal period with current metric snapshots) and establishes the current assessment. From then on each `calculation.run` assesses its complete periods. The EXISTING nightly job re-enqueues `funding.assess` for an enabled organisation whose latest eligible period has no current assessment. This is **"calculate after enablement with eligible historical backfill."**
 3. **Disablement** stops calculation. Rows already written remain as the audit record but are unreadable while the flag is off. Re-enabling runs the backfill again for periods whose current assessment does not cite the period's current run.
 4. Each row records its `trigger` (`enablement_backfill` / `calculation_run` / `nightly_backstop`), so activation history is auditable.
+
+### ADR-123 · ADR-120 remediation: answers to the independent audit, and the AR/AP freshness rule
+Status: **implemented; awaiting a second independent audit.** Phase 16 not started.
+Context: the independent audit of ADR-120 (`docs/ADR-120_INDEPENDENT_AUDIT.md`, of `7a139b8`) returned **NOT READY**: HIGH F-1…F-4, MEDIUM F-5…F-11, LOW L-1…L-10. Every blocking finding was reproduced on the auditor's own data shapes, now kept as the permanent fixture `test/fixtures/audit-orgs.ts` and asserted in `test/integration/adr123-remediation.test.ts` through the real queue.
+
+**Decision (product owner, 2026-09-30) — the AR/AP invoice freshness rule (F-4, F-9):**
+- A batch of a side covers P when its declared range spans P, OR when it is fresh for P. Fresh means all three of:
+  - committed on or after `P.period_start`;
+  - committed no more than 45 days after `P.period_end`;
+  - its declared range overlaps P (starts on or before P's end, ends on or after P's start).
+- **Approved:** the commit window.
+- **Added in implementation, recorded here for the owner:**
+  - the range must reach into P (the auditor's F-4 fix, because the approved window alone still let a March list, committed 5 April, cover February);
+  - the range must not have ended before P, because the first draft let that same list state a verified 0.00 for April and hide April's balance sheet — the remediation test caught it.
+
+**Findings and what was done:**
+
+| # | Sev | Finding | Fix | Status |
+|---|---|---|---|---|
+| F-1 | HIGH | Cash carried across a missing statement month, relabelled complete | (a) §2.3 applied to cash: a month no source covers is NULL `no_source_covers_period`, not a carried value. (b) The chain RESTARTS when P−1 was not fully stated or its close is unknown; a restart takes only a balance stated exactly at P's start (that day's statement opening, or a typed balance dated the day before), else NULL. (c) The statement closing cross-check and the IMP-BAL-006/007 flag are wired (FU-4). GAP: August 4,000 → 3,500 (verified); July NULL; no invented `cash.decline`. | FIXED |
+| F-2 | HIGH | Opening taken from the wrong statement | A statement's opening is a candidate only for the period starting on its own first day; ties go to the latest committed (L-4). MIDSTART: July NULL (unknowable); August restarts at 5,500 → 5,600. | FIXED |
+| F-3 | HIGH | Two opening journals double-counted | The LATEST opening journal at or before P, plus movements from its period. LEDGER2: 6,000 / 7,000 / 5,000; drill-down 5,000. | FIXED |
+| F-4 | HIGH | A later list stated a verified 0.00 for an earlier month | Freshness rule above. BSREV February: NULL `stale_invoice_data`. | FIXED |
+| F-5 | MED | Days to get paid from unstated revenue zeros | The denominator treats revenue carrying `open_items_only` as unknown. BSREV April/May: NULL. The P&L defect itself remains FU-1. | FIXED (its ADR-120 reach) |
+| F-6 | MED | TB + BS drill-down summed twice | New descriptor filter `balance_kind` pins the statement the engine chose. TBBS 9,000 → 9,000. | FIXED |
+| F-7 | MED | Part-paid invoice with a payment date dropped from drill-down | The resolver's open-at filter uses `invoiceOutstandingAt` (non-zero contribution). PARTIALPD 600 → 600, 1 row. | FIXED |
+| F-8 | MED | Drill-downs over ~250 records: HTTP 414 | Id batches of 100 (measured limit ~200). BIGINV 10,500 → 10,500, 1,050 rows. | FIXED |
+| F-9 | MED | Current month unreachable; the test depended on the wall clock | Freshness rule above (CURRENT: September 1,500 / overdue 1,000). Fixtures pin `committed_at` (`COMMITTED_AT`); the impossible assertion is replaced by the true one (a June–August list says nothing about September). | FIXED |
+| F-10 | MED | Deterioration alerts: "133%", HIGH alert on a net credit | No alert when the total is not positive; `top3_share` is over the gross overdue invoices it names (≤ 100%); figures keep their sign. Thresholds and triggers unchanged. | FIXED |
+| F-11 | MED | Health/alert regression record incomplete | Restated below from an 18-organisation diff (7 ADR-120 fixtures + the audit's 11), pre-ADR-120 engine (`1443e76`) vs this remediation. | FIXED (needs owner sign-off) |
+| L-1 | LOW | `payables_days` gross ÷ net | Needs a spec decision (VAT netting of payables) | FOLLOW-UP (FU-9) |
+| L-3 | LOW | Movement TB hid a cumulative BS | Statement kind precedence runs over kinds that can state a balance. MOVTB: 9,000. | FIXED |
+| L-4 | LOW | Same-day statements tie-broken by uuid | Latest committed wins | FIXED |
+| L-5 | LOW | Upgrade sweep audited re-found jobs | Migration `20260930000002`: audit only when a job is queued | FIXED |
+| L-6 | LOW | Fingerprint lists unpaged | — | FOLLOW-UP (FU-3) |
+| L-7 | LOW | Paged aggregate re-evaluated per page; one statement timeout (the retry succeeded) | — | FOLLOW-UP (FU-10) |
+| L-8 | LOW | `*_days` derived evidence names only P's inputs | — | FOLLOW-UP (FU-11) |
+| L-9 | LOW | Future periods carried cash | A month with no covering source is NULL (F-1 (a)) | FIXED (cash) |
+| L-10 | LOW | No pgTAP for the upgrade sweep | `supabase/tests/15_engine_upgrade.test.sql` (12) | FIXED |
+| H-11 | — | "Not affected by ADR-120" was wrong (audit) | The cross-check is wired as part of F-1 | FIXED |
+
+**F-11 — the complete Health and alert change set of ADR-120 + ADR-123.** The same 18 organisations were computed by the engine before ADR-120 and by this one, and compared rule by rule and alert by alert, every period. Every change falls into one of these categories. No threshold or rule was changed.
+
+| Category | Rules / alerts that change | Where (fixtures) |
+|---|---|---|
+| A. Newly available figures (receivables, payables, runway) | Q3 scores (was always skipped); C2 scores (was always skipped); `receivables.deterioration` and `payables.deterioration` fire | INVBANK, INVONLY, LEDGER, LEDGER2, CURRENT, PARTIALPD, CREDITHEAVY (July only; a net credit in August does not), BIGINV, LONG (13 months) |
+| B. Cash carried, and openings stated by statements | B1 reads a carried balance. C1/C4 and the `cash_flow` dimension are scored where a statement now states the opening (it was unknown). `cash.decline` removed where it was a carry artefact, added where cash really fell three months running. | BANK, LEDGER, HISTORY, GAP, MIDSTART, INVBANK (removed), BIGINV (added) |
+| C. A month with no statement is unknown, not a zero movement (§2.3) | C3 is skipped (`insufficient_history`) in the first months after data begins, where it had scored invented 0.00 movements. `bank.unusual_transaction` / `variance.significant` no longer fire on a month no statement spans. | BANK, INVBANK, LEDGER, TB (June–July); MIDSTART |
+| D. Health and alert reads no longer truncated at 1,000 rows | G1, G2, K1, P1, P2, P4, B2 now evaluated. `revenue_growth`, `cost_control` and `profitability` included where required metrics had been cut off. `revenue.decline` replaces `variance.significant`. `concentration.supplier` fires. | LONG (15 months: August 56 → 67), BIGINV (unscored → 59/76/50), LEDGER, LEDGER2, CURRENT, PARTIALPD, CREDITHEAVY, INVBANK |
+| E. State alerts re-dated from a future month to the last covered month | `recurring.*` | BANK, INVBANK, LEDGER |
+
+**Consequence for Phase 15.** The first 2.0.0 run recomputes an organisation's whole history under the same `health.config.v1`, so `bandFell` / `scoreFell` compare like with like. But the Command Centre will show different scores for organisations with long histories (category D), and different attention reasons (A, B). **This change set needs the product owner's sign-off.**
+
+**Gates** are recorded in the commit message.
+
+### ADR-122 amendment (2026-09-30)
+- FU-4 (statement cross-check and unreconciled flag) is **FIXED by ADR-123** (F-1).
+- New follow-ups:
+  - **FU-9:** `payables_days` VAT consistency (L-1);
+  - **FU-10:** paged-aggregate performance (L-7);
+  - **FU-11:** `*_days` derived evidence naming the three-month denominator (L-8).
+- **FU-1 remains: fix before Phase 16 F1.**
+

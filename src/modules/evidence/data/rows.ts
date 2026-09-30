@@ -117,8 +117,15 @@ function isRecordStatusEvent(value: unknown): value is RecordStatusEventName {
   return typeof value === 'string' && (RECORD_STATUS_EVENTS as readonly string[]).includes(value);
 }
 
-/** Ids are sent to PostgREST in batches so one URL never carries fifty thousand uuids. */
-const ID_BATCH = 300;
+/**
+ * Ids are sent to PostgREST in batches so one URL never carries fifty thousand uuids.
+ *
+ * 100, not 300: each id is 37 characters in the query string, and the gateway refuses a URL of 300
+ * of them with 414 "URI too long" (measured: 200 pass, 300 fail). At 300 every drill-down behind
+ * more than ~250 records threw — every receivables figure of a business with a few hundred open
+ * invoices (ADR-123, audit F-8).
+ */
+const ID_BATCH = 100;
 
 function batched<T>(values: readonly T[], size: number): T[][] {
   const out: T[][] = [];

@@ -101,6 +101,8 @@ export interface LeafDescriptor {
     readonly exclude_cash_transfers?: boolean;
     readonly open_as_of?: string;
     readonly overdue_as_of?: string;
+    /** The one statement kind a balance selection reads (ADR-123). */
+    readonly balance_kind?: 'trial_balance' | 'pnl_report' | 'balance_sheet';
   };
   readonly as_of: { readonly calculation_run_id: string; readonly aggregated_at: string };
   readonly order?: ReadonlyArray<{ field: string; dir: 'asc' | 'desc' }>;

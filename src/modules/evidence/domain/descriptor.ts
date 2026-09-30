@@ -99,6 +99,12 @@ const FiltersSchema = z.strictObject({
   exclude_cash_transfers: z.boolean().optional(),
   open_as_of: isoDate.optional(),
   overdue_as_of: isoDate.optional(),
+  /**
+   * The statement kind a balance selection reads (ADR-123, audit F-6). The engine takes ONE statement
+   * per period — trial balance over balance sheet (ADR-047.4) — so its drill-down must too: with both
+   * covering a month, a selection by period and account alone summed each balance twice.
+   */
+  balance_kind: z.enum(['trial_balance', 'pnl_report', 'balance_sheet']).optional(),
   metric_keys: z.array(z.string().min(1)).min(1).optional(),
   dimension: DimensionSchema.optional(),
 });

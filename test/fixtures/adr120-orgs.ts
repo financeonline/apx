@@ -21,6 +21,12 @@ import { drainJobs } from '@/modules/jobs';
 import { adminSql, clientFor, createAuthUser, drainUntilFinished } from '../integration/setup';
 
 export const AS_OF = '2026-09-15';
+/**
+ * When every fixture batch was committed: FIXED, and before `AS_OF`, as in production (ADR-123,
+ * audit F-9). The fixtures used `now()`, which is always after the run's as-of date and turned the
+ * current-period test into one that passed only until the wall clock moved on.
+ */
+export const COMMITTED_AT = '2026-09-10T10:00:00Z';
 export const MONTHS = [
   { key: 'jun', start: '2026-06-01', end: '2026-06-30' },
   { key: 'jul', start: '2026-07-01', end: '2026-07-31' },
@@ -47,7 +53,7 @@ function batch(org: string, doc: string, o: {
 }): string {
   return one(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
       period_start, period_end, committed_at, bank_account_id, invoice_list_kind, balance_basis)
-    values ('${org}', '${doc}', '${o.importType}', '${o.target}', 'committed', 'csv', '${o.start}', '${o.end}', now(),
+    values ('${org}', '${doc}', '${o.importType}', '${o.target}', 'committed', 'csv', '${o.start}', '${o.end}', '${COMMITTED_AT}',
       ${o.bankAccount ? `'${o.bankAccount}'` : 'null'}, ${o.listKind ? `'${o.listKind}'` : 'null'},
       ${o.balanceBasis ? `'${o.balanceBasis}'` : 'null'}) returning id`);
 }

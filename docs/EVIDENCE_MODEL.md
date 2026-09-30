@@ -93,6 +93,7 @@ A `query_descriptor` is a declarative, versioned selection that the resolver re-
     "exclude_cash_transfers": true,
     "open_as_of": "2026-03-31",
     "overdue_as_of": "2026-03-31",
+    "balance_kind": "trial_balance",
     "metric_keys": ["revenue"],
     "dimension": { "type": "counterparty", "id": "uuid" }
   },

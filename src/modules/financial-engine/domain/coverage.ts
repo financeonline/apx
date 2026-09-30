@@ -125,14 +125,23 @@ export interface InvoiceSideCoverage {
 }
 
 /**
- * §2.2, "`invoices` (AR/AP families)": an invoice batch of the side whose declared range covers P, or
- * one committed within 45 days AFTER `P.period_end`.
+ * §2.2, "`invoices` (AR/AP families)", per SIDE (ADR-120), as decided in ADR-123.
  *
- * Per SIDE (ADR-120), because a sales list says nothing about what is owed to suppliers. And "after"
- * means after: a list committed before the period ended cannot describe what was open at its end.
- * The shared `invoices` coverage above accepts any batch committed up to 45 days after — including
- * one committed a year BEFORE — which the P&L family reads and which this deliberately does not
- * reuse (recorded as a finding in ADR-120 rather than changed under the P&L).
+ * A batch of the side covers P when EITHER
+ *   (a) its declared range spans P; or
+ *   (b) it is FRESH for P: committed on or after `P.period_start` and no more than 45 days after
+ *       `P.period_end`, AND its declared range OVERLAPS P (starts on or before `P.period_end`, ends
+ *       on or after `P.period_start`).
+ *
+ * Why (b) has three parts (ADR-123, independent audit F-4 / F-9):
+ *   - "on or after P's start" — a list committed before the month began cannot describe what was
+ *     open during it (ADR-120 had "after P ended", which made the CURRENT month unreachable: a list
+ *     uploaded on the 10th could never age the month it was uploaded in, F-9);
+ *   - "≤ 45 days after P's end" — §2.2's freshness gate, unchanged;
+ *   - "range overlaps P" — a list that begins after P, or ended before it, says nothing about P's
+ *     invoices. Without it, a March-only list committed on 5 April stated a VERIFIED ZERO for February
+ *     (F-4) — and, under the first draft of this rule, for April too, hiding April's balance sheet.
+ *     The current month still qualifies: a list running to the 10th overlaps it.
  */
 export function invoiceSideCoverage(
   batches: readonly CoverageBatch[],
@@ -143,8 +152,11 @@ export function invoiceSideCoverage(
     (b) => b.targetTable === 'invoices' && SIDE_IMPORT_TYPES[side].includes(b.importType ?? ''),
   );
   const fresh = (b: CoverageBatch): boolean => {
-    const days = daysBetween(period.periodEnd, b.committedAt.slice(0, 10));
-    return days >= 0 && days <= AR_AP_FRESHNESS_DAYS;
+    const committed = b.committedAt.slice(0, 10);
+    return committed >= period.periodStart
+      && daysBetween(period.periodEnd, committed) <= AR_AP_FRESHNESS_DAYS
+      && b.periodStart <= period.periodEnd
+      && b.periodEnd >= period.periodStart;
   };
   return {
     covers: ofSide.some((b) => spans(b, period) || fresh(b)),

@@ -20,7 +20,7 @@
  */
 
 import { Decimal, parseDecimalOrNull, toMoneyString } from '@/core/money';
-import { chooseBalanceKind, invoiceSideCoverage, type CoverageBatch, type InvoiceSide } from './coverage';
+import { invoiceSideCoverage, winningBalanceBatch, type CoverageBatch, type InvoiceSide } from './coverage';
 import { ledgerAmount, naturalToReporting } from './sign';
 import {
   WORKING_CAPITAL_ASSETS, WORKING_CAPITAL_LIABILITIES,
@@ -70,20 +70,33 @@ const SALES = new Set(['sales', 'sales_credit_note']);
 const PURCHASES = new Set(['purchase', 'purchase_credit_note']);
 
 /** The balance family's cumulative cells for P, or null when no cumulative TB/BS states P. */
+/** The chosen balance statement for P: its cells and its kind, which its evidence must pin (ADR-123 F-6). */
+interface BalanceStatement {
+  readonly kind: 'trial_balance' | 'balance_sheet';
+  readonly cells: readonly AggregateCell[];
+}
+
+/**
+ * The balance family's statement for P, or null when no cumulative TB/BS states P.
+ *
+ * Kind precedence is ADR-047.4's (trial balance, then balance sheet), taken among the kinds that can
+ * STATE a balance: a statement with no rows, or one stated as movements, says nothing about what was
+ * owed at the period end (ADR-027.1), so it gives way to the next kind rather than hiding it
+ * (ADR-123, audit L-3: a movement-basis trial balance used to hide a cumulative balance sheet).
+ */
 function balanceStatement(
   cells: readonly AggregateCell[],
   batches: readonly CoverageBatch[],
   period: PeriodRef,
-): readonly AggregateCell[] | null {
-  const chosen = chooseBalanceKind(batches, period, 'balance');
-  if (chosen === null) return null;
-  const ofKind = cells.filter(
-    (c) => c.periodId === period.id && c.source === 'period_balances' && c.balanceKind === chosen.kind,
-  );
-  // A balance sheet states balances only on the cumulative basis (ADR-027.1). A statement with no
-  // rows at all, or one stated as movements, says nothing about what was owed at the period end.
-  if (ofKind.length === 0 || ofKind.some((c) => c.balanceBasis !== 'cumulative')) return null;
-  return ofKind;
+): BalanceStatement | null {
+  for (const kind of ['trial_balance', 'balance_sheet'] as const) {
+    if (winningBalanceBatch(batches, period, kind) === null) continue;
+    const ofKind = cells.filter(
+      (c) => c.periodId === period.id && c.source === 'period_balances' && c.balanceKind === kind,
+    );
+    if (ofKind.length > 0 && ofKind.every((c) => c.balanceBasis === 'cumulative')) return { kind, cells: ofKind };
+  }
+  return null;
 }
 
 function accountsOf(ctx: EngineContext, categories: readonly StandardCategory[]): readonly EngineContext['accounts'][number][] {
@@ -128,12 +141,18 @@ function ledgerFallback(
    * movements posted before it are already inside them: summing both would count them twice. A
    * period before the journal has no stated opening at all.
    */
-  const journalStarts = ledger.openingJournal
+  /*
+   * The LATEST opening journal at or before P (ADR-123, audit F-3). Each journal restates every
+   * balance as at its own period — yearly GL exports each carry one — so the balance is that
+   * journal plus the movements after it. Starting at the earliest journal added the later one's
+   * lines on top of the movements they already contain: 13,000 for a true 7,000.
+   */
+  const journalStart = ledger.openingJournal
     .map((line) => periodStarts.get(line.periodId))
-    .filter((start): start is string => start !== undefined)
-    .sort();
-  const journalStart = journalStarts[0];
-  if (journalStart === undefined || period.periodStart < journalStart) return null;
+    .filter((start): start is string => start !== undefined && start <= period.periodStart)
+    .sort()
+    .at(-1);
+  if (journalStart === undefined) return null;
 
   let cumulative = new Decimal(0);
   const periodIds = new Set<string>();
@@ -150,7 +169,7 @@ function ledgerFallback(
   let opening = new Decimal(0);
   for (const line of ledger.openingJournal) {
     const account = accounts.get(line.accountId);
-    if (account === undefined) continue;
+    if (account === undefined || periodStarts.get(line.periodId) !== journalStart) continue;
     opening = opening.plus(ledgerAmount({ accountType: account.accountType, debit: line.debit, credit: line.credit }));
   }
 
@@ -182,7 +201,7 @@ function resolveSide(
   period: PeriodRef,
   coverage: PeriodCoverage,
   cells: readonly AggregateCell[],
-  statement: readonly AggregateCell[] | null,
+  statement: BalanceStatement | null,
   input: ReceivablesComposeInput,
   side: InvoiceSide,
 ): SideResolution {
@@ -191,7 +210,7 @@ function resolveSide(
   const types = side === 'sales' ? SALES : PURCHASES;
   const invoices = sideCoverage.covers ? input.invoices.filter((i) => types.has(i.invoiceType)) : null;
 
-  const fromStatement = statement === null ? null : statementTotal(statement, ctx, [category]);
+  const fromStatement = statement === null ? null : statementTotal(statement.cells, ctx, [category]);
   const ledger = fromStatement === null ? ledgerFallback(ctx, period, coverage, input.ledger, category) : null;
 
   const fallback: CategoryBalanceFallback = {
@@ -199,6 +218,7 @@ function resolveSide(
       ? fromStatement.accountIds
       : accountsOf(ctx, [category]).map((a) => a.id).sort(),
     periodBalanceClosing: fromStatement?.value ?? null,
+    periodBalanceKind: statement?.kind,
     ledger: ledger === null ? null : { openingBalance: ledger.openingBalance, movements: ledger.movements },
     ledgerPeriodIds: ledger?.periodIds,
   };
@@ -255,8 +275,18 @@ export function denominatorInputsFor(
     payablesExpenseBase = toMoneyString(new Decimal(costOfSales).plus(opex).plus(marketing));
   }
 
+  /*
+   * Revenue the P&L stated from an invoice list that does not state the month's sales (warning
+   * `open_items_only` — the P&L family's own coverage defect, ADR-122 FU-1) is not a sales figure:
+   * dividing a receivables balance by it gave 91 "days to get paid" over months whose revenue nobody
+   * stated (ADR-123, audit F-5). It is unknown here, so the days figure is too.
+   */
+  const revenueResult = results.find((r) => r.key === 'revenue' && r.dimensionType === 'none');
+  const revenue = revenueResult === undefined || revenueResult.dataQuality.warnings.includes('open_items_only')
+    ? null : revenueResult.value;
+
   return {
-    revenue: resultValue(results, 'revenue'),
+    revenue,
     invoiceSalesTotal,
     payablesExpenseBase,
     hasOpenItemsList: sales.openItemsSpans,
@@ -279,7 +309,7 @@ export function receivablesPeriodInput(
   const balanceSheetClosings: Partial<Record<StandardCategory, BalanceSheetTerm>> = {};
   if (statement !== null) {
     for (const category of [...WORKING_CAPITAL_ASSETS, ...WORKING_CAPITAL_LIABILITIES]) {
-      const term = statementTotal(statement, ctx, [category]);
+      const term = statementTotal(statement.cells, ctx, [category]);
       balanceSheetClosings[category] = { value: term.value, basis: 'period_balances', accountIds: term.accountIds };
     }
   }

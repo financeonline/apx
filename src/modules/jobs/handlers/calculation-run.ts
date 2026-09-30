@@ -7,7 +7,8 @@ import {
 } from '@/core/db';
 import {
   composePeriod, runCalculation,
-  type AggregateCell, type CalculationTrigger, type CashSeriesOptions, type OpeningCashCandidate, type EngineContext, type MetricResult,
+  type AggregateCell, type CalculationTrigger, type CashSeriesOptions, type OpeningCashCandidate,
+  type StatementClosingBalance, type EngineContext, type MetricResult,
   type PeriodCoverage, type PeriodRef, type ReceivablesComposeInput,
 } from '@/modules/financial-engine';
 import { healthStep } from '@/modules/health';
@@ -120,6 +121,9 @@ export async function runCalculationJob(
         receivables?: ReceivablesComposeInput;
         coveredBankAccountIds?: readonly string[];
         statementOpenings?: readonly OpeningCashCandidate[];
+        openingExactOnly?: boolean;
+        statementClosing?: readonly StatementClosingBalance[];
+        unreconciledStatement?: boolean;
       };
       return composeWithIds({
         period: input.period as PeriodRef,
@@ -131,6 +135,9 @@ export async function runCalculationJob(
         receivables: aggregates.receivables,
         coveredBankAccountIds: aggregates.coveredBankAccountIds,
         statementOpenings: aggregates.statementOpenings,
+        openingExactOnly: aggregates.openingExactOnly,
+        statementClosing: aggregates.statementClosing,
+        unreconciledStatement: aggregates.unreconciledStatement,
       });
     },
     startRun: startCalculationRun,

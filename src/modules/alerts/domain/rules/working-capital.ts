@@ -69,8 +69,7 @@ function topOverdueOpen(
       && i.dueDate !== null && i.dueDate < asOf)
     .map((i) => ({ id: i.id, outstanding: invoiceOutstandingAt(i, asOf), label: i.description ?? 'Overdue invoice' }))
     .filter((x) => x.outstanding.greaterThan(0))
-    .sort((a, b) => b.outstanding.comparedTo(a.outstanding) || a.id.localeCompare(b.id))
-    .slice(0, TOP_OVERDUE_LIMIT);
+    .sort((a, b) => b.outstanding.comparedTo(a.outstanding) || a.id.localeCompare(b.id));
 }
 
 /** The pre-ADR-120 selection from this period's own records, for callers without `openInvoices`. */
@@ -107,9 +106,14 @@ function evaluateSide(ctx: RuleContext, side: Side): readonly RuleOutcome[] {
   const total = usableValue(totalObservation);
   const overdue = usableValue(overdueObservation);
 
-  const share = total !== null && overdue !== null && total.abs().greaterThan(0)
-    ? overdue.abs().dividedBy(total.abs())
-    : null;
+  /*
+   * Nothing owed, nothing to deteriorate (ADR-123, audit F-10). A total at or below zero means the
+   * credit notes outweigh the invoices: the business owes ITS customers (or suppliers owe it). Taking
+   * magnitudes here raised a HIGH alert telling the owner 700.00 was owed and overdue on a net
+   * credit of −700.00.
+   */
+  if (total === null || !total.greaterThan(0)) return [];
+  const share = overdue !== null && overdue.greaterThan(0) ? overdue.dividedBy(total) : null;
 
   const slowing = slowedBy !== null && slowedBy.greaterThanOrEqualTo(DAYS_INCREASE);
   const overdueHeavy = share !== null && share.greaterThanOrEqualTo(OVERDUE_SHARE);
@@ -117,10 +121,17 @@ function evaluateSide(ctx: RuleContext, side: Side): readonly RuleOutcome[] {
 
   const asOf = typeof overdueObservation?.components.as_of === 'string'
     ? overdueObservation.components.as_of : ctx.periodEnd;
-  const invoices = ctx.openInvoices !== undefined
+  const everyOverdue = ctx.openInvoices !== undefined
     ? topOverdueOpen(ctx.openInvoices, config.invoiceTypes, asOf)
     : topOverdueFromRecords(ctx, config.invoiceTypes);
+  const invoices = everyOverdue.slice(0, TOP_OVERDUE_LIMIT);
   const top3 = invoices.slice(0, 3).reduce((sum, r) => sum.plus(r.outstanding), new Decimal(0));
+  /*
+   * `top3_share` is the top three's share of the overdue INVOICES the sentence is about ("the top
+   * three account for …"), not of the net overdue figure: credit notes reduce the net, so dividing by
+   * it gave "the top three account for 133%" (ADR-123, audit F-10). Never above 100%.
+   */
+  const grossOverdue = everyOverdue.reduce((sum, r) => sum.plus(r.outstanding), new Decimal(0));
 
   const evidence: EvidencePin[] = [];
   for (const observation of [overdueObservation, totalObservation, daysVariance]) {
@@ -154,13 +165,13 @@ function evaluateSide(ctx: RuleContext, side: Side): readonly RuleOutcome[] {
     metricKey: config.overdueMetric,
     thresholdSummary: {
       trigger: overdueHeavy ? 'overdue_share' : 'days_increase',
-      overdue: overdue === null ? null : toMoneyString(overdue.abs()),
-      total: total === null ? null : toMoneyString(total.abs()),
+      // Signed as the figures are: a net-credit overdue balance is shown as the credit it is.
+      overdue: overdue === null ? null : toMoneyString(overdue),
+      total: toMoneyString(total),
       share: share === null ? null : toRatioString(share),
       days_increase: slowedBy === null ? null : slowedBy.toDecimalPlaces(1).toString(),
       overdue_count: String(invoices.length),
-      top3_share: overdue !== null && overdue.abs().greaterThan(0)
-        ? toRatioString(top3.dividedBy(overdue.abs())) : null,
+      top3_share: grossOverdue.greaterThan(0) ? toRatioString(top3.dividedBy(grossOverdue)) : null,
       threshold_share: toRatioString(OVERDUE_SHARE),
       threshold_days: DAYS_INCREASE.toString(),
     },

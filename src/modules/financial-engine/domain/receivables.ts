@@ -105,6 +105,8 @@ export interface CategoryBalanceFallback {
   readonly accountIds: readonly string[];
   /** `period_balances` closing balance of the category, in reporting sign. */
   readonly periodBalanceClosing?: string | null;
+  /** The statement kind the closing came from; its descriptor pins it (ADR-123, audit F-6). */
+  readonly periodBalanceKind?: 'trial_balance' | 'balance_sheet';
   readonly ledger?: { readonly openingBalance: string | null; readonly movements: string } | null;
   /**
    * Every period whose ledger rows the ledger figure summed (ADR-120). The ledger branch is
@@ -325,8 +327,10 @@ function fromBalances(
       missing: [],
       // §5, AR/AP (balances): a total with no aging behind it.
       completeness: 0.7,
-      components: { source: 'period_balances', closing_balance: toMoneyString(closing) },
-      evidence: leafEvidence(ctx, 'period_balances', descriptorFilters),
+      components: { source: 'period_balances', closing_balance: toMoneyString(closing), balance_kind: fallback.periodBalanceKind ?? null },
+      evidence: leafEvidence(ctx, 'period_balances', fallback.periodBalanceKind === undefined
+        ? descriptorFilters
+        : { ...descriptorFilters, balance_kind: fallback.periodBalanceKind }),
     };
   }
 

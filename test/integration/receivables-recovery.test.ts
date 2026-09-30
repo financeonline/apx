@@ -63,8 +63,17 @@ describe('receivables and payables on the invoice basis (INVBANK)', () => {
     expect(headline(org.INVBANK, '2026-08-01', 'receivables')?.basis).toBe('invoices');
   });
 
-  it('the current period is aged as at the run\'s as-of date', () => {
-    expect(v(org.INVBANK, '2026-09-01', 'receivables_overdue')).toBe('4400.00');
+  /*
+   * ADR-123 (audit F-9): this used to assert 4,400 for September — possible only because the fixture
+   * stamped every batch `committed_at = now()`, after the run's as-of date. With a real commit time
+   * (10 Sep) the June–August list says nothing about invoices issued in September, so September is
+   * honestly unknown. Current-month aging from a list that DOES reach into the month is proven by the
+   * CURRENT organisation in adr123-remediation.test.ts.
+   */
+  it('the current period is unknown when no list reaches into it', () => {
+    const sep = headline(org.INVBANK, '2026-09-01', 'receivables')!;
+    expect(sep.value).toBeNull();
+    expect(sep.missing).toContain('stale_invoice_data');
   });
 
   it('D/E · payables: positive, then a genuine zero when everything was paid', () => {
@@ -148,9 +157,10 @@ describe('the cash chain (§3.3): each month opens at the last one\'s close', ()
     }
   });
 
-  it('a month without a statement says so rather than claiming a complete balance', () => {
+  it('a month without a statement is unknown, never a carried balance (§2.3; ADR-123 F-1)', () => {
     const sep = headline(org.BANK, '2026-09-01', 'closing_cash')!;
-    expect(sep.warnings).toContain('bank_coverage_partial');
+    expect(sep.value).toBeNull();
+    expect(sep.missing).toContain('no_source_covers_period');
   });
 });
 
@@ -257,6 +267,14 @@ describe('Health Score and alerts: the intended consequences of ADR-120', () => 
 
   it('receivables and payables deterioration now fire on real figures', () => {
     expect(alerts(org.INVBANK)).toEqual(expect.arrayContaining(['receivables.deterioration|medium', 'payables.deterioration|high']));
+  });
+
+  it('with a credit note present, "the top three account for" is of the overdue invoices — 100%, not 133% (ADR-123 F-10)', () => {
+    const summary = JSON.parse(adminSql(`select r.threshold_summary::text from public.alerts a
+      join public.alert_revisions r on r.id = a.current_revision_id and r.organization_id = a.organization_id
+      where a.organization_id = '${org.INVBANK}' and a.rule_key = 'receivables.deterioration'`).trim()) as Record<string, string>;
+    expect(summary.overdue).toBe('1800.00'); // net of the credit note, as the figure is
+    expect(summary.top3_share).toBe('1.000000'); // S2 2,400 of 2,400 overdue invoices
   });
 
   it('and do not fire where nothing is owed or nothing is known', () => {

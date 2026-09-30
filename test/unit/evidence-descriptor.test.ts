@@ -385,6 +385,11 @@ describe('descriptor compiler (§3.1)', () => {
     expect(balances.amountColumn).toBe('closing_balance');
   });
 
+  it('pins the statement kind a balance selection reads, so a TB and a BS for one month are not summed together (ADR-123)', () => {
+    const pinned = compileDescriptor(parseQueryDescriptor({ v: 1, table: 'period_balances', filters: { account_ids: [ACCOUNT_A], balance_kind: 'trial_balance' } }));
+    expect(pinned.filters).toContainEqual({ column: 'balance_kind', op: 'eq', value: 'trial_balance' });
+  });
+
   it('sums a directional bank selection as a magnitude, because the figure is one (ADR-109)', () => {
     // A bank amount is signed. `cash_outflows` of 4,200.00 had a drill-down totalling -4,200.00
     // while `cash_inflows` matched, so the two halves of one statement disagreed about sign.

@@ -604,38 +604,51 @@ export async function loadLatestEngineVersion(
   return rows[0]?.engine_version ?? null;
 }
 
-/** A committed statement's own opening balance (deterministic or reviewer-typed only, IMP-BAL). */
-export interface StatementOpening {
+/** A committed bank statement: its declared range and the balances printed on it (IMP-BAL). */
+export interface StatementBatch {
   readonly batchId: string;
   readonly bankAccountId: string;
   readonly periodStart: string;
-  readonly openingBalance: string;
+  readonly periodEnd: string;
+  readonly committedAt: string;
+  /** Printed opening / closing balance — deterministic or reviewer-typed only, never an AI reading. */
+  readonly openingBalance: string | null;
+  readonly closingBalance: string | null;
+  /** The rows did not add up to the printed balances at import (IMP-BAL-006/007). */
+  readonly unreconciled: boolean;
 }
 
 /**
- * Every committed bank statement that states an opening balance. The columns hold only parsed or
- * reviewer-typed balances — "an AI reading never reaches these columns" (migration 20260905000032) —
- * which is what CD-06 / §3.3 require of the first opening-cash source.
+ * Every committed bank statement of the organisation (ADR-120 / ADR-123): CD-06's first opening
+ * source, the closing cross-check and the "does not reconcile" flag §3.3 names — all three are facts
+ * about the statement batch. The balance columns hold only parsed or reviewer-typed values: "an AI
+ * reading never reaches these columns" (migration 20260905000032).
  */
-export async function loadStatementOpenings(
+export async function loadStatements(
   scoped: SupabaseClient, orgId: string,
-): Promise<StatementOpening[]> {
+): Promise<StatementBatch[]> {
   return paged(
     (from, to) => scoped
       .from('import_batches')
-      .select('id, bank_account_id, period_start, statement_opening_balance')
+      .select('id, bank_account_id, period_start, period_end, committed_at, statement_opening_balance, statement_closing_balance, batch_issues')
       .eq('organization_id', orgId)
       .eq('status', 'committed')
       .eq('target_table', 'bank_transactions')
-      .not('statement_opening_balance', 'is', null)
       .not('bank_account_id', 'is', null)
       .order('id')
       .range(from, to),
-    (r) => ({
-      batchId: r.id as string,
-      bankAccountId: r.bank_account_id as string,
-      periodStart: r.period_start as string,
-      openingBalance: String(r.statement_opening_balance),
-    }),
+    (r) => {
+      const issues = Array.isArray(r.batch_issues) ? (r.batch_issues as Array<{ code?: unknown }>) : [];
+      return {
+        batchId: r.id as string,
+        bankAccountId: r.bank_account_id as string,
+        periodStart: r.period_start as string,
+        periodEnd: r.period_end as string,
+        committedAt: String(r.committed_at),
+        openingBalance: r.statement_opening_balance === null ? null : String(r.statement_opening_balance),
+        closingBalance: r.statement_closing_balance === null ? null : String(r.statement_closing_balance),
+        unreconciled: issues.some((issue) => issue.code === 'IMP-BAL-006' || issue.code === 'IMP-BAL-007'),
+      };
+    },
   );
 }

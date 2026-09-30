@@ -175,7 +175,7 @@ const TABLES: Record<DescriptorTable, TableSpec> = {
       'currency', 'balance_kind', 'balance_basis', 'record_status', 'assurance_level',
       'superseded_by',
     ],
-    filters: ['period_ids', 'account_ids'],
+    filters: ['period_ids', 'account_ids', 'balance_kind'],
     orderColumns: ['id', 'period_start', 'closing_balance', 'created_at'],
     amountColumn: 'closing_balance',
     hasRecordLifecycle: true,
@@ -207,6 +207,7 @@ const FILTER_ORDER: readonly DescriptorFilterKey[] = [
   'exclude_cash_transfers',
   'open_as_of',
   'overdue_as_of',
+  'balance_kind',
   'metric_keys',
   'dimension',
 ];
@@ -286,6 +287,9 @@ function compileFilter(
       return;
     case 'account_ids':
       if (f.account_ids) filters.add({ column: 'account_id', op: 'in', value: sortedIds(f.account_ids) });
+      return;
+    case 'balance_kind':
+      if (f.balance_kind) filters.add({ column: 'balance_kind', op: 'eq', value: f.balance_kind });
       return;
     case 'counterparty_ids':
       if (f.counterparty_ids) {

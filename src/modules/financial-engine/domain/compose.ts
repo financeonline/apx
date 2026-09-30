@@ -13,6 +13,7 @@ import { Decimal, parseDecimalOrNull } from '@/core/money';
 import { invoiceSignFor, ledgerAmount, naturalToReporting } from './sign';
 import {
   computeCash, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions, type OpeningCashCandidate,
+  type StatementClosingBalance,
 } from './cash';
 import type { TransferKind } from '@/modules/banking';
 import { computeConcentration, type ConcentrationPeriodInput } from './concentration';
@@ -64,6 +65,23 @@ export interface ComposeInput {
    * ahead of the balance typed on the account. The domain's precedence (`pickCandidate`) chooses.
    */
   readonly statementOpenings?: readonly OpeningCashCandidate[];
+  /**
+   * The chain RESTARTS at this period (ADR-123, audit F-1): the month before was not fully stated, or
+   * its close is unknown, so its close is no opening. Only a balance stated exactly at P's start may
+   * open it — a statement's printed opening (already exact in `statementOpenings`) or a balance typed
+   * on the account dated the day before. A typed balance from months earlier is not.
+   */
+  readonly openingExactOnly?: boolean;
+  /** Printed closing balances of statements ending on P's last day (the §3.3 cross-check, FU-4). */
+  readonly statementClosing?: readonly StatementClosingBalance[];
+  /** A statement covering P did not add up to its printed balances at import (IMP-BAL-006/007). */
+  readonly unreconciledStatement?: boolean;
+}
+
+/** `YYYY-MM-DD` minus one day. */
+function dayBefore(date: string): string {
+  const t = Date.parse(`${date}T00:00:00Z`) - 86_400_000;
+  return new Date(t).toISOString().slice(0, 10);
 }
 
 /** The aggregate source each basis reads from. */
@@ -450,6 +468,7 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
       ...(input.statementOpenings ?? []),
       ...context.bankAccounts
         .filter((a) => a.openingBalance !== null && isCashLikeBankAccount(a.accountType))
+        .filter((a) => !input.openingExactOnly || a.openingBalanceDate === dayBefore(period.periodStart))
         .map((a) => ({
           bankAccountId: a.id,
           source: 'bank_account_opening_balance' as const,
@@ -457,6 +476,8 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
           asAtDate: a.openingBalanceDate,
         })),
     ],
+    ...(input.statementClosing !== undefined ? { statementClosing: input.statementClosing } : {}),
+    ...(input.unreconciledStatement !== undefined ? { unreconciledStatement: input.unreconciledStatement } : {}),
     coveredBankAccountIds: input.coveredBankAccountIds ?? context.bankAccounts
       .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType))
       .map((a) => a.id),

@@ -207,13 +207,21 @@ function applyPostFilters(
   for (const filter of postFilters) {
     switch (filter.kind) {
       case 'open_at': {
-        // "Unpaid at the date": paid_date is unknown, or the payment happened after it
-        // (FINANCIAL_ENGINE.md §3, `receivables`).
-        // Both sides are `date` columns rendered as YYYY-MM-DD, for which lexicographic and
-        // chronological order coincide; no Date parsing, so no timezone can shift the boundary.
+        /*
+         * "Owed at the date": the row contributes a non-zero amount under the ENGINE's own rule
+         * (`invoiceOutstandingAt`) — the whole total when it was paid after the date, else what is
+         * still due, credit notes negative. The old test ("no paid_date, or paid after the date")
+         * dropped a part-paid invoice whose payment was dated: a receivables figure of 600.00 had a
+         * drill-down of 0.00 rows (ADR-123, audit F-7). A row that owed nothing is not listed.
+         */
         out = out.filter((row) => {
-          const paid = str(row, 'paid_date');
-          return paid === null || paid > filter.date;
+          const invoiceType = str(row, 'invoice_type') as InvoiceType | null;
+          const totalAmount = str(row, 'total_amount');
+          const balanceDue = str(row, 'balance_due');
+          if (invoiceType === null || totalAmount === null || balanceDue === null) return false;
+          return !invoiceOutstandingAt(
+            { invoiceType, paidDate: str(row, 'paid_date'), totalAmount, balanceDue }, filter.date,
+          ).isZero();
         });
         break;
       }

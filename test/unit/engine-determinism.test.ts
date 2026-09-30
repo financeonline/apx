@@ -255,7 +255,7 @@ const repository = vi.hoisted(() => ({
   loadLatestEngineVersion: vi.fn(),
   loadAgingInvoices: vi.fn(),
   loadOpeningJournal: vi.fn(),
-  loadStatementOpenings: vi.fn(),
+  loadStatements: vi.fn(),
 }));
 
 vi.mock('@/modules/financial-engine/data/repository', () => repository);
@@ -298,7 +298,7 @@ describe('a run reads the ledger at one instant, and that instant is the databas
     repository.loadLatestEngineVersion.mockResolvedValue(null);
     repository.loadAgingInvoices.mockResolvedValue([]);
     repository.loadOpeningJournal.mockResolvedValue(null);
-    repository.loadStatementOpenings.mockResolvedValue([]);
+    repository.loadStatements.mockResolvedValue([]);
   });
 
   /**

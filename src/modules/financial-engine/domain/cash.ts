@@ -527,13 +527,22 @@ export function computeCash(
      * and a later period inherits it through the carried opening exactly as `no_opening_cash` does.
      * An account that has since been closed still counts for the months a statement covered it.
      */
-    if (activeCashLikeIds.length === 0 && coveredCashLike.length === 0) {
-      const missing: DataQualityMissing[] = ['no_bank_accounts'];
+    /*
+     * §2.3: "a period with no covering source for a family writes every metric of that family with
+     * value = NULL, basis = 'none', missing = ['no_source_covers_period']". The cash family did not:
+     * a month with no statement at all carried the previous close forward as if nothing happened,
+     * and the next month's alert read "cash fell from 9,000" off that invented July (ADR-123, audit
+     * F-1). Such a month is now unknown, and the run restarts the chain after it from a balance a
+     * statement states.
+     */
+    const noAccounts = activeCashLikeIds.length === 0 && coveredCashLike.length === 0;
+    if (noAccounts || input.basis.basis === 'none') {
+      const missing: DataQualityMissing[] = noAccounts ? ['no_bank_accounts'] : ['no_source_covers_period'];
       const quality = metricQuality(0, warnings, missing, input.basis.proxy);
       const unavailable = (key: string, unit: MetricUnit, evidenceQuery: EvidenceQuery | null): MetricResult => ({
         key, value: null, unit, basis: 'none', assurance: input.basis.assurance,
         dimensionType: 'none', dimensionId: null, currency: unit === 'money' ? currency : null,
-        components: { bank_accounts: 0, covered_bank_account_ids: [] },
+        components: { bank_accounts: noAccounts ? 0 : activeCashLikeIds.length, covered_bank_account_ids: [] },
         dataQuality: quality, evidenceQuery,
       });
       perPeriod.push({
