@@ -6,7 +6,7 @@ import type { AccessContext } from '@/modules/tenancy';
 import {
   AS_OF, calculateAndAlert, headline, seedAdr120Orgs, type FixtureKey,
 } from '../fixtures/adr120-orgs';
-import { adminSql, clientFor } from './setup';
+import { adminSql, clientFor, createAuthUser } from './setup';
 
 /**
  * ADR-120 — receivables, payables and working capital recovered; the cash chain carried.
@@ -41,7 +41,8 @@ beforeAll(async () => {
 
 afterAll(() => {
   adminSql(`delete from public.organizations where id in (${Object.values(org).map((id) => `'${id}'`).join(',')});
-            delete from auth.users where email like '%@${TAG}.adr120.itest';`);
+            delete from public.platform_users where user_id in (select id from auth.users where email like '%@${TAG}.roles.itest');
+            delete from auth.users where email like '%@${TAG}.adr120.itest' or email like '%@${TAG}.roles.itest';`);
 });
 
 describe('K/L · the figures come from a real calculation run, not from inserted rows', () => {
@@ -153,6 +154,25 @@ describe('the cash chain (§3.3): each month opens at the last one\'s close', ()
   });
 });
 
+describe('history first, banking later — and the statement\'s own opening balance (CD-06)', () => {
+  it('months before any statement have unknown cash, never zero', () => {
+    for (const month of ['2026-03-01', '2026-04-01', '2026-05-01']) {
+      const closing = headline(org.HISTORY, month, 'closing_cash')!;
+      expect(closing.value, month).toBeNull();
+      expect(closing.missing, month).toContain('no_opening_cash');
+    }
+  });
+
+  it('the chain starts at the first statement\'s printed opening balance and carries from there', () => {
+    const chain = ['2026-06-01', '2026-07-01', '2026-08-01']
+      .map((m) => [v(org.HISTORY, m, 'opening_cash'), v(org.HISTORY, m, 'closing_cash')]);
+    expect(chain).toEqual([['8000.00', '9500.00'], ['9500.00', '10000.00'], ['10000.00', '10300.00']]);
+    expect(adminSql(`select s.assurance_level from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
+      join public.fiscal_periods p on p.id = c.period_id where c.organization_id = '${org.HISTORY}' and p.period_start = '2026-06-01'
+      and c.metric_key = 'opening_cash' and c.dimension_type = 'none'`).trim()).toBe('verified');
+  });
+});
+
 describe('O · evidence resolves to the figure, in the run it was computed in', () => {
   const reconcile = async (o: string, start: string, key: string) => {
     const snapshot = headline(o, start, key)!;
@@ -242,5 +262,53 @@ describe('Health Score and alerts: the intended consequences of ADR-120', () => 
   it('and do not fire where nothing is owed or nothing is known', () => {
     expect(alerts(org.EMPTY)).toEqual([]);
     expect(alerts(org.TB).filter((a) => a.includes('deterioration'))).toEqual([]);
+  });
+});
+
+describe('M/N · every role sees exactly what the matrix allows (RLS and the resolver agree)', () => {
+  const roles = { admin: '', client: '', assigned: '', unassigned: '', superAdmin: '' };
+  beforeAll(() => {
+    for (const name of Object.keys(roles) as Array<keyof typeof roles>) {
+      roles[name] = createAuthUser(`${name}@${TAG}.roles.itest`);
+    }
+    adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status)
+                values ('${org.INVBANK}', '${roles.admin}', 'admin', 'active'), ('${org.INVBANK}', '${roles.client}', 'client', 'active');
+              insert into public.platform_users (user_id, platform_role)
+                values ('${roles.assigned}', 'employee'), ('${roles.unassigned}', 'employee'), ('${roles.superAdmin}', 'super_admin');
+              insert into public.organization_assignments (organization_id, employee_user_id) values ('${org.INVBANK}', '${roles.assigned}');
+              update public.profiles set mfa_enrolled_at = now() where id in ('${roles.assigned}', '${roles.unassigned}', '${roles.superAdmin}');`);
+  });
+
+  const reads = async (user: string, aal: 'aal1' | 'aal2' = 'aal1'): Promise<number> => {
+    const { data, error } = await clientFor(user, { aal }).from('metric_snapshots').select('id')
+      .eq('organization_id', org.INVBANK).in('metric_key', ['receivables', 'payables', 'working_capital']);
+    expect(error).toBeNull();
+    return (data ?? []).length;
+  };
+
+  it('owner, admin and client of the organisation read its receivables family', async () => {
+    expect(await reads(owner(org.INVBANK))).toBeGreaterThan(0);
+    expect(await reads(roles.admin)).toBeGreaterThan(0);
+    expect(await reads(roles.client)).toBeGreaterThan(0);
+  });
+
+  it('an employee reads only an ASSIGNED organisation, and only at aal2', async () => {
+    expect(await reads(roles.assigned, 'aal2')).toBeGreaterThan(0);
+    expect(await reads(roles.unassigned, 'aal2')).toBe(0);
+    expect(await reads(roles.assigned, 'aal1')).toBe(0);
+  });
+
+  it('a super admin reads at aal2 and not at aal1', async () => {
+    expect(await reads(roles.superAdmin, 'aal2')).toBeGreaterThan(0);
+    expect(await reads(roles.superAdmin, 'aal1')).toBe(0);
+  });
+
+  it('an unassigned employee\'s session cannot resolve the organisation\'s evidence', async () => {
+    const snapshot = headline(org.INVBANK, '2026-08-01', 'receivables')!;
+    const query = JSON.parse(adminSql(`select evidence_query::text from public.metric_snapshots where id = '${snapshot.snapshotId}'`).trim()) as { descriptor: unknown };
+    const intruder: AccessContext = { ...ctxFor(org.INVBANK), userId: roles.unassigned, db: clientFor(roles.unassigned, { aal: 'aal2' }) };
+    expect((await resolveDescriptor(intruder, query.descriptor)).count).toBe(0);
+    const allowed: AccessContext = { ...ctxFor(org.INVBANK), userId: roles.assigned, db: clientFor(roles.assigned, { aal: 'aal2' }) };
+    expect(money((await resolveDescriptor(allowed, query.descriptor)).total)).toBe('4400.00');
   });
 });

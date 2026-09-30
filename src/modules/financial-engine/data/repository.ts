@@ -133,12 +133,16 @@ export async function loadPeriods(
 export async function loadAccounts(
   scoped: SupabaseClient, orgId: string,
 ): Promise<AccountRef[]> {
-  const { data, error } = await scoped
-    .from('accounts')
-    .select('id, code, name, standard_category, account_type, is_system')
-    .eq('organization_id', orgId);
+  // Paged (ADR-120 hardening): an account past the 1,000th row was invisible to every family —
+  // its ledger cells folded into nothing and a receivables account went unrecognised.
+  const rows = await paged(
+    (from, to) => scoped.from('accounts')
+      .select('id, code, name, standard_category, account_type, is_system')
+      .eq('organization_id', orgId).order('id').range(from, to),
+    (r) => r,
+  );
 
-  return unwrap(data, error).map((r) => ({
+  return rows.map((r) => ({
     id: r.id as string,
     code: r.code as string | null,
     name: r.name as string,
@@ -151,12 +155,16 @@ export async function loadAccounts(
 export async function loadCounterparties(
   scoped: SupabaseClient, orgId: string,
 ): Promise<CounterpartyRef[]> {
-  const { data, error } = await scoped
-    .from('counterparties')
-    .select('id, name, kind, merged_into_id, default_expense_category')
-    .eq('organization_id', orgId);
+  // Paged (ADR-120 hardening): a purchase invoice's expense category comes from its supplier, so a
+  // supplier past the 1,000th row sent its purchases to `uncategorised` and out of `payables_days`.
+  const rows = await paged(
+    (from, to) => scoped.from('counterparties')
+      .select('id, name, kind, merged_into_id, default_expense_category')
+      .eq('organization_id', orgId).order('id').range(from, to),
+    (r) => r,
+  );
 
-  return unwrap(data, error).map((r) => ({
+  return rows.map((r) => ({
     id: r.id as string,
     name: r.name as string,
     kind: r.kind as CounterpartyRef['kind'],
@@ -168,12 +176,14 @@ export async function loadCounterparties(
 export async function loadBankAccounts(
   scoped: SupabaseClient, orgId: string,
 ): Promise<BankAccountRef[]> {
-  const { data, error } = await scoped
-    .from('bank_accounts')
-    .select('id, name, account_type, opening_balance, opening_balance_date, is_active')
-    .eq('organization_id', orgId);
+  const rows = await paged(
+    (from, to) => scoped.from('bank_accounts')
+      .select('id, name, account_type, opening_balance, opening_balance_date, is_active')
+      .eq('organization_id', orgId).order('id').range(from, to),
+    (r) => r,
+  );
 
-  return unwrap(data, error).map((r) => ({
+  return rows.map((r) => ({
     id: r.id as string,
     name: r.name as string,
     accountType: r.account_type as BankAccountRef['accountType'],
@@ -555,7 +565,7 @@ export async function loadOpeningJournal(
   const lines = await paged(
     (from, to) => scoped
       .from('ledger_entries')
-      .select('id, account_id, direction, amount')
+      .select('id, account_id, period_id, direction, amount')
       .eq('organization_id', orgId)
       .eq('is_opening_balance', true)
       .eq('record_status', 'accepted')
@@ -565,6 +575,7 @@ export async function loadOpeningJournal(
       .range(from, to),
     (r) => ({
       accountId: r.account_id as string,
+      periodId: r.period_id as string,
       debit: r.direction === 'debit' ? String(r.amount) : '0',
       credit: r.direction === 'credit' ? String(r.amount) : '0',
     }),
@@ -591,4 +602,40 @@ export async function loadLatestEngineVersion(
     .limit(1);
   const rows = unwrap(data, error) as Array<{ engine_version: string }>;
   return rows[0]?.engine_version ?? null;
+}
+
+/** A committed statement's own opening balance (deterministic or reviewer-typed only, IMP-BAL). */
+export interface StatementOpening {
+  readonly batchId: string;
+  readonly bankAccountId: string;
+  readonly periodStart: string;
+  readonly openingBalance: string;
+}
+
+/**
+ * Every committed bank statement that states an opening balance. The columns hold only parsed or
+ * reviewer-typed balances — "an AI reading never reaches these columns" (migration 20260905000032) —
+ * which is what CD-06 / §3.3 require of the first opening-cash source.
+ */
+export async function loadStatementOpenings(
+  scoped: SupabaseClient, orgId: string,
+): Promise<StatementOpening[]> {
+  return paged(
+    (from, to) => scoped
+      .from('import_batches')
+      .select('id, bank_account_id, period_start, statement_opening_balance')
+      .eq('organization_id', orgId)
+      .eq('status', 'committed')
+      .eq('target_table', 'bank_transactions')
+      .not('statement_opening_balance', 'is', null)
+      .not('bank_account_id', 'is', null)
+      .order('id')
+      .range(from, to),
+    (r) => ({
+      batchId: r.id as string,
+      bankAccountId: r.bank_account_id as string,
+      periodStart: r.period_start as string,
+      openingBalance: String(r.statement_opening_balance),
+    }),
+  );
 }

@@ -38,6 +38,7 @@ export {
   observationOf,
   usableValue,
   valueOf,
+  type OpenInvoiceObservation,
   type RecurringGroupObservation,
   type RuleContext,
 } from './domain/context';

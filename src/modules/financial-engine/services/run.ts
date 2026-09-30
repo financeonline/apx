@@ -7,7 +7,7 @@ import { log } from '@/core/logging';
 import { affectedRange, chunkPeriods, chunkWindow, type CalculationTrigger } from '../domain/chunking';
 import { computeCoverage, isPeriodComplete, type CoverageBatch } from '../domain/coverage';
 import { isCashLikeBankAccount } from '../domain/categories';
-import type { CashSeriesOptions } from '../domain/cash';
+import type { CashSeriesOptions, OpeningCashCandidate } from '../domain/cash';
 import type { DenominatorInputs } from '../domain/receivables';
 import { denominatorInputsFor, type ReceivablesComposeInput } from '../domain/receivables-input';
 import { computeFingerprint } from '../domain/fingerprint';
@@ -352,6 +352,32 @@ export async function runCalculation(
   const cashLikeActive = bankAccounts
     .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType)).map((a) => a.id).sort();
 
+  /*
+   * CD-06 / §3.3: the statement's own opening balance is the first source of opening cash. Only the
+   * EARLIEST statement per cash-like account can supply one — it starts that account's chain; every
+   * later month opens at the carried close — and only when that statement starts on the first day
+   * of a fiscal period: a statement from 15 May states the balance at 15 May, not at 1 June.
+   */
+  const periodStartSet = new Set(allPeriods.map((p) => p.periodStart));
+  const cashLikeIds = new Set(bankAccounts.filter((a) => isCashLikeBankAccount(a.accountType)).map((a) => a.id));
+  const earliestStatement = new Map<string, repo.StatementOpening>();
+  for (const statement of await repo.loadStatementOpenings(scoped, orgId)) {
+    if (!cashLikeIds.has(statement.bankAccountId)) continue;
+    const held = earliestStatement.get(statement.bankAccountId);
+    if (held === undefined || statement.periodStart < held.periodStart
+      || (statement.periodStart === held.periodStart && statement.batchId < held.batchId)) {
+      earliestStatement.set(statement.bankAccountId, statement);
+    }
+  }
+  const statementOpenings: OpeningCashCandidate[] = [...earliestStatement.values()]
+    .filter((statement) => periodStartSet.has(statement.periodStart))
+    .map((statement) => ({
+      bankAccountId: statement.bankAccountId,
+      source: 'statement_opening_balance',
+      value: statement.openingBalance,
+      asAtDate: statement.periodStart,
+    }));
+
   // The carries' starting point: what the last run left for the two periods before this range.
   const firstIndex = allPeriods.findIndex((p) => p.id === toWrite[0]!.id);
   const priorIds = allPeriods.slice(Math.max(0, firstIndex - 2), firstIndex).map((p) => p.id);
@@ -515,6 +541,7 @@ export async function runCalculation(
           aggregates: {
             aggregates, transferLegs, coverage, cashOptions, receivables,
             coveredBankAccountIds: cashCoveredIn(period, allBatches, bankAccounts),
+            statementOpenings,
           },
           context,
         });

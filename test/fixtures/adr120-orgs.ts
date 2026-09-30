@@ -13,6 +13,8 @@
  *   LEDGER   GL with an opening-balance journal     — ledger-basis AR/AP (ADR-027.3 item 3)
  *   TB       cumulative trial balances + bank        — balance-basis AR/AP, a stated zero, WC terms
  *   EMPTY    an organisation with nothing            — no zero anywhere
+ *   HISTORY  GL from March, statements from June     — history first, banking later; the
+ *            first statement's own opening balance (CD-06) with nothing typed on the account
  */
 import { expect } from 'vitest';
 import { drainJobs } from '@/modules/jobs';
@@ -25,7 +27,7 @@ export const MONTHS = [
   { key: 'aug', start: '2026-08-01', end: '2026-08-31' },
 ] as const;
 
-export type FixtureKey = 'BANK' | 'INVBANK' | 'INVONLY' | 'LEDGER' | 'TB' | 'EMPTY';
+export type FixtureKey = 'BANK' | 'INVBANK' | 'INVONLY' | 'LEDGER' | 'TB' | 'EMPTY' | 'HISTORY';
 
 const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`).split('\n')[0]!.trim();
 
@@ -62,13 +64,22 @@ function accepted(org: string, table: string, id: string, batchId: string): void
     values ('${org}', '${table}', '${id}', 'accepted', '${batchId}')`);
 }
 
-/** A current account with statements for June–August; `moves[m]` are that month's signed amounts. */
-function bankStatements(org: string, openingBalance: string, moves: readonly (readonly string[])[]): string {
+/**
+ * A current account with statements for June–August; `moves[m]` are that month's signed amounts.
+ * `openingBalance` is typed on the account (dated 05-31); `statementOpening`, when given, is printed
+ * on the JUNE statement instead — the first source CD-06 names.
+ */
+function bankStatements(
+  org: string, openingBalance: string | null, moves: readonly (readonly string[])[], statementOpening: string | null = null,
+): string {
   const bank = one(`insert into public.bank_accounts (organization_id, name, bank_name, account_type, opening_balance, opening_balance_date, is_active)
-    values ('${org}', 'Main', 'Test Bank', 'current', ${openingBalance}, '2026-05-31', true) returning id`);
+    values ('${org}', 'Main', 'Test Bank', 'current', ${openingBalance ?? 'null'}, ${openingBalance === null ? 'null' : `'2026-05-31'`}, true) returning id`);
   MONTHS.forEach((month, m) => {
     const doc = document(org, `bank-${month.key}`, 'bank_statement');
     const b = batch(org, doc, { importType: 'bank_statement', target: 'bank_transactions', start: month.start, end: month.end, bankAccount: bank });
+    if (m === 0 && statementOpening !== null) {
+      adminSql(`update public.import_batches set statement_opening_balance = ${statementOpening} where id = '${b}'`);
+    }
     (moves[m] ?? []).forEach((amount, i) => {
       const row = importRow(org, b);
       const id = one(`insert into public.bank_transactions (organization_id, bank_account_id, transaction_date, amount, currency, description_raw,
@@ -235,7 +246,7 @@ function trialBalanceOrg(org: string): void {
 
 export async function seedAdr120Orgs(tag: string): Promise<Record<FixtureKey, string>> {
   const owners = [createAuthUser(`owner-a@${tag}.adr120.itest`), createAuthUser(`owner-b@${tag}.adr120.itest`),
-    createAuthUser(`owner-c@${tag}.adr120.itest`)];
+    createAuthUser(`owner-c@${tag}.adr120.itest`), createAuthUser(`owner-d@${tag}.adr120.itest`)];
   let n = 0;
   const create = async (name: string): Promise<string> => {
     // `create_organization` is throttled per person, so the six organisations take three owners.
@@ -247,6 +258,7 @@ export async function seedAdr120Orgs(tag: string): Promise<Record<FixtureKey, st
   const orgs = {
     BANK: await create('Bank'), INVBANK: await create('InvBank'), INVONLY: await create('InvOnly'),
     LEDGER: await create('Ledger'), TB: await create('TB'), EMPTY: await create('Empty'),
+    HISTORY: await create('History'),
   };
 
   /*
@@ -273,7 +285,35 @@ export async function seedAdr120Orgs(tag: string): Promise<Record<FixtureKey, st
   trialBalanceOrg(orgs.TB);
   bankStatements(orgs.TB, '3000', [['500'], ['-200'], ['100']]);
 
+  /*
+   * HISTORY — a GL for March–August (sales 1,000 a month through the bank) and statements only from
+   * June, whose first statement prints an opening balance of 8,000.00; nothing is typed on the account.
+   *   Mar–May: no statement and no opening → cash unknown (NULL no_opening_cash), never 0
+   *   Jun: opens at the statement's 8,000.00 (verified) → +1,500 → 9,500.00; Jul → 10,000.00; Aug → 10,300.00
+   */
+  historyOrg(orgs.HISTORY);
+  bankStatements(orgs.HISTORY, null, [['1500'], ['500'], ['300']], '8000');
+
   return orgs;
+}
+
+function historyOrg(org: string): void {
+  const months = [
+    { key: 'mar', start: '2026-03-01', end: '2026-03-31' }, { key: 'apr', start: '2026-04-01', end: '2026-04-30' },
+    { key: 'may', start: '2026-05-01', end: '2026-05-31' }, ...MONTHS,
+  ];
+  for (const month of months) {
+    const doc = document(org, `hgl-${month.key}`, 'general_ledger');
+    const b = batch(org, doc, { importType: 'general_ledger', target: 'ledger_entries', start: month.start, end: month.end });
+    for (const [category, direction] of [['cash', 'debit'], ['revenue', 'credit']] as const) {
+      const row = importRow(org, b);
+      const id = one(`insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status,
+          source_document_id, import_batch_id, import_row_id, source_ref)
+        values ('${org}', '${month.end}', '${account(org, category)}', '${direction}', 1000,
+          '00000000-0000-0000-0000-000000000000', 'accepted', '${doc}', '${b}', '${row}', 'h${rowNumber}') returning id`);
+      accepted(org, 'ledger_entries', id, b);
+    }
+  }
 }
 
 /** One real calculation, then the alert pass it enqueues — both through the queue. */

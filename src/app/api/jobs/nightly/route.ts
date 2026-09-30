@@ -1,5 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { enqueueNightlySweep } from '@/core/db';
+import { enqueueEngineUpgrade, enqueueNightlySweep } from '@/core/db';
+import { ENGINE_VERSION } from '@/modules/financial-engine';
 import { log } from '@/core/logging';
 import { cronAuthorised } from '../_lib/cron-auth';
 
@@ -21,13 +22,33 @@ export async function GET(request: NextRequest) {
     return new NextResponse(null, { status: 404 });
   }
 
+  let jobId: string;
   try {
-    const jobId = await enqueueNightlySweep();
-    return NextResponse.json({ jobId });
+    jobId = await enqueueNightlySweep();
   } catch (cause) {
     log.error('the nightly sweep could not be queued', {
       error: cause instanceof Error ? cause.message : String(cause),
     });
     return NextResponse.json({ error: 'The nightly sweep could not be queued.' }, { status: 500 });
+  }
+
+  /*
+   * ADR-120: every organisation still on an older engine's figures is queued for a full
+   * recalculation, every night, until a run on this version has succeeded for it. The first night
+   * after a deploy does the bulk; later nights pick up only the ones whose run failed. Its own error
+   * path: the sweep above is already queued, and a failure here must say what failed.
+   */
+  try {
+    const engineUpgrade = await enqueueEngineUpgrade(ENGINE_VERSION);
+    if (engineUpgrade > 0) {
+      log.info('organisations queued for the engine upgrade', { engineVersion: ENGINE_VERSION, count: engineUpgrade });
+    }
+    return NextResponse.json({ jobId, engineUpgrade });
+  } catch (cause) {
+    log.error('the engine upgrade could not be queued', {
+      engineVersion: ENGINE_VERSION,
+      error: cause instanceof Error ? cause.message : String(cause),
+    });
+    return NextResponse.json({ jobId, error: 'The engine upgrade could not be queued.' }, { status: 500 });
   }
 }

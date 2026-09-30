@@ -103,7 +103,9 @@ export async function evaluateAlerts(
   const { scoped } = deps;
   const orgId = request.organizationId;
 
-  const [snapshots, bankRecords, ledgerRecords, invoiceRecords, groups, accounts, counterparties, existing] =
+  // The as-of date of the current period's aging is at most today; the latest period end covers both.
+  const issuedBy = request.periods.map((p) => p.periodEnd).sort().at(-1) ?? request.aggregatedAt.slice(0, 10);
+  const [snapshots, bankRecords, ledgerRecords, invoiceRecords, groups, accounts, counterparties, existing, openInvoices] =
     await Promise.all([
       deps.loadObservations(request.windowPeriodIds),
       deps.loadBankRecords(request.windowPeriodIds, request.aggregatedAt),
@@ -113,6 +115,7 @@ export async function evaluateAlerts(
       deps.loadAccounts(),
       deps.loadCounterparties(),
       repo.loadExistingAlerts(scoped, orgId),
+      repo.loadOpenInvoices(scoped, orgId, issuedBy, request.aggregatedAt),
     ]);
 
   const allRecords = [...bankRecords, ...ledgerRecords, ...invoiceRecords];
@@ -144,6 +147,7 @@ export async function evaluateAlerts(
         newCounterpartyIds: newCounterpartyIdsIn(allRecords, period.id, request.windowPeriodIds),
         accounts,
         counterpartyNames,
+        openInvoices,
       },
     };
   });

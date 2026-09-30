@@ -4,6 +4,7 @@ import { toMotionError } from '@/core/errors';
 import { signedFromEntry, toMoneyString } from '@/core/money';
 import type { AlertSeverity, AlertSubjectType, RecordObservation } from '../domain/types';
 import type { ExistingAlert } from '../domain/lifecycle';
+import type { OpenInvoiceObservation } from '../domain/context';
 
 /**
  * Alert reads and writes (DATABASE_ARCHITECTURE.md §6).
@@ -213,6 +214,46 @@ export async function loadInvoiceRecords(
     dueDate: row.due_date,
     invoiceType: row.invoice_type,
   }));
+}
+
+/**
+ * Every invoice the receivables and payables deterioration rules may name (ADR-120 hardening): the
+ * current row of each accepted, non-superseded, non-void invoice issued by `issuedBy`, visible at
+ * the run's aggregation instant — the set the engine aged. Paged: PostgREST's 1,000-row cap is
+ * silent, and a business with a thousand open invoices is exactly the one these rules are for.
+ */
+export async function loadOpenInvoices(
+  db: SupabaseClient, orgId: string, issuedBy: string, aggregatedAt: string, requestId?: string,
+): Promise<OpenInvoiceObservation[]> {
+  const PAGE = 1000;
+  const out: OpenInvoiceObservation[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await db
+      .from('invoices')
+      .select('id, invoice_type, issue_date, due_date, total_amount, balance_due, paid_date, description, invoice_number')
+      .eq('organization_id', orgId)
+      .eq('record_status', 'accepted')
+      .is('superseded_by', null)
+      .neq('status', 'void')
+      .lte('created_at', aggregatedAt)
+      .lte('issue_date', issuedBy)
+      .order('id')
+      .range(from, from + PAGE - 1);
+    const rows = unwrap(data as unknown as Array<Record<string, unknown>> | null, error, requestId);
+    for (const row of rows) {
+      out.push({
+        id: row.id as string,
+        invoiceType: row.invoice_type as OpenInvoiceObservation['invoiceType'],
+        issueDate: row.issue_date as string,
+        dueDate: (row.due_date as string | null) ?? null,
+        totalAmount: String(row.total_amount),
+        balanceDue: String(row.balance_due),
+        paidDate: (row.paid_date as string | null) ?? null,
+        description: (row.description as string | null) ?? (row.invoice_number as string | null) ?? null,
+      });
+    }
+    if (rows.length < PAGE) return out;
+  }
 }
 
 // ---------------------------------------------------------------------------------------------

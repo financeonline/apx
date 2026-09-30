@@ -527,6 +527,15 @@ export async function enqueueNightlySweep(date?: string): Promise<string> {
   return serverRpc<string>('enqueue_nightly_sweep', date === undefined ? {} : { p_date: date });
 }
 
+/**
+ * Queue a recalculation for every organisation with figures from an older engine version (ADR-120):
+ * `api_server.enqueue_engine_upgrade`, through the existing `app.enqueue_recalculation`. Idempotent
+ * and resumable; returns how many organisations were queued (or re-found already queued).
+ */
+export async function enqueueEngineUpgrade(engineVersion: string): Promise<number> {
+  return serverRpc<number>('enqueue_engine_upgrade', { p_engine_version: engineVersion });
+}
+
 export async function startCalculationRun(
   input: Record<string, unknown>,
 ): Promise<{ runId: string; noChange: boolean }> {
@@ -652,28 +661,64 @@ export async function persistAlerts(
  * through `api_server` wrappers. The repository used to call them unqualified, which resolved to
  * `public` and returned PGRST202 on every calculation — the defect ADR-057.2 records.
  */
+/**
+ * A set-returning `api_server` read, in full.
+ *
+ * PostgREST's `max_rows` (1,000) applies to a FUNCTION's result exactly as to a table's, and
+ * truncates silently: `aggregate_periods` over an organisation with 1,200 customers returned 1,000
+ * cells and the engine computed revenue from the ones it was handed (ADR-120 hardening). So every
+ * set-returning server read pages, ordered on its full grouping key so pages never overlap or skip.
+ * Each page re-evaluates the function at the same arguments — the aggregation instant is one of
+ * them — so the pages are one consistent result.
+ */
+const RPC_PAGE = 1000;
+
+async function serverRpcAll(
+  fn: string, args: Record<string, unknown>, orderBy: readonly string[],
+): Promise<Record<string, unknown>[]> {
+  const out: Record<string, unknown>[] = [];
+  for (let from = 0; ; from += RPC_PAGE) {
+    let query = serverClient().schema('api_server').rpc(fn, args);
+    for (const column of orderBy) query = query.order(column, { ascending: true, nullsFirst: true });
+    const { data, error } = await query.range(from, from + RPC_PAGE - 1);
+    if (error) throw toMotionError(error);
+    const page = (data ?? []) as Record<string, unknown>[];
+    out.push(...page);
+    if (page.length < RPC_PAGE) return out;
+  }
+}
+
+/** The grouping key of `app.aggregate_periods`, then its sums, so the order is total. */
+const AGGREGATE_ORDER = [
+  'period_id', 'source', 'standard_category', 'account_id', 'counterparty_id', 'bank_account_id',
+  'balance_kind', 'balance_basis', 'invoice_type', 'transfer_kind', 'unpaired_transfer',
+  'debit', 'credit', 'amount', 'row_count',
+] as const;
+
 export async function aggregatePeriods(
   orgId: string, from: string, to: string, aggregatedAt: string,
 ): Promise<Record<string, unknown>[]> {
-  return serverRpc<Record<string, unknown>[]>('aggregate_periods', {
+  return serverRpcAll('aggregate_periods', {
     p_org: orgId, p_from: from, p_to: to, p_aggregated_at: aggregatedAt,
-  }).then((rows) => rows ?? []);
+  }, AGGREGATE_ORDER);
 }
 
 export async function aggregateTransferLegs(
   orgId: string, from: string, to: string, aggregatedAt: string,
 ): Promise<Record<string, unknown>[]> {
-  return serverRpc<Record<string, unknown>[]>('aggregate_transfer_legs', {
+  return serverRpcAll('aggregate_transfer_legs', {
     p_org: orgId, p_from: from, p_to: to, p_aggregated_at: aggregatedAt,
-  }).then((rows) => rows ?? []);
+  }, ['period_id', 'bank_account_id', 'transfer_kind', 'inflow', 'outflow', 'row_count']);
 }
 
 export async function batchCoverage(
   orgId: string, from: string, to: string,
 ): Promise<Record<string, unknown>[]> {
-  return serverRpc<Record<string, unknown>[]>('batch_coverage', {
-    p_org: orgId, p_from: from, p_to: to,
-  }).then((rows) => rows ?? []);
+  // Ordered newest-committed first, as the function itself orders, with the id as the tie-break.
+  return serverRpcAll('batch_coverage', { p_org: orgId, p_from: from, p_to: to }, ['batch_id'])
+    .then((rows) => [...rows].sort((a, b) =>
+      String(b.committed_at).localeCompare(String(a.committed_at))
+      || String(a.batch_id).localeCompare(String(b.batch_id))));
 }
 
 // ---------------------------------------------------------------------------

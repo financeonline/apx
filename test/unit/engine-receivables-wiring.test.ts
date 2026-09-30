@@ -3,7 +3,7 @@ import { describe, expect, it } from 'vitest';
 import {
   composePeriod, computeCash, computeCoverage, ENGINE_VERSION, invoiceOutstandingAt, invoiceSideCoverage,
   type AccountRef, type AggregateCell, type AgingInvoice, type BankAccountRef, type CoverageBatch,
-  type EngineContext, type MetricResult, type PeriodRef, type ReceivablesComposeInput,
+  type EngineContext, type MetricResult, type OpeningCashCandidate, type PeriodRef, type ReceivablesComposeInput,
 } from '@/modules/financial-engine';
 
 /**
@@ -228,7 +228,7 @@ describe('receivables from the ledger (ADR-027.3 item 3)', () => {
   it('is opening journal + every movement to P, and its evidence names every period it summed', () => {
     const results = compose({
       batches: [gl],
-      ledger: { cells: ledgerCells, openingJournal: [{ accountId: 'a-ar', debit: '5000', credit: '0' }], periodStarts },
+      ledger: { cells: ledgerCells, openingJournal: [{ accountId: 'a-ar', periodId: jun.id, debit: '5000', credit: '0' }], periodStarts },
     }, ledgerCells, {}, [gl]);
     // 9,000 − 3,000 (June, including the 5,000 opening line) + 2,000 − 6,000 = 2,000
     const ar = metric(results, 'receivables');
@@ -238,6 +238,23 @@ describe('receivables from the ledger (ADR-027.3 item 3)', () => {
     expect(ar.evidenceQuery).toMatchObject({
       kind: 'leaf', descriptor: { table: 'ledger_entries', filters: { period_ids: [aug.id, jun.id].sort(), account_ids: ['a-ar'] } },
     });
+  });
+
+  it('starts at the journal: movements before it are already inside it, and a month before it has no opening', () => {
+    // The journal is posted in AUGUST; June's movements (+6,000) predate it and must not be added.
+    const journal = [{ accountId: 'a-ar', periodId: aug.id, debit: '5000', credit: '0' }];
+    const augCells = [...ledgerCells, cell({ periodId: aug.id, source: 'ledger', accountId: 'a-ar', standardCategory: 'receivables', balanceKind: null, balanceBasis: null, debit: '5000', credit: '0' })];
+    const results = compose({ batches: [gl], ledger: { cells: augCells, openingJournal: journal, periodStarts } }, augCells, {}, [gl]);
+    // August: journal 5,000 + (2,000 − 6,000) = 1,000 — June's 6,000 is not counted again.
+    expect(metric(results, 'receivables').value).toBe('1000.00');
+  });
+
+  it('a month the GL export only partly reaches is not a stated balance', () => {
+    const results = compose({
+      batches: [], // no declared GL range spans August: rows alone make it a partial month
+      ledger: { cells: ledgerCells, openingJournal: [{ accountId: 'a-ar', periodId: jun.id, debit: '5000', credit: '0' }], periodStarts },
+    }, ledgerCells, {}, []);
+    expect(metric(results, 'receivables').value).toBeNull();
   });
 
   it('without an opening journal a ledger total is not a balance → no_opening_balance', () => {
@@ -260,6 +277,16 @@ describe('working capital (§3.4, ADR-120)', () => {
     const wc = metric(results, 'working_capital');
     expect(wc.value).toBe('8500.00'); // 5,000 + 4,400 − 900; no trial balance, so the balance-sheet terms are partial
     expect(wc.dataQuality.warnings).toContain('partial_working_capital');
+  });
+
+  it('a genuine zero: 5,000 cash + nothing owed to you − 5,000 owed = 0.00, a stated figure', () => {
+    const results = compose({
+      batches: [...both, bankBatch],
+      invoices: [sale({ id: 'p-1', invoiceType: 'purchase', totalAmount: '5000', balanceDue: '5000' })],
+    }, [], { bankAccounts: [bank] }, [...both, bankBatch]);
+    const wc = metric(results, 'working_capital');
+    expect(wc.value).toBe('0.00');
+    expect(wc.dataQuality.missing).toEqual([]);
   });
 
   it('H · NULL when payables are unknown — never summed as nil', () => {
@@ -305,5 +332,27 @@ describe('the runway window reads only months a statement fully stated (ADR-120)
     const aug0 = series[0]!.metrics;
     expect(aug0.find((m) => m.key === 'opening_cash')!.value).toBe('7000.00');
     expect(aug0.find((m) => m.key === 'cash_runway_months')!.value).toBeNull();
+  });
+});
+
+describe('opening cash: the statement\'s own opening balance comes first (CD-06, ADR-120 hardening)', () => {
+  const bank: BankAccountRef = { id: 'ba', name: 'Main', accountType: 'current', openingBalance: '5000.00', openingBalanceDate: '2026-07-31', isActive: true };
+  const statement = batch({ targetTable: 'bank_transactions', importType: 'bank_statement', bankAccountId: 'ba', invoiceListKind: null, periodStart: '2026-08-01', periodEnd: '2026-08-31' });
+  const run = (statementOpenings: readonly OpeningCashCandidate[]) => {
+    const ctx = context({ bankAccounts: [bank] });
+    const coverage = computeCoverage({ period: aug, batches: [statement], bankAccounts: [bank], rowCounts: {}, asOf: ctx.asOf });
+    return composePeriod({ period: aug, coverage, cells: [], transferLegs: [], context: ctx, coveredBankAccountIds: ['ba'], statementOpenings });
+  };
+
+  it('uses the statement\'s opening balance over the one typed on the account, and rates it verified', () => {
+    const results = run([{ bankAccountId: 'ba', source: 'statement_opening_balance', value: '5200.00', asAtDate: '2026-08-01' }]);
+    expect(metric(results, 'opening_cash').value).toBe('5200.00');
+    expect(metric(results, 'opening_cash').assurance).toBe('verified');
+  });
+
+  it('falls back to the typed balance when no statement states one', () => {
+    const results = run([]);
+    expect(metric(results, 'opening_cash').value).toBe('5000.00');
+    expect(metric(results, 'opening_cash').assurance).toBe('calculated');
   });
 });

@@ -291,6 +291,36 @@ describe('receivables.deterioration and payables.deterioration', () => {
     expect(evaluateReceivablesDeterioration(ctx('receivables', '0', '10000', '9'))).toHaveLength(0);
   });
 
+  it('names every invoice open and overdue at the figure\'s own date — not only this month\'s (ADR-120)', () => {
+    const open = (over: Partial<import('@/modules/alerts').OpenInvoiceObservation> & { id: string }) => ({
+      invoiceType: 'sales' as const, issueDate: '2026-01-15', dueDate: '2026-02-14', totalAmount: '1000.00',
+      balanceDue: '1000.00', paidDate: null, description: over.id, ...over,
+    });
+    const outcome = evaluateReceivablesDeterioration(emptyRuleContext({
+      snapshots: [
+        snapshot({ key: 'receivables', value: '9000', unit: 'money' }),
+        { ...snapshot({ key: 'receivables_overdue', value: '6500', unit: 'money' }), components: { as_of: '2026-03-31' } },
+      ],
+      records: [], // nothing issued in March itself
+      openInvoices: [
+        open({ id: 'jan-overdue', totalAmount: '4000.00', balanceDue: '4000.00' }),
+        // Paid in APRIL, after the date: at 31 March it was owed in full (the engine's rule).
+        open({ id: 'paid-later', totalAmount: '2500.00', balanceDue: '0.00', paidDate: '2026-04-10' }),
+        // Paid before the date: nothing left.
+        open({ id: 'paid-before', totalAmount: '800.00', balanceDue: '0.00', paidDate: '2026-03-01' }),
+        // Not yet due at 31 March.
+        open({ id: 'not-due', dueDate: '2026-04-30' }),
+        // A credit note is never an "overdue invoice", however large.
+        open({ id: 'credit', invoiceType: 'sales_credit_note', totalAmount: '9999.00', balanceDue: '9999.00' }),
+        // A supplier's invoice is the payables rule's business.
+        open({ id: 'purchase', invoiceType: 'purchase' }),
+      ],
+    }))[0]!;
+    expect(outcome.recordIds).toEqual(['jan-overdue', 'paid-later']);
+    expect(outcome.thresholdSummary.overdue_count).toBe('2');
+    expect(outcome.thresholdSummary.top3_share).toBe('1.000000'); // (4,000 + 2,500) / 6,500
+  });
+
   it('pins the overdue invoices and reports the top three share', () => {
     const outcome = evaluateReceivablesDeterioration(ctx('receivables', '6000', '10000'))[0]!;
     expect(outcome.recordIds).toEqual(['inv-1', 'inv-2']);

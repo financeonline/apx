@@ -11,8 +11,8 @@
  */
 
 import { Decimal, toMoneyString, toRatioString } from '@/core/money';
-import { observationOf, usableValue, type RuleContext } from '../context';
-import { varianceKey } from '@/modules/financial-engine';
+import { observationOf, usableValue, type OpenInvoiceObservation, type RuleContext } from '../context';
+import { invoiceOutstandingAt, varianceKey } from '@/modules/financial-engine';
 import { NO_SUBJECT, type EvidencePin, type RecordObservation, type RuleOutcome } from '../types';
 
 /** Defaults, CD-18. */
@@ -49,6 +49,37 @@ const SIDE: Readonly<Record<Side, {
   },
 };
 
+interface OverdueInvoice {
+  readonly id: string;
+  readonly outstanding: Decimal;
+  readonly label: string;
+}
+
+/**
+ * The largest invoices overdue at `asOf` — the date the overdue FIGURE was aged at (its
+ * `components.as_of`) — valued by the engine's own rule (`invoiceOutstandingAt`: paid after the date
+ * counts at its total; credit notes subtract), so the list agrees with the figure it explains
+ * (ADR-120 hardening). Void invoices never reach `openInvoices`.
+ */
+function topOverdueOpen(
+  invoices: readonly OpenInvoiceObservation[], invoiceTypes: readonly string[], asOf: string,
+): OverdueInvoice[] {
+  return invoices
+    .filter((i) => invoiceTypes.includes(i.invoiceType) && i.issueDate <= asOf
+      && i.dueDate !== null && i.dueDate < asOf)
+    .map((i) => ({ id: i.id, outstanding: invoiceOutstandingAt(i, asOf), label: i.description ?? 'Overdue invoice' }))
+    .filter((x) => x.outstanding.greaterThan(0))
+    .sort((a, b) => b.outstanding.comparedTo(a.outstanding) || a.id.localeCompare(b.id))
+    .slice(0, TOP_OVERDUE_LIMIT);
+}
+
+/** The pre-ADR-120 selection from this period's own records, for callers without `openInvoices`. */
+function topOverdueFromRecords(ctx: RuleContext, invoiceTypes: readonly string[]): OverdueInvoice[] {
+  return topOverdue(ctx, invoiceTypes).map((r) => ({
+    id: r.id, outstanding: new Decimal(r.outstanding!).abs(), label: r.descriptionNormalized ?? 'Overdue invoice',
+  }));
+}
+
 /** The largest overdue invoices this period, pinned by id (§8.2). */
 function topOverdue(ctx: RuleContext, invoiceTypes: readonly string[]): RecordObservation[] {
   return ctx.records
@@ -84,9 +115,12 @@ function evaluateSide(ctx: RuleContext, side: Side): readonly RuleOutcome[] {
   const overdueHeavy = share !== null && share.greaterThanOrEqualTo(OVERDUE_SHARE);
   if (!slowing && !overdueHeavy) return [];
 
-  const invoices = topOverdue(ctx, config.invoiceTypes);
-  const top3 = invoices.slice(0, 3)
-    .reduce((sum, r) => sum.plus(new Decimal(r.outstanding!).abs()), new Decimal(0));
+  const asOf = typeof overdueObservation?.components.as_of === 'string'
+    ? overdueObservation.components.as_of : ctx.periodEnd;
+  const invoices = ctx.openInvoices !== undefined
+    ? topOverdueOpen(ctx.openInvoices, config.invoiceTypes, asOf)
+    : topOverdueFromRecords(ctx, config.invoiceTypes);
+  const top3 = invoices.slice(0, 3).reduce((sum, r) => sum.plus(r.outstanding), new Decimal(0));
 
   const evidence: EvidencePin[] = [];
   for (const observation of [overdueObservation, totalObservation, daysVariance]) {
@@ -105,7 +139,7 @@ function evaluateSide(ctx: RuleContext, side: Side): readonly RuleOutcome[] {
       itemType: 'invoice',
       refId: invoice.id,
       queryDescriptor: null,
-      label: invoice.descriptionNormalized ?? 'Overdue invoice',
+      label: invoice.label,
       claim: 'An overdue invoice behind this alert',
       assuranceLevel: 'verified',
     });

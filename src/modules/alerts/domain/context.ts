@@ -96,6 +96,26 @@ export interface RuleContext {
    * they arrive as data for a template rather than being interpolated into a prompt anywhere.
    */
   readonly counterpartyNames: ReadonlyMap<string, string>;
+  /**
+   * Every accepted, non-superseded, non-void invoice issued by the latest period end — NOT only this
+   * period's (ADR-120 hardening). The receivables and payables deterioration rules name the largest
+   * overdue invoices behind a figure that ages every open invoice; an invoice issued in July and
+   * overdue in August is exactly the one they exist to name, and `records` (this period's only)
+   * never held it. Absent in callers that predate it; the rules then fall back to `records`.
+   */
+  readonly openInvoices?: readonly OpenInvoiceObservation[];
+}
+
+/** An invoice as the deterioration rules age it: the engine's outstanding-at rule needs these fields. */
+export interface OpenInvoiceObservation {
+  readonly id: string;
+  readonly invoiceType: 'sales' | 'sales_credit_note' | 'purchase' | 'purchase_credit_note';
+  readonly issueDate: string;
+  readonly dueDate: string | null;
+  readonly totalAmount: string;
+  readonly balanceDue: string;
+  readonly paidDate: string | null;
+  readonly description: string | null;
 }
 
 // ---------------------------------------------------------------------------------------------

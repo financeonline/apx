@@ -26,7 +26,8 @@
     "check:schema": "tsx scripts/check-schema-drift.ts",
     "e2e": "playwright test",
     "e2e:smoke": "playwright test journey-1 journey-8",
-    "e2e:ui": "playwright test --ui"
+    "e2e:ui": "playwright test --ui",
+    "engine:upgrade": "tsx scripts/engine-upgrade.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.124.0",

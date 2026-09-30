@@ -3,6 +3,7 @@ export { createServiceClient, withOrgScope, type OrgScope } from './service-clie
 export {
   aggregationInstant,
   buildMetricBundle,
+  enqueueEngineUpgrade,
   enqueueNightlySweep,
   persistAssistantTurn,
   persistUserTurn,

@@ -35,6 +35,8 @@ import type {
 /** One opening-balance journal line (`ledger_entries.is_opening_balance`, IMP-GL-011). */
 export interface OpeningJournalLine {
   readonly accountId: string;
+  /** The fiscal period the journal is posted in — the instant its balances are stated as at. */
+  readonly periodId: string;
   readonly debit: string;
   readonly credit: string;
 }
@@ -113,9 +115,25 @@ function ledgerFallback(
   ledger: ReceivablesComposeInput['ledger'],
   category: 'receivables' | 'payables',
 ): CategoryBalanceFallback['ledger'] & { periodIds: readonly string[] } | null {
-  if (ledger === null || ledger.openingJournal === null || !coverage.bySource.ledger.covers) return null;
+  if (ledger === null || ledger.openingJournal === null) return null;
+  // A declared GL range must span P: a month the export only partly reaches (`partial_month`) has no
+  // balance at its end that anybody stated.
+  const ledgerCoverage = coverage.bySource.ledger;
+  if (!ledgerCoverage.covers || ledgerCoverage.warnings.includes('partial_month')) return null;
   const accounts = new Map(accountsOf(ctx, [category]).map((a) => [a.id, a]));
   const { periodStarts } = ledger;
+
+  /*
+   * The balance starts AT the opening journal. Its lines state the balances as at its own period, so
+   * movements posted before it are already inside them: summing both would count them twice. A
+   * period before the journal has no stated opening at all.
+   */
+  const journalStarts = ledger.openingJournal
+    .map((line) => periodStarts.get(line.periodId))
+    .filter((start): start is string => start !== undefined)
+    .sort();
+  const journalStart = journalStarts[0];
+  if (journalStart === undefined || period.periodStart < journalStart) return null;
 
   let cumulative = new Decimal(0);
   const periodIds = new Set<string>();
@@ -124,7 +142,7 @@ function ledgerFallback(
     const account = accounts.get(cell.accountId);
     if (account === undefined) continue;
     const start = periodStarts.get(cell.periodId);
-    if (start === undefined || start > period.periodStart) continue;
+    if (start === undefined || start > period.periodStart || start < journalStart) continue;
     cumulative = cumulative.plus(ledgerAmount({ accountType: account.accountType, debit: cell.debit, credit: cell.credit }));
     periodIds.add(cell.periodId);
   }

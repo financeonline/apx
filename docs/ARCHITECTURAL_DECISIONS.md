@@ -1915,6 +1915,97 @@ Status: **implemented; awaiting independent audit.** Phase 16 has not started.
 - **F-8 `payables_days` needs cost of sales.** Its denominator requires `cost_of_sales`, so an organisation with no cost-of-sales accounts has no `payables_days` (§3.4 as written).
 - **F-9 Balance drill-down totals.** `period_balances` drill-downs are now in reporting sign for every descriptor. P&L trial-balance descriptors still do not total to their monthly figure (cumulative differencing, pre-existing, outside the sweep).
 
+#### ADR-120 — pre-audit hardening and final disposition (2026-09-30)
+
+Status: **hardened; ready for independent audit.** Not independently approved. Phase 16 not started.
+
+**Receivables / payables source precedence (per side, per period; `domain/receivables-input.ts`):**
+1. **Invoices of that side.** A sales batch (`sales_invoices` / `sales_report`) for receivables, a purchase batch (`purchase_invoices` / `purchase_report`) for payables, whose declared range spans P, or which was committed **0–45 days after** P ended (`invoiceSideCoverage`).
+   - Every accepted, non-superseded invoice issued by the as-of date is aged with `invoiceOutstandingAt`: an invoice paid after the date counts at its total; credit notes subtract; void invoices are excluded.
+   - The as-of date is P's end, or the run's `asOf` for the current period.
+2. **The balance family's statement for P.** Trial balance over balance sheet (ADR-047.4), cumulative basis only.
+   - Σ closing balance of the category's accounts, in reporting sign.
+   - A covering statement with no row states **0**. A movement-basis statement is not a balance.
+3. **The ledger.** Only when BOTH hold:
+   - a declared GL range spans P (not `partial_month`);
+   - an opening-balance journal exists and P is not before the journal's period.
+
+   Value = opening journal + every movement from the journal's period to P. Movements before the journal are already inside it and are never added.
+4. **Otherwise NULL**, with `stale_invoice_data` (a batch of that side exists but none covers P), `no_opening_balance` (ledger rows but no usable opening), or `no_source_covers_period`.
+
+Working capital is NULL when cash, receivables or payables is unknown. The balance-sheet-only terms may be missing (`partial_working_capital`).
+
+**Cash carry and runway coverage semantics (`services/run.ts`, `domain/cash.ts`):**
+- **Chain start.** The chain starts at the first period in which a statement covers any cash-like account. Before it, each month is computed on its own; with no opening source it is NULL `no_opening_cash`, never 0.
+- **Chain-start opening**, per account, CD-06 order:
+  1. the earliest statement's own printed opening balance — only when that statement starts on the first day of a fiscal period; `verified`; deterministic or reviewer-typed values only;
+  2. `bank_accounts.opening_balance` dated on or before the period start (`calculated`);
+  3. otherwise NULL.
+- **Carry.** From the chain start, P opens at P−1's close, carrying P−1's basis, assurance and missing reasons. An account first covered later brings its own opening (a "joiner").
+- **Coverage and completeness.** Coverage is the accounts a committed statement ACTUALLY covers in P: `completeness = covered / active`, with `bank_coverage_partial` below 1.
+- **Runway.** `cash_runway_months` needs three consecutive months, each fully covered (every active cash-like account stated). A month without that is unknown (`insufficient_history`), never a 0.00 burn. A cash-generative window is NULL with `cash_positive`, which Health C2 scores as designed.
+
+**Deployment recalculation mechanism:**
+- **Function.** `api_server.enqueue_engine_upgrade(engine_version)` (migration `20260930000001`, service role only). It queues `calculation.run` (`recalc_manual`) through the EXISTING `app.enqueue_recalculation` for every `active` / `suspended` organisation that has a succeeded run but none on `engine_version`, writing `job.enqueued` audit rows (`reason: engine_upgrade`).
+- **Idempotent.** The recalculation idempotency key coalesces with any queued job for the organisation.
+- **Resumable.** An organisation leaves the set only when a run on the new version SUCCEEDS.
+- **Tenant-safe.** One job per organisation under `withOrgScope`.
+- **No giant transaction.** The function only inserts job rows; the worker computes each organisation separately.
+- **Failures visible.** They surface as failed/dead jobs in `/platform/jobs`.
+- **Nothing left behind silently.** `/api/jobs/nightly` calls it every night after the storage sweep, so a failed organisation is queued again until it succeeds.
+- **After a deploy.** Run `APP_URL=… CRON_SECRET=… npm run engine:upgrade` (the same endpoint) to start at once. The run recomputes the whole history on a version change (`loadLatestEngineVersion`).
+- **No other schedule touched.** No other scheduled calculation exists to disturb (FU-6).
+
+**Final findings table** (FU-n = the follow-up register, ADR-122):
+
+| # | Finding | Severity | Origin | Affected by ADR-120? | Action | Status |
+|---|---|---|---|---|---|---|
+| H-1 | New engine version left every organisation on old figures until its next run; §6's deploy-time recalculation was never built | HIGH | pre-existing gap, made material by 2.0.0 | Yes | `enqueue_engine_upgrade` + nightly + `npm run engine:upgrade`; tests: queues only eligible, idempotent, runs on 2.0.0, failure isolated/visible/re-queued, server-only, version validated | **FIXED** |
+| H-2 | Set-returning RPC reads (`aggregate_periods`, `aggregate_transfer_legs`, `batch_coverage`) silently capped at 1,000 rows by PostgREST `max_rows` (proved: 1,200 cells → 1,000) | HIGH | pre-existing (Phase 4) | Yes. The ledger history, statement cells and invoice denominators all come from the aggregate. On `364bf17`, revenue came out 99,900.00 for a 120,000.00 month. | `serverRpcAll`: paged, ordered on the full grouping key; `engine-row-cap.test.ts` (fails on `364bf17`, passes now) | **FIXED** |
+| H-3 | Engine table reads `accounts`, `counterparties`, `bank_accounts` capped at 1,000 | MEDIUM | pre-existing | Yes: receivables/payables accounts; supplier category → `payables_days` (proved: cost of sales 0.00 → 500.00); cash coverage | paged | **FIXED** |
+| H-4 | Restored deterioration alerts named only invoices ISSUED in the alert month, at today's balance; void invoices were not excluded; the read was unpaged | MEDIUM | pre-existing code, reached by ADR-120 | Yes: `overdue_count`, `top3_share`, pinned evidence. The condition (snapshot share) was correct. | `loadOpenInvoices` (paged, non-void, visible at the run instant) aged with `invoiceOutstandingAt` at the figure's `as_of`; unit test | **FIXED** |
+| H-5 | CD-06's first opening-cash source (the statement's own opening balance) never supplied | MEDIUM | pre-existing | Yes: the value at the chain start, hence every carried month and runway | earliest statement per account, first-of-period only; unit + HISTORY integration (8,000 opening, `verified`) | **FIXED** |
+| H-6 | Ledger fallback could add movements posted before a mid-export opening journal (double count) and used partly covered months | MEDIUM | ADR-120 (`364bf17`) | Yes | balance starts at the journal's period; a declared range must span P; unit tests | **FIXED** |
+| H-7 | The P&L family's shared `invoices` coverage accepts a batch committed BEFORE the period and treats the AR/AP freshness gate as revenue coverage. A month no list covers takes the invoice basis and reports revenue **0.00 with no missing reason** (probe: INVBANK Sep–Dec 0.00, identical before and after ADR-120) | HIGH | pre-existing (P&L coverage) | No. ADR-120 uses its own per-side, after-only test; its only reach is `receivables_days` on a balance or ledger basis becoming unavailable, never wrong. | registered as FU-1. **Must be fixed before Phase 16 F1** (it would score `no_revenue` −30 on a fabricated zero) | **PRE-EXISTING / FOLLOW-UP** |
+| H-8 | Unpaged record readers: alerts `loadLedgerRecords`, `loadInvoiceRecords` (duplicates), `loadExistingAlerts`; health `loadBankRecords`, recurring members, `loadRecurringGroups` | MEDIUM | pre-existing | No. The restored C2/Q3/B1 and the restored alert conditions read the paged `metric_current`; the restored alerts' invoice list reads `loadOpenInvoices`. These feed B3/K3, bank, duplicate and recurring rules. | FU-2 | **PRE-EXISTING / FOLLOW-UP** |
+| H-9 | Fingerprint source lists unpaged | LOW | pre-existing | No: they decide whether a run happens, not its figures; the version bump forces the recompute | FU-3 | **PRE-EXISTING / FOLLOW-UP** |
+| H-10 | `loadPeriods` unpaged | — | — | No: one row per month, cannot reach 1,000 | none | **INTENTIONAL** |
+| H-11 | `statementClosing` / `unreconciledStatement` never supplied to cash, so `statement_balance_mismatch` / `unreconciled_statement` never appear on cash snapshots. Phase 16's design (gate G-3) assumed they do. | MEDIUM | pre-existing | No: data-quality warnings only, no value | FU-4 | **PRE-EXISTING / FOLLOW-UP** |
+| H-12 | ADR-027.3's other ledger opening (a balance-sheet row for the period before the earliest ledger period) not implemented | LOW | ADR-120 scope | No wrong value: such a balance is NULL `no_opening_balance` | FU-5 | **INTENTIONAL** (conservative; unavailable, never wrong) |
+| H-13 | Aging invoice read is row-proportional | LOW | ADR-120 design | — | paged; reuses the Phase 4 domain rule rather than a second copy in SQL | **INTENTIONAL** |
+| H-14 | No daily scheduled calculation: the `scheduled` trigger exists but nothing enqueues it, so the current month's aging/runway refresh only on imports, recalculations and the engine-upgrade sweep | MEDIUM | pre-existing | No | FU-6 | **PRE-EXISTING / FOLLOW-UP** |
+| H-15 | Periods after the as-of date carry the last close at completeness 0 with `bank_coverage_partial` | LOW | ADR-120 semantics | — | §3.3 coverage rule | **INTENTIONAL** |
+| H-16 | `payables_days` NULL without cost-of-sales accounts | LOW | §3.4 as written | — | — | **INTENTIONAL** |
+| H-17 | P&L trial-balance drill-downs do not total to the monthly (differenced) figure | LOW | pre-existing | No: balance-family descriptors reconcile (sweep) | FU-7 | **PRE-EXISTING / FOLLOW-UP** |
+| H-18 | CI "security checks" red: new `brace-expansion` high advisory (transitive) | MEDIUM | external | No | lockfile-only patch bumps, separate commit; `uuid` moderate via `exceljs` (breaking fix) is FU-8 | **FIXED** (high) / FOLLOW-UP (moderate) |
+| H-19 | `ai-eval-record` `get_alerts #16` ordering flake | LOW | pre-existing | No | out of scope by instruction | **PRE-EXISTING / FOLLOW-UP** |
+| H-20 | AI tools list a NULL receivables row with `availability.state: available` | — | existing tool contract | — | `availability` is only the ADR-106 withholding rule; the value is `null` with its missing reason, like every NULL metric | **INTENTIONAL** |
+
+**Hardening verification:**
+- **Same six fixtures, old engine vs hardened engine**, rule by rule: Health changes only C2, Q3, B1, as recorded above, with no other rule in any dimension or month. The alert changes are as recorded above. The fixtures' figures are identical to `364bf17`.
+- **Days-to-pay variance.** `receivables_days` / `payables_days` variances are now written (e.g. `payables_days.variance.prev_period` 44 in INVBANK September). The deterioration rules keep their existing incomplete-period suppression.
+- **New tests:**
+  - `engine-row-cap.test.ts` (5, above the cap on every read);
+  - `engine-upgrade.test.ts` (6);
+  - `receivables-recovery.test.ts` now 32 (adds history-first/banking-later with a statement opening, and admin / client / assigned and unassigned employee / super admin at aal1 and aal2 through RLS and the resolver);
+  - unit: 5 wiring tests (journal start, partial month, working-capital genuine zero, statement opening ×2) and 1 alert rule test.
+
+Gates for the hardening commit are recorded in its commit message.
+
+### ADR-122 · Follow-up register: pre-existing defects found during the ADR-120 hardening
+Status: **open. Not fixed by ADR-120; each needs its own decision.** Listed so none is lost. None changes an ADR-120 figure (ADR-120 findings table, H-7…H-19).
+
+| # | Defect | Evidence | Recommendation |
+|---|---|---|---|
+| FU-1 | P&L `invoices` coverage accepts a batch committed before the period, and uses the AR/AP freshness gate as revenue coverage. A month no full list spans reports revenue 0.00 with no reason, and a complete month inside a gap between two lists would be scored by Health as a zero-revenue month. | `coverage.ts` `arApBatch` (negative day gap accepted; `invoices.covers` true on it); ADR-120 probe INVBANK Sep–Dec revenue 0.00 before and after | Fix before Phase 16: revenue needs a `full` list spanning P (ADR-047.10); the freshness gate is the AR/AP family's only. |
+| FU-2 | Alert and health record readers unpaged (1,000-row cap) | ADR-120 H-8 | Page as `loadOpenInvoices` does. |
+| FU-3 | Fingerprint source lists unpaged | ADR-120 H-9 | Page, or fingerprint from counts/max timestamps. |
+| FU-4 | Statement closing cross-check and unreconciled-statement flag never supplied to cash | `compose.ts` passes neither `statementClosing` nor `unreconciledStatement` | Wire before Phase 16 F3.4 relies on `unreconciled_statement`. |
+| FU-5 | Ledger opening from the prior balance sheet (ADR-027.3 (a)) | ADR-120 H-12 | Implement if ledger-only organisations need AR/AP without an opening journal. |
+| FU-6 | No daily `scheduled` calculation is enqueued | no caller of the `scheduled` trigger | Enqueue per organisation from the nightly route (as-of-only runs, ADR-047.8). |
+| FU-7 | P&L trial-balance drill-down totals ≠ monthly figure | cumulative differencing | Descriptor over the two statements, or a derived descriptor. |
+| FU-8 | `uuid` moderate advisory via `exceljs` | `npm audit` | Upgrade `exceljs` deliberately (breaking). |
+
 ### ADR-121 · Funding Readiness is calculated only while enabled, with eligible historical backfill on enablement
 Status: **decided by the product owner, 2026-09-30 (Phase 16 U-4, U-5).** The earlier proposal (calculate for every organisation and let the flag gate visibility only) is **REJECTED**.
 

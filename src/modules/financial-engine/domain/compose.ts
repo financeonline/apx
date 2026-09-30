@@ -11,7 +11,9 @@
 
 import { Decimal, parseDecimalOrNull } from '@/core/money';
 import { invoiceSignFor, ledgerAmount, naturalToReporting } from './sign';
-import { computeCash, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions } from './cash';
+import {
+  computeCash, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions, type OpeningCashCandidate,
+} from './cash';
 import type { TransferKind } from '@/modules/banking';
 import { computeConcentration, type ConcentrationPeriodInput } from './concentration';
 import { computeReceivables } from './receivables';
@@ -57,6 +59,11 @@ export interface ComposeInput {
    * which the runway window (now fed three months) read as a real month of no burn.
    */
   readonly coveredBankAccountIds?: readonly string[];
+  /**
+   * Statement opening balances the run found eligible (ADR-120 hardening): CD-06's FIRST source,
+   * ahead of the balance typed on the account. The domain's precedence (`pickCandidate`) chooses.
+   */
+  readonly statementOpenings?: readonly OpeningCashCandidate[];
 }
 
 /** The aggregate source each basis reads from. */
@@ -439,14 +446,17 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
     period,
     basis: cashBasis,
     movements: bankMovements(cells, period.id, context.bankAccounts),
-    openingCandidates: context.bankAccounts
-      .filter((a) => a.openingBalance !== null && isCashLikeBankAccount(a.accountType))
-      .map((a) => ({
-        bankAccountId: a.id,
-        source: 'bank_account_opening_balance' as const,
-        value: a.openingBalance!,
-        asAtDate: a.openingBalanceDate,
-      })),
+    openingCandidates: [
+      ...(input.statementOpenings ?? []),
+      ...context.bankAccounts
+        .filter((a) => a.openingBalance !== null && isCashLikeBankAccount(a.accountType))
+        .map((a) => ({
+          bankAccountId: a.id,
+          source: 'bank_account_opening_balance' as const,
+          value: a.openingBalance!,
+          asAtDate: a.openingBalanceDate,
+        })),
+    ],
     coveredBankAccountIds: input.coveredBankAccountIds ?? context.bankAccounts
       .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType))
       .map((a) => a.id),
