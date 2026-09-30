@@ -97,7 +97,7 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 | Product/service contribution, invoice lines, full customer contribution with cost allocation | §7 | 14 | CD-08 |
 | Accountant/CFO Command Centre (portfolio dashboard, cross-client alerts/actions/reports, advisory opportunities) | §18, Phase 15 | 15 | MVP has the list page only |
 | External adviser organizations | §29 | 15 | CD-02 |
-| Funding Readiness assessment, report and health dimension | §19, Phase 16 | 16 | |
+| Funding Readiness assessment, report and health dimension | §19, Phase 16 | 16 | Assessment + page: Phase 16 (`PHASE_16_IMPLEMENTATION.md`), calculated only while `features.funding_readiness` is on (ADR-121). Printable report: Phase 17 (§20, REQ-RP-05). Health dimension: **deferred, ADR-119** — not part of Phase 16. **Blocked by dependency:** Phase 16 implementation (incl. factor F5, REQ-FR-07) waits for the Receivables/Payables Engine Recovery and its Health Score regression audit (ADR-120) |
 | Daily Executive Brief, Weekly Intelligence Report, Accountant/CFO Report, Funding Readiness Report, Custom AI Report | §20, Phase 17 | 17 | |
 | Team Management System, action comments, notifications | §3 | Post-17 | CD-26 |
 | Investment Opportunities / pitch decks | §3 | Post-17 | CD-26 |

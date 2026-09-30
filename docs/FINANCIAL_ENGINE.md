@@ -268,6 +268,12 @@ Property tests: `closing_cash(P) = opening_cash(P+1)` for consecutive covered pe
 
 ### 3.4 Receivables, payables, working capital
 
+> **Implementation status (verified at `74050d1`; ADR-120).** The seven metrics below are specified and the pure module `domain/receivables.ts` exists. However, `composePeriod` does **not** invoke it and no SQL writes them, so **no calculation run persists them.** As a result:
+> - Health rule Q3 is always skipped;
+> - `receivables.deterioration` / `payables.deterioration` never fire.
+>
+> The specification below is unchanged and remains the contract. Recovering it is a separate engine remediation (ADR-120), which must be completed and independently audited, including Health Score regression, before Phase 16 implementation.
+
 `asOf` for aging = `P.period_end` (historical periods) or the run's `asOf` date for the current period (stored in `components.as_of`).
 
 | Key | Unit | Inputs | Formula | Edge cases / missing | Evidence |
@@ -397,7 +403,7 @@ Analytical indicator only; every screen carries the SOW §9 disclaimer text ("in
 | `customer_quality` | 10 | `customer_concentration_top1` | `customer_concentration_top5`, `revenue_concentration_hhi`, `receivables_days` |
 | `banking_health` | 10 | any bank coverage for P | `closing_cash` trend 3, `cash_outflows` vs `cash_inflows`, open alerts of families `bank.*`, `recurring.*`, `duplicate.*` |
 | `marketing_efficiency` | (10, reserved) | post-MVP (CAC, contribution per acquisition) | — |
-| `funding_readiness` | (10, reserved) | post-MVP | — |
+| `funding_readiness` | (10, reserved) | post-MVP; **deferred by ADR-119** (Phase 16 ships a standalone assessment; this dimension is not activated) | — |
 
 When post-MVP dimensions arrive, MVP weights are scaled so the eight sum to 100; the config version bumps.
 

@@ -1722,3 +1722,70 @@ Consequences:
   - The briefing is less fluent than prose.
   - No live Claude model has been run (no API key); every test uses the deterministic validator and a fake transport.
   - The digest sent to the model has no size bound (audit L-H).
+
+### ADR-119 · Funding Readiness ships as a standalone assessment; its Health Score integration is deferred
+Status: **decided by the product owner, 2026-09-30.** Design only; nothing is implemented by this ADR.
+
+Context:
+- `MVP_SCOPE.md` row 100 schedules "Funding Readiness assessment, report and health dimension" for Phase 16.
+- `FINANCIAL_ENGINE.md §7.1` reserves a `funding_readiness` Health Score dimension (weight 10, "post-MVP"). `health/domain/config.ts` says that when a reserved dimension lands, every weight is rescaled to sum to 100 and the config version bumps.
+- Activating it would move every organisation from `health.config.v1` to a v2. That changes every health score MOTION has published.
+- Phase 15 (released at `74050d1`, audited READY in `docs/PHASE_15_FINAL_RELEASE_AUDIT_3.md`) reads the Health Score. `portfolio/domain/attention.ts` (`bandFell`, `scoreFell`) and the adviser briefing compare the latest two complete months. A month scored under v1 beside one scored under v2 would show a band fall caused by a rules change, not by the business.
+- Three of the seven Funding Readiness factors (revenue & profitability, cash flow, banking behaviour) re-score inputs the Health Score already scores (profitability, revenue growth, cash flow, banking health). Inside the Health Score those signals would be counted twice.
+
+Decision:
+1. **Funding Readiness Health Score integration is deferred and is not part of Phase 16 implementation.**
+2. Phase 16 delivers Funding Readiness as a standalone, persisted, deterministic assessment (`docs/PHASE_16_IMPLEMENTATION.md`).
+3. `health.config.v1`, every stored `health_scores` row, `health_current`, the Home score, the analyst tool `get_health_score`, the recorded AI eval corpus and every Phase 15 health comparison stay exactly as released.
+4. The reserved `funding_readiness` row in `FINANCIAL_ENGINE.md §7.1` and the SOW requirement REQ-BH-10 are **not deleted**. They remain open requirements, now marked deferred.
+5. When the dimension is eventually activated, it needs its own decision, at minimum:
+   - a config-version bump;
+   - a full re-score of history under the new config;
+   - a rule that Phase 15 attention never compares scores of different `config_version`s;
+   - an answer to the double-counting described above;
+   - its own independent audit.
+
+Consequences:
+- `MVP_SCOPE.md` row 100 is delivered in part by Phase 16: the assessment. The printable report is Phase 17 (SOW §20, REQ-RP-05). The health dimension is deferred by this ADR.
+- The Home Health Score and the Funding Readiness score are two separate numbers with separate band vocabularies (`docs/PHASE_16_IMPLEMENTATION.md §6`). Neither is derived from the other.
+- **Addendum (2026-09-30, with ADR-120).** "Health unchanged" binds **Phase 16**. The separate Receivables/Payables Engine Recovery (ADR-120) is expected to change Health Scores: rule Q3 starts scoring, and the `receivables/payables.deterioration` alerts start firing. That change is intentional, happens outside Phase 16, and is independently audited there. Phase 16 must not make or hide any Health change of its own.
+
+### ADR-120 · Receivables, payables and working capital are recovered by a separate engine remediation before Phase 16
+Status: **decided by the product owner, 2026-09-30 (Phase 16 U-1).** Not implemented; this records the decision and the dependency.
+
+Context:
+- **Defined but never computed (verified at `74050d1`).** `FINANCIAL_ENGINE.md §3.4` and the metric registry define `receivables`, `receivables_overdue`, `receivables_days`, `payables`, `payables_overdue`, `payables_days` and `working_capital`. A pure `computeReceivables` exists (`financial-engine/domain/receivables.ts`, Phase 4, `b2a6861`), but `composePeriod` never calls it and no SQL writes these keys. No calculation run has ever persisted them.
+- **Tests fake the figures.** The integration tests that need them insert snapshots by hand (`writeMetric`).
+- **Knock-on effects:**
+  - Health rule Q3 (`customer_quality`, days to get paid) is always skipped.
+  - The `receivables.deterioration` and `payables.deterioration` alerts can never fire.
+  - Money › receivables / payables have no engine figures.
+  - Funding Readiness factor F5 (REQ-FR-07) has no trustworthy production source.
+
+Decision:
+1. The recovery is a **separate engine remediation**, not part of Phase 16, and it is done **before** Phase 16 implementation. It must deliver:
+   1. calculation invocation (the receivables module wired into the run under the EXISTING §2.3 precedence);
+   2. deterministic persistence (snapshots, descriptors and current pointers like every other metric; an engine version bump per §6);
+   3. empty and missing-data handling (NULL with the engine's reasons, e.g. `stale_invoice_data`, `no_opening_balance`, `open_items_only`, `no_source_covers_period`; never zero);
+   4. unit, integration and pgTAP coverage;
+   5. tenant/RLS verification;
+   6. Health Score regression testing.
+2. Restoring the calculation may make existing Health Score rules (Q3) and alerts begin to fire. That is an **intentional** consequence, and it must be **independently audited** as part of the remediation. It includes re-scoring history, and it checks that no Phase 15 comparison mixes before-recovery and after-recovery scores without that being stated.
+3. **Dependency chain:** Receivables/Payables Engine Recovery → Health Score regression audit → Phase 16 implementation, including F5.
+4. **Figures F5 may use.** F5 must never consume manually inserted, test-only or synthetic figures. Missing receivables/payables data stays unavailable, never zero and never a healthy score.
+5. **Requirement unchanged.** REQ-FR-07 stays a requirement; only its implementation is blocked by this dependency.
+
+### ADR-121 · Funding Readiness is calculated only while enabled, with eligible historical backfill on enablement
+Status: **decided by the product owner, 2026-09-30 (Phase 16 U-4, U-5).** The earlier proposal (calculate for every organisation and let the flag gate visibility only) is **REJECTED**.
+
+Decision:
+1. **Flag off** (`organizations.features.funding_readiness` absent or false, the default):
+   - no Funding Readiness calculation;
+   - no current assessment;
+   - `/app/[orgSlug]/funding` returns not-found;
+   - no navigation link.
+
+   This is enforced server-side, and by RLS on the funding tables (a flag predicate), never by UI hiding alone.
+2. **Enablement** sets the flag, writes the audit event and enqueues `funding.assess` on the EXISTING job queue, all in one transaction. The job assesses every eligible period (each complete fiscal period with current metric snapshots) and establishes the current assessment. From then on each `calculation.run` assesses its complete periods. The EXISTING nightly job re-enqueues `funding.assess` for an enabled organisation whose latest eligible period has no current assessment. This is **"calculate after enablement with eligible historical backfill."**
+3. **Disablement** stops calculation. Rows already written remain as the audit record but are unreadable while the flag is off. Re-enabling runs the backfill again for periods whose current assessment does not cite the period's current run.
+4. Each row records its `trigger` (`enablement_backfill` / `calculation_run` / `nightly_backstop`), so activation history is auditable.
