@@ -2022,7 +2022,7 @@ Decision:
 4. Each row records its `trigger` (`enablement_backfill` / `calculation_run` / `nightly_backstop`), so activation history is auditable.
 
 ### ADR-123 · ADR-120 remediation: answers to the independent audit, and the AR/AP freshness rule
-Status: **implemented; awaiting a second independent audit.** Phase 16 not started.
+Status: **implemented (`8493362`); second independent audit NOT READY** (`docs/ADR-120_SECOND_INDEPENDENT_AUDIT.md`) — residuals and new findings go to ADR-124. Phase 16 not started.
 Context: the independent audit of ADR-120 (`docs/ADR-120_INDEPENDENT_AUDIT.md`, of `7a139b8`) returned **NOT READY**: HIGH F-1…F-4, MEDIUM F-5…F-11, LOW L-1…L-10. Every blocking finding was reproduced on the auditor's own data shapes, now kept as the permanent fixture `test/fixtures/audit-orgs.ts` and asserted in `test/integration/adr123-remediation.test.ts` through the real queue.
 
 **Decision (product owner, 2026-09-30) — the AR/AP invoice freshness rule (F-4, F-9):**
@@ -2083,3 +2083,107 @@ Context: the independent audit of ADR-120 (`docs/ADR-120_INDEPENDENT_AUDIT.md`, 
   - **FU-11:** `*_days` derived evidence naming the three-month denominator (L-8).
 - **FU-1 remains: fix before Phase 16 F1.**
 
+
+### ADR-124 · Second ADR-120 remediation: per-account cash balances, period-aware AR/AP freshness, dated opening journals
+Status: **PROPOSED — awaiting the product owner's approval of D-1…D-6. No code has been written.** Phase 16 not started.
+
+**Context.** The second independent audit of `8493362` (`docs/ADR-120_SECOND_INDEPENDENT_AUDIT.md`) returned **NOT READY**. Blocking:
+- **HIGH:** N-1 and N-2.
+- **MEDIUM:** N-3 to N-7.
+- **First-audit findings:** F-1, F-2 and F-10 are partly fixed; F-11 is not closed.
+
+Four of the blocking findings (N-1, N-2, N-3, N-6) sit in the cash chain. ADR-123 patched it twice, and each patch fixed the reproduced shapes but not the general case. The cause is structural. The chain carries one **organisation-level** closing figure and decides "carry or restart" for all accounts together. It judges a month's coverage by whether a **single** statement spans it, and it starts the chain at the first month a single statement spans. Every finding is a data shape where one of those three shortcuts is wrong:
+- a month partly covered, or covered only by the GL (N-1);
+- a split first statement (N-2);
+- a joining account (N-3);
+- a 5th-to-4th statement cycle (P-2).
+
+ADR-124 therefore replaces the shortcuts with one rule rather than adding a third patch.
+
+**D-1 · Cash is a per-account balance history (N-1, N-2, N-3, N-8, N-9, P-2).** For each cash-like bank account *A* and period *P*:
+1. **Coverage.** *A*'s movement in *P* is **known** only when the union of *A*'s winning statements covers every day of *P*. The winning statement for a range is the latest committed; a superseded upload is ignored, including for the unreconciled flag (N-8). One statement need not span the month on its own (P-2: 5th-to-4th cycles).
+2. **Opening.** Take the first of these that applies:
+   - (a) *A*'s own closing for *P−1*, when known (the carry);
+   - (b) a balance stated **exactly** at *P*'s start: a statement opening dated `P.start`, a statement closing dated `P.start − 1`, or a typed balance dated `P.start − 1`. This rule is the same at a chain start and at a restart (N-2, N-9). A typed balance dated earlier is never an opening for *P*.
+   - (c) otherwise unknown.
+   When (a) and (b) both exist, (a) is stored and (b) is a cross-check that raises `statement_balance_mismatch`. The computed value is kept, as §3.3 already requires.
+3. **Closing.** Opening + movement, when both are known; otherwise unknown. An unknown closing never carries. The next period can only restart through (b).
+4. **Organisation figures.**
+   - `opening_cash` and `closing_cash` are the sums over the accounts in scope. Each is published only when every in-scope account's value is known; otherwise NULL with the reason, naming the accounts.
+   - `cash_inflows`, `cash_outflows` and `net_cash_movement` are published only when every in-scope account's movement is known; otherwise NULL with `no_source_covers_period`.
+   - Cash figures come from bank statements and typed balances only. A ledger or balance-sheet basis never lends a month a cash figure computed from bank rows (the GAPGL July 9,000 and its 0.00 "ledger" movement).
+5. **Carrying between chunks.** Per-account closings are stored in `closing_cash.components.per_account`, and the run reads them for the period before its range. No schema change is needed; the loader adds `components` to its select.
+
+Expected outcomes on the audit's reproductions:
+
+| Organisation | Month | Result |
+|---|---|---|
+| GAPGL | July | NULL, so no invented July. August restarts at the printed 4,000. |
+| PARTJUL | July | NULL, and the August `cash.decline` disappears. |
+| MIDTYPED | July | NULL, because the typed balance is dated 31 May, not 30 June. |
+| MIDTYPED | August | 5,500 → 5,600 |
+| NEWACCT | April–July | *A*'s balances (see D-2) |
+| NEWACCT | August | 9,100 |
+| CYCLE | June | Opens at the typed balance, then carries 9,000 / 8,000 / 7,000 / 6,000, if its typed balance is dated 31 May. |
+
+**D-2 · Which accounts are in scope for P (N-3; needs owner approval).**
+- An active cash-like account **joins** at its start: the first day any source states something about it, meaning its first statement's start or the day after its typed balance date. Before its start it is outside the sum; this is §3.3's "joins at its first covered period", made reachable.
+- An active account about which **nothing** is stated (no statement, no typed balance) is in scope for every period. Cash is then unknown, naming that account: "add a statement or an opening balance for …". It is never silently left out of the total.
+- A closed account stays in scope for the periods its statements cover.
+
+**D-3 · AR/AP invoice freshness depends on whether P is complete (N-4, N-10). This supersedes the rule approved under ADR-123 and needs owner approval.** A batch of a side covers *P* when its declared range spans *P*. Otherwise:
+- **The current period** (the one containing the run's as-of date): the batch covers *P* when it was committed on or after `P.start` and its range overlaps *P*. This is unchanged, and CURRENT stays at 1,500 / 1,000.
+- **A completed period:** the batch covers *P* when it was committed after `P.end` and no more than 45 days after it, and it states the position **at** `P.end`:
+  - a **full** list (every invoice, with paid dates) whose range reaches `P.end` (starts on or before `P.end` and ends on or after it);
+  - or an **open-items** list whose as-at date (the range end) is exactly `P.end`.
+- An open-items list dated after `P.end` cannot state *P*. Invoices paid in between are missing from it, so it would under-state *P* (N-10).
+- A list committed **during** a completed month states nothing about that month's end (N-4). BSLIST August falls back to its balance sheet: 3,000.
+
+**D-4 · An opening journal starts on its own date (N-5).**
+- The ledger fallback starts at the journal's `entry_date`, not at the start of its period. In the journal's own period it adds only the movements dated on or after that date. Earlier periods are unchanged.
+- The loader reads `entry_date`, and the aggregate for that one period is date-aware.
+- The evidence descriptor gains an optional filter, `entry_date_from`, handled like `balance_kind`: optional in the schema, part of the hash, and emitted only for that period. Old descriptors still parse.
+- LEDGER3 August: 5,000.
+- Fallback, if the owner prefers: a journal not dated on a period start makes the ledger fallback NULL, with the reason `opening_journal_mid_period`.
+
+**D-5 · The deterioration alert states a possible share (N-7; needs owner approval because it changes when the alert fires).**
+- `share` becomes the gross overdue invoices ÷ the gross open invoices: the positive open balances, the population the sentence names.
+- Open credits are reported separately in the summary (`open_credits`).
+- The 50% and 75% thresholds and the days trigger are unchanged.
+- CNFUTURE: "1,000.00 of 1,000.00 owed on invoices is overdue (100%); credits of 800.00 not yet applied". The alert remains HIGH, and the figure is now possible.
+
+**D-6 · The engine version is bumped to 3.0.0 (N-6).**
+- ADR-123 changed existing formulas and precedence; under §6 that is a **major** change, and it did not bump the version. ADR-124 bumps it to `3.0.0`, so the upgrade sweep re-queues every organisation, including those `7a139b8` computed.
+- **Rule from now on:** any remediation that changes an existing figure bumps the major version in the same commit. A unit test pins `ENGINE_VERSION` to the version recorded in the latest ADR, so forgetting fails CI.
+
+**LOW findings included:**
+- N-11: state and overflow alerts are evaluated only up to the as-of period.
+- N-12: a NULL cash figure has completeness 0 and the assurance of its missing input, never `verified`.
+- N-13: the auditor's nine probe organisations (GAPGL, PARTJUL, NEWACCT, BSLIST, LEDGER3, UNRECON, CNFUTURE, MIDTYPED, CYCLE) become the permanent fixture `test/fixtures/audit2-orgs.ts`, asserted through the real queue in `test/integration/adr124-remediation.test.ts`.
+- Unit tests cover the per-account chain directly: the run-loop restart, the joiner and L-4.
+- The non-discriminating "no cash fell from 9,000" test is replaced by PARTJUL's decline, which fails on `8493362`.
+
+**Out of scope (unchanged):**
+- Health Score thresholds and rules;
+- alert thresholds;
+- Phase 15 code;
+- the Phase 16 boundary;
+- RLS and authorisation;
+- FU-1 (fix before Phase 16 F1), FU-2, FU-3, FU-5 to FU-11, and L-1 (FU-9).
+
+**F-11 and sign-off.**
+- After implementation, the Health and alert change set is recomputed for all 27 organisations: the 7 ADR-120 fixtures, the first audit's 11 and the second audit's 9. The comparison is `1443e76` against the ADR-124 commit, rule by rule and alert by alert.
+- Every change is assigned to a category, and any change that fits no category is investigated rather than recorded.
+- One owner sign-off then covers ADR-120, ADR-123 and ADR-124 together.
+
+**Specification changes on approval:**
+- FINANCIAL_ENGINE §2.2: the per-account bank test and the period-aware freshness rule.
+- FINANCIAL_ENGINE §3.3: the per-account opening, closing, scope and joiner rules.
+- FINANCIAL_ENGINE §6: the version rule.
+- EVIDENCE_MODEL: the `entry_date_from` filter.
+
+**Order of work:**
+1. Owner approves D-1 to D-6 (or amends them).
+2. Implement, with a regression test for every N-finding, run on a clean database with all gates run in sequence.
+3. Commit and push.
+4. **Third independent audit.** Phase 16 stays blocked until an audit returns READY.
