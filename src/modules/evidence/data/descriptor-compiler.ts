@@ -80,8 +80,22 @@ export interface CompiledQuery {
    * column sum added a refund to revenue instead of subtracting it: `revenue` 19,400.00 had a
    * drill-down of 21,400.00 (HIGH-6, ADR-111). A direction-filtered ledger selection is all one side
    * and keeps `column`.
+   *
+   * `invoice_open_at` totals a receivables or payables selection on the engine's own rule for what an
+   * invoice still owed at the date (`invoiceOutstandingAt`): `balance_due`, or the whole
+   * `total_amount` when it was paid AFTER the date, with credit notes subtracting (§3.4, ADR-047.5).
+   * Σ `balance_due` read today's balance of every row: a March invoice paid in May counted £0 behind
+   * March's receivables, and a credit note ADDED to what customers owed (ADR-120).
+   *
+   * `balance_reporting` reads a `period_balances` row's `closing_balance` — stored in NATURAL sign,
+   * debit positive (ADR-027.1) — in reporting sign by the account's type at the as-of instant, the
+   * rule the engine applies to every balance it reads. A trial-balance payables figure of 4,000.00
+   * otherwise had a drill-down totalling −4,000.00 (ADR-120).
    */
-  readonly amountBasis: 'column' | 'invoice_net' | 'column_magnitude' | 'ledger_reporting';
+  readonly amountBasis:
+    | 'column' | 'invoice_net' | 'column_magnitude' | 'ledger_reporting' | 'invoice_open_at' | 'balance_reporting';
+  /** The date an `invoice_open_at` selection is open at. */
+  readonly openAt?: string;
   readonly asOf: { readonly calculationRunId: string; readonly aggregatedAt: string } | null;
   readonly limit: number;
   /** True for the four tables with a `record_status_events` lifecycle. */
@@ -428,6 +442,14 @@ export function compileDescriptor(descriptor: QueryDescriptorV1): CompiledQuery 
   const ledgerNetted = descriptor.table === 'ledger_entries'
     && descriptor.filters.direction === undefined;
 
+  // A balance selection totals in reporting sign, like a two-sided ledger selection (ADR-120).
+  const balanceNetted = descriptor.table === 'period_balances';
+
+  // A receivables / payables selection totals on the engine's outstanding-at rule (ADR-120).
+  const openAt = descriptor.table === 'invoices'
+    ? descriptor.filters.open_as_of ?? descriptor.filters.overdue_as_of
+    : undefined;
+
   return {
     table: descriptor.table,
     columns: spec.columns,
@@ -437,7 +459,10 @@ export function compileDescriptor(descriptor: QueryDescriptorV1): CompiledQuery 
     amountColumn: invoicePnl ? null : spec.amountColumn,
     amountBasis: invoicePnl
       ? 'invoice_net'
+      : openAt !== undefined ? 'invoice_open_at'
+      : balanceNetted ? 'balance_reporting'
       : bankDirectional ? 'column_magnitude' : ledgerNetted ? 'ledger_reporting' : 'column',
+    ...(openAt !== undefined ? { openAt } : {}),
     asOf: descriptor.as_of
       ? {
           calculationRunId: descriptor.as_of.calculation_run_id,

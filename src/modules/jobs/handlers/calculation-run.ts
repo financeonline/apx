@@ -7,8 +7,8 @@ import {
 } from '@/core/db';
 import {
   composePeriod, runCalculation,
-  type AggregateCell, type CalculationTrigger, type EngineContext, type MetricResult,
-  type PeriodCoverage, type PeriodRef,
+  type AggregateCell, type CalculationTrigger, type CashSeriesOptions, type EngineContext, type MetricResult,
+  type PeriodCoverage, type PeriodRef, type ReceivablesComposeInput,
 } from '@/modules/financial-engine';
 import { healthStep } from '@/modules/health';
 import { bankingStep } from '@/modules/banking';
@@ -115,6 +115,10 @@ export async function runCalculationJob(
         aggregates: readonly AggregateCell[];
         transferLegs: readonly { periodId: string; bankAccountId: string; transferKind: string; inflow: string; outflow: string }[];
         coverage: PeriodCoverage;
+        // ADR-120: the carries from the period before, and the receivables family's inputs.
+        cashOptions?: CashSeriesOptions;
+        receivables?: ReceivablesComposeInput;
+        coveredBankAccountIds?: readonly string[];
       };
       return composeWithIds({
         period: input.period as PeriodRef,
@@ -122,6 +126,9 @@ export async function runCalculationJob(
         cells: aggregates.aggregates,
         transferLegs: aggregates.transferLegs,
         context: input.context as EngineContext,
+        cashOptions: aggregates.cashOptions,
+        receivables: aggregates.receivables,
+        coveredBankAccountIds: aggregates.coveredBankAccountIds,
       });
     },
     startRun: startCalculationRun,

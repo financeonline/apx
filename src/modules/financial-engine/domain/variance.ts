@@ -52,9 +52,15 @@ export const COMPARISON_PERIOD_COUNT: Readonly<Record<VarianceSuffix, number>> =
 };
 
 /** The base metrics §3.2 writes a variance for. */
+/**
+ * `receivables_days` and `payables_days` are bases because §8.2's `receivables.deterioration` and
+ * `payables.deterioration` fire on `*_days.variance.prev_period ≥ 10`. §3.2's list omitted them, so
+ * that trigger read a key no run ever wrote (ADR-120).
+ */
 export const VARIANCE_BASE_METRICS = [
   'revenue', 'gross_profit', 'gross_margin', 'operating_expenses', 'operating_profit',
   'net_profit', 'net_margin', 'closing_cash', 'net_cash_movement', 'receivables', 'payables',
+  'receivables_days', 'payables_days',
   'expense_by_category', 'expense_by_account',
 ] as const;
 export type VarianceBaseMetric = (typeof VARIANCE_BASE_METRICS)[number];

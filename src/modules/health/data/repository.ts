@@ -56,18 +56,36 @@ const SNAPSHOT_SELECT = `
  */
 export type RecordObservationLike = Pick<RecordObservation, 'counterpartyId' | 'periodId'>;
 
+/**
+ * PostgREST's `max_rows` (1,000) truncates a response SILENTLY. A window of thirteen to twenty-four
+ * months holds far more current snapshots than that — the ADR-120 fixture organisation has 1,848 —
+ * so a single read handed the health step and the alert pass an arbitrary subset: a dimension could
+ * lose a required metric and be excluded, and a rule could find its input missing, with nothing
+ * failing anywhere (the Phase 15 lesson, ADR-114). Paged, ordered on the pointer's own key.
+ */
+const OBSERVATION_PAGE = 1000;
+
 /** Every current snapshot for a set of periods — the period being scored and its lookback. */
 export async function loadObservations(
   db: SupabaseClient, orgId: string, periodIds: readonly string[], requestId?: string,
 ): Promise<MetricObservation[]> {
   if (periodIds.length === 0) return [];
-  const { data, error } = await db
-    .from('metric_current')
-    .select(SNAPSHOT_SELECT)
-    .eq('organization_id', orgId)
-    .in('period_id', [...periodIds]);
+  const rows: CurrentRow[] = [];
+  for (let from = 0; ; from += OBSERVATION_PAGE) {
+    const { data, error } = await db
+      .from('metric_current')
+      .select(SNAPSHOT_SELECT)
+      .eq('organization_id', orgId)
+      .in('period_id', [...periodIds])
+      .order('period_id').order('metric_key').order('dimension_type')
+      .order('dimension_id', { nullsFirst: true }).order('dimension_key', { nullsFirst: true })
+      .range(from, from + OBSERVATION_PAGE - 1);
+    const page = unwrap(data as unknown as CurrentRow[] | null, error, requestId);
+    rows.push(...page);
+    if (page.length < OBSERVATION_PAGE) break;
+  }
 
-  return unwrap(data as unknown as CurrentRow[] | null, error, requestId)
+  return rows
     .flatMap((row) => {
       const snapshot = row.metric_snapshots;
       if (!snapshot) return [];

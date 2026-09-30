@@ -146,7 +146,8 @@ describe('the fingerprint decides whether a run has anything to do (ADR-047.8)',
   });
 
   it('changes when the engine version changes', () => {
-    expect(computeFingerprint({ ...base, engineVersion: '2.0.0' })).not.toBe(computeFingerprint(base));
+    // Any version other than the one `base` carries (ENGINE_VERSION is 2.0.0 since ADR-120).
+    expect(computeFingerprint({ ...base, engineVersion: '9.9.9' })).not.toBe(computeFingerprint(base));
   });
 
   it('changes when the banking detector changes', () => {

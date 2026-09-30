@@ -2,7 +2,9 @@ import 'server-only';
 import { NotFound } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import { parseDecimalOrNull, sum, toMoneyString, type Decimal } from '@/core/money';
-import { invoiceNetOfTax, invoiceSignFor, ledgerLineAmount } from '@/modules/financial-engine';
+import {
+  invoiceNetOfTax, invoiceOutstandingAt, invoiceSignFor, ledgerLineAmount, naturalToReporting,
+} from '@/modules/financial-engine';
 import {
   CATEGORY_ACCOUNT_TYPE,
   type AccountType, type EntryDirection, type InvoiceStatus, type InvoiceType, type StandardCategory,
@@ -301,6 +303,27 @@ function amountReader(
       return toMoneyString(invoiceSignFor(invoiceType) === 1 ? net : net.negated());
     };
   }
+  if (compiled.amountBasis === 'balance_reporting') {
+    return (row) => {
+      const closing = str(row, 'closing_balance');
+      const accountType = ledgerTypes.get(str(row, 'account_id') ?? '');
+      // An account the caller cannot see has no known sign: not known, which is not zero (§1.5).
+      if (closing === null || accountType === undefined) return null;
+      return toMoneyString(naturalToReporting(accountType, closing));
+    };
+  }
+  if (compiled.amountBasis === 'invoice_open_at' && compiled.openAt !== undefined) {
+    const openAt = compiled.openAt;
+    return (row) => {
+      const invoiceType = str(row, 'invoice_type') as InvoiceType | null;
+      const totalAmount = str(row, 'total_amount');
+      const balanceDue = str(row, 'balance_due');
+      if (invoiceType === null || totalAmount === null || balanceDue === null) return null;
+      return toMoneyString(invoiceOutstandingAt(
+        { invoiceType, paidDate: str(row, 'paid_date'), totalAmount, balanceDue }, openAt,
+      ));
+    };
+  }
   const column = compiled.amountColumn;
   if (column === null) return (row) => (compiled.table === 'metric_snapshots' ? str(row, 'value') : null);
   if (compiled.amountBasis === 'column_magnitude') {
@@ -377,7 +400,7 @@ async function ledgerAccountTypes(
   projection: AsOfProjection,
 ): Promise<Map<string, AccountType>> {
   const out = new Map<string, AccountType>();
-  if (compiled.amountBasis !== 'ledger_reporting') return out;
+  if (compiled.amountBasis !== 'ledger_reporting' && compiled.amountBasis !== 'balance_reporting') return out;
   const ids = [...new Set(rows.map((row) => str(row, 'account_id')).filter((id): id is string => id !== null))];
   const missing = ids.filter((id) => !projection.accountCategory.has(id));
   const current = missing.length > 0 ? await fetchAccountCategories(ctx.db, orgId, missing) : new Map<string, string>();

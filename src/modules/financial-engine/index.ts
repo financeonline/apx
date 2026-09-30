@@ -65,6 +65,10 @@ export {
   computeCoverage,
   isPeriodComplete,
   winningBalanceBatch,
+  invoiceSideCoverage,
+  AR_AP_FRESHNESS_DAYS,
+  type InvoiceSide,
+  type InvoiceSideCoverage,
   type CoverageBatch,
   type CoverageInput,
   type MetricFamilyKey,
@@ -92,6 +96,7 @@ export * from './domain/pnl';
 export * from './domain/variance';
 export * from './domain/cash';
 export * from './domain/receivables';
+export * from './domain/receivables-input';
 export * from './domain/concentration';
 export * from './domain/commercial-population';
 

@@ -106,6 +106,12 @@ export interface CategoryBalanceFallback {
   /** `period_balances` closing balance of the category, in reporting sign. */
   readonly periodBalanceClosing?: string | null;
   readonly ledger?: { readonly openingBalance: string | null; readonly movements: string } | null;
+  /**
+   * Every period whose ledger rows the ledger figure summed (ADR-120). The ledger branch is
+   * cumulative — opening journal plus every movement to P — so a descriptor naming only P re-selected
+   * one month of a balance built from many and could never reconcile to it.
+   */
+  readonly ledgerPeriodIds?: readonly string[];
 }
 
 /** One balance-sheet term of `working_capital`, as `closing(P)` in reporting sign. */
@@ -138,6 +144,16 @@ export interface ReceivablesPeriodInput extends DenominatorInputs {
   readonly asOfIsPeriodEnd: boolean;
   /** The current rows of every non-void invoice, or null when the invoice basis does not cover P. */
   readonly invoices: readonly AgingInvoice[] | null;
+  /**
+   * Per-side overrides (ADR-120). A sales list and a purchase list are separate imports, so the
+   * invoice basis can cover receivables and not payables: answering payables from a sales-only
+   * upload would report a £0 nobody stated. When set, these replace `invoices` for their side.
+   */
+  readonly salesInvoices?: readonly AgingInvoice[] | null;
+  readonly purchaseInvoices?: readonly AgingInvoice[] | null;
+  /** Why each side's invoice basis is unavailable, when the caller knows. */
+  readonly receivablesUnavailableReason?: DataQualityMissing;
+  readonly payablesUnavailableReason?: DataQualityMissing;
   readonly receivablesFallback: CategoryBalanceFallback;
   readonly payablesFallback: CategoryBalanceFallback;
   /** Present only where a cumulative TB/BS covers P (§3.4). */
@@ -180,7 +196,10 @@ interface BalanceResolution {
  * `asOf` — the alternative, treating it as unpaid, would inflate receivables on every invoice
  * somebody part-paid — and raises `payment_date_unknown` so the figure is not read as exact.
  */
-function outstandingAt(invoice: AgingInvoice, asOf: string): Decimal {
+function outstandingAt(
+  invoice: Pick<AgingInvoice, 'paidDate' | 'totalAmount' | 'balanceDue'>,
+  asOf: string,
+): Decimal {
   if (invoice.paidDate !== null && invoice.paidDate > asOf) {
     return parseDecimal(invoice.totalAmount, 'total_amount');
   }
@@ -191,10 +210,23 @@ function paymentDateUnknown(invoice: AgingInvoice): boolean {
   return invoice.paidDate === null && !parseDecimal(invoice.amountPaid, 'amount_paid').isZero();
 }
 
-/** ADR-047.5: `Σ balance_due(sales) − Σ balance_due(sales_credit_note)`. */
-function signedOutstanding(invoice: AgingInvoice, asOf: string): Decimal {
+/**
+ * ADR-047.5: `Σ balance_due(sales) − Σ balance_due(sales_credit_note)`.
+ *
+ * Exported because it is THE rule for what one invoice contributes to receivables or payables at a
+ * date, and the evidence resolver must total a drill-down on exactly this rule (ADR-120) — a second
+ * copy there would be the second financial truth §1 forbids.
+ */
+export function invoiceOutstandingAt(
+  invoice: Pick<AgingInvoice, 'invoiceType' | 'paidDate' | 'totalAmount' | 'balanceDue'>,
+  asOf: string,
+): Decimal {
   const outstanding = outstandingAt(invoice, asOf);
   return CREDIT_NOTE_TYPES.includes(invoice.invoiceType) ? outstanding.negated() : outstanding;
+}
+
+function signedOutstanding(invoice: AgingInvoice, asOf: string): Decimal {
+  return invoiceOutstandingAt(invoice, asOf);
 }
 
 function fromInvoices(
@@ -311,7 +343,10 @@ function fromBalances(
         opening_balance: toMoneyString(ledger.openingBalance),
         movements: toMoneyString(ledger.movements),
       },
-      evidence: leafEvidence(ctx, 'ledger_entries', descriptorFilters),
+      evidence: leafEvidence(ctx, 'ledger_entries', {
+        ...descriptorFilters,
+        period_ids: [...(fallback.ledgerPeriodIds ?? [period.id])].sort(),
+      }),
     };
   }
 
@@ -481,14 +516,18 @@ export function computeReceivables(
     const asOf = input.asOfIsPeriodEnd ? period.periodEnd : ctx.asOf;
     const currency = ctx.settings.baseCurrency;
 
+    const salesInvoices = input.salesInvoices === undefined ? input.invoices : input.salesInvoices;
+    const purchaseInvoices = input.purchaseInvoices === undefined ? input.invoices : input.purchaseInvoices;
     const receivables =
-      input.invoices === null
-        ? fromBalances(ctx, input.receivablesFallback, period, input.invoiceBasisUnavailableReason)
-        : fromInvoices(ctx, input.invoices, SALES_TYPES, asOf, input.basis);
+      salesInvoices === null
+        ? fromBalances(ctx, input.receivablesFallback, period,
+            input.receivablesUnavailableReason ?? input.invoiceBasisUnavailableReason)
+        : fromInvoices(ctx, salesInvoices, SALES_TYPES, asOf, input.basis);
     const payables =
-      input.invoices === null
-        ? fromBalances(ctx, input.payablesFallback, period, input.invoiceBasisUnavailableReason)
-        : fromInvoices(ctx, input.invoices, PURCHASE_TYPES, asOf, input.basis);
+      purchaseInvoices === null
+        ? fromBalances(ctx, input.payablesFallback, period,
+            input.payablesUnavailableReason ?? input.invoiceBasisUnavailableReason)
+        : fromInvoices(ctx, purchaseInvoices, PURCHASE_TYPES, asOf, input.basis);
 
     const asOfComponents = {
       as_of: asOf,
@@ -632,10 +671,15 @@ function daysMetric(
  * `working_capital` = cash + receivables + inventory + other current assets − payables − card −
  * tax − other current liabilities (§3.4).
  *
- * A missing balance-sheet term is *unknown*, not zero: the metric is still written — a working
- * capital figure without inventory is useful to a service business and honest about what it omits —
- * with `partial_working_capital` naming every term that could not be seen. Only a missing
- * `closing_cash` nulls it, because cash is the term the figure is mostly about.
+ * A missing balance-sheet-only term (inventory, other current assets, card, tax, other current
+ * liabilities) is *unknown*, not zero: the metric is still written — a working capital figure
+ * without inventory is useful to a service business and honest about what it omits — with
+ * `partial_working_capital` naming every term that could not be seen.
+ *
+ * `closing_cash`, `receivables` and `payables` are different: they are the terms the figure is
+ * mostly about, and each has a source of its own. When any of them is unknown the figure is NULL
+ * with that term's reasons (ADR-120). Leaving an unknown receivables balance out of the sum would
+ * add it in as zero — the fabricated £0 §1.5 forbids.
  */
 function workingCapital(
   input: ReceivablesPeriodInput,
@@ -683,7 +727,8 @@ function workingCapital(
   );
   const basis = combineBasis(knownTerms.map((term) => term.basis));
 
-  if (cashValue === null) {
+  const requiredUnknown = cashValue === null || receivables.value === null || payables.value === null;
+  if (requiredUnknown) {
     return {
       key: 'working_capital',
       value: null,
@@ -698,7 +743,7 @@ function workingCapital(
         baseCompleteness,
         warnings,
         dedupeCodes([
-          ...(cash?.dataQuality.missing ?? ['no_opening_cash']),
+          ...(cashValue === null ? (cash?.dataQuality.missing ?? ['no_opening_cash']) : []),
           ...receivables.missing,
           ...payables.missing,
         ]),

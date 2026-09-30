@@ -449,6 +449,13 @@ interface PeriodState {
   readonly closingMissing: readonly DataQualityMissing[];
   readonly completeness: number;
   readonly warnings: readonly DataQualityWarning[];
+  /**
+   * Every active cash-like account's statement covers the period, so its net movement was STATED.
+   * A month with an uncovered account shows only the covered accounts' rows; its movement is a
+   * fragment, and runway's burn window must treat it as unknown rather than as a quiet month
+   * (ADR-120) — reading it as 0.00 makes a runway longer precisely because data is missing.
+   */
+  readonly movementKnown: boolean;
 }
 
 /**
@@ -533,6 +540,7 @@ export function computeCash(
         state: {
           period, netMovement: new Decimal(0), closing: null, closingBasis: 'none',
           closingAssurance: input.basis.assurance, closingMissing: missing, completeness: 0, warnings,
+          movementKnown: false,
         },
         metrics: [
           unavailable('cash_inflows', 'money', null),
@@ -725,6 +733,7 @@ export function computeCash(
       state: {
         period,
         netMovement,
+        movementKnown: coverageRatio >= 1,
         closing: closingValue,
         closingBasis,
         closingAssurance,
@@ -859,6 +868,7 @@ function movementWindow(
       if (state === undefined) return null;
       const next = states[at + 1];
       if (next !== undefined && !isPreviousMonth(state.period, next.period)) return null;
+      if (!state.movementKnown) return null;
       values.push(state.netMovement);
       continue;
     }
@@ -879,7 +889,7 @@ function countWindow(
   for (let offset = 0; offset < 3; offset += 1) {
     const at = index - offset;
     if (at >= 0) {
-      if (states[at] !== undefined) available += 1;
+      if (states[at]?.movementKnown === true) available += 1;
     } else if (priorNetMovements[priorNetMovements.length + at] != null) {
       available += 1;
     }

@@ -14,6 +14,8 @@ import { invoiceSignFor, ledgerAmount, naturalToReporting } from './sign';
 import { computeCash, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions } from './cash';
 import type { TransferKind } from '@/modules/banking';
 import { computeConcentration, type ConcentrationPeriodInput } from './concentration';
+import { computeReceivables } from './receivables';
+import { receivablesPeriodInput, type ReceivablesComposeInput } from './receivables-input';
 import {
   bankDirectedPart, bankLineDirection, commercialPopulation, commercialSelection,
 } from './commercial-population';
@@ -43,6 +45,18 @@ export interface ComposeInput {
   /** Cash carries forward from the previous period; supplied by the run loop. */
   readonly cashOptions?: CashSeriesOptions;
   readonly resolveSnapshotId?: SnapshotIdResolver;
+  /**
+   * The receivables family's inputs beyond the period's cells (ADR-120). The calculation run always
+   * supplies it; a caller that omits it gets no receivables, payables or working-capital figures.
+   */
+  readonly receivables?: ReceivablesComposeInput;
+  /**
+   * The cash-like accounts a committed statement actually covers in this period (§2.2), supplied by
+   * the run (ADR-120). Omitted, every active cash-like account is treated as covered — the old
+   * default, under which a month with no statement reported a known 0.00 movement at completeness 1,
+   * which the runway window (now fed three months) read as a real month of no burn.
+   */
+  readonly coveredBankAccountIds?: readonly string[];
 }
 
 /** The aggregate source each basis reads from. */
@@ -343,6 +357,27 @@ function counterpartyAmounts(
 const NO_SNAPSHOT: SnapshotIdResolver = () => null;
 
 /**
+ * A derived metric names the snapshots it was worked out from (ADR-059). The receivables module
+ * builds its component list before any snapshot exists, so the ids are filled here from the same
+ * resolver the P&L uses. A component that is not a metric of this period (a balance-sheet term such
+ * as `inventory`) resolves to nothing and stays null — honestly unlinked, never invented.
+ */
+function withDerivedIds(result: MetricResult, resolve: SnapshotIdResolver): MetricResult {
+  const query = result.evidenceQuery;
+  if (query === null || query.kind !== 'derived') return result;
+  return {
+    ...result,
+    evidenceQuery: {
+      kind: 'derived',
+      components: query.components.map((c) => ({
+        name: c.name,
+        snapshot_id: c.snapshot_id ?? resolve(c.name, null, null),
+      })),
+    },
+  };
+}
+
+/**
  * Runs one period's metrics.
  *
  * The families are computed independently and each takes its own basis from precedence, which is
@@ -412,7 +447,7 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
         value: a.openingBalance!,
         asAtDate: a.openingBalanceDate,
       })),
-    coveredBankAccountIds: context.bankAccounts
+    coveredBankAccountIds: input.coveredBankAccountIds ?? context.bankAccounts
       .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType))
       .map((a) => a.id),
   };
@@ -456,6 +491,21 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
   };
   for (const periodMetrics of computeConcentration(context, [concentrationInput])) {
     if (periodMetrics.periodId === period.id) results.push(...periodMetrics.metrics);
+  }
+
+  // ---- Receivables, payables, working capital (§3.4, ADR-120) ----
+  // Last, because it reads what came before: revenue and the expense categories for the days
+  // denominators, and closing cash for working capital.
+  if (input.receivables !== undefined) {
+    const receivablesInput = receivablesPeriodInput(context, period, coverage, cells, results, input.receivables);
+    const series = computeReceivables(context, [receivablesInput], {
+      priorDenominators: input.receivables.priorDenominators,
+    });
+    for (const periodMetrics of series) {
+      if (periodMetrics.periodId === period.id) {
+        results.push(...periodMetrics.metrics.map((m) => withDerivedIds(m, resolve)));
+      }
+    }
   }
 
   // A stable order makes two runs over identical data write byte-identical snapshots, which is the

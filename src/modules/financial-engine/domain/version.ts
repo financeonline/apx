@@ -14,7 +14,12 @@
  * guarantee checkable: given a run id, its fingerprint and the tagged version from git, a replay
  * must reproduce every snapshot value.
  */
-export const ENGINE_VERSION = '1.0.0';
+/**
+ * 2.0.0 (ADR-120): MAJOR. The run now carries cash and the runway window between periods (existing
+ * cash values change) and writes the receivables family for the first time. §6: a change to an
+ * existing value is a major bump, and the first run on it recomputes each organisation's history.
+ */
+export const ENGINE_VERSION = '2.0.0';
 
 /** Bumped independently of the engine (§6). */
 export const HEALTH_CONFIG_VERSION = 'health.config.v1';

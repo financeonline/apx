@@ -83,6 +83,8 @@ describe('the variance registry (§3.2)', () => {
     expect([...VARIANCE_BASE_METRICS]).toEqual([
       'revenue', 'gross_profit', 'gross_margin', 'operating_expenses', 'operating_profit',
       'net_profit', 'net_margin', 'closing_cash', 'net_cash_movement', 'receivables', 'payables',
+      // ADR-120: §8.2's receivables/payables deterioration rules read `*_days.variance.prev_period`.
+      'receivables_days', 'payables_days',
       'expense_by_category', 'expense_by_account',
     ]);
   });

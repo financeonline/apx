@@ -6,6 +6,8 @@ import type {
   AccountRef, AggregateCell, BankAccountRef, CounterpartyRef, OrganizationSettings, PeriodRef,
 } from '../domain/types';
 import type { CoverageBatch } from '../domain/coverage';
+import type { AgingInvoice } from '../domain/receivables';
+import type { OpeningJournalLine } from '../domain/receivables-input';
 
 /**
  * The engine's reads (FINANCIAL_ENGINE.md §2.4 step 4).
@@ -101,6 +103,7 @@ export async function loadCoverageBatches(
     balanceBasis: null,
     bankAccountId: r.bank_account_id as string | null,
     invoiceListKind: r.invoice_list_kind as CoverageBatch['invoiceListKind'],
+    importType: (r.import_type as string | null) ?? null,
     periodStart: r.period_start as string,
     periodEnd: r.period_end as string,
     committedAt: r.committed_at as string,
@@ -443,14 +446,22 @@ export async function loadCurrentObservations(
   scoped: SupabaseClient, orgId: string, periodIds: readonly string[], metricKeys: readonly string[],
 ): Promise<StoredObservation[]> {
   if (periodIds.length === 0 || metricKeys.length === 0) return [];
-  const { data, error } = await scoped
-    .from('metric_current')
-    .select('period_id, metric_key, dimension_type, dimension_id, dimension_key, snapshot_id, metric_snapshots!inner(value, basis, assurance_level, data_quality)')
-    .eq('organization_id', orgId)
-    .in('period_id', [...periodIds])
-    .in('metric_key', [...metricKeys]);
+  // Paged: the comparison set (every variance base × dimension × up to thirteen periods) passes
+  // PostgREST's silent 1,000-row cap for any organisation with a real chart of accounts (ADR-120).
+  const rows = await paged(
+    (from, to) => scoped
+      .from('metric_current')
+      .select('period_id, metric_key, dimension_type, dimension_id, dimension_key, snapshot_id, metric_snapshots!inner(value, basis, assurance_level, data_quality)')
+      .eq('organization_id', orgId)
+      .in('period_id', [...periodIds])
+      .in('metric_key', [...metricKeys])
+      .order('period_id').order('metric_key').order('dimension_type')
+      .order('dimension_id', { nullsFirst: true }).order('dimension_key', { nullsFirst: true })
+      .range(from, to),
+    (r) => r,
+  );
 
-  return unwrap(data, error).flatMap((r) => {
+  return rows.flatMap((r) => {
     const s = r.metric_snapshots as unknown as { value: unknown; basis: string; assurance_level: string; data_quality: StoredObservation['dataQuality'] } | null;
     if (!s) return [];
     return [{
@@ -466,4 +477,118 @@ export async function loadCurrentObservations(
       dataQuality: s.data_quality ?? {},
     }];
   });
+}
+
+// ---------------------------------------------------------------------------------------------
+// Receivables, payables and the version gate (ADR-120)
+// ---------------------------------------------------------------------------------------------
+
+/**
+ * PostgREST returns at most `max_rows` (1,000) rows per request and truncates SILENTLY (the Phase 15
+ * lesson, ADR-114): a list read in one request is a list that is quietly short past the thousandth
+ * row. Every raw-row reader here pages until a short page, ordered by id so pages never overlap.
+ */
+const PAGE = 1000;
+
+async function paged<T>(
+  fetchPage: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: unknown }>,
+  map: (row: Record<string, unknown>) => T,
+): Promise<T[]> {
+  const out: T[] = [];
+  for (let from = 0; ; from += PAGE) {
+    const { data, error } = await fetchPage(from, from + PAGE - 1);
+    const rows = unwrap(data as Record<string, unknown>[] | null, error);
+    out.push(...rows.map(map));
+    if (rows.length < PAGE) return out;
+  }
+}
+
+/**
+ * The invoice rows receivables and payables are aged from (§3.4).
+ *
+ * The CURRENT row of every accepted, non-superseded invoice (ADR-047.10) visible at the chunk's
+ * aggregation instant — the same three conditions `app.aggregate_periods` applies, so the aging and
+ * the P&L read the same set of documents. Void invoices are returned and excluded by the domain,
+ * which owns that rule (ADR-107). `issue_date ≤ issuedBy` because nothing issued later can be owed.
+ *
+ * This is the one engine read that is proportional to rows rather than to periods × dimensions: the
+ * Phase 4 domain function ages invoices, and a SQL re-implementation of its rule would be a second
+ * copy of it. Recorded in ADR-120 as a known scaling finding.
+ */
+export async function loadAgingInvoices(
+  scoped: SupabaseClient, orgId: string, issuedBy: string, aggregatedAt: string,
+): Promise<AgingInvoice[]> {
+  return paged(
+    (from, to) => scoped
+      .from('invoices')
+      .select('id, invoice_type, counterparty_id, issue_date, due_date, total_amount, amount_paid, balance_due, paid_date, status')
+      .eq('organization_id', orgId)
+      .eq('record_status', 'accepted')
+      .is('superseded_by', null)
+      .lte('created_at', aggregatedAt)
+      .lte('issue_date', issuedBy)
+      .order('id')
+      .range(from, to),
+    (r) => ({
+      id: r.id as string,
+      invoiceType: r.invoice_type as AgingInvoice['invoiceType'],
+      counterpartyId: (r.counterparty_id as string | null) ?? null,
+      issueDate: r.issue_date as string,
+      dueDate: (r.due_date as string | null) ?? null,
+      totalAmount: String(r.total_amount),
+      amountPaid: String(r.amount_paid ?? '0'),
+      balanceDue: String(r.balance_due),
+      paidDate: (r.paid_date as string | null) ?? null,
+      status: r.status as AgingInvoice['status'],
+    }),
+  );
+}
+
+/**
+ * The opening-balance journal (IMP-GL-011, ADR-027.3 item 3), or null when the organisation has
+ * none. Its existence is what turns a ledger's running total into a balance: without it a GL exported
+ * from March knows nothing of what was owed in February.
+ */
+export async function loadOpeningJournal(
+  scoped: SupabaseClient, orgId: string, aggregatedAt: string,
+): Promise<OpeningJournalLine[] | null> {
+  const lines = await paged(
+    (from, to) => scoped
+      .from('ledger_entries')
+      .select('id, account_id, direction, amount')
+      .eq('organization_id', orgId)
+      .eq('is_opening_balance', true)
+      .eq('record_status', 'accepted')
+      .is('superseded_by', null)
+      .lte('created_at', aggregatedAt)
+      .order('id')
+      .range(from, to),
+    (r) => ({
+      accountId: r.account_id as string,
+      debit: r.direction === 'debit' ? String(r.amount) : '0',
+      credit: r.direction === 'credit' ? String(r.amount) : '0',
+    }),
+  );
+  return lines.length === 0 ? null : lines;
+}
+
+/**
+ * The engine version of the organisation's latest succeeded run, or null when it has none.
+ *
+ * A run on a different engine version must recompute the whole history (FINANCIAL_ENGINE.md §6): the
+ * carries (cash, the days windows) start from the stored figures of the period before the range, and
+ * figures an older engine wrote are not a starting point this one can trust (ADR-120).
+ */
+export async function loadLatestEngineVersion(
+  scoped: SupabaseClient, orgId: string,
+): Promise<string | null> {
+  const { data, error } = await scoped
+    .from('calculation_runs')
+    .select('engine_version, finished_at')
+    .eq('organization_id', orgId)
+    .eq('status', 'succeeded')
+    .order('finished_at', { ascending: false, nullsFirst: false })
+    .limit(1);
+  const rows = unwrap(data, error) as Array<{ engine_version: string }>;
+  return rows[0]?.engine_version ?? null;
 }

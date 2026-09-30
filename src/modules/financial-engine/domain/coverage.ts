@@ -30,6 +30,11 @@ export interface CoverageBatch {
   readonly balanceBasis: 'cumulative' | 'movement' | null;
   readonly bankAccountId: string | null;
   readonly invoiceListKind: 'full' | 'open_items' | null;
+  /**
+   * What was imported (`import_batches.import_type`). Optional because only the AR/AP test reads it:
+   * a sales list and a purchase list are both `invoices`, and only this says which side was covered.
+   */
+  readonly importType?: string | null;
   /** The DECLARED range the reviewer confirmed, not the min/max posting date. */
   readonly periodStart: string;
   readonly periodEnd: string;
@@ -92,6 +97,61 @@ export function chooseBalanceKind(
     if (batch) return { kind, batch };
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------------------------
+// Receivables and payables (§2.2, ADR-120)
+// ---------------------------------------------------------------------------------------------
+
+export type InvoiceSide = 'sales' | 'purchase';
+
+const SIDE_IMPORT_TYPES: Readonly<Record<InvoiceSide, readonly string[]>> = {
+  sales: ['sales_invoices', 'sales_report'],
+  purchase: ['purchase_invoices', 'purchase_report'],
+};
+
+/** §2.2's AR/AP freshness gate, in days after the period ends. */
+export const AR_AP_FRESHNESS_DAYS = 45;
+
+export interface InvoiceSideCoverage {
+  /** A batch of this side covers P under §2.2's AR/AP test. */
+  readonly covers: boolean;
+  /** Any committed batch of this side exists at all; `covers = false` with this true is `stale_invoice_data`. */
+  readonly anyBatch: boolean;
+  /** A `full` list of this side spans P — only a full list states the sales history DSO divides by. */
+  readonly fullListSpans: boolean;
+  /** An `open_items` list of this side spans P (ADR-047.10: it makes the DSO denominator meaningless). */
+  readonly openItemsSpans: boolean;
+}
+
+/**
+ * §2.2, "`invoices` (AR/AP families)": an invoice batch of the side whose declared range covers P, or
+ * one committed within 45 days AFTER `P.period_end`.
+ *
+ * Per SIDE (ADR-120), because a sales list says nothing about what is owed to suppliers. And "after"
+ * means after: a list committed before the period ended cannot describe what was open at its end.
+ * The shared `invoices` coverage above accepts any batch committed up to 45 days after — including
+ * one committed a year BEFORE — which the P&L family reads and which this deliberately does not
+ * reuse (recorded as a finding in ADR-120 rather than changed under the P&L).
+ */
+export function invoiceSideCoverage(
+  batches: readonly CoverageBatch[],
+  period: PeriodRef,
+  side: InvoiceSide,
+): InvoiceSideCoverage {
+  const ofSide = batches.filter(
+    (b) => b.targetTable === 'invoices' && SIDE_IMPORT_TYPES[side].includes(b.importType ?? ''),
+  );
+  const fresh = (b: CoverageBatch): boolean => {
+    const days = daysBetween(period.periodEnd, b.committedAt.slice(0, 10));
+    return days >= 0 && days <= AR_AP_FRESHNESS_DAYS;
+  };
+  return {
+    covers: ofSide.some((b) => spans(b, period) || fresh(b)),
+    anyBatch: ofSide.length > 0,
+    fullListSpans: ofSide.some((b) => b.invoiceListKind === 'full' && spans(b, period)),
+    openItemsSpans: ofSide.some((b) => b.invoiceListKind === 'open_items' && spans(b, period)),
+  };
 }
 
 /** Cash-like account types. Credit-card and loan accounts are tracked but are not cash (§4.4). */

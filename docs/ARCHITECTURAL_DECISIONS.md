@@ -1775,6 +1775,146 @@ Decision:
 4. **Figures F5 may use.** F5 must never consume manually inserted, test-only or synthetic figures. Missing receivables/payables data stays unavailable, never zero and never a healthy score.
 5. **Requirement unchanged.** REQ-FR-07 stays a requirement; only its implementation is blocked by this dependency.
 
+#### ADR-120 — implementation record (2026-09-30, engine 2.0.0)
+
+Status: **implemented; awaiting independent audit.** Phase 16 has not started.
+
+**Scope as approved.** During inspection a second defect of the same class was found: the cash chain was never carried between periods. The product owner decided (2026-09-30) to fix it **in this same remediation**, so one engine version bump and one Health regression audit cover both.
+
+**1. Root cause — one defect class: the run computed each period alone and never carried anything.**
+- `composePeriod` (the only caller of the metric modules) ran P&L, cash and concentration. It **never called `computeReceivables`** (Phase 4, `b2a6861`), and no SQL wrote the seven receivables keys. No calculation run ever persisted them.
+- `computeCash` supports `openingCarry` / `priorNetMovements`, but the run **never supplied them** (logged in Phase 14 only as LOW-8). As a result:
+  - every month opened at the bank account's own `opening_balance` instead of the previous close. Reproduced: opening 20,000 with −3,000 a month gave 20,000 → 17,000 in June, July **and** August;
+  - `cash_runway_months` never had three months and was always `insufficient_history`.
+- Found on the same path and fixed because the restored figures would otherwise not reach their consumers correctly:
+  - (a) **Coverage.** Composition told the cash module that every active account was covered in every period, so a month with no statement reported a known 0.00 movement at completeness 1 (contrary to §3.3).
+  - (b) **Silent truncation.** `health` `loadObservations` and the engine's `loadCurrentObservations` read `metric_current` in one PostgREST request, which is **silently truncated at 1,000 rows**. A 24-month organisation holds ~1,300 rows before this change and 1,848 after, so the health step and the alert pass had been working on an arbitrary subset (the ADR-114 lesson).
+  - (c) **Variance bases.** `receivables_days` / `payables_days` were not variance bases, so §8.2's "days slowed ≥ 10" trigger read a key no run wrote.
+  - (d) **Drill-down totals.** The evidence resolver totalled `open_as_of` / `overdue_as_of` drill-downs as today's unsigned Σ `balance_due`, and `period_balances` drill-downs in natural sign. Neither could reconcile to the engine's figure.
+
+**2. Exact implementation (no migration; schema unchanged: 55 tables, 125 api functions).**
+- **Wiring.** `financial-engine/domain/receivables-input.ts` (new, pure) shapes `ReceivablesPeriodInput` from what the run holds. `composePeriod` calls `computeReceivables` last, and fills derived-component snapshot ids.
+- **Per-side source**, first that can state the balance:
+  1. invoices of that side under §2.2's AR/AP test (`invoiceSideCoverage`: spans P, or committed **0–45 days after** P);
+  2. the balance family's cumulative trial balance / balance sheet — a stated zero when the statement lists no row;
+  3. the ledger, only with an opening-balance journal;
+  4. otherwise NULL with `stale_invoice_data` / `no_opening_balance` / `no_source_covers_period`.
+- **Working capital** is NULL when `closing_cash`, `receivables` or `payables` is unknown. Before, an unknown receivables balance was summed as nil.
+- **Run (`services/run.ts`):**
+  - per period: `cashOptions` (opening carried from P−1's close once any earlier period had a statement; P−2/P−1 net movements, NULL when a month was not fully covered), `priorDenominators`, the invoice rows (paged), the opening journal, and the cash-like accounts a statement actually covers in P;
+  - once per run: every committed batch (`import_type` now kept by the loader).
+- **Version gate.** The first run on a new engine version recomputes the whole history (`loadLatestEngineVersion`).
+- **Cash domain.** A month whose statements do not cover every active cash-like account has an unknown movement for runway (`movementKnown`).
+- **Variance bases** gained `receivables_days`, `payables_days`.
+- **Paging.** `loadObservations` (health / alerts) and `loadCurrentObservations` (engine) page in 1,000s, ordered.
+- **Resolver.** `invoice_open_at` totals on the engine's `invoiceOutstandingAt` (exported: one rule, two readers); `balance_reporting` totals `period_balances` in reporting sign.
+- `ENGINE_VERSION` 1.0.0 → **2.0.0** (major: existing cash values change).
+
+**3. Calculation path restored.** `calculation.run` job → `runCalculation` (carries, batches, invoices) → `composeWithIds` → `composePeriod` → `computeReceivables` / `computeCash` → `finish_chunk` → health step → `alerts.evaluate` job. Health and alerts read the snapshots unchanged, through their existing rules.
+
+**4. Persistence path.** Unchanged architecture: `metric_snapshots` + `metric_current` via `api_server.finish_chunk`, each snapshot with `basis`, `assurance_level`, `data_quality`, `components` and `evidence_query` pinned to the run. No figure is written anywhere else. The fixtures prove every receivables snapshot belongs to a succeeded 2.0.0 run.
+
+**5. Evidence path.**
+- **Leaf descriptors:**
+  - invoices: `open_as_of` / `overdue_as_of`;
+  - `period_balances`: with `account_ids`;
+  - `ledger_entries`: naming every period summed.
+- **Derived metrics** (`*_days`, `working_capital`) name their input snapshots.
+- **Reconciliation:** the sweep now walks **104** descriptors (100 before), **0 mismatches**. The fixture tests reconcile:
+  - historical receivables including an invoice paid after the date (1,200 = 1,200);
+  - receivables and overdue with a credit note (4,400 / 1,800);
+  - a ledger balance (2,500 / 2,600);
+  - a trial-balance liability (4,000 = 4,000).
+
+**6. Test coverage.**
+- **Unit** `engine-receivables-wiring.test.ts` (24):
+  - per-side and after-only freshness;
+  - outstanding-at rule;
+  - positive / genuine zero / unavailable / stale;
+  - sales-only ⇒ payables unknown;
+  - trial balance (stated zero, liability sign, movement basis refused);
+  - ledger with and without an opening journal;
+  - working capital valid and NULL;
+  - runway over unstated months.
+- **Compiler:** one test for `balance_reporting`.
+- **Integration** `receivables-recovery.test.ts` (26), over six organisations seeded as raw committed records and computed only through the real queue (`test/fixtures/adr120-orgs.ts`; nothing writes a snapshot). It covers A–O and edge cases 1–14:
+  - no invoices; no purchases; invoice-only; ledger; bank + invoice; partial and complete coverage;
+  - fully paid and outstanding, on both sides;
+  - empty organisation; multiple months; a month with missing data;
+  - tenant isolation and RLS; evidence; the intended Health and alert changes.
+- **Existing tests amended because the approved rule changed their expectation** (each comment says why):
+  - working capital with unknown receivables (5,900.00 → NULL);
+  - the §3.2 variance-base list;
+  - two compiler assertions (`column` → `invoice_open_at`);
+  - the fingerprint test's version literal;
+  - the run-loop test's repository mock (three new readers).
+- **AI eval corpus** re-recorded (`RECORD_AI_EVAL=1`, ADR-081). Normalised diff:
+  - `get_receivables` / `get_payables` return the engine's NULL snapshot with `no_source_covers_period` instead of `NO_DATA`;
+  - `get_business_summary` lists those NULL rows;
+  - one `get_alerts` `threshold_summary` gains `revenue` (paging fix);
+  - `get_health_score` gains one snapshot id.
+
+  The prompt version (`analyst-v3.5`) is unchanged.
+
+**7. Health Score behavioural changes** (before/after regression audit: the same six fixtures computed on `74050d1`'s engine and on 2.0.0, diffed rule by rule for every dimension and month). Only these rules changed, each for the stated reason:
+
+| Rule | Before | After | Cause |
+|---|---|---|---|
+| C2 runway | always `skipped` | scores: BANK Aug `3 to 6 months` +5; INVBANK Aug `>= 6 months` +20; LEDGER and TB Aug `cash generative` +20 | runway computed (cash carry) |
+| Q3 days to get paid | always `skipped` | INVBANK and INVONLY Aug `60 to 90 days` −10 (61 days); LEDGER Aug `<= 30 days` +15 (in an excluded dimension) | receivables computed |
+| B1 balance trend | `no clear trend` (flat, uncarried balance) | BANK `falling for 3 months` −15; LEDGER `rising for 3 months` +15 | cash carried |
+
+- **Scores, August:** INVBANK 71 → 75, INVONLY 72 → 70, LEDGER 69 → 76, TB 70 → 80.
+- **Unchanged:** June and July in every organisation, every other rule (P1–P4, G1–G3, K1–K3, C1, C3, C4, Q1, Q2, B2–B4), and `health.config.v1`.
+- **Rules not modified.** No Health threshold or rule was modified.
+- **Months without a statement** now carry `bank_coverage_partial` at completeness 0, so the existing 0.6 rule excludes their cash dimension instead of scoring an invented 0.00 movement.
+- **Phase 15 comparisons.** The first 2.0.0 run recomputes an organisation's whole history under the same config, so the latest-two-months comparisons compare like with like.
+
+**8. Alert behavioural changes** (same audit):
+- **Now fire:**
+  - `receivables.deterioration` (INVBANK and INVONLY Aug, medium, 41% overdue);
+  - `payables.deterioration` (INVBANK Aug, high, 100% overdue).
+- **Now fire because their inputs are no longer truncated.** The conditions were already true:
+  - LEDGER `revenue.decline` (Jul medium −25%, Aug high −33%);
+  - INVBANK `concentration.supplier`.
+- **Removed:** INVBANK `cash.decline` (Aug). It was an artefact: August had been computed from the account's opening balance rather than July's close.
+- **Moved:** state alerts `recurring.*` move from a future month (Aug 2027), which had been treated as fully covered, to the last covered month (Aug 2026).
+- **Rules not modified.** No alert threshold or rule was modified.
+
+**9. Security verification.**
+- No schema, grant, policy or permission change.
+- New figures live in the existing RLS-forced tables. The new suite proves:
+  - another organisation's owner reads none of them;
+  - the owner reads their own;
+  - a descriptor resolved through an outsider's session returns nothing.
+- The existing tenancy, RLS, portfolio and isolation suites pass: integration 782/783, pgTAP 1,068/1,068.
+
+**10. Final gates (clean database, sequential, 2026-09-30).**
+
+| Gate | Result |
+|---|---|
+| typecheck | pass |
+| lint | pass |
+| unit | 2,067 / 2,067 |
+| integration | 782 / 783 in one full run on the final code (52 files). The one failure was `ai-eval-record` detecting the intended `get_receivables` output change; after re-recording (the only file changed afterwards) that test passes, then shows its known flake below |
+| `ai-eval-record` isolated rate on the new recording | 6/10, the documented `get_alerts #16 output shape` ordering flake, pre-existing and untouched |
+| eval | 253 / 253 |
+| pgTAP | 1,068 / 1,068 |
+| schema drift | 55 tables / 125 api functions, unchanged |
+| production build | pass |
+| Playwright | 69 passed + 1 pre-existing conditional skip (as at the Phase 15 release) |
+
+**11. Known remaining findings (not fixed here; none blocks the recovered figures).**
+- **F-1 Unpaged record reads (pre-existing).** The alert pass's ledger, bank and invoice record readers are also unpaged (1,000-row cap). ADR-120 does not change their row counts.
+- **F-2 Invoice coverage for the P&L (pre-existing, P&L family).** The shared `invoices` coverage accepts an invoice batch committed before a period ended, and an `open_items`-only list can become the P&L basis. The AR/AP family no longer uses it.
+- **F-3 Statement opening balance not wired.** CD-06's first opening-cash source (the statement's own opening balance) is not wired; opening cash still comes from `bank_accounts.opening_balance`.
+- **F-4 Ledger opening from a prior balance sheet.** ADR-027.3's balance-sheet row for the period before the earliest ledger period is not implemented; such ledger balances are NULL `no_opening_balance`.
+- **F-5 Invoice read scales with rows.** The aging invoice read is proportional to rows (paged), not to periods × dimensions.
+- **F-6 No deploy-time recalculation.** Each organisation shows 1.0.0 figures until its next run, which then recomputes its whole history. Operationally, enqueue a `recalc_manual` for every active organisation after deploy.
+- **F-7 Future fiscal periods.** Months after the as-of date carry the last close at completeness 0 with `bank_coverage_partial`.
+- **F-8 `payables_days` needs cost of sales.** Its denominator requires `cost_of_sales`, so an organisation with no cost-of-sales accounts has no `payables_days` (§3.4 as written).
+- **F-9 Balance drill-down totals.** `period_balances` drill-downs are now in reporting sign for every descriptor. P&L trial-balance descriptors still do not total to their monthly figure (cumulative differencing, pre-existing, outside the sweep).
+
 ### ADR-121 · Funding Readiness is calculated only while enabled, with eligible historical backfill on enablement
 Status: **decided by the product owner, 2026-09-30 (Phase 16 U-4, U-5).** The earlier proposal (calculate for every organisation and let the flag gate visibility only) is **REJECTED**.
 

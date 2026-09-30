@@ -5,13 +5,17 @@ import { toMotionError } from '@/core/errors';
 import { bankingRuleVersions } from '@/modules/banking';
 import { log } from '@/core/logging';
 import { affectedRange, chunkPeriods, chunkWindow, type CalculationTrigger } from '../domain/chunking';
-import { computeCoverage, isPeriodComplete } from '../domain/coverage';
+import { computeCoverage, isPeriodComplete, type CoverageBatch } from '../domain/coverage';
+import { isCashLikeBankAccount } from '../domain/categories';
+import type { CashSeriesOptions } from '../domain/cash';
+import type { DenominatorInputs } from '../domain/receivables';
+import { denominatorInputsFor, type ReceivablesComposeInput } from '../domain/receivables-input';
 import { computeFingerprint } from '../domain/fingerprint';
 import { AS_OF_DEPENDENT_KEYS } from '../domain/registry';
 import { VARIANCE_BASE_METRICS } from '../domain/variance';
 import { comparisonPeriodIds, variancesForPeriod } from '../domain/variance-pass';
 import { ENGINE_VERSION as VERSION } from '../domain/version';
-import type { MetricResult, PeriodRef } from '../domain/types';
+import type { AggregateCell, BankAccountRef, MetricResult, PeriodRef } from '../domain/types';
 import * as repo from '../data/repository';
 
 /**
@@ -142,6 +146,88 @@ export interface HealthChunkInput {
   readonly counterpartyNames: ReadonlyMap<string, string>;
 }
 
+// ---------------------------------------------------------------------------------------------
+// Carries between periods (ADR-120)
+// ---------------------------------------------------------------------------------------------
+
+/** The keys a later period reads from an earlier one: the cash chain and the days denominators. */
+const CARRIED_KEYS = [
+  'closing_cash', 'net_cash_movement', 'revenue', 'cost_of_sales', 'expense_by_category',
+] as const;
+
+/** A stored observation, in the shape the carries read. Only the fields they use are meaningful. */
+function storedAsResult(o: repo.StoredObservation): MetricResult {
+  return {
+    key: o.metricKey,
+    value: o.value,
+    unit: 'money',
+    basis: o.basis as MetricResult['basis'],
+    assurance: o.assurance as MetricResult['assurance'],
+    dimensionType: o.dimensionType as MetricResult['dimensionType'],
+    dimensionId: o.dimensionId,
+    dimensionKey: o.dimensionKey,
+    currency: null,
+    components: {},
+    dataQuality: {
+      completeness: o.dataQuality.completeness ?? 0,
+      proxy: false,
+      warnings: (o.dataQuality.warnings ?? []) as MetricResult['dataQuality']['warnings'],
+      missing: (o.dataQuality.missing ?? []) as MetricResult['dataQuality']['missing'],
+    },
+    evidenceQuery: null,
+  };
+}
+
+function headline(results: readonly MetricResult[] | undefined, key: string): MetricResult | undefined {
+  return results?.find((r) => r.key === key && r.dimensionType === 'none');
+}
+
+/** Whether `b` is the calendar month straight after `a`. */
+function consecutive(a: PeriodRef, b: PeriodRef): boolean {
+  const [ay, am] = a.periodStart.split('-').map(Number) as [number, number];
+  const [by, bm] = b.periodStart.split('-').map(Number) as [number, number];
+  return by * 12 + bm - (ay * 12 + am) === 1;
+}
+
+/**
+ * The cash-like accounts a statement covered in some period BEFORE `period`.
+ *
+ * The cash chain starts at the first period any statement covers: before it nothing states a
+ * balance, so each month is computed on its own (as it always was); from it on, each month opens at
+ * the one before's close. Starting the chain at the organisation's first fiscal period instead would
+ * let a year of ledger history before the first statement — where no opening balance could apply —
+ * carry an unknown into every later month.
+ */
+function cashCoveredBefore(
+  period: PeriodRef,
+  allPeriods: readonly PeriodRef[],
+  batches: readonly CoverageBatch[],
+  bankAccounts: readonly BankAccountRef[],
+): readonly string[] {
+  const cashLike = new Set(bankAccounts.filter((a) => isCashLikeBankAccount(a.accountType)).map((a) => a.id));
+  const earlier = allPeriods.filter((p) => p.periodStart < period.periodStart);
+  const covered = new Set<string>();
+  for (const b of batches) {
+    if (b.targetTable !== 'bank_transactions' || b.bankAccountId === null || !cashLike.has(b.bankAccountId)) continue;
+    if (earlier.some((p) => b.periodStart <= p.periodStart && b.periodEnd >= p.periodEnd)) covered.add(b.bankAccountId);
+  }
+  return [...covered].sort();
+}
+
+/** The ACTIVE cash-like accounts a committed statement covers in `period` (§2.2's bank test). */
+function cashCoveredIn(
+  period: PeriodRef,
+  batches: readonly CoverageBatch[],
+  bankAccounts: readonly BankAccountRef[],
+): readonly string[] {
+  return bankAccounts
+    .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType))
+    .filter((a) => batches.some((b) => b.targetTable === 'bank_transactions' && b.bankAccountId === a.id
+      && b.periodStart <= period.periodStart && b.periodEnd >= period.periodEnd))
+    .map((a) => a.id)
+    .sort();
+}
+
 export async function runCalculation(
   deps: RunDeps,
   request: RunRequest,
@@ -174,8 +260,17 @@ export async function runCalculation(
     (p) => p.periodStart <= request.asOf && p.periodEnd >= request.asOf,
   );
 
+  /*
+   * FINANCIAL_ENGINE.md §6, ADR-120: the first run on a new engine version recomputes the whole
+   * history, whatever triggered it. Later runs carry cash and the days windows forward from the
+   * stored figures of the period before their range, and figures an older engine wrote are not a
+   * starting point this one can build on.
+   */
+  const lastVersion = await repo.loadLatestEngineVersion(scoped, orgId);
+  const versionChanged = lastVersion !== null && lastVersion !== VERSION;
+
   const range = affectedRange({
-    trigger: request.trigger,
+    trigger: versionChanged ? 'recalc_manual' : request.trigger,
     changedPeriodIds: request.changedPeriodIds,
     allPeriods,
     currentPeriodId: currentPeriod?.id ?? null,
@@ -244,6 +339,29 @@ export async function runCalculation(
 
   const runId = started.runId;
 
+  /*
+   * Every committed batch, not only the chunk window's: §2.2's AR/AP test accepts a batch committed
+   * up to 45 days after a period, whose declared range may lie outside the window, and the cash chain
+   * asks whether any EARLIER period had a statement (ADR-120).
+   */
+  const lastPeriod = allPeriods[allPeriods.length - 1]!;
+  const allBatches = await repo.loadCoverageBatches(
+    scoped, orgId, allPeriods[0]!.periodStart, addYear(lastPeriod.periodEnd),
+  );
+
+  const cashLikeActive = bankAccounts
+    .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType)).map((a) => a.id).sort();
+
+  // The carries' starting point: what the last run left for the two periods before this range.
+  const firstIndex = allPeriods.findIndex((p) => p.id === toWrite[0]!.id);
+  const priorIds = allPeriods.slice(Math.max(0, firstIndex - 2), firstIndex).map((p) => p.id);
+  const storedPrior = new Map<string, MetricResult[]>();
+  for (const o of await repo.loadCurrentObservations(scoped, orgId, priorIds, CARRIED_KEYS)) {
+    const list = storedPrior.get(o.periodId) ?? [];
+    list.push(storedAsResult(o));
+    storedPrior.set(o.periodId, list);
+  }
+
   let snapshotsWritten = 0;
   let periodsWritten = 0;
   let healthScoresWritten = 0;
@@ -278,6 +396,23 @@ export async function runCalculation(
         repo.loadTransferLegs(scoped, orgId, windowFrom, windowTo, aggregatedAt),
         repo.loadCoverageBatches(scoped, orgId, windowFrom, windowTo),
       ]);
+
+      /*
+       * Receivables and payables (ADR-120): the invoice rows to age, and — only when an opening
+       * journal makes a ledger total a balance — the ledger's full history to P.
+       */
+      const chunkEnd = chunk[chunk.length - 1]!.periodEnd;
+      const [invoices, openingJournal] = await Promise.all([
+        repo.loadAgingInvoices(scoped, orgId, request.asOf > chunkEnd ? request.asOf : chunkEnd, aggregatedAt),
+        repo.loadOpeningJournal(scoped, orgId, aggregatedAt),
+      ]);
+      const historyFrom = allPeriods[0]!.periodStart;
+      const ledgerHistory: readonly AggregateCell[] = openingJournal === null
+        ? []
+        : windowFrom <= historyFrom
+          ? aggregates
+          : await repo.loadAggregates(scoped, orgId, historyFrom, windowTo, aggregatedAt);
+      const periodStarts = new Map(allPeriods.map((p) => [p.id, p.periodStart]));
 
       const context = {
         organizationId: orgId,
@@ -325,9 +460,62 @@ export async function runCalculation(
           period, batches, bankAccounts, rowCounts, asOf: request.asOf,
         });
 
+        const index = allPeriods.findIndex((p) => p.id === period.id);
+        const resultsFor = (p: PeriodRef | undefined): readonly MetricResult[] | undefined =>
+          p === undefined ? undefined : computedThisRun.get(p.id) ?? storedPrior.get(p.id);
+        const prev = index >= 1 && consecutive(allPeriods[index - 1]!, period) ? allPeriods[index - 1] : undefined;
+        const prev2 = prev !== undefined && index >= 2 && consecutive(allPeriods[index - 2]!, prev)
+          ? allPeriods[index - 2] : undefined;
+
+        // ---- the cash chain (§3.3): P opens at P−1's close once any earlier period had a statement ----
+        const covered = cashCoveredBefore(period, allPeriods, allBatches, bankAccounts);
+        const prevClosing = headline(resultsFor(prev), 'closing_cash');
+        const fullyCovered = (p: PeriodRef): boolean => {
+          const inP = cashCoveredIn(p, allBatches, bankAccounts);
+          return cashLikeActive.length > 0 && inP.length === cashLikeActive.length;
+        };
+        const cashOptions: CashSeriesOptions = {
+          openingCarry: covered.length === 0 || prev === undefined
+            ? null
+            : prevClosing === undefined
+              ? { value: null, basis: 'none', assurance: 'calculated', missing: ['no_opening_cash'], coveredBankAccountIds: covered }
+              : {
+                  value: prevClosing.value,
+                  basis: prevClosing.basis,
+                  assurance: prevClosing.assurance,
+                  missing: prevClosing.dataQuality.missing,
+                  coveredBankAccountIds: covered,
+                },
+          // Runway needs three consecutive months (§3.3); the two before P, oldest first. A month no
+          // statement fully covered did not state its movement, so it is unknown — never a 0.00 burn.
+          priorNetMovements: [prev2, prev]
+            .filter((p): p is PeriodRef => p !== undefined)
+            .map((p) => (fullyCovered(p) ? headline(resultsFor(p), 'net_cash_movement')?.value ?? null : null)),
+        };
+
+        // ---- the days windows (§3.4): the denominators of P−2 and P−1, when both are consecutive ----
+        const priorDenominators: DenominatorInputs[] = [];
+        for (const p of [prev2, prev]) {
+          if (p === undefined) continue;
+          const earlier = resultsFor(p);
+          if (earlier === undefined) continue;
+          priorDenominators.push(denominatorInputsFor(p, earlier, aggregates, allBatches));
+        }
+
+        const receivables: ReceivablesComposeInput = {
+          invoices,
+          batches: allBatches,
+          asOfIsPeriodEnd: period.id !== currentPeriod?.id,
+          priorDenominators,
+          ledger: openingJournal === null ? null : { cells: ledgerHistory, openingJournal, periodStarts },
+        };
+
         const results = await deps.computePeriod({
           period,
-          aggregates: { aggregates, transferLegs, coverage },
+          aggregates: {
+            aggregates, transferLegs, coverage, cashOptions, receivables,
+            coveredBankAccountIds: cashCoveredIn(period, allBatches, bankAccounts),
+          },
           context,
         });
 
@@ -422,4 +610,10 @@ export async function runCalculation(
     });
     throw toMotionError(cause);
   }
+}
+
+/** `YYYY-MM-DD` plus one year, for a batch read that must reach past the last period. */
+function addYear(date: string): string {
+  const [y, m, d] = date.split('-') as [string, string, string];
+  return `${Number(y) + 1}-${m}-${d === '29' && m === '02' ? '28' : d}`;
 }

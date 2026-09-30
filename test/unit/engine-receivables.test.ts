@@ -608,7 +608,7 @@ describe('working_capital (§3.4)', () => {
     expect(metric(results, 0, 'working_capital').dataQuality.missing).toContain('no_opening_cash');
   });
 
-  it('treats an unknown receivables balance as a missing term rather than nil', () => {
+  it('is NULL when receivables or payables are unknown — an unknown term is never summed as nil (ADR-120)', () => {
     const results = computeReceivables(context(), [
       periodInput(1, {
         invoices: null,
@@ -618,9 +618,12 @@ describe('working_capital (§3.4)', () => {
     ]);
     const wc = metric(results, 0, 'working_capital');
     expect(wc.components).toMatchObject({ missing_terms: ['payables', 'receivables'] });
-    expect(wc.dataQuality.warnings).toContain('partial_working_capital');
-    // 5,000 + 1,000 + 500 − 300 − 200 − 100, with the two unknown terms left out entirely.
-    expect(wc.value).toBe('5900.00');
+    // Before ADR-120 this wrote 5,900.00 — 5,000 + 1,000 + 500 − 300 − 200 − 100 — i.e. it added the
+    // two unknown balances in as zero. Receivables and payables are the figure's own terms, each with
+    // a source, so an unknown one leaves the whole figure unknown, with its reason.
+    expect(wc.value).toBeNull();
+    expect(wc.dataQuality.missing).toContain('no_opening_balance');
+    expect(wc.dataQuality.missing).not.toContain('no_opening_cash');
   });
 });
 

@@ -354,7 +354,10 @@ describe('descriptor compiler (§3.1)', () => {
     expect(compiled.filters).toContainEqual({ column: 'due_date', op: 'lt', value: '2026-03-31' });
     expect(compiled.postFilters).toEqual([{ kind: 'open_at', date: '2026-03-31' }]);
     expect(compiled.amountColumn).toBe('balance_due');
-    expect(compiled.amountBasis).toBe('column');
+    // ADR-120: totalled on the engine's outstanding-at rule at the descriptor's date, not on today's
+    // Σ balance_due (which counted a later-paid invoice as £0 and ADDED credit notes).
+    expect(compiled.amountBasis).toBe('invoice_open_at');
+    expect(compiled.openAt).toBe('2026-03-31');
   });
 
   it('reads an invoice-basis P&L selection on the engine’s net-of-tax basis, never on balance_due (ADR-105)', () => {
@@ -369,10 +372,17 @@ describe('descriptor compiler (§3.1)', () => {
     expect(pnl.columns).toEqual(expect.arrayContaining(['subtotal', 'tax_amount', 'total_amount', 'invoice_type', 'status']));
     // The supplier filter that scopes the figure is untouched.
     expect(pnl.filters).toContainEqual({ column: 'counterparty_id', op: 'in', value: ['00000000-0000-4000-8000-000000000002'] });
-    // Receivables keep the balance still owed, which IS that figure.
+    // Receivables are totalled on what was still owed AT the date — the engine's rule (ADR-120).
     const ar = compileDescriptor(parseQueryDescriptor({ v: 1, table: 'invoices', filters: { invoice_types: ['sales'], open_as_of: '2026-03-31' } }));
-    expect(ar.amountBasis).toBe('column');
+    expect(ar.amountBasis).toBe('invoice_open_at');
+    expect(ar.openAt).toBe('2026-03-31');
     expect(ar.amountColumn).toBe('balance_due');
+  });
+
+  it('totals a balance selection in reporting sign, so a liability reads positive (ADR-120)', () => {
+    const balances = compileDescriptor(parseQueryDescriptor({ v: 1, table: 'period_balances', filters: { account_ids: [ACCOUNT_A] } }));
+    expect(balances.amountBasis).toBe('balance_reporting');
+    expect(balances.amountColumn).toBe('closing_balance');
   });
 
   it('sums a directional bank selection as a magnitude, because the figure is one (ADR-109)', () => {
