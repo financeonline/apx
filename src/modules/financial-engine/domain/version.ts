@@ -19,7 +19,17 @@
  * cash values change) and writes the receivables family for the first time. §6: a change to an
  * existing value is a major bump, and the first run on it recomputes each organisation's history.
  */
-export const ENGINE_VERSION = '2.0.0';
+/**
+ * 3.0.0 (ADR-124): MAJOR. Cash is solved per bank account, day by day, from what the statements state
+ * (D-1, D-2); a completed month's receivables and payables need a list that states the month's END
+ * (D-3); a ledger balance starts on its opening journal's DATE (D-4). It also carries ADR-123's
+ * figure changes, which were released on 2.0.0 without the bump §6 requires — so organisations a
+ * 2.0.0 engine computed before ADR-123 were never recomputed (audit N-6).
+ *
+ * The bump is ENFORCED, not remembered: `test/unit/engine-version-golden.test.ts` hashes the engine's
+ * outputs over a fixed corpus and fails when they change while this string does not.
+ */
+export const ENGINE_VERSION = '3.0.0';
 
 /** Bumped independently of the engine (§6). */
 export const HEALTH_CONFIG_VERSION = 'health.config.v1';

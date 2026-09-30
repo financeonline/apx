@@ -1,13 +1,14 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { toMotionError } from '@/core/errors';
-import { aggregatePeriods, aggregateTransferLegs, batchCoverage } from '@/core/db';
+import { aggregatePeriods, aggregateTransferLegs, bankDailyMovements, batchCoverage } from '@/core/db';
 import type {
   AccountRef, AggregateCell, BankAccountRef, CounterpartyRef, OrganizationSettings, PeriodRef,
 } from '../domain/types';
 import type { CoverageBatch } from '../domain/coverage';
+import type { DailyMovement } from '../domain/cash-history';
 import type { AgingInvoice } from '../domain/receivables';
-import type { OpeningJournalLine } from '../domain/receivables-input';
+import type { OpeningJournalLine, PreJournalLine } from '../domain/receivables-input';
 
 /**
  * The engine's reads (FINANCIAL_ENGINE.md §2.4 step 4).
@@ -63,6 +64,18 @@ export async function loadAggregates(
     fallbackRows: Number(r.fallback_rows ?? 0),
     minDate: r.min_date as string | null,
     maxDate: r.max_date as string | null,
+  }));
+}
+
+/** Every bank account's rows summed per day, to `to` (ADR-124 D-1: the per-account cash history). */
+export async function loadBankDailyMovements(
+  orgId: string, to: string, aggregatedAt: string,
+): Promise<DailyMovement[]> {
+  const rows = await bankDailyMovements(orgId, to, aggregatedAt);
+  return rows.map((r) => ({
+    bankAccountId: r.bank_account_id as string,
+    date: r.transaction_date as string,
+    amount: String(r.amount ?? '0'),
   }));
 }
 
@@ -565,7 +578,7 @@ export async function loadOpeningJournal(
   const lines = await paged(
     (from, to) => scoped
       .from('ledger_entries')
-      .select('id, account_id, period_id, direction, amount')
+      .select('id, account_id, period_id, entry_date, direction, amount')
       .eq('organization_id', orgId)
       .eq('is_opening_balance', true)
       .eq('record_status', 'accepted')
@@ -576,11 +589,40 @@ export async function loadOpeningJournal(
     (r) => ({
       accountId: r.account_id as string,
       periodId: r.period_id as string,
+      entryDate: r.entry_date as string,
       debit: r.direction === 'debit' ? String(r.amount) : '0',
       credit: r.direction === 'credit' ? String(r.amount) : '0',
     }),
   );
   return lines.length === 0 ? null : lines;
+}
+
+/**
+ * Every current ledger line of `periodId` dated before `journalDate`, opening lines included
+ * (ADR-124 D-4): the part of a month that an opening journal dated inside it already contains.
+ */
+export async function loadLinesBeforeJournal(
+  scoped: SupabaseClient, orgId: string, periodId: string, journalDate: string, aggregatedAt: string,
+): Promise<PreJournalLine[]> {
+  return paged(
+    (from, to) => scoped
+      .from('ledger_entries')
+      .select('id, account_id, direction, amount')
+      .eq('organization_id', orgId)
+      .eq('period_id', periodId)
+      .lt('entry_date', journalDate)
+      .eq('record_status', 'accepted')
+      .is('superseded_by', null)
+      .lte('created_at', aggregatedAt)
+      .order('id')
+      .range(from, to),
+    (r) => ({
+      journalDate,
+      accountId: r.account_id as string,
+      debit: r.direction === 'debit' ? String(r.amount) : '0',
+      credit: r.direction === 'credit' ? String(r.amount) : '0',
+    }),
+  );
 }
 
 /**

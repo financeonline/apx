@@ -1,6 +1,6 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { varianceKey } from '@/modules/financial-engine';
+import { ENGINE_VERSION, varianceKey } from '@/modules/financial-engine';
 import { metricAvailability, type AvailabilityInput } from '@/modules/financials';
 import {
   loadHealthCard, loadHealthHistory, summarySentence,
@@ -243,10 +243,11 @@ export async function loadHome(
   options: LoadHomeOptions = {},
 ): Promise<HomeState> {
   const suspended = options.suspended === true;
-  const [periods, withData, recalculating, lastData, hasRecords] = await Promise.all([
+  const [periods, withData, jobRunning, figuresEngine, lastData, hasRecords] = await Promise.all([
     repo.loadPeriods(db, orgId, requestId),
     repo.loadPeriodsWithData(db, orgId, requestId),
     repo.isRecalculating(db, orgId, requestId),
+    repo.loadFiguresEngineVersion(db, orgId, requestId),
     repo.loadLastDataDate(db, orgId, requestId),
     /*
      * The frozen Home (ADR-068): a suspended member cannot read a single record, so the question
@@ -256,6 +257,14 @@ export async function loadHome(
      */
     suspended ? Promise.resolve(true) : repo.hasAcceptedRecords(db, orgId, requestId),
   ]);
+
+  /*
+   * ADR-124 D-6: figures an earlier engine version computed are not current. Until the engine-upgrade
+   * recalculation replaces them they stay on screen — a stale number with a warning serves a reader
+   * better than a blank page (§7.1) — but under the same "Updating your numbers" banner a running
+   * recalculation gets, never as if they were today's.
+   */
+  const recalculating = jobRunning || (figuresEngine !== null && figuresEngine !== ENGINE_VERSION);
 
   /*
    * The first-run test is about RECORDS, not snapshots (ADR-058.8).

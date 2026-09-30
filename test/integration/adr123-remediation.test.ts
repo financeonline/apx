@@ -77,9 +77,10 @@ describe('F-1 · a missing statement month restarts the cash chain at the next s
 });
 
 describe('F-2 · only a statement that starts ON a period start opens that period', () => {
-  it('July — whose only statement began on 21 June — has an unknown opening, not a verified 10,000', () => {
-    expect(headline(o('MIDSTART'), '2026-07-01', 'closing_cash')?.value).toBeNull();
-    expect(headline(o('MIDSTART'), '2026-07-01', 'closing_cash')?.missing).toContain('no_opening_cash');
+  it('July — whose only statement began on 21 June — opens at the truth, 5,000, not a verified 10,000', () => {
+    // ADR-123 could only make July unknown. ADR-124 D-1 chains S1's printed 10,000 (the close of 31 May)
+    // through S1 and S2, which together cover every day: 1 July = 5,000, July closes at 5,500.
+    expect([v('MIDSTART', '2026-07-01', 'opening_cash'), v('MIDSTART', '2026-07-01', 'closing_cash')]).toEqual(['5000.00', '5500.00']);
   });
 
   it('August restarts at its own statement\'s printed 5,500 and closes at the truth, 5,600', () => {

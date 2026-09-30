@@ -409,6 +409,26 @@ export interface CashView {
   readonly accounts: readonly CashAccountView[];
   /** True when at least one account has no opening balance, so cash cannot be stated (CD-06). */
   readonly openingBalanceMissing: boolean;
+  /**
+   * The accounts whose balance the engine could not establish this month, by name (ADR-124 D-2):
+   * cash is unknown until a statement or an opening balance states them. Read from the figure's own
+   * record of what it is missing — never worked out here.
+   */
+  readonly missingAccounts: readonly string[];
+}
+
+/** The account names a cash figure recorded as missing (`components.missing_bank_accounts`). */
+function missingAccountNames(byKey: ReadonlyMap<string, SnapshotRow>): string[] {
+  const names = new Set<string>();
+  for (const key of ['opening_cash', 'closing_cash']) {
+    const listed = byKey.get(key)?.components.missing_bank_accounts;
+    if (!Array.isArray(listed)) continue;
+    for (const entry of listed) {
+      const name = (entry as { name?: unknown }).name;
+      if (typeof name === 'string' && name.trim() !== '') names.add(name);
+    }
+  }
+  return [...names].sort((a, b) => a.localeCompare(b));
 }
 
 /** The masked reference a person recognises their account by. Never an unmasked number. */
@@ -450,6 +470,7 @@ export async function loadCash(
     }),
     accounts,
     openingBalanceMissing: accounts.some((a) => a.needsOpeningBalance),
+    missingAccounts: missingAccountNames(byKey),
   };
 }
 

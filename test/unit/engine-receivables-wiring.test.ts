@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  composePeriod, computeCash, computeCoverage, ENGINE_VERSION, invoiceOutstandingAt, invoiceSideCoverage,
-  type AccountRef, type AggregateCell, type AgingInvoice, type BankAccountRef, type CoverageBatch,
-  type EngineContext, type MetricResult, type OpeningCashCandidate, type PeriodRef, type ReceivablesComposeInput,
+  buildCashHistory, composePeriod, computeCash, computeCoverage, ENGINE_VERSION, invoiceOutstandingAt, invoiceSideCoverage,
+  type AccountRef, type AggregateCell, type AgingInvoice, type BankAccountRef, type CoverageBatch, type DailyMovement,
+  type EngineContext, type MetricResult, type PeriodRef, type ReceivablesComposeInput, type StatementRef,
 } from '@/modules/financial-engine';
 
 /**
@@ -65,6 +65,19 @@ const cell = (over: Partial<AggregateCell>): AggregateCell => ({
 
 const noLedger = null;
 
+/** A bank statement batch as the per-account history reads it (ADR-124). */
+const statementOf = (b: CoverageBatch, over: Partial<StatementRef> = {}): StatementRef => ({
+  batchId: b.id, bankAccountId: b.bankAccountId!, periodStart: b.periodStart, periodEnd: b.periodEnd,
+  committedAt: b.committedAt, openingBalance: null, closingBalance: null, unreconciled: false, ...over,
+});
+
+/** August's state of every cash-like account, from the per-account history the run builds (ADR-124). */
+function cashAccountsFor(
+  bankAccounts: readonly BankAccountRef[], statements: readonly StatementRef[], movements: readonly DailyMovement[] = [],
+) {
+  return buildCashHistory({ bankAccounts, statements, movements, periods: [jun, jul, aug] }).get(aug.id) ?? [];
+}
+
 function compose(
   receivables: Partial<ReceivablesComposeInput>,
   cells: readonly AggregateCell[] = [],
@@ -76,8 +89,10 @@ function compose(
     period: aug, batches: batchesForCoverage, bankAccounts: ctx.bankAccounts,
     rowCounts: { ledger: cells.filter((c) => c.source === 'ledger' && c.periodId === aug.id).length }, asOf: ctx.asOf,
   });
+  const statements = batchesForCoverage.filter((b) => b.targetTable === 'bank_transactions').map((b) => statementOf(b));
   return composePeriod({
     period: aug, coverage, cells, transferLegs: [], context: ctx,
+    cashAccounts: cashAccountsFor(ctx.bankAccounts, statements),
     receivables: {
       invoices: [], batches: [], asOfIsPeriodEnd: true, priorDenominators: [], ledger: noLedger, ...receivables,
     },
@@ -118,7 +133,7 @@ describe('the AR/AP invoice test is per side, and "after" means after (§2.2, AD
   it('F-9 · a list uploaded DURING the current month covers it', () => {
     const sep: PeriodRef = { ...aug, id: 'p-sep', periodStart: '2026-09-01', periodEnd: '2026-09-30', label: 'Sep 2026', isComplete: false };
     const midMonth = batch({ periodStart: '2026-06-01', periodEnd: '2026-09-10', committedAt: '2026-09-10T10:00:00Z' });
-    expect(invoiceSideCoverage([midMonth], sep, 'sales').covers).toBe(true);
+    expect(invoiceSideCoverage([midMonth], sep, 'sales', true).covers).toBe(true);
   });
 
   it('never covers a period with a list committed BEFORE it ended', () => {
@@ -247,7 +262,7 @@ describe('receivables from the ledger (ADR-027.3 item 3)', () => {
   it('is opening journal + every movement to P, and its evidence names every period it summed', () => {
     const results = compose({
       batches: [gl],
-      ledger: { cells: ledgerCells, openingJournal: [{ accountId: 'a-ar', periodId: jun.id, debit: '5000', credit: '0' }], periodStarts },
+      ledger: { cells: ledgerCells, openingJournal: [{ accountId: 'a-ar', periodId: jun.id, entryDate: '2026-06-01', debit: '5000', credit: '0' }], periodStarts },
     }, ledgerCells, {}, [gl]);
     // 9,000 − 3,000 (June, including the 5,000 opening line) + 2,000 − 6,000 = 2,000
     const ar = metric(results, 'receivables');
@@ -261,7 +276,7 @@ describe('receivables from the ledger (ADR-027.3 item 3)', () => {
 
   it('starts at the journal: movements before it are already inside it, and a month before it has no opening', () => {
     // The journal is posted in AUGUST; June's movements (+6,000) predate it and must not be added.
-    const journal = [{ accountId: 'a-ar', periodId: aug.id, debit: '5000', credit: '0' }];
+    const journal = [{ accountId: 'a-ar', periodId: aug.id, entryDate: '2026-08-01', debit: '5000', credit: '0' }];
     const augCells = [...ledgerCells, cell({ periodId: aug.id, source: 'ledger', accountId: 'a-ar', standardCategory: 'receivables', balanceKind: null, balanceBasis: null, debit: '5000', credit: '0' })];
     const results = compose({ batches: [gl], ledger: { cells: augCells, openingJournal: journal, periodStarts } }, augCells, {}, [gl]);
     // August: journal 5,000 + (2,000 − 6,000) = 1,000 — June's 6,000 is not counted again.
@@ -271,7 +286,7 @@ describe('receivables from the ledger (ADR-027.3 item 3)', () => {
   it('a month the GL export only partly reaches is not a stated balance', () => {
     const results = compose({
       batches: [], // no declared GL range spans August: rows alone make it a partial month
-      ledger: { cells: ledgerCells, openingJournal: [{ accountId: 'a-ar', periodId: jun.id, debit: '5000', credit: '0' }], periodStarts },
+      ledger: { cells: ledgerCells, openingJournal: [{ accountId: 'a-ar', periodId: jun.id, entryDate: '2026-06-01', debit: '5000', credit: '0' }], periodStarts },
     }, ledgerCells, {}, []);
     expect(metric(results, 'receivables').value).toBeNull();
   });
@@ -316,99 +331,99 @@ describe('working capital (§3.4, ADR-120)', () => {
   });
 });
 
-describe('the runway window reads only months a statement fully stated (ADR-120)', () => {
+describe('the runway window reads only months a statement fully stated (ADR-120, ADR-124)', () => {
   const accounts: BankAccountRef[] = [{ id: 'ba', name: 'Main', accountType: 'current', openingBalance: '9000.00', openingBalanceDate: '2026-05-31', isActive: true }];
   const movement = (p: PeriodRef, outflow: string) => ({
     ...cell({ periodId: p.id, source: 'bank', bankAccountId: 'ba', balanceKind: null, balanceBasis: null, credit: outflow }),
     source: 'bank' as const, bankAccountId: 'ba', transferKind: 'none' as const, unpairedTransferCandidate: false,
   });
-  const input = (p: PeriodRef, covered: readonly string[]) => ({
-    period: p,
-    basis: { basis: 'bank' as const, assurance: 'verified' as const, warnings: [], proxy: false },
-    movements: [movement(p, '1000')],
-    openingCandidates: [{ bankAccountId: 'ba', source: 'bank_account_opening_balance' as const, value: '9000.00', asAtDate: '2026-05-31' }],
-    coveredBankAccountIds: covered,
-  });
+  const months = (covered: readonly PeriodRef[]) => {
+    const history = buildCashHistory({
+      bankAccounts: accounts,
+      statements: covered.map((p) => ({ batchId: `s-${p.id}`, bankAccountId: 'ba', periodStart: p.periodStart, periodEnd: p.periodEnd, committedAt: '2026-09-01T00:00:00Z', openingBalance: null, closingBalance: null, unreconciled: false })),
+      movements: [jun, jul, aug].map((p) => ({ bankAccountId: 'ba', date: `${p.periodStart.slice(0, 8)}10`, amount: '-1000' })),
+      periods: [jun, jul, aug],
+    });
+    return (p: PeriodRef) => ({ period: p, movements: [movement(p, '1000')], accounts: history.get(p.id)! });
+  };
 
   it('three fully covered months give a runway', () => {
-    const series = computeCash(context({ bankAccounts: accounts }), [input(jun, ['ba']), input(jul, ['ba']), input(aug, ['ba'])]);
+    const input = months([jun, jul, aug]);
+    const series = computeCash(context({ bankAccounts: accounts }), [input(jun), input(jul), input(aug)]);
     const runway = series[2]!.metrics.find((m) => m.key === 'cash_runway_months')!;
     expect(runway.value).toBe('6.000000'); // 6,000 / 1,000
   });
 
   it('a month with no statement makes the runway unknown instead of reading a 0.00 burn', () => {
-    const series = computeCash(context({ bankAccounts: accounts }), [input(jun, ['ba']), input(jul, []), input(aug, ['ba'])]);
+    const input = months([jun, aug]);
+    const series = computeCash(context({ bankAccounts: accounts }), [input(jun), input(jul), input(aug)]);
     const runway = series[2]!.metrics.find((m) => m.key === 'cash_runway_months')!;
     expect(runway.value).toBeNull();
     expect(runway.dataQuality.missing).toContain('insufficient_history');
   });
 
   it('a carried-in month that was not fully stated arrives as unknown', () => {
-    const series = computeCash(context({ bankAccounts: accounts }), [input(aug, ['ba'])], {
-      openingCarry: { value: '7000.00', basis: 'bank', assurance: 'verified', missing: [], coveredBankAccountIds: ['ba'] },
-      priorNetMovements: [null, '-1000.00'],
-    });
+    const input = months([jun, jul, aug]);
+    const series = computeCash(context({ bankAccounts: accounts }), [input(aug)], { priorNetMovements: [null, '-1000.00'] });
     const aug0 = series[0]!.metrics;
     expect(aug0.find((m) => m.key === 'opening_cash')!.value).toBe('7000.00');
     expect(aug0.find((m) => m.key === 'cash_runway_months')!.value).toBeNull();
   });
 });
 
-describe('opening cash: the statement\'s own opening balance comes first (CD-06, ADR-120 hardening)', () => {
+describe('opening cash: the statement\'s own opening balance comes first (CD-06, ADR-120 hardening, ADR-124)', () => {
   const bank: BankAccountRef = { id: 'ba', name: 'Main', accountType: 'current', openingBalance: '5000.00', openingBalanceDate: '2026-07-31', isActive: true };
   const statement = batch({ targetTable: 'bank_transactions', importType: 'bank_statement', bankAccountId: 'ba', invoiceListKind: null, periodStart: '2026-08-01', periodEnd: '2026-08-31' });
-  const run = (statementOpenings: readonly OpeningCashCandidate[]) => {
+  const run = (printedOpening: string | null) => {
     const ctx = context({ bankAccounts: [bank] });
     const coverage = computeCoverage({ period: aug, batches: [statement], bankAccounts: [bank], rowCounts: {}, asOf: ctx.asOf });
-    return composePeriod({ period: aug, coverage, cells: [], transferLegs: [], context: ctx, coveredBankAccountIds: ['ba'], statementOpenings });
+    return composePeriod({ period: aug, coverage, cells: [], transferLegs: [], context: ctx,
+      cashAccounts: cashAccountsFor([bank], [statementOf(statement, { openingBalance: printedOpening })]) });
   };
 
   it('uses the statement\'s opening balance over the one typed on the account, and rates it verified', () => {
-    const results = run([{ bankAccountId: 'ba', source: 'statement_opening_balance', value: '5200.00', asAtDate: '2026-08-01' }]);
+    const results = run('5200.00');
     expect(metric(results, 'opening_cash').value).toBe('5200.00');
     expect(metric(results, 'opening_cash').assurance).toBe('verified');
   });
 
   it('falls back to the typed balance when no statement states one', () => {
-    const results = run([]);
+    const results = run(null);
     expect(metric(results, 'opening_cash').value).toBe('5000.00');
     expect(metric(results, 'opening_cash').assurance).toBe('calculated');
   });
 });
 
-describe('the chain restart takes only a balance stated exactly at the period start (ADR-123, F-1/F-2)', () => {
+describe('an opening is a balance stated exactly at the boundary, or the chain through covered days (ADR-123, ADR-124)', () => {
   const statement = batch({ targetTable: 'bank_transactions', importType: 'bank_statement', bankAccountId: 'ba', invoiceListKind: null, periodStart: '2026-08-01', periodEnd: '2026-08-31' });
-  const run = (bank: BankAccountRef, over: Partial<Parameters<typeof composePeriod>[0]> = {}) => {
+  const run = (bank: BankAccountRef, over: Partial<StatementRef> = {}) => {
     const ctx = context({ bankAccounts: [bank] });
     const coverage = computeCoverage({ period: aug, batches: [statement], bankAccounts: [bank], rowCounts: {}, asOf: ctx.asOf });
-    return composePeriod({ period: aug, coverage, cells: [], transferLegs: [], context: ctx, coveredBankAccountIds: ['ba'], ...over });
+    return composePeriod({ period: aug, coverage, cells: [], transferLegs: [], context: ctx,
+      cashAccounts: cashAccountsFor([bank], [statementOf(statement, over)]) });
   };
   const typedLongAgo: BankAccountRef = { id: 'ba', name: 'Main', accountType: 'current', openingBalance: '10000.00', openingBalanceDate: '2026-05-31', isActive: true };
 
-  it('refuses a typed balance from months earlier on a restart — unknown, not a stale figure', () => {
-    const results = run(typedLongAgo, { openingExactOnly: true });
+  it('refuses a typed balance from months earlier across uncovered months — unknown, not a stale figure', () => {
+    const results = run(typedLongAgo);
     expect(metric(results, 'opening_cash').value).toBeNull();
-    expect(metric(results, 'opening_cash').dataQuality.missing).toContain('no_opening_cash');
+    // The balance was stated (31 May); June and July are what nothing covers.
+    expect(metric(results, 'opening_cash').dataQuality.missing).toEqual(['no_source_covers_period']);
   });
 
-  it('accepts a typed balance dated the day before the restart', () => {
-    const results = run({ ...typedLongAgo, openingBalanceDate: '2026-07-31' }, { openingExactOnly: true });
+  it('accepts a typed balance dated the day before the period', () => {
+    const results = run({ ...typedLongAgo, openingBalanceDate: '2026-07-31' });
     expect(metric(results, 'opening_cash').value).toBe('10000.00');
   });
 
   it('accepts the statement that starts that day, and prefers it', () => {
-    const results = run(typedLongAgo, {
-      openingExactOnly: true,
-      statementOpenings: [{ bankAccountId: 'ba', source: 'statement_opening_balance', value: '4000.00', asAtDate: '2026-08-01' }],
-    });
+    const results = run(typedLongAgo, { openingBalance: '4000.00' });
     expect(metric(results, 'opening_cash').value).toBe('4000.00');
     expect(metric(results, 'opening_cash').assurance).toBe('verified');
   });
 
   it('the printed closing cross-checks the computed close; a mismatch is flagged, not overwritten', () => {
-    const results = run({ ...typedLongAgo, openingBalanceDate: '2026-07-31' }, {
-      statementClosing: [{ bankAccountId: 'ba', balanceAfter: '9000.00' }],
-    });
+    const results = run({ ...typedLongAgo, openingBalanceDate: '2026-07-31' }, { closingBalance: '9000.00' });
     const closing = metric(results, 'closing_cash');
     expect(closing.value).toBe('10000.00');
     expect(closing.dataQuality.warnings).toContain('statement_balance_mismatch');
@@ -416,7 +431,7 @@ describe('the chain restart takes only a balance stated exactly at the period st
   });
 
   it('a statement that did not reconcile at import marks the month', () => {
-    const results = run({ ...typedLongAgo, openingBalanceDate: '2026-07-31' }, { unreconciledStatement: true });
+    const results = run({ ...typedLongAgo, openingBalanceDate: '2026-07-31' }, { unreconciled: true });
     expect(metric(results, 'closing_cash').dataQuality.warnings).toContain('unreconciled_statement');
   });
 });

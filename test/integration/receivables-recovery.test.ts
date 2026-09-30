@@ -2,6 +2,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Decimal } from '@/core/money';
 import { permissionsFor } from '@/core/permissions';
 import { resolveDescriptor } from '@/modules/evidence';
+import { ENGINE_VERSION } from '@/modules/financial-engine';
 import type { AccessContext } from '@/modules/tenancy';
 import {
   AS_OF, calculateAndAlert, headline, seedAdr120Orgs, type FixtureKey,
@@ -50,7 +51,8 @@ describe('K/L · the figures come from a real calculation run, not from inserted
     const rows = adminSql(`select distinct r.status || '|' || r.engine_version
       from public.metric_snapshots s join public.calculation_runs r on r.id = s.calculation_run_id and r.organization_id = s.organization_id
       where s.organization_id = '${org.INVBANK}' and s.metric_key in ('receivables', 'payables', 'working_capital')`).trim();
-    expect(rows).toBe('succeeded|2.0.0');
+    // The version the test asserts is the deployed one, never a literal a bump silently leaves behind (ADR-124 D-6).
+    expect(rows).toBe(`succeeded|${ENGINE_VERSION}`);
   });
 });
 
@@ -169,7 +171,9 @@ describe('history first, banking later — and the statement\'s own opening bala
     for (const month of ['2026-03-01', '2026-04-01', '2026-05-01']) {
       const closing = headline(org.HISTORY, month, 'closing_cash')!;
       expect(closing.value, month).toBeNull();
-      expect(closing.missing, month).toContain('no_opening_cash');
+      // ADR-124 D-2: the account starts with its first statement (it has no typed balance), so nothing
+      // covers these months at all — §2.3's reason, where ADR-120 said "no opening balance".
+      expect(closing.missing, month).toEqual(['no_source_covers_period']);
     }
   });
 

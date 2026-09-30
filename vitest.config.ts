@@ -106,6 +106,19 @@ export default defineConfig({
           setupFiles: ['test/integration/setup.ts'],
         },
       },
+      {
+        resolve: { alias },
+        test: {
+          // ADR-124: the engine regression record — a tool run on demand (`npm run engine:compare`),
+          // not part of the integration gate. It seeds 27 organisations and takes several minutes.
+          name: 'regression',
+          include: ['test/regression/**/*.test.ts'],
+          environment: 'node',
+          testTimeout: 3_600_000,
+          hookTimeout: 180_000,
+          setupFiles: ['test/integration/setup.ts'],
+        },
+      },
     ],
   },
 });

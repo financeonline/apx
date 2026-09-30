@@ -24,7 +24,7 @@ import type {
  * descriptor can be asserted — and asserted to be identical twice — without a database.
  */
 
-export type FilterOp = 'eq' | 'neq' | 'in' | 'lt' | 'lte' | 'gt' | 'isNull';
+export type FilterOp = 'eq' | 'neq' | 'in' | 'lt' | 'lte' | 'gt' | 'gte' | 'isNull';
 
 export interface CompiledFilter {
   readonly column: string;
@@ -132,7 +132,7 @@ const TABLES: Record<DescriptorTable, TableSpec> = {
       'direction', 'amount', 'currency', 'description', 'reference', 'record_status',
       'assurance_level', 'superseded_by',
     ],
-    filters: ['period_ids', 'account_ids', 'counterparty_ids', 'direction'],
+    filters: ['period_ids', 'account_ids', 'counterparty_ids', 'direction', 'entry_date_from'],
     orderColumns: ['id', 'entry_date', 'amount', 'created_at'],
     // Unsigned: the sign lives in `direction` (see the ledger_entries table comment). Σ amount is
     // therefore Σ magnitude, which is what a direction-filtered driver list reconciles to.
@@ -208,6 +208,7 @@ const FILTER_ORDER: readonly DescriptorFilterKey[] = [
   'open_as_of',
   'overdue_as_of',
   'balance_kind',
+  'entry_date_from',
   'metric_keys',
   'dimension',
 ];
@@ -290,6 +291,9 @@ function compileFilter(
       return;
     case 'balance_kind':
       if (f.balance_kind) filters.add({ column: 'balance_kind', op: 'eq', value: f.balance_kind });
+      return;
+    case 'entry_date_from':
+      if (f.entry_date_from) filters.add({ column: 'entry_date', op: 'gte', value: f.entry_date_from });
       return;
     case 'counterparty_ids':
       if (f.counterparty_ids) {

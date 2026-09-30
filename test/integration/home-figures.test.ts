@@ -3,6 +3,7 @@ import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
 import {
   formatValue, latestCompletePeriodByFlag, loadHome, loadPeriodSnapshots, loadTrend, partialPeriod,
 } from '@/modules/dashboard';
+import { ENGINE_VERSION } from '@/modules/financial-engine';
 import { adminSql, clientFor, createAuthUser, resetFixtures } from './setup';
 
 /**
@@ -31,7 +32,7 @@ function writeMetric(periodId: string, key: string, value: string | null, over: 
   const runId = over.runId ?? one(`
     insert into public.calculation_runs
            (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-    values ('${orgId}', 'recalc_manual', '1.0.0', '${periodId}', '${periodId}', '2026-06-15', 'succeeded')
+    values ('${orgId}', 'recalc_manual', '${ENGINE_VERSION}', '${periodId}', '${periodId}', '2026-06-15', 'succeeded')
     returning id`);
 
   const snapshotId = one(`

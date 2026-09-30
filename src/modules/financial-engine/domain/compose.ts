@@ -12,9 +12,9 @@
 import { Decimal, parseDecimalOrNull } from '@/core/money';
 import { invoiceSignFor, ledgerAmount, naturalToReporting } from './sign';
 import {
-  computeCash, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions, type OpeningCashCandidate,
-  type StatementClosingBalance,
+  computeCash, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions,
 } from './cash';
+import type { AccountPeriodState } from './cash-history';
 import type { TransferKind } from '@/modules/banking';
 import { computeConcentration, type ConcentrationPeriodInput } from './concentration';
 import { computeReceivables } from './receivables';
@@ -54,34 +54,12 @@ export interface ComposeInput {
    */
   readonly receivables?: ReceivablesComposeInput;
   /**
-   * The cash-like accounts a committed statement actually covers in this period (§2.2), supplied by
-   * the run (ADR-120). Omitted, every active cash-like account is treated as covered — the old
-   * default, under which a month with no statement reported a known 0.00 movement at completeness 1,
-   * which the runway window (now fed three months) read as a real month of no burn.
+   * Every cash-like account's state in this period, from the per-account history the run builds
+   * (`buildCashHistory`, ADR-124): scope, coverage, the balance at each end and the cross-checks.
+   * Omitted, no account is in scope, so cash is unknown — never a guess, and never the old default
+   * under which a month with no statement reported a known 0.00 movement (ADR-120).
    */
-  readonly coveredBankAccountIds?: readonly string[];
-  /**
-   * Statement opening balances the run found eligible (ADR-120 hardening): CD-06's FIRST source,
-   * ahead of the balance typed on the account. The domain's precedence (`pickCandidate`) chooses.
-   */
-  readonly statementOpenings?: readonly OpeningCashCandidate[];
-  /**
-   * The chain RESTARTS at this period (ADR-123, audit F-1): the month before was not fully stated, or
-   * its close is unknown, so its close is no opening. Only a balance stated exactly at P's start may
-   * open it — a statement's printed opening (already exact in `statementOpenings`) or a balance typed
-   * on the account dated the day before. A typed balance from months earlier is not.
-   */
-  readonly openingExactOnly?: boolean;
-  /** Printed closing balances of statements ending on P's last day (the §3.3 cross-check, FU-4). */
-  readonly statementClosing?: readonly StatementClosingBalance[];
-  /** A statement covering P did not add up to its printed balances at import (IMP-BAL-006/007). */
-  readonly unreconciledStatement?: boolean;
-}
-
-/** `YYYY-MM-DD` minus one day. */
-function dayBefore(date: string): string {
-  const t = Date.parse(`${date}T00:00:00Z`) - 86_400_000;
-  return new Date(t).toISOString().slice(0, 10);
+  readonly cashAccounts?: readonly AccountPeriodState[];
 }
 
 /** The aggregate source each basis reads from. */
@@ -459,28 +437,10 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
   results.push(...computePnl(pnlInput, context, resolve));
 
   // ---- Cash ----
-  const cashBasis = choosePrecedence(coverage, 'cash');
   const cashInput: CashPeriodInput = {
     period,
-    basis: cashBasis,
     movements: bankMovements(cells, period.id, context.bankAccounts),
-    openingCandidates: [
-      ...(input.statementOpenings ?? []),
-      ...context.bankAccounts
-        .filter((a) => a.openingBalance !== null && isCashLikeBankAccount(a.accountType))
-        .filter((a) => !input.openingExactOnly || a.openingBalanceDate === dayBefore(period.periodStart))
-        .map((a) => ({
-          bankAccountId: a.id,
-          source: 'bank_account_opening_balance' as const,
-          value: a.openingBalance!,
-          asAtDate: a.openingBalanceDate,
-        })),
-    ],
-    ...(input.statementClosing !== undefined ? { statementClosing: input.statementClosing } : {}),
-    ...(input.unreconciledStatement !== undefined ? { unreconciledStatement: input.unreconciledStatement } : {}),
-    coveredBankAccountIds: input.coveredBankAccountIds ?? context.bankAccounts
-      .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType))
-      .map((a) => a.id),
+    accounts: input.cashAccounts ?? [],
   };
   const cashSeries = computeCash(context, [cashInput], input.cashOptions ?? {});
   for (const periodMetrics of cashSeries) {

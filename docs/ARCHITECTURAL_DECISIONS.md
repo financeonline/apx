@@ -2085,7 +2085,7 @@ Context: the independent audit of ADR-120 (`docs/ADR-120_INDEPENDENT_AUDIT.md`, 
 
 
 ### ADR-124 · Second ADR-120 remediation: per-account cash balances, period-aware AR/AP freshness, dated opening journals
-Status: **PROPOSED — awaiting the product owner's approval of D-1…D-6. No code has been written.** Phase 16 not started.
+Status: **APPROVED by the product owner (2026-09-30) and IMPLEMENTED — engine 3.0.0.** Implementation record, tests, gates and the 27-organisation Health/alert regression record: `docs/ADR-124.md`. Not independently audited: by the owner's process decision the comprehensive independent audit follows once the remaining approved phases are built. Phase 16 not started.
 
 **Context.** The second independent audit of `8493362` (`docs/ADR-120_SECOND_INDEPENDENT_AUDIT.md`) returned **NOT READY**. Blocking:
 - **HIGH:** N-1 and N-2.
@@ -2182,8 +2182,12 @@ Expected outcomes on the audit's reproductions:
 - FINANCIAL_ENGINE §6: the version rule.
 - EVIDENCE_MODEL: the `entry_date_from` filter.
 
-**Order of work:**
-1. Owner approves D-1 to D-6 (or amends them).
-2. Implement, with a regression test for every N-finding, run on a clean database with all gates run in sequence.
-3. Commit and push.
-4. **Third independent audit.** Phase 16 stays blocked until an audit returns READY.
+**Order of work (as amended by the owner at approval):** build → test → regression-verify → document → commit. No separate independent audit of ADR-124 now; it is included in the comprehensive audit after the remaining approved phases. Phase 16 is still not started.
+
+**As implemented — where it refines the approved text** (details in `docs/ADR-124.md`):
+- *D-1:* the chain is day-level — a run of consecutive covered days starts at its earliest anchor (a printed opening or closing, or the typed balance, each at the close of a day) — so a statement cycle that is not calendar-aligned carries (P-2) and "exactly at P's start" is simply the anchor dated the day before. No cash figure is read back from a previous run.
+- *D-2:* an account joining mid-month brings its balance of the day before it starts into that month's opening.
+- *D-3:* the approved rule, applied consistently: an `open_items` list states a completed month only when its as-at date (range end) is that month's end, whether or not its range spans the month.
+- *D-4:* implemented as proposed (date-aware), not the NULL fallback.
+- *D-5:* without the invoice population (no `openInvoices`), a net share above 100 % is withheld rather than stated.
+- *D-6:* the sweep keys on the LATEST succeeded run; Home shows figures from another engine version under "Updating your numbers"; the golden hash test enforces the bump.

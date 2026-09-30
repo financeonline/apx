@@ -33,10 +33,10 @@ import {
 } from '@/core/money';
 import { monthsBetween, yearMonthOf } from '@/core/periods';
 import type { BankAccountType, TransferKind } from '@/modules/banking';
+import type { AccountPeriodState } from './cash-history';
 import type {
   AggregateCell,
   AssuranceLevel,
-  BasisChoice,
   DataQuality,
   DataQualityMissing,
   DataQualityWarning,
@@ -45,7 +45,6 @@ import type {
   LeafDescriptor,
   MetricBasis,
   MetricResult,
-  MetricUnit,
   PeriodRef,
 } from './types';
 
@@ -190,66 +189,22 @@ export interface BankAggregateCell extends AggregateCell {
   readonly unpairedTransferCandidate: boolean;
 }
 
-/** Where an opening balance came from, in CD-06 precedence order. */
-export const OPENING_CASH_SOURCES = [
-  'statement_opening_balance',
-  'bank_account_opening_balance',
-  'balance_sheet_prior_period',
-  'opening_balance_journal',
-] as const;
-export type OpeningCashSource = (typeof OPENING_CASH_SOURCES)[number];
-
-/**
- * A stated opening balance for one cash-like account.
- *
- * `statement_opening_balance` is `import_batches.statement_opening_balance` — the figure captured
- * deterministically from the statement at import, **never** an AI-read value on its own (CD-06). The
- * loader is responsible for not offering one that came from an unconfirmed extraction.
- */
-export interface OpeningCashCandidate {
-  readonly bankAccountId: string;
-  readonly source: OpeningCashSource;
-  readonly value: string;
-  /** The date the balance is stated as at; a candidate later than `P.period_start` is not eligible. */
-  readonly asAtDate: string | null;
-}
-
-/** `balance_after` on the last transaction of P for one account, for the closing cross-check. */
-export interface StatementClosingBalance {
-  readonly bankAccountId: string;
-  readonly balanceAfter: string;
-}
-
 export interface CashPeriodInput {
   readonly period: PeriodRef;
-  /** The cash family's precedence outcome for this period (§2.3). */
-  readonly basis: BasisChoice;
   readonly movements: readonly BankAggregateCell[];
-  /** Every opening balance available for this period, in any order. */
-  readonly openingCandidates: readonly OpeningCashCandidate[];
-  /** Active cash-like accounts with a statement covering P (§2.2). */
-  readonly coveredBankAccountIds: readonly string[];
-  /** Present only when every covered account's last transaction carries `balance_after`. */
-  readonly statementClosing?: readonly StatementClosingBalance[];
-  /** A statement batch that could not be reconciled at import (`IMP-BAL-007`). */
-  readonly unreconciledStatement?: boolean;
-}
-
-/** `closing_cash` of the period before the first input — chunked runs read it from `metric_current`. */
-export interface CashCarry {
-  readonly value: string | null;
-  readonly basis: MetricBasis;
-  readonly assurance: AssuranceLevel;
-  readonly missing: readonly DataQualityMissing[];
-  /** Accounts already covered before the first input period, so mid-history joiners are detected. */
-  readonly coveredBankAccountIds?: readonly string[];
+  /**
+   * Every cash-like account's state in this period — in scope or not — from the per-account history
+   * (`cash-history.ts`, ADR-124). The balances, the coverage and the cross-checks all come from it;
+   * this module only sums them and states what is missing.
+   */
+  readonly accounts: readonly AccountPeriodState[];
 }
 
 export interface CashSeriesOptions {
-  readonly openingCarry?: CashCarry | null;
   /**
-   * `net_cash_movement` of the periods immediately before the first input, oldest first. Runway
-   * needs three consecutive months, so a chunk boundary would otherwise lose two of them.
+   * `net_cash_movement` of the periods immediately before the first input, oldest first; NULL for a
+   * month whose movement was not stated. Runway needs three consecutive months, so a chunk boundary
+   * would otherwise lose two of them.
    */
   readonly priorNetMovements?: readonly (string | null)[];
 }
@@ -334,109 +289,6 @@ function totalMovements(
 }
 
 // ---------------------------------------------------------------------------------------------
-// Opening cash
-// ---------------------------------------------------------------------------------------------
-
-interface OpeningResolution {
-  readonly value: Decimal | null;
-  readonly basis: MetricBasis;
-  readonly assurance: AssuranceLevel;
-  readonly perAccount: ReadonlyArray<{ account_id: string; source: string; value: string | null }>;
-  readonly missingAccounts: readonly string[];
-}
-
-const OPENING_SOURCE_BASIS: Readonly<Record<OpeningCashSource, MetricBasis>> = {
-  statement_opening_balance: 'bank',
-  bank_account_opening_balance: 'bank',
-  balance_sheet_prior_period: 'period_balances',
-  opening_balance_journal: 'ledger',
-};
-
-/**
- * §2.3 rates the cash family `verified` on bank data. Only the statement's own opening balance is
- * bank data; a figure somebody typed, a prior balance sheet or an opening journal are all a step
- * removed, so they degrade the balance to `calculated`.
- */
-const OPENING_SOURCE_ASSURANCE: Readonly<Record<OpeningCashSource, AssuranceLevel>> = {
-  statement_opening_balance: 'verified',
-  bank_account_opening_balance: 'calculated',
-  balance_sheet_prior_period: 'calculated',
-  opening_balance_journal: 'calculated',
-};
-
-/**
- * The CD-06 / ADR-027.3 chain, per account, in the order the document states it.
- *
- * A candidate stated later than the period start is not eligible: `bank_accounts.opening_balance` is
- * an opening balance only for a period starting on or after its `opening_balance_date`.
- */
-function pickCandidate(
-  candidates: readonly OpeningCashCandidate[],
-  bankAccountId: string,
-  periodStart: string,
-): OpeningCashCandidate | null {
-  const eligible = candidates.filter(
-    (candidate) =>
-      candidate.bankAccountId === bankAccountId &&
-      (candidate.asAtDate === null || candidate.asAtDate <= periodStart),
-  );
-  for (const source of OPENING_CASH_SOURCES) {
-    // Two candidates of the same source for the same account is a loader bug; sorting makes the
-    // choice deterministic rather than dependent on which row the database returned first.
-    const hits = [...eligible]
-      .filter((candidate) => candidate.source === source)
-      .sort((a, b) => a.value.localeCompare(b.value));
-    const first = hits[0];
-    if (first !== undefined) return first;
-  }
-  return null;
-}
-
-/**
- * Σ opening balance over the named accounts.
- *
- * If any of them has no stated opening balance the sum is NOT partially reported: an incomplete sum
- * of balances is a wrong balance, and §1.5 forbids filling the gap with zero. The accounts that are
- * missing are named in `components`, so "enter your opening balance" can name them.
- */
-function openingFor(
-  bankAccountIds: readonly string[],
-  candidates: readonly OpeningCashCandidate[],
-  periodStart: string,
-): OpeningResolution {
-  const perAccount: Array<{ account_id: string; source: string; value: string | null }> = [];
-  const missingAccounts: string[] = [];
-  const bases: MetricBasis[] = [];
-  let assurance: AssuranceLevel = 'verified';
-  let total = new Decimal(0);
-
-  for (const bankAccountId of [...bankAccountIds].sort()) {
-    const candidate = pickCandidate(candidates, bankAccountId, periodStart);
-    if (candidate === null) {
-      missingAccounts.push(bankAccountId);
-      perAccount.push({ account_id: bankAccountId, source: 'none', value: null });
-      continue;
-    }
-    total = total.plus(parseDecimal(candidate.value, 'opening_balance'));
-    bases.push(OPENING_SOURCE_BASIS[candidate.source]);
-    assurance = weakerAssurance(assurance, OPENING_SOURCE_ASSURANCE[candidate.source]);
-    perAccount.push({
-      account_id: bankAccountId,
-      source: candidate.source,
-      value: toMoneyString(candidate.value),
-    });
-  }
-
-  return {
-    value: missingAccounts.length > 0 ? null : total,
-    basis: combineBasis(bases),
-    assurance,
-    perAccount,
-    missingAccounts,
-  };
-}
-
-// ---------------------------------------------------------------------------------------------
 // The series
 // ---------------------------------------------------------------------------------------------
 
@@ -450,23 +302,30 @@ interface PeriodState {
   readonly completeness: number;
   readonly warnings: readonly DataQualityWarning[];
   /**
-   * Every active cash-like account's statement covers the period, so its net movement was STATED.
-   * A month with an uncovered account shows only the covered accounts' rows; its movement is a
-   * fragment, and runway's burn window must treat it as unknown rather than as a quiet month
-   * (ADR-120) — reading it as 0.00 makes a runway longer precisely because data is missing.
+   * Every in-scope cash-like account's statements cover every day of the period, so its net movement
+   * was STATED. A month with an uncovered day shows only a fragment of what moved, and runway's burn
+   * window must treat it as unknown rather than as a quiet month (ADR-120, ADR-124).
    */
   readonly movementKnown: boolean;
 }
 
+/** NULL is a real answer, not a zero; it is never `verified` and it is never complete (audit N-12). */
+const UNKNOWN_ASSURANCE: AssuranceLevel = 'calculated';
+
 /**
- * Compute the six cash metrics for every input period.
+ * Compute the six cash metrics for every input period (§3.3, ADR-124).
  *
- * The whole series is computed at once because three of the six are cross-period: `opening_cash(P)`
- * is `closing_cash(P−1)`, a missing opening balance has to poison every later closing balance, and
- * runway needs three consecutive months of movement. Computing a period at a time would either
- * re-derive that chain or, worse, silently restart it at zero.
+ * The balances are the per-account histories summed: `opening_cash(P)` is Σ each in-scope account's
+ * balance at the close of the day before P, `closing_cash(P)` Σ each account's opening plus its rows
+ * of P — published only when EVERY in-scope account's value is known, because a partial sum of
+ * balances is a wrong balance, not an approximate one (§1.5). The movements are the bank cells of P
+ * with ADR-028's transfer rule, published only when every in-scope account's statements cover every
+ * day of P: a month stated for the 1st to the 15th has no stated movement, and 0.00 or the half that
+ * was uploaded would both be inventions (audit N-1). Cash is bank data: a ledger or balance-sheet
+ * basis never lends a month a figure computed from bank rows.
  *
- * Inputs may arrive in any order; they are sorted by `period_start` before anything is computed.
+ * Nothing here carries anything from one period to the next except runway's burn window. The
+ * history already did the carrying, per account, from what the statements state.
  */
 export function computeCash(
   ctx: EngineContext,
@@ -481,260 +340,209 @@ export function computeCash(
   const accountTypeById = new Map<string, BankAccountType>(
     ctx.bankAccounts.map((account) => [account.id, account.accountType]),
   );
-  const activeCashLikeIds = ctx.bankAccounts
-    .filter((account) => account.isActive && isCashLike(account.accountType))
-    .map((account) => account.id)
-    .sort();
-
-  const carry = options.openingCarry ?? null;
-  const everCovered = new Set<string>(carry?.coveredBankAccountIds ?? []);
+  const anyActiveCashLike = ctx.bankAccounts.some((account) => account.isActive && isCashLike(account.accountType));
   const currency = ctx.settings.baseCurrency;
 
   const perPeriod: Array<{ state: PeriodState; metrics: MetricResult[] }> = [];
 
-  let previousClosing: Decimal | null = carry === null || carry.value === null
-    ? null
-    : parseDecimal(carry.value);
-  let previousBasis: MetricBasis = carry?.basis ?? 'none';
-  let previousAssurance: AssuranceLevel = carry?.assurance ?? 'verified';
-  let previousMissing: readonly DataQualityMissing[] = carry?.missing ?? [];
-  let isFirstPeriod = carry === null;
-
   for (const input of ordered) {
     const { period } = input;
-    const coveredCashLike = [...input.coveredBankAccountIds]
-      .filter((id) => {
-        const type = accountTypeById.get(id);
-        return type !== undefined && isCashLike(type);
-      })
-      .sort();
+    const inScope = [...input.accounts]
+      .filter((a) => a.inScope)
+      .sort((a, b) => a.bankAccountId.localeCompare(b.bankAccountId));
+    const inScopeIds = inScope.map((a) => a.bankAccountId);
+    const known = inScope.filter((a) => a.movementKnown);
 
-    // §2.2: bank coverage is per ACTIVE cash-like account. With none active there is nothing to
-    // cover, so the ratio is 1 rather than 0/0.
-    const coveredActive = activeCashLikeIds.filter((id) => coveredCashLike.includes(id));
-    const coverageRatio =
-      activeCashLikeIds.length === 0 ? 1 : coveredActive.length / activeCashLikeIds.length;
+    // §2.2: bank coverage is per in-scope cash-like account.
+    const coverageRatio = inScope.length === 0 ? (anyActiveCashLike ? 0 : 1) : known.length / inScope.length;
+    const movementKnown = inScope.length > 0 && known.length === inScope.length;
 
-    const warnings: DataQualityWarning[] = [...input.basis.warnings];
-    if (coverageRatio < 1) warnings.push('bank_coverage_partial');
-    if (input.unreconciledStatement === true) warnings.push('unreconciled_statement');
+    const warnings: DataQualityWarning[] = [];
+    if (inScope.length > 0 && !movementKnown && inScope.some((a) => a.anyDayCovered)) warnings.push('bank_coverage_partial');
+    if (inScope.some((a) => a.unreconciled)) warnings.push('unreconciled_statement');
 
     /*
      * §1.5, §2.3, ADR-104: an organisation with no cash-like bank account has no source from which
-     * cash can be established. A sum over zero accounts is not a known zero — it is nothing — and
-     * writing it as 0.00 with completeness 1 told a business whose statements were simply never
-     * uploaded that it had no money. Every metric of the family is NULL with `no_bank_accounts`,
-     * and a later period inherits it through the carried opening exactly as `no_opening_cash` does.
-     * An account that has since been closed still counts for the months a statement covered it.
+     * cash can be established. A sum over zero accounts is not a known zero — it is nothing. Every
+     * metric of the family is NULL with `no_bank_accounts`. An organisation whose accounts all start
+     * after P (D-2) has accounts, just none yet: nothing covers P. An account IN scope about which
+     * nothing is stated goes through the ordinary path below, so the reason names it.
      */
-    /*
-     * §2.3: "a period with no covering source for a family writes every metric of that family with
-     * value = NULL, basis = 'none', missing = ['no_source_covers_period']". The cash family did not:
-     * a month with no statement at all carried the previous close forward as if nothing happened,
-     * and the next month's alert read "cash fell from 9,000" off that invented July (ADR-123, audit
-     * F-1). Such a month is now unknown, and the run restarts the chain after it from a balance a
-     * statement states.
-     */
-    const noAccounts = activeCashLikeIds.length === 0 && coveredCashLike.length === 0;
-    if (noAccounts || input.basis.basis === 'none') {
+    if (inScope.length === 0) {
+      const noAccounts = !anyActiveCashLike;
       const missing: DataQualityMissing[] = noAccounts ? ['no_bank_accounts'] : ['no_source_covers_period'];
-      const quality = metricQuality(0, warnings, missing, input.basis.proxy);
-      const unavailable = (key: string, unit: MetricUnit, evidenceQuery: EvidenceQuery | null): MetricResult => ({
-        key, value: null, unit, basis: 'none', assurance: input.basis.assurance,
-        dimensionType: 'none', dimensionId: null, currency: unit === 'money' ? currency : null,
-        components: { bank_accounts: noAccounts ? 0 : activeCashLikeIds.length, covered_bank_account_ids: [] },
-        dataQuality: quality, evidenceQuery,
+      const quality = metricQuality(0, warnings, missing);
+      const unavailable = (key: string): MetricResult => ({
+        key, value: null, unit: 'money', basis: 'none', assurance: UNKNOWN_ASSURANCE,
+        dimensionType: 'none', dimensionId: null, currency,
+        components: { bank_accounts: inScope.length, covered_bank_account_ids: [] },
+        dataQuality: quality, evidenceQuery: null,
       });
       perPeriod.push({
         state: {
           period, netMovement: new Decimal(0), closing: null, closingBasis: 'none',
-          closingAssurance: input.basis.assurance, closingMissing: missing, completeness: 0, warnings,
+          closingAssurance: UNKNOWN_ASSURANCE, closingMissing: missing, completeness: 0, warnings,
           movementKnown: false,
         },
-        metrics: [
-          unavailable('cash_inflows', 'money', null),
-          unavailable('cash_outflows', 'money', null),
-          unavailable('net_cash_movement', 'money', null),
-          unavailable('opening_cash', 'money', null),
-          unavailable('closing_cash', 'money', null),
-        ],
+        metrics: ['cash_inflows', 'cash_outflows', 'net_cash_movement', 'opening_cash', 'closing_cash'].map(unavailable),
       });
-      previousClosing = null;
-      previousBasis = 'none';
-      previousAssurance = input.basis.assurance;
-      previousMissing = missing;
-      isFirstPeriod = false;
       continue;
     }
 
-    const totals = totalMovements(input.movements, accountTypeById);
+    const inScopeSet = new Set(inScopeIds);
+    // Only in-scope accounts' rows count. A cell naming an account the run did not load stays in, so
+    // `totalMovements` can count it into `unresolved_bank_account_cells` rather than lose it silently.
+    const totals = totalMovements(
+      input.movements.filter((cell) => inScopeSet.has(cell.bankAccountId) || !accountTypeById.has(cell.bankAccountId)),
+      accountTypeById,
+    );
     if (totals.unpairedCandidates > 0) warnings.push('unpaired_transfer_candidate');
     const netMovement = totals.inflows.minus(totals.outflows);
 
-    // ---- opening cash -----------------------------------------------------------------------
-    // The first period states the balance of every account it covers; afterwards the prior closing
-    // carries them, and only an account covered for the FIRST time brings a new balance with it
-    // (§3.3, "New account mid-history"). Where the first period covers nothing but the organization
-    // does have active cash-like accounts, their own opening balances are the only thing that can
-    // state the position — and if they have none, the position is unknown rather than zero.
-    const firstPeriodAccounts = coveredCashLike.length > 0 ? coveredCashLike : activeCashLikeIds;
-    const joiners = coveredCashLike.filter((id) => !everCovered.has(id));
-    const opening = isFirstPeriod
-      ? openingFor(firstPeriodAccounts, input.openingCandidates, period.periodStart)
-      : openingFor(joiners, input.openingCandidates, period.periodStart);
-    for (const id of isFirstPeriod ? firstPeriodAccounts : coveredCashLike) everCovered.add(id);
-
-    const carried = isFirstPeriod ? new Decimal(0) : previousClosing;
-    const openingValue = carried === null || opening.value === null ? null : carried.plus(opening.value);
-
-    const openingMissing: DataQualityMissing[] = [];
-    if (opening.value === null) openingMissing.push('no_opening_cash');
-    if (carried === null) openingMissing.push(...previousMissing);
-    if (openingValue === null && openingMissing.length === 0) openingMissing.push('no_opening_cash');
-
-    const openingBasis = isFirstPeriod
-      ? opening.basis
-      : combineBasis(opening.perAccount.length === 0 ? [previousBasis] : [previousBasis, opening.basis]);
-    const openingAssurance = isFirstPeriod
-      ? opening.assurance
-      : opening.perAccount.length === 0
-        ? previousAssurance
-        : weakerAssurance(previousAssurance, opening.assurance);
-
-    // ---- closing cash -----------------------------------------------------------------------
-    const closingValue = openingValue === null ? null : openingValue.plus(netMovement);
-    const closingMissing = openingValue === null ? dedupeCodes(openingMissing) : [];
-    const closingBasis =
-      openingValue === null ? openingBasis : combineBasis([openingBasis, input.basis.basis]);
-    const closingAssurance = weakerAssurance(openingAssurance, input.basis.assurance);
-
-    // Cross-check against the statement, when every covered account supplies a closing figure.
-    const statementWarnings: DataQualityWarning[] = [];
-    const statementComponents: Record<string, unknown> = {};
-    const statementRows = input.statementClosing ?? [];
-    const statementComplete =
-      coveredCashLike.length > 0 &&
-      coveredCashLike.every((id) => statementRows.some((row) => row.bankAccountId === id));
-    if (statementComplete && closingValue !== null) {
-      const stated = sum(
-        [...statementRows]
-          .filter((row) => coveredCashLike.includes(row.bankAccountId))
-          .sort((a, b) => a.bankAccountId.localeCompare(b.bankAccountId))
-          .map((row) => row.balanceAfter),
-      );
-      const delta = subtract(stated, closingValue);
-      statementComponents.statement_closing_cash = toMoneyString(stated);
-      statementComponents.statement_delta = toMoneyString(delta);
-      // The computed value is still what is stored: the statement figure is a cross-check, and a
-      // mismatch is a data-quality fact to show, not a licence to overwrite the arithmetic (§3.3).
-      if (abs(delta).greaterThan(ONE_PENNY)) statementWarnings.push('statement_balance_mismatch');
-    }
-
-    // §5: the cash family's completeness is the coverage ratio, halved while opening cash is unknown.
-    const completeness = coverageRatio * (openingValue === null ? 0.5 : 1);
-    const movementQuality = metricQuality(completeness, warnings, [], input.basis.proxy);
-
-    const inflows: MetricResult = {
-      key: 'cash_inflows',
-      value: toMoneyString(totals.inflows),
+    // ---- movements ----------------------------------------------------------------------------
+    const movementMissing: DataQualityMissing[] = movementKnown ? [] : ['no_source_covers_period'];
+    const movementQuality = metricQuality(movementKnown ? 1 : 0, warnings, movementMissing);
+    const movementBase = {
       unit: 'money',
-      basis: input.basis.basis,
-      assurance: input.basis.assurance,
+      basis: movementKnown ? 'bank' : 'none',
+      assurance: movementKnown ? 'verified' : UNKNOWN_ASSURANCE,
       dimensionType: 'none',
       dimensionId: null,
       currency,
+      dataQuality: movementQuality,
+    } as const;
+    const accountsComponent = inScope.map((a) => ({ account_id: a.bankAccountId, movement_known: a.movementKnown }));
+
+    const inflows: MetricResult = {
+      ...movementBase,
+      key: 'cash_inflows',
+      value: movementKnown ? toMoneyString(totals.inflows) : null,
       components: {
         by_category: totals.byCategory,
         excluded_cash_transfer_legs: totals.excludedTransferLegs,
         unpaired_transfer_candidates: totals.unpairedCandidates,
         unresolved_bank_account_cells: totals.unresolvedAccounts,
-        covered_bank_account_ids: coveredCashLike,
+        covered_bank_account_ids: known.map((a) => a.bankAccountId),
         bank_coverage_ratio: coverageRatio,
+        accounts: accountsComponent,
       },
-      dataQuality: movementQuality,
-      evidenceQuery: leafEvidence(ctx, 'bank_transactions', {
+      evidenceQuery: movementKnown ? leafEvidence(ctx, 'bank_transactions', {
         period_ids: [period.id],
-        bank_account_ids: activeCashLikeIds,
+        bank_account_ids: inScopeIds,
         direction: 'inflow',
         exclude_cash_transfers: true,
-      }),
+      }) : null,
     };
 
     const outflows: MetricResult = {
       ...inflows,
       key: 'cash_outflows',
-      value: toMoneyString(totals.outflows),
-      evidenceQuery: leafEvidence(ctx, 'bank_transactions', {
+      value: movementKnown ? toMoneyString(totals.outflows) : null,
+      evidenceQuery: movementKnown ? leafEvidence(ctx, 'bank_transactions', {
         period_ids: [period.id],
-        bank_account_ids: activeCashLikeIds,
+        bank_account_ids: inScopeIds,
         direction: 'outflow',
         exclude_cash_transfers: true,
-      }),
+      }) : null,
     };
 
     const net: MetricResult = {
+      ...movementBase,
       key: 'net_cash_movement',
-      value: toMoneyString(netMovement),
-      unit: 'money',
-      basis: input.basis.basis,
-      assurance: input.basis.assurance,
-      dimensionType: 'none',
-      dimensionId: null,
-      currency,
-      components: {
-        cash_inflows: toMoneyString(totals.inflows),
-        cash_outflows: toMoneyString(totals.outflows),
-      },
-      dataQuality: movementQuality,
-      evidenceQuery: derivedEvidence(['cash_inflows', 'cash_outflows']),
+      value: movementKnown ? toMoneyString(netMovement) : null,
+      components: movementKnown
+        ? { cash_inflows: toMoneyString(totals.inflows), cash_outflows: toMoneyString(totals.outflows) }
+        : { accounts: accountsComponent },
+      evidenceQuery: movementKnown ? derivedEvidence(['cash_inflows', 'cash_outflows']) : null,
     };
+
+    // ---- opening cash ---------------------------------------------------------------------------
+    // Σ each in-scope account's balance at the close of the day before P. One unknown account makes
+    // the sum unknown, and names that account: "add a statement or an opening balance for …" (D-2).
+    const withoutOpening = inScope.filter((a) => a.opening === null);
+    const openingKnown = withoutOpening.length === 0;
+    const openingValue = openingKnown ? sum(inScope.map((a) => a.opening!.value)) : null;
+    const openingAssurance = openingKnown
+      ? inScope.reduce<AssuranceLevel>((acc, a) => weakerAssurance(acc, a.opening!.assurance), 'verified')
+      : UNKNOWN_ASSURANCE;
+    const missingAccounts = withoutOpening.map((a) => ({ account_id: a.bankAccountId, name: a.name }));
+    // Why: an account nobody ever stated a balance for needs an opening balance; one that WAS stated
+    // before and is unknown now has a stretch no statement covers since (a gap, or a month after its
+    // last statement) — the same reason §2.3 gives a month nothing covers.
+    const openingMissing: DataQualityMissing[] = [];
+    if (withoutOpening.some((a) => !a.everStated)) openingMissing.push('no_opening_cash');
+    if (withoutOpening.some((a) => a.everStated)) openingMissing.push('no_source_covers_period');
+    const perAccount = inScope.map((a) => ({
+      account_id: a.bankAccountId,
+      source: a.opening?.source ?? 'none',
+      as_at: a.opening?.anchorDate ?? null,
+      value: a.opening?.value ?? null,
+    }));
 
     const openingResult: MetricResult = {
       key: 'opening_cash',
       value: openingValue === null ? null : toMoneyString(openingValue),
       unit: 'money',
-      basis: openingBasis,
+      basis: openingKnown ? 'bank' : 'none',
       assurance: openingAssurance,
       dimensionType: 'none',
       dimensionId: null,
       currency,
       components: {
-        source: isFirstPeriod ? 'opening_balances' : 'previous_closing_cash',
-        previous_closing_cash:
-          isFirstPeriod || previousClosing === null ? null : toMoneyString(previousClosing),
-        accounts: opening.perAccount,
-        accounts_without_opening_balance: opening.missingAccounts,
-        new_accounts_this_period: joiners,
+        accounts: perAccount,
+        accounts_without_opening_balance: missingAccounts.map((a) => a.account_id),
+        missing_bank_accounts: missingAccounts,
       },
-      dataQuality: metricQuality(
-        completeness,
-        warnings,
-        openingValue === null ? dedupeCodes(openingMissing) : [],
-        input.basis.proxy,
-      ),
-      evidenceQuery: isFirstPeriod ? null : derivedEvidence(['closing_cash']),
+      dataQuality: metricQuality(openingKnown ? 1 : 0, warnings, openingMissing),
+      evidenceQuery: null,
     };
+
+    // ---- closing cash ---------------------------------------------------------------------------
+    const closingKnown = inScope.every((a) => a.closing !== null);
+    const closingValue = closingKnown ? sum(inScope.map((a) => a.closing!.value)) : null;
+    const closingMissing: DataQualityMissing[] = [...openingMissing];
+    if (!movementKnown) closingMissing.push('no_source_covers_period');
+    const closingAssurance = closingKnown ? weakerAssurance(openingAssurance, 'verified') : UNKNOWN_ASSURANCE;
+
+    // Cross-checks (§3.3): a printed balance inside P that disagrees with an account's chain, or the
+    // printed closings of statements ending on P's last day that disagree with the computed sum. The
+    // computed value is what is stored; a mismatch is a fact to show, not a licence to overwrite.
+    const statementWarnings: DataQualityWarning[] = [];
+    const statementComponents: Record<string, unknown> = {};
+    if (inScope.some((a) => a.balanceMismatch)) statementWarnings.push('statement_balance_mismatch');
+    if (closingValue !== null && inScope.every((a) => a.statementClosing !== null)) {
+      const stated = sum(inScope.map((a) => a.statementClosing!));
+      const delta = subtract(stated, closingValue);
+      statementComponents.statement_closing_cash = toMoneyString(stated);
+      statementComponents.statement_delta = toMoneyString(delta);
+      if (abs(delta).greaterThan(ONE_PENNY)) statementWarnings.push('statement_balance_mismatch');
+    }
+    // A transfer between two of the organisation's own accounts moves both balances but no cash
+    // (ADR-028). When its legs fall in different months the money is in transit: the balances say so,
+    // and the gap between them and opening + net movement is shown rather than hidden.
+    if (closingValue !== null && openingValue !== null && movementKnown) {
+      const inTransit = closingValue.minus(openingValue.plus(netMovement));
+      if (!inTransit.isZero()) statementComponents.cash_transfers_in_transit = toMoneyString(inTransit);
+    }
 
     const closingResult: MetricResult = {
       key: 'closing_cash',
       value: closingValue === null ? null : toMoneyString(closingValue),
       unit: 'money',
-      basis: closingBasis,
+      basis: closingKnown ? 'bank' : 'none',
       assurance: closingAssurance,
       dimensionType: 'none',
       dimensionId: null,
       currency,
       components: {
         opening_cash: openingValue === null ? null : toMoneyString(openingValue),
-        net_cash_movement: toMoneyString(netMovement),
+        net_cash_movement: movementKnown ? toMoneyString(netMovement) : null,
+        // Read by the next run as the carry-free record of each account's balance (ADR-124).
+        per_account: inScope.map((a) => ({ account_id: a.bankAccountId, value: a.closing?.value ?? null })),
+        missing_bank_accounts: missingAccounts,
         ...statementComponents,
       },
-      dataQuality: metricQuality(
-        completeness,
-        [...warnings, ...statementWarnings],
-        closingMissing,
-        input.basis.proxy,
-      ),
+      dataQuality: metricQuality(closingKnown ? 1 : 0, [...warnings, ...statementWarnings], closingKnown ? [] : closingMissing),
       evidenceQuery: derivedEvidence(['opening_cash', 'net_cash_movement']),
     };
 
@@ -742,22 +550,16 @@ export function computeCash(
       state: {
         period,
         netMovement,
-        movementKnown: coverageRatio >= 1,
+        movementKnown,
         closing: closingValue,
-        closingBasis,
+        closingBasis: closingKnown ? 'bank' : 'none',
         closingAssurance,
-        closingMissing,
-        completeness,
+        closingMissing: closingKnown ? [] : closingMissing,
+        completeness: closingKnown ? 1 : 0,
         warnings: [...warnings, ...statementWarnings],
       },
       metrics: [inflows, outflows, net, openingResult, closingResult],
     });
-
-    previousClosing = closingValue;
-    previousBasis = closingBasis;
-    previousAssurance = closingAssurance;
-    previousMissing = closingMissing;
-    isFirstPeriod = false;
   }
 
   // Runway needs P, P−1 and P−2, so it is computed once the movement series exists.

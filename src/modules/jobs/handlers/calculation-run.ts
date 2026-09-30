@@ -7,8 +7,8 @@ import {
 } from '@/core/db';
 import {
   composePeriod, runCalculation,
-  type AggregateCell, type CalculationTrigger, type CashSeriesOptions, type OpeningCashCandidate,
-  type StatementClosingBalance, type EngineContext, type MetricResult,
+  type AccountPeriodState, type AggregateCell, type CalculationTrigger, type CashSeriesOptions,
+  type EngineContext, type MetricResult,
   type PeriodCoverage, type PeriodRef, type ReceivablesComposeInput,
 } from '@/modules/financial-engine';
 import { healthStep } from '@/modules/health';
@@ -116,14 +116,11 @@ export async function runCalculationJob(
         aggregates: readonly AggregateCell[];
         transferLegs: readonly { periodId: string; bankAccountId: string; transferKind: string; inflow: string; outflow: string }[];
         coverage: PeriodCoverage;
-        // ADR-120: the carries from the period before, and the receivables family's inputs.
+        // ADR-120: runway's burn window and the receivables family's inputs.
         cashOptions?: CashSeriesOptions;
         receivables?: ReceivablesComposeInput;
-        coveredBankAccountIds?: readonly string[];
-        statementOpenings?: readonly OpeningCashCandidate[];
-        openingExactOnly?: boolean;
-        statementClosing?: readonly StatementClosingBalance[];
-        unreconciledStatement?: boolean;
+        // ADR-124: every cash-like account's state in the period, from the per-account history.
+        cashAccounts?: readonly AccountPeriodState[];
       };
       return composeWithIds({
         period: input.period as PeriodRef,
@@ -133,11 +130,7 @@ export async function runCalculationJob(
         context: input.context as EngineContext,
         cashOptions: aggregates.cashOptions,
         receivables: aggregates.receivables,
-        coveredBankAccountIds: aggregates.coveredBankAccountIds,
-        statementOpenings: aggregates.statementOpenings,
-        openingExactOnly: aggregates.openingExactOnly,
-        statementClosing: aggregates.statementClosing,
-        unreconciledStatement: aggregates.unreconciledStatement,
+        cashAccounts: aggregates.cashAccounts,
       });
     },
     startRun: startCalculationRun,

@@ -53,6 +53,11 @@ export interface EvaluateInput {
   /** Now, in ISO. Explicit so the ninety-day cooldown is reproducible in a test. */
   readonly now: string;
   readonly evaluators: Readonly<Record<AlertRuleKey, Evaluator>>;
+  /**
+   * The run's as-of date. The overflow summary is dated in the latest period that has begun by then,
+   * never in a future month the run merely reached (ADR-124, audit N-11). Omitted, the last period.
+   */
+  readonly asOf?: string;
 }
 
 export interface PlannedInsert {
@@ -293,7 +298,9 @@ export function planEvaluation(input: EvaluateInput): EvaluationPlan {
   }
 
   if (overflow > 0) {
-    const latest = input.periods[input.periods.length - 1];
+    const asOf = input.asOf;
+    const begun = asOf === undefined ? input.periods : input.periods.filter((p) => p.periodStart <= asOf);
+    const latest = begun[begun.length - 1] ?? input.periods[input.periods.length - 1];
     if (latest !== undefined) {
       changes.push({
         kind: 'insert',

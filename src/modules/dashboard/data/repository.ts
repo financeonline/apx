@@ -215,6 +215,24 @@ export async function isRecalculating(
   return data === true;
 }
 
+/**
+ * The engine version that produced the figures now on screen: the organisation's latest succeeded
+ * run (ADR-124 D-6). Null before the first run.
+ */
+export async function loadFiguresEngineVersion(
+  db: SupabaseClient, orgId: string, requestId?: string,
+): Promise<string | null> {
+  const { data, error } = await db
+    .from('calculation_runs')
+    .select('engine_version, finished_at')
+    .eq('organization_id', orgId)
+    .eq('status', 'succeeded')
+    .order('finished_at', { ascending: false, nullsFirst: false })
+    .limit(1);
+  const rows = unwrap(data, error, requestId) as Array<{ engine_version: string }>;
+  return rows[0]?.engine_version ?? null;
+}
+
 /** The last time any data was committed, for the freshness line (§4 level 1). */
 export async function loadLastDataDate(
   db: SupabaseClient, orgId: string, requestId?: string,

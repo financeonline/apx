@@ -114,6 +114,8 @@ export interface CategoryBalanceFallback {
    * one month of a balance built from many and could never reconcile to it.
    */
   readonly ledgerPeriodIds?: readonly string[];
+  /** The opening journal's date when it falls inside a month: the drill-down's first day (ADR-124 D-4). */
+  readonly ledgerEntryDateFrom?: string;
 }
 
 /** One balance-sheet term of `working_capital`, as `closing(P)` in reporting sign. */
@@ -350,6 +352,7 @@ function fromBalances(
       evidence: leafEvidence(ctx, 'ledger_entries', {
         ...descriptorFilters,
         period_ids: [...(fallback.ledgerPeriodIds ?? [period.id])].sort(),
+        ...(fallback.ledgerEntryDateFrom ? { entry_date_from: fallback.ledgerEntryDateFrom } : {}),
       }),
     };
   }

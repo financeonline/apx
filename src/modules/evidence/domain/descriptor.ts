@@ -105,6 +105,13 @@ const FiltersSchema = z.strictObject({
    * covering a month, a selection by period and account alone summed each balance twice.
    */
   balance_kind: z.enum(['trial_balance', 'pnl_report', 'balance_sheet']).optional(),
+  /**
+   * The first ledger day a balance selection reads (ADR-124 D-4, audit N-5). A ledger balance starts
+   * at an opening journal, which restates every balance as at its own date; when that date falls
+   * inside a month, the month's rows dated before it are already inside the journal's figures, and
+   * a selection by period alone would count them twice.
+   */
+  entry_date_from: isoDate.optional(),
   metric_keys: z.array(z.string().min(1)).min(1).optional(),
   dimension: DimensionSchema.optional(),
 });

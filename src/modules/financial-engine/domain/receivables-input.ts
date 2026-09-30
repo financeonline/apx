@@ -35,8 +35,22 @@ import type {
 /** One opening-balance journal line (`ledger_entries.is_opening_balance`, IMP-GL-011). */
 export interface OpeningJournalLine {
   readonly accountId: string;
-  /** The fiscal period the journal is posted in — the instant its balances are stated as at. */
+  /** The fiscal period the journal is posted in. */
   readonly periodId: string;
+  /**
+   * The journal's effective date — the balances it states are those at the START of this day (an
+   * export's opening journal is dated on the export's first day). ADR-124 D-4, audit N-5.
+   */
+  readonly entryDate: string;
+  readonly debit: string;
+  readonly credit: string;
+}
+
+/** A ledger line dated before a mid-month opening journal, in the journal's own period (D-4). */
+export interface PreJournalLine {
+  /** The journal date this line precedes. */
+  readonly journalDate: string;
+  readonly accountId: string;
   readonly debit: string;
   readonly credit: string;
 }
@@ -61,6 +75,11 @@ export interface ReceivablesComposeInput {
     readonly openingJournal: readonly OpeningJournalLine[] | null;
     /** `period_start` of EVERY fiscal period — the cells reach back past the chunk's window. */
     readonly periodStarts: ReadonlyMap<string, string>;
+    /**
+     * For each opening journal dated INSIDE a month, every ledger line of that month dated before it
+     * (ADR-124 D-4). The cells sum a month at a time; these are what the journal already contains.
+     */
+    readonly preJournal?: readonly PreJournalLine[];
   } | null;
 }
 
@@ -127,7 +146,7 @@ function ledgerFallback(
   coverage: PeriodCoverage,
   ledger: ReceivablesComposeInput['ledger'],
   category: 'receivables' | 'payables',
-): CategoryBalanceFallback['ledger'] & { periodIds: readonly string[] } | null {
+): CategoryBalanceFallback['ledger'] & { periodIds: readonly string[]; entryDateFrom: string | null } | null {
   if (ledger === null || ledger.openingJournal === null) return null;
   // A declared GL range must span P: a month the export only partly reaches (`partial_month`) has no
   // balance at its end that anybody stated.
@@ -137,40 +156,55 @@ function ledgerFallback(
   const { periodStarts } = ledger;
 
   /*
-   * The balance starts AT the opening journal. Its lines state the balances as at its own period, so
-   * movements posted before it are already inside them: summing both would count them twice. A
-   * period before the journal has no stated opening at all.
+   * The balance starts AT the opening journal: its lines restate every balance as at the start of its
+   * own DATE, so the rows posted before that date are already inside them — summing both counts them
+   * twice. A period before the journal has no stated opening at all.
+   *
+   * The LATEST journal effective by P's end (ADR-123, audit F-3: each yearly export carries one, and
+   * starting at the earliest added the later one's lines on top of the rows they already contain).
+   * Its DATE, not its month (ADR-124 D-4, audit N-5): an export starting on 15 July carries a
+   * journal dated 15 July, and the rows of 1–14 July from the export before it are inside that
+   * journal's figures. Taking the journal's month as its start counted them again: 6,000 for a true
+   * 5,000.
    */
-  /*
-   * The LATEST opening journal at or before P (ADR-123, audit F-3). Each journal restates every
-   * balance as at its own period — yearly GL exports each carry one — so the balance is that
-   * journal plus the movements after it. Starting at the earliest journal added the later one's
-   * lines on top of the movements they already contain: 13,000 for a true 7,000.
-   */
-  const journalStart = ledger.openingJournal
-    .map((line) => periodStarts.get(line.periodId))
-    .filter((start): start is string => start !== undefined && start <= period.periodStart)
+  const journalDate = ledger.openingJournal
+    .map((line) => line.entryDate)
+    .filter((date) => date <= period.periodEnd)
     .sort()
     .at(-1);
+  if (journalDate === undefined) return null;
+  const journalLines = ledger.openingJournal.filter((line) => line.entryDate === journalDate);
+  const journalStart = periodStarts.get(journalLines[0]!.periodId);
   if (journalStart === undefined) return null;
+
+  const amountOf = (accountId: string, debit: string, credit: string): Decimal | null => {
+    const account = accounts.get(accountId);
+    return account === undefined ? null : ledgerAmount({ accountType: account.accountType, debit, credit });
+  };
 
   let cumulative = new Decimal(0);
   const periodIds = new Set<string>();
   for (const cell of ledger.cells) {
     if (cell.source !== 'ledger' || cell.accountId === null) continue;
-    const account = accounts.get(cell.accountId);
-    if (account === undefined) continue;
     const start = periodStarts.get(cell.periodId);
     if (start === undefined || start > period.periodStart || start < journalStart) continue;
-    cumulative = cumulative.plus(ledgerAmount({ accountType: account.accountType, debit: cell.debit, credit: cell.credit }));
+    const amount = amountOf(cell.accountId, cell.debit, cell.credit);
+    if (amount === null) continue;
+    cumulative = cumulative.plus(amount);
     periodIds.add(cell.periodId);
+  }
+  // The journal's own month sums from its first day; what was posted before the journal's date is
+  // already inside the journal, so it comes out again.
+  for (const line of ledger.preJournal ?? []) {
+    if (line.journalDate !== journalDate) continue;
+    const amount = amountOf(line.accountId, line.debit, line.credit);
+    if (amount !== null) cumulative = cumulative.minus(amount);
   }
 
   let opening = new Decimal(0);
-  for (const line of ledger.openingJournal) {
-    const account = accounts.get(line.accountId);
-    if (account === undefined || periodStarts.get(line.periodId) !== journalStart) continue;
-    opening = opening.plus(ledgerAmount({ accountType: account.accountType, debit: line.debit, credit: line.credit }));
+  for (const line of journalLines) {
+    const amount = amountOf(line.accountId, line.debit, line.credit);
+    if (amount !== null) opening = opening.plus(amount);
   }
 
   return {
@@ -178,6 +212,8 @@ function ledgerFallback(
     // The cells include the opening journal's lines, so the movements are what is left once it is out.
     movements: toMoneyString(cumulative.minus(opening)),
     periodIds: periodIds.size === 0 ? [period.id] : [...periodIds].sort(),
+    // The drill-down starts on the same day, so it selects exactly the rows the figure summed.
+    entryDateFrom: journalDate > journalStart ? journalDate : null,
   };
 }
 
@@ -206,7 +242,8 @@ function resolveSide(
   side: InvoiceSide,
 ): SideResolution {
   const category = side === 'sales' ? 'receivables' : 'payables';
-  const sideCoverage = invoiceSideCoverage(input.batches, period, side);
+  // ADR-124 D-3: a completed month needs its END position; the current one is aged at the as-of.
+  const sideCoverage = invoiceSideCoverage(input.batches, period, side, !input.asOfIsPeriodEnd);
   const types = side === 'sales' ? SALES : PURCHASES;
   const invoices = sideCoverage.covers ? input.invoices.filter((i) => types.has(i.invoiceType)) : null;
 
@@ -221,6 +258,7 @@ function resolveSide(
     periodBalanceKind: statement?.kind,
     ledger: ledger === null ? null : { openingBalance: ledger.openingBalance, movements: ledger.movements },
     ledgerPeriodIds: ledger?.periodIds,
+    ...(ledger?.entryDateFrom ? { ledgerEntryDateFrom: ledger.entryDateFrom } : {}),
   };
 
   const unavailableReason: DataQualityMissing | undefined = sideCoverage.anyBatch

@@ -29,7 +29,7 @@ export const MAX_SELECTION_ROWS = 50_000;
 
 /**
  * The slice of the PostgREST builder the compiler needs, described structurally rather than
- * imported from `@supabase/postgrest-js`. The compiled filters are a closed set of six operators
+ * imported from `@supabase/postgrest-js`. The compiled filters are a closed set of seven operators
  * and an IS NULL; anything outside this interface cannot be reached from a descriptor.
  */
 interface Builder {
@@ -39,6 +39,7 @@ interface Builder {
   lt(column: string, value: unknown): Builder;
   lte(column: string, value: unknown): Builder;
   gt(column: string, value: unknown): Builder;
+  gte(column: string, value: unknown): Builder;
   is(column: string, value: null): Builder;
   order(column: string, options: { ascending: boolean }): Builder;
   range(from: number, to: number): PromiseLike<{ data: unknown; error: unknown }>;
@@ -65,6 +66,9 @@ function applyFilters(builder: Builder, compiled: CompiledQuery): Builder {
         break;
       case 'gt':
         q = q.gt(filter.column, filter.value);
+        break;
+      case 'gte':
+        q = q.gte(filter.column, filter.value);
         break;
       case 'isNull':
         q = q.is(filter.column, null);

@@ -95,6 +95,7 @@ export * from './domain/categories';
 export * from './domain/pnl';
 export * from './domain/variance';
 export * from './domain/cash';
+export * from './domain/cash-history';
 export * from './domain/receivables';
 export * from './domain/receivables-input';
 export * from './domain/concentration';

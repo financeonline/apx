@@ -1,6 +1,6 @@
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
-import { PageHeader, Card, CardHeader, CardBody, EmptyState, DetailList } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardHeader, CardBody, EmptyState, DetailList, Banner } from '@/components/ui/surfaces';
 import { loadBankAccountsForBalances, loadCash, loadPeriodScope } from '@/modules/dashboard';
 import { PeriodHeading } from '../_components/period-heading';
 import { FigureTable } from '../_components/figures';
@@ -81,6 +81,16 @@ export default async function CashPage({
       />
 
       <div className="flex flex-col gap-6">
+        {/*
+          ADR-124 D-2: an account the engine could not establish is named, never quietly left out of
+          the total. The names come from the figure's own record of what it is missing.
+        */}
+        {view.missingAccounts.length > 0 ? (
+          <Banner tone="warn" title="Your cash balance is not complete yet">
+            Add a statement or an opening balance for {view.missingAccounts.join(', ')}.
+          </Banner>
+        ) : null}
+
         <Card>
           <CardHeader title="This month" />
           <CardBody className="px-0 py-0">

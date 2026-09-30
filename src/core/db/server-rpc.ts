@@ -711,6 +711,18 @@ export async function aggregateTransferLegs(
   }, ['period_id', 'bank_account_id', 'transfer_kind', 'inflow', 'outflow', 'row_count']);
 }
 
+/**
+ * One account-day at a time: every accepted, current row of every bank account, summed per day up
+ * to `to`, visible at `aggregatedAt` (ADR-124 D-1). The per-account cash history reads it to move a
+ * printed balance on from the day it was stated.
+ */
+export async function bankDailyMovements(
+  orgId: string, to: string, aggregatedAt: string,
+): Promise<Record<string, unknown>[]> {
+  return serverRpcAll('bank_daily_movements', { p_org: orgId, p_to: to, p_aggregated_at: aggregatedAt },
+    ['bank_account_id', 'transaction_date']);
+}
+
 export async function batchCoverage(
   orgId: string, from: string, to: string,
 ): Promise<Record<string, unknown>[]> {

@@ -16,6 +16,7 @@
  */
 
 import { bankCoverageFromRatio, completenessHolds } from '@/core/periods';
+import { bankCoverageFor } from './cash-history';
 
 import type {
   BankAccountRef, BasisChoice, DataQualityWarning, PeriodCoverage, PeriodRef, SourceCoverage,
@@ -49,6 +50,12 @@ export interface CoverageInput {
   readonly rowCounts: Readonly<Partial<Record<SourceKind, number>>>;
   /** Today, for the invoice freshness gate. Explicit, never read from a clock (§1.1). */
   readonly asOf: string;
+  /**
+   * Every committed statement of the organisation, all history (ADR-124). An account's scope — when
+   * it starts, when a closed one ends — is a fact about ALL its statements, not the window's.
+   * Omitted, the bank batches among `batches` stand in.
+   */
+  readonly statements?: ReadonlyArray<{ readonly bankAccountId: string; readonly periodStart: string; readonly periodEnd: string }>;
 }
 
 const NO_COVERAGE: SourceCoverage = { covers: false, warnings: [], completeness: 0 };
@@ -125,44 +132,62 @@ export interface InvoiceSideCoverage {
 }
 
 /**
- * §2.2, "`invoices` (AR/AP families)", per SIDE (ADR-120), as decided in ADR-123.
+ * §2.2, "`invoices` (AR/AP families)", per SIDE (ADR-120), as decided in ADR-124 D-3 — which replaces
+ * ADR-123's freshness rule.
  *
- * A batch of the side covers P when EITHER
- *   (a) its declared range spans P; or
- *   (b) it is FRESH for P: committed on or after `P.period_start` and no more than 45 days after
- *       `P.period_end`, AND its declared range OVERLAPS P (starts on or before `P.period_end`, ends
- *       on or after `P.period_start`).
+ * A receivables or payables figure for a COMPLETED month is a position at that month's END. A list
+ * can state it only if it knows what was open on that day. So a batch of the side covers P when:
  *
- * Why (b) has three parts (ADR-123, independent audit F-4 / F-9):
- *   - "on or after P's start" — a list committed before the month began cannot describe what was
- *     open during it (ADR-120 had "after P ended", which made the CURRENT month unreachable: a list
- *     uploaded on the 10th could never age the month it was uploaded in, F-9);
- *   - "≤ 45 days after P's end" — §2.2's freshness gate, unchanged;
- *   - "range overlaps P" — a list that begins after P, or ended before it, says nothing about P's
- *     invoices. Without it, a March-only list committed on 5 April stated a VERIFIED ZERO for February
- *     (F-4) — and, under the first draft of this rule, for April too, hiding April's balance sheet.
- *     The current month still qualifies: a list running to the 10th overlaps it.
+ *   (a) its declared range SPANS P — a full list (every invoice, with its payment dates) spanning
+ *       P can reconstruct the position on any day inside it; an open-items (aged-debtors) list states
+ *       the position only on its own as-at date, its range's end, so it must end ON `P.period_end`; or
+ *
+ *   (b) P is COMPLETED and the batch is FRESH for it: committed AFTER `P.period_end`, no more than 45
+ *       days after it (§2.2's freshness gate), and it states the position AT `P.period_end`:
+ *         - a full list whose range reaches `P.period_end` (starts on or before it, ends on or after it);
+ *         - an open-items list whose as-at date (its range's end) is exactly `P.period_end`.
+ *       An open-items list dated after P's end cannot state P: the invoices paid in between are not
+ *       on it, so it would under-state P (audit N-10). A list committed DURING a completed month
+ *       knew nothing after the day it was committed, so it states nothing about the month's end — it
+ *       used to outrank that month's own balance sheet with a verified figure (audit N-4, BSLIST); or
+ *
+ *   (c) P is the CURRENT period (the one containing the run's as-of date) and the batch was committed
+ *       on or after `P.period_start` with a range overlapping P — unchanged from ADR-123: a list
+ *       uploaded on the 10th ages the month it was uploaded in (audit F-9), and the figure is dated
+ *       at the run's as-of, not at a month end nobody has reached.
+ *
+ * When no batch of the side covers P the family falls through to `period_balances` / `ledger` (§2.3),
+ * so recency of upload alone never overrides a more authoritative source.
  */
 export function invoiceSideCoverage(
   batches: readonly CoverageBatch[],
   period: PeriodRef,
   side: InvoiceSide,
+  current = false,
 ): InvoiceSideCoverage {
   const ofSide = batches.filter(
     (b) => b.targetTable === 'invoices' && SIDE_IMPORT_TYPES[side].includes(b.importType ?? ''),
   );
+  const openItems = (b: CoverageBatch): boolean => b.invoiceListKind === 'open_items';
+  /** The batch states the position at the close of `P.period_end`. */
+  const statesMonthEnd = (b: CoverageBatch): boolean => (openItems(b)
+    ? b.periodEnd === period.periodEnd
+    : b.periodStart <= period.periodEnd && b.periodEnd >= period.periodEnd);
+  const spanning = (b: CoverageBatch): boolean => spans(b, period) && (current || !openItems(b) || statesMonthEnd(b));
   const fresh = (b: CoverageBatch): boolean => {
     const committed = b.committedAt.slice(0, 10);
-    return committed >= period.periodStart
+    if (current) {
+      return committed >= period.periodStart && b.periodStart <= period.periodEnd && b.periodEnd >= period.periodStart;
+    }
+    return committed > period.periodEnd
       && daysBetween(period.periodEnd, committed) <= AR_AP_FRESHNESS_DAYS
-      && b.periodStart <= period.periodEnd
-      && b.periodEnd >= period.periodStart;
+      && statesMonthEnd(b);
   };
   return {
-    covers: ofSide.some((b) => spans(b, period) || fresh(b)),
+    covers: ofSide.some((b) => spanning(b) || fresh(b)),
     anyBatch: ofSide.length > 0,
     fullListSpans: ofSide.some((b) => b.invoiceListKind === 'full' && spans(b, period)),
-    openItemsSpans: ofSide.some((b) => b.invoiceListKind === 'open_items' && spans(b, period)),
+    openItemsSpans: ofSide.some((b) => openItems(b) && spans(b, period)),
   };
 }
 
@@ -218,22 +243,25 @@ export function computeCoverage(input: CoverageInput): PeriodCoverage {
       : NO_COVERAGE;
 
   // ---- bank ----
-  // EVERY active cash-like account needs a statement whose declared range spans the period. A
-  // covered month with no transactions is fine; an uncovered account is not, because its movements
-  // are simply invisible and the cash figure would be wrong without saying so.
-  const activeCashLike = bankAccounts.filter((a) => a.isActive && CASH_LIKE.has(a.accountType));
-  const coveredAccounts = activeCashLike.filter((account) =>
-    batches.some((b) => b.targetTable === 'bank_transactions'
-      && b.bankAccountId === account.id && spans(b, period)));
+  // EVERY in-scope cash-like account needs its statements to cover every day of the period it
+  // exists for — one statement or several that meet (ADR-124 D-1: a 5th-to-4th cycle covers a month
+  // between two statements). An account that has not started yet, or a closed one after its last
+  // statement, is not in scope (D-2). A covered month with no transactions is fine; an uncovered
+  // account is not, because its movements are simply invisible.
+  const statementRanges = input.statements ?? batches
+    .filter((b) => b.targetTable === 'bank_transactions' && b.bankAccountId !== null)
+    .map((b) => ({ bankAccountId: b.bankAccountId!, periodStart: b.periodStart, periodEnd: b.periodEnd }));
+  const bankScope = bankCoverageFor(bankAccounts, statementRanges, period);
+  const hasActiveCashLike = bankAccounts.some((a) => a.isActive && CASH_LIKE.has(a.accountType));
 
-  const bankRatio = activeCashLike.length === 0
-    ? 1
-    : coveredAccounts.length / activeCashLike.length;
+  const bankRatio = bankScope.inScope.length === 0
+    ? (hasActiveCashLike ? 0 : 1)
+    : bankScope.covered.length / bankScope.inScope.length;
 
   const bankWarnings: DataQualityWarning[] = [];
   if (bankRatio > 0 && bankRatio < 1) bankWarnings.push('bank_coverage_partial');
 
-  const bank: SourceCoverage = coveredAccounts.length > 0 || (rowCounts.bank ?? 0) > 0
+  const bank: SourceCoverage = bankScope.covered.length > 0 || (rowCounts.bank ?? 0) > 0
     ? { covers: true, warnings: bankWarnings, completeness: bankRatio }
     : NO_COVERAGE;
 

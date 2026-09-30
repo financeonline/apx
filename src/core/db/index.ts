@@ -35,6 +35,7 @@ export {
   aggregatePeriods,
   aggregateTransferLegs,
   batchCoverage,
+  bankDailyMovements,
   writeImportRows,
   setBatchValidation,
   failImportBatch,

@@ -256,6 +256,9 @@ const repository = vi.hoisted(() => ({
   loadAgingInvoices: vi.fn(),
   loadOpeningJournal: vi.fn(),
   loadStatements: vi.fn(),
+  // ADR-124: the per-account cash history's rows, and the rows before a mid-month opening journal.
+  loadBankDailyMovements: vi.fn(),
+  loadLinesBeforeJournal: vi.fn(),
 }));
 
 vi.mock('@/modules/financial-engine/data/repository', () => repository);
@@ -299,6 +302,8 @@ describe('a run reads the ledger at one instant, and that instant is the databas
     repository.loadAgingInvoices.mockResolvedValue([]);
     repository.loadOpeningJournal.mockResolvedValue(null);
     repository.loadStatements.mockResolvedValue([]);
+    repository.loadBankDailyMovements.mockResolvedValue([]);
+    repository.loadLinesBeforeJournal.mockResolvedValue([]);
   });
 
   /**

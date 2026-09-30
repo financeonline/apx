@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  composePeriod, computeCoverage, ENGINE_VERSION,
+  buildCashHistory, composePeriod, computeCoverage, ENGINE_VERSION,
   type AggregateCell, type AccountRef, type BankAccountRef, type EngineContext, type PeriodRef,
 } from '@/modules/financial-engine';
 
@@ -159,6 +159,17 @@ describe('cash and the transfer rule (ADR-028)', () => {
     })),
     bankAccounts: accounts, rowCounts: { bank: 3 }, asOf: '2026-06-15',
   });
+  // ADR-124: the run hands composition every account's state from the per-account history; here a
+  // statement covers May for each account, so the movements are stated.
+  const cashAccounts = (accounts: BankAccountRef[]) => buildCashHistory({
+    bankAccounts: accounts,
+    statements: accounts.map((a) => ({
+      batchId: `b-${a.id}`, bankAccountId: a.id, periodStart: '2026-05-01', periodEnd: '2026-05-31',
+      committedAt: '2026-06-01T00:00:00Z', openingBalance: null, closingBalance: null, unreconciled: false,
+    })),
+    movements: [],
+    periods: [may],
+  }).get(may.id) ?? [];
 
   it('excludes a cash-to-cash transfer from both inflows and outflows', () => {
     const savings: BankAccountRef = { ...current, id: 'ba-savings', accountType: 'savings' };
@@ -171,7 +182,7 @@ describe('cash and the transfer rule (ADR-028)', () => {
     ];
     const results = composePeriod({
       period: may, coverage: bankCoverage([current, savings]), cells, transferLegs: [],
-      context: context({ bankAccounts: [current, savings] }),
+      context: context({ bankAccounts: [current, savings] }), cashAccounts: cashAccounts([current, savings]),
     });
 
     // Only the genuine 2,000 receipt counts; the internal move cancels by construction.
@@ -188,7 +199,7 @@ describe('cash and the transfer rule (ADR-028)', () => {
     ];
     const results = composePeriod({
       period: may, coverage: bankCoverage([current, card]), cells, transferLegs: [],
-      context: context({ bankAccounts: [current, card] }),
+      context: context({ bankAccounts: [current, card] }), cashAccounts: cashAccounts([current, card]),
     });
     expect(valueOf(results, 'cash_outflows')).toBe('3000.00');
   });
@@ -199,7 +210,7 @@ describe('cash and the transfer rule (ADR-028)', () => {
     ];
     const results = composePeriod({
       period: may, coverage: bankCoverage([current, card]), cells, transferLegs: [],
-      context: context({ bankAccounts: [current, card] }),
+      context: context({ bankAccounts: [current, card] }), cashAccounts: cashAccounts([current, card]),
     });
     // A card purchase is an expense, not a cash movement; cash is unmoved.
     expect(valueOf(results, 'cash_outflows')).toBe('0.00');

@@ -5,9 +5,9 @@ import { toMotionError } from '@/core/errors';
 import { bankingRuleVersions } from '@/modules/banking';
 import { log } from '@/core/logging';
 import { affectedRange, chunkPeriods, chunkWindow, type CalculationTrigger } from '../domain/chunking';
-import { computeCoverage, isPeriodComplete, type CoverageBatch } from '../domain/coverage';
-import { isCashLikeBankAccount } from '../domain/categories';
-import type { CashSeriesOptions, OpeningCashCandidate, StatementClosingBalance } from '../domain/cash';
+import { computeCoverage, isPeriodComplete } from '../domain/coverage';
+import type { CashSeriesOptions } from '../domain/cash';
+import { buildCashHistory, type CashHistory, type StatementRef } from '../domain/cash-history';
 import type { DenominatorInputs } from '../domain/receivables';
 import { denominatorInputsFor, type ReceivablesComposeInput } from '../domain/receivables-input';
 import { computeFingerprint } from '../domain/fingerprint';
@@ -15,7 +15,7 @@ import { AS_OF_DEPENDENT_KEYS } from '../domain/registry';
 import { VARIANCE_BASE_METRICS } from '../domain/variance';
 import { comparisonPeriodIds, variancesForPeriod } from '../domain/variance-pass';
 import { ENGINE_VERSION as VERSION } from '../domain/version';
-import type { AggregateCell, BankAccountRef, MetricResult, PeriodRef } from '../domain/types';
+import type { AggregateCell, MetricResult, PeriodRef } from '../domain/types';
 import * as repo from '../data/repository';
 
 /**
@@ -150,9 +150,13 @@ export interface HealthChunkInput {
 // Carries between periods (ADR-120)
 // ---------------------------------------------------------------------------------------------
 
-/** The keys a later period reads from an earlier one: the cash chain and the days denominators. */
+/**
+ * The keys a later period reads from an earlier one: runway's burn window and the days denominators.
+ * Cash balances are not among them: the per-account history recomputes every balance from the
+ * statements on every run (ADR-124), so no figure an earlier run stored is a starting point.
+ */
 const CARRIED_KEYS = [
-  'closing_cash', 'net_cash_movement', 'revenue', 'cost_of_sales', 'expense_by_category',
+  'net_cash_movement', 'revenue', 'cost_of_sales', 'expense_by_category',
 ] as const;
 
 /** A stored observation, in the shape the carries read. Only the fields they use are meaningful. */
@@ -189,43 +193,10 @@ function consecutive(a: PeriodRef, b: PeriodRef): boolean {
   return by * 12 + bm - (ay * 12 + am) === 1;
 }
 
-/**
- * The cash-like accounts a statement covered in some period BEFORE `period`.
- *
- * The cash chain starts at the first period any statement covers: before it nothing states a
- * balance, so each month is computed on its own (as it always was); from it on, each month opens at
- * the one before's close. Starting the chain at the organisation's first fiscal period instead would
- * let a year of ledger history before the first statement — where no opening balance could apply —
- * carry an unknown into every later month.
- */
-function cashCoveredBefore(
-  period: PeriodRef,
-  allPeriods: readonly PeriodRef[],
-  batches: readonly CoverageBatch[],
-  bankAccounts: readonly BankAccountRef[],
-): readonly string[] {
-  const cashLike = new Set(bankAccounts.filter((a) => isCashLikeBankAccount(a.accountType)).map((a) => a.id));
-  const earlier = allPeriods.filter((p) => p.periodStart < period.periodStart);
-  const covered = new Set<string>();
-  for (const b of batches) {
-    if (b.targetTable !== 'bank_transactions' || b.bankAccountId === null || !cashLike.has(b.bankAccountId)) continue;
-    if (earlier.some((p) => b.periodStart <= p.periodStart && b.periodEnd >= p.periodEnd)) covered.add(b.bankAccountId);
-  }
-  return [...covered].sort();
-}
-
-/** The ACTIVE cash-like accounts a committed statement covers in `period` (§2.2's bank test). */
-function cashCoveredIn(
-  period: PeriodRef,
-  batches: readonly CoverageBatch[],
-  bankAccounts: readonly BankAccountRef[],
-): readonly string[] {
-  return bankAccounts
-    .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType))
-    .filter((a) => batches.some((b) => b.targetTable === 'bank_transactions' && b.bankAccountId === a.id
-      && b.periodStart <= period.periodStart && b.periodEnd >= period.periodEnd))
-    .map((a) => a.id)
-    .sort();
+/** Whether every in-scope cash-like account's statements cover every day of P, so its movement was stated. */
+function movementStated(history: CashHistory, period: PeriodRef): boolean {
+  const inScope = (history.get(period.id) ?? []).filter((a) => a.inScope);
+  return inScope.length > 0 && inScope.every((a) => a.movementKnown);
 }
 
 export async function runCalculation(
@@ -349,38 +320,12 @@ export async function runCalculation(
     scoped, orgId, allPeriods[0]!.periodStart, addYear(lastPeriod.periodEnd),
   );
 
-  const cashLikeActive = bankAccounts
-    .filter((a) => a.isActive && isCashLikeBankAccount(a.accountType)).map((a) => a.id).sort();
-
   /*
-   * The organisation's bank statements (ADR-123): CD-06's first opening source, the §3.3 closing
-   * cross-check and the "does not reconcile" flag are all facts about a statement batch.
-   *
-   * A statement's printed OPENING is a candidate only for the period starting on the statement's own
-   * first day — a statement from 1 June states the balance at 1 June, and nothing about 1 July; one
-   * from 21 June states nothing about any period start (audit F-2: a 1–20 June statement's opening
-   * was taken for July, a verified 10,000 against a true 5,000). Two statements starting the same day:
-   * the latest committed wins, as a re-upload supersedes (ADR-029.2; audit L-4).
+   * The organisation's bank statements (ADR-124): their declared ranges say which days each account's
+   * rows cover, and their printed balances anchor each account's history. Loaded once per run; the
+   * rows they anchor are read per chunk, at the chunk's own aggregation instant.
    */
-  const cashLikeIds = new Set(bankAccounts.filter((a) => isCashLikeBankAccount(a.accountType)).map((a) => a.id));
-  const statements = (await repo.loadStatements(scoped, orgId)).filter((st) => cashLikeIds.has(st.bankAccountId));
-  const latestPerAccount = (list: readonly repo.StatementBatch[]): repo.StatementBatch[] => {
-    const byAccount = new Map<string, repo.StatementBatch>();
-    for (const st of [...list].sort((a, b) => b.committedAt.localeCompare(a.committedAt) || a.batchId.localeCompare(b.batchId))) {
-      if (!byAccount.has(st.bankAccountId)) byAccount.set(st.bankAccountId, st);
-    }
-    return [...byAccount.values()];
-  };
-  const statementOpeningsAt = (period: PeriodRef): OpeningCashCandidate[] =>
-    latestPerAccount(statements.filter((st) => st.periodStart === period.periodStart && st.openingBalance !== null))
-      .map((st) => ({ bankAccountId: st.bankAccountId, source: 'statement_opening_balance', value: st.openingBalance!, asAtDate: st.periodStart }));
-  /** Printed closings of statements ending on P's last day: §3.3's cross-check against the computed close. */
-  const statementClosingAt = (period: PeriodRef): StatementClosingBalance[] =>
-    latestPerAccount(statements.filter((st) => st.periodEnd === period.periodEnd && st.closingBalance !== null))
-      .map((st) => ({ bankAccountId: st.bankAccountId, balanceAfter: st.closingBalance! }));
-  /** A statement overlapping P did not add up to its printed balances at import (IMP-BAL-006/007). */
-  const unreconciledIn = (period: PeriodRef): boolean =>
-    statements.some((st) => st.unreconciled && st.periodStart <= period.periodEnd && st.periodEnd >= period.periodStart);
+  const statements: StatementRef[] = (await repo.loadStatements(scoped, orgId)).map((st) => ({ ...st }));
 
   // The carries' starting point: what the last run left for the two periods before this range.
   const firstIndex = allPeriods.findIndex((p) => p.id === toWrite[0]!.id);
@@ -443,6 +388,27 @@ export async function runCalculation(
           ? aggregates
           : await repo.loadAggregates(scoped, orgId, historyFrom, windowTo, aggregatedAt);
       const periodStarts = new Map(allPeriods.map((p) => [p.id, p.periodStart]));
+      /*
+       * ADR-124 D-4: an opening journal dated INSIDE a month already contains that month's earlier
+       * rows. The cells sum whole months, so those rows are read on their own, once per such journal.
+       */
+      const midMonthJournals = openingJournal === null ? [] : [...new Map(openingJournal
+        .filter((line) => line.entryDate !== periodStarts.get(line.periodId))
+        .map((line) => [line.entryDate, line.periodId] as const)).entries()].sort();
+      const preJournal = (await Promise.all(midMonthJournals.map(([date, periodId]) =>
+        repo.loadLinesBeforeJournal(scoped, orgId, periodId, date, aggregatedAt)))).flat();
+
+      /*
+       * The per-account cash histories (ADR-124 D-1, D-2), from the first statement to this chunk's
+       * end, at this chunk's instant: every balance is recomputed from what the statements state, so
+       * a figure an earlier run (or an earlier engine) stored is never a starting point.
+       */
+      const cashHistory = buildCashHistory({
+        bankAccounts,
+        statements,
+        movements: await repo.loadBankDailyMovements(orgId, windowTo, aggregatedAt),
+        periods: allPeriods.filter((p) => p.periodStart <= windowTo),
+      });
 
       const context = {
         organizationId: orgId,
@@ -487,7 +453,7 @@ export async function runCalculation(
         }
 
         const coverage = computeCoverage({
-          period, batches, bankAccounts, rowCounts, asOf: request.asOf,
+          period, batches, bankAccounts, rowCounts, asOf: request.asOf, statements,
         });
 
         const index = allPeriods.findIndex((p) => p.id === period.id);
@@ -497,39 +463,13 @@ export async function runCalculation(
         const prev2 = prev !== undefined && index >= 2 && consecutive(allPeriods[index - 2]!, prev)
           ? allPeriods[index - 2] : undefined;
 
-        // ---- the cash chain (§3.3): P opens at P−1's close once any earlier period had a statement ----
-        const covered = cashCoveredBefore(period, allPeriods, allBatches, bankAccounts);
-        const prevClosing = headline(resultsFor(prev), 'closing_cash');
-        const fullyCovered = (p: PeriodRef): boolean => {
-          const inP = cashCoveredIn(p, allBatches, bankAccounts);
-          return cashLikeActive.length > 0 && inP.length === cashLikeActive.length;
-        };
-        /*
-         * The chain RESTARTS when the month before is no opening (ADR-123, audit F-1): it was not fully
-         * stated (a statement missing, or ending mid-month), or its close is unknown. Carrying across a
-         * missing month turned 9,000 into August's opening when August's own statement printed 4,000,
-         * and reported the result at completeness 1. On a restart only a balance stated exactly at P's
-         * start may open it (`openingExactOnly`); without one the opening is unknown, never a guess.
-         */
-        const chainStarted = covered.length > 0;
-        const prevStated = prev !== undefined && fullyCovered(prev)
-          && prevClosing !== undefined && prevClosing.value !== null;
-        const restart = chainStarted && !prevStated;
+        // ---- cash (§3.3, ADR-124): the per-account history carries the balances; runway needs the
+        // movements of the two months before P, and a month whose movement was not stated is unknown —
+        // never a 0.00 burn.
         const cashOptions: CashSeriesOptions = {
-          openingCarry: !chainStarted || restart
-            ? null
-            : {
-                value: prevClosing!.value,
-                basis: prevClosing!.basis,
-                assurance: prevClosing!.assurance,
-                missing: prevClosing!.dataQuality.missing,
-                coveredBankAccountIds: covered,
-              },
-          // Runway needs three consecutive months (§3.3); the two before P, oldest first. A month no
-          // statement fully covered did not state its movement, so it is unknown — never a 0.00 burn.
           priorNetMovements: [prev2, prev]
             .filter((p): p is PeriodRef => p !== undefined)
-            .map((p) => (fullyCovered(p) ? headline(resultsFor(p), 'net_cash_movement')?.value ?? null : null)),
+            .map((p) => (movementStated(cashHistory, p) ? headline(resultsFor(p), 'net_cash_movement')?.value ?? null : null)),
         };
 
         // ---- the days windows (§3.4): the denominators of P−2 and P−1, when both are consecutive ----
@@ -546,18 +486,14 @@ export async function runCalculation(
           batches: allBatches,
           asOfIsPeriodEnd: period.id !== currentPeriod?.id,
           priorDenominators,
-          ledger: openingJournal === null ? null : { cells: ledgerHistory, openingJournal, periodStarts },
+          ledger: openingJournal === null ? null : { cells: ledgerHistory, openingJournal, periodStarts, preJournal },
         };
 
         const results = await deps.computePeriod({
           period,
           aggregates: {
             aggregates, transferLegs, coverage, cashOptions, receivables,
-            coveredBankAccountIds: cashCoveredIn(period, allBatches, bankAccounts),
-            statementOpenings: statementOpeningsAt(period),
-            openingExactOnly: restart,
-            statementClosing: statementClosingAt(period),
-            unreconciledStatement: unreconciledIn(period),
+            cashAccounts: cashHistory.get(period.id) ?? [],
           },
           context,
         });

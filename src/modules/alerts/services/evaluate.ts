@@ -38,6 +38,8 @@ export interface AlertEvaluationRequest {
   readonly aggregatedAt: string;
   readonly currency: string;
   readonly firstPeriodWithDataId: string | null;
+  /** The run's as-of date, where the overflow summary is dated (ADR-124, audit N-11). */
+  readonly asOf?: string;
   /** Now, in ISO. Supplied by the caller so the cooldown is reproducible in a test. */
   readonly now: string;
 }
@@ -161,6 +163,7 @@ export async function evaluateAlerts(
     existing,
     now: request.now,
     evaluators: EVALUATORS,
+    ...(request.asOf !== undefined ? { asOf: request.asOf } : {}),
   });
 
   const counts = await deps.persistAlerts({

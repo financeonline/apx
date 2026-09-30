@@ -29,6 +29,7 @@ const SIDE: Readonly<Record<Side, {
   readonly totalMetric: string;
   readonly overdueMetric: string;
   readonly invoiceTypes: readonly string[];
+  readonly creditNoteType: string;
   readonly baseSeverity: 'medium';
 }>> = {
   receivables: {
@@ -37,6 +38,7 @@ const SIDE: Readonly<Record<Side, {
     totalMetric: 'receivables',
     overdueMetric: 'receivables_overdue',
     invoiceTypes: ['sales'],
+    creditNoteType: 'sales_credit_note',
     baseSeverity: 'medium',
   },
   payables: {
@@ -45,6 +47,7 @@ const SIDE: Readonly<Record<Side, {
     totalMetric: 'payables',
     overdueMetric: 'payables_overdue',
     invoiceTypes: ['purchase'],
+    creditNoteType: 'purchase_credit_note',
     baseSeverity: 'medium',
   },
 };
@@ -70,6 +73,35 @@ function topOverdueOpen(
     .map((i) => ({ id: i.id, outstanding: invoiceOutstandingAt(i, asOf), label: i.description ?? 'Overdue invoice' }))
     .filter((x) => x.outstanding.greaterThan(0))
     .sort((a, b) => b.outstanding.comparedTo(a.outstanding) || a.id.localeCompare(b.id));
+}
+
+/**
+ * The invoice population the headline sentence names (ADR-124 D-5, audit N-7): every invoice of the
+ * side still open at `asOf`, the overdue part of it, and the open credit notes — kept apart.
+ *
+ * The share used to be net overdue ÷ net total. A credit note not yet due lowers the total and not
+ * the overdue part, so one overdue invoice of 1,000.00 beside a credit note of 800.00 read "1,000.00
+ * of the 200.00 owed to you is overdue (500%)". Over the invoices themselves the share is a share —
+ * never above 100% — and the credit notes are stated, not hidden.
+ */
+function openPopulation(
+  invoices: readonly OpenInvoiceObservation[], invoiceTypes: readonly string[], creditNoteType: string, asOf: string,
+): { open: Decimal; overdue: Decimal; credits: Decimal } {
+  let open = new Decimal(0);
+  let overdue = new Decimal(0);
+  let credits = new Decimal(0);
+  for (const i of invoices) {
+    if (i.issueDate > asOf) continue;
+    const outstanding = invoiceOutstandingAt(i, asOf);
+    if (i.invoiceType === creditNoteType) {
+      credits = credits.plus(outstanding.abs());
+      continue;
+    }
+    if (!invoiceTypes.includes(i.invoiceType) || !outstanding.greaterThan(0)) continue;
+    open = open.plus(outstanding);
+    if (i.dueDate !== null && i.dueDate < asOf) overdue = overdue.plus(outstanding);
+  }
+  return { open, overdue, credits };
 }
 
 /** The pre-ADR-120 selection from this period's own records, for callers without `openInvoices`. */
@@ -113,14 +145,26 @@ function evaluateSide(ctx: RuleContext, side: Side): readonly RuleOutcome[] {
    * credit of −700.00.
    */
   if (total === null || !total.greaterThan(0)) return [];
-  const share = overdue !== null && overdue.greaterThan(0) ? overdue.dividedBy(total) : null;
+
+  const asOf = typeof overdueObservation?.components.as_of === 'string'
+    ? overdueObservation.components.as_of : ctx.periodEnd;
+  /*
+   * The share of the OPEN INVOICES that is overdue (ADR-124 D-5). Without the invoice population
+   * (a caller that supplies no `openInvoices`) the figures are all there is, and a net share above
+   * 100% is not a share at all: it is withheld rather than stated.
+   */
+  const population = ctx.openInvoices !== undefined
+    ? openPopulation(ctx.openInvoices, config.invoiceTypes, config.creditNoteType, asOf)
+    : null;
+  const shareOf = (part: Decimal | null, whole: Decimal | null): Decimal | null =>
+    part !== null && whole !== null && part.greaterThan(0) && whole.greaterThan(0) && !part.greaterThan(whole)
+      ? part.dividedBy(whole) : null;
+  const share = population !== null ? shareOf(population.overdue, population.open) : shareOf(overdue, total);
 
   const slowing = slowedBy !== null && slowedBy.greaterThanOrEqualTo(DAYS_INCREASE);
   const overdueHeavy = share !== null && share.greaterThanOrEqualTo(OVERDUE_SHARE);
   if (!slowing && !overdueHeavy) return [];
 
-  const asOf = typeof overdueObservation?.components.as_of === 'string'
-    ? overdueObservation.components.as_of : ctx.periodEnd;
   const everyOverdue = ctx.openInvoices !== undefined
     ? topOverdueOpen(ctx.openInvoices, config.invoiceTypes, asOf)
     : topOverdueFromRecords(ctx, config.invoiceTypes);
@@ -168,6 +212,11 @@ function evaluateSide(ctx: RuleContext, side: Side): readonly RuleOutcome[] {
       // Signed as the figures are: a net-credit overdue balance is shown as the credit it is.
       overdue: overdue === null ? null : toMoneyString(overdue),
       total: toMoneyString(total),
+      // The population the sentence and the share are about (ADR-124 D-5): open invoices, the
+      // overdue part of them, and open credit notes stated on their own.
+      overdue_invoices: population === null ? null : toMoneyString(population.overdue),
+      open_invoices: population === null ? null : toMoneyString(population.open),
+      open_credits: population === null ? null : toMoneyString(population.credits),
       share: share === null ? null : toRatioString(share),
       days_increase: slowedBy === null ? null : slowedBy.toDecimalPlaces(1).toString(),
       overdue_count: String(invoices.length),

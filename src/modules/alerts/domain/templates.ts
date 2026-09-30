@@ -81,6 +81,12 @@ function count(value: string | null | undefined): string {
   return value ?? 'several';
 }
 
+/** A money value that is present and above zero — a clause about it is only worth saying then. */
+function isPositiveMoney(value: string | null | undefined): boolean {
+  const parsed = tryParseDecimal(value ?? null);
+  return parsed !== null && parsed.greaterThan(0);
+}
+
 /** Plain-language names for the metrics `variance.significant` can be about. */
 const METRIC_NAMES: Readonly<Record<string, string>> = {
   operating_profit: 'Profit before interest and tax',
@@ -162,8 +168,16 @@ export const TEMPLATES: Readonly<Record<AlertRuleKey | typeof OVERFLOW_RULE_KEY,
   },
   'receivables.deterioration': {
     title: () => 'More of what you are owed is overdue',
-    whatHappened: (v, c) =>
-      `${money(v.overdue, c)} of the ${money(v.total, c)} owed to you is overdue (${percent(v.share)}).`,
+    // ADR-124 D-5: the sentence is about the open invoices, whose share of overdue is a share; credit
+    // notes are stated beside it rather than netted into it. An alert stored before ADR-124 has no
+    // invoice figures and keeps its original sentence.
+    whatHappened: (v, c) => (v.open_invoices == null
+      ? `${money(v.overdue, c)} of the ${money(v.total, c)} owed to you is overdue (${percent(v.share)}).`
+      : `${money(v.overdue_invoices, c)} of the ${money(v.open_invoices, c)} owed to you on open invoices is overdue`
+        + (v.share == null ? '.' : ` (${percent(v.share)}).`)
+        + (isPositiveMoney(v.open_credits)
+          ? ` Open credit notes of ${money(v.open_credits, c)} bring what you are owed to ${money(v.total, c)}.`
+          : '')),
     whyItMatters: () =>
       'Money owed to you is not money you have; every week it sits there is a week you are lending it for nothing.',
     whatYouCanDo: (v) => v.top3_share === null
@@ -174,7 +188,7 @@ export const TEMPLATES: Readonly<Record<AlertRuleKey | typeof OVERFLOW_RULE_KEY,
   },
   'payables.deterioration': {
     title: () => 'You owe money that is past due',
-    whatHappened: (v, c) => `You owe ${money(v.overdue, c)} that is past due.`,
+    whatHappened: (v, c) => `You owe ${money(v.overdue_invoices ?? v.overdue, c)} that is past due.`,
     whyItMatters: () =>
       'Suppliers who are not paid on time tighten terms, and tighter terms cost more than the invoice did.',
     whatYouCanDo: () =>

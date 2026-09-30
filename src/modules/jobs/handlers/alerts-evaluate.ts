@@ -62,6 +62,7 @@ export async function evaluateAlertsJob(
     aggregatedAt: run.aggregatedAt,
     currency: settings.currency,
     firstPeriodWithDataId,
+    asOf: run.asOf,
     // The ONE clock read in the alert engine, and it exists only for the ninety-day dismissal
     // cooldown (§8.1). Everything else is a function of the data.
     now: new Date().toISOString(),
@@ -73,6 +74,7 @@ export async function evaluateAlertsJob(
 interface RunRow {
   period_from: string;
   period_to: string;
+  as_of: string;
   started_at: string;
   finished_at: string | null;
   chunks: Array<{ aggregated_at?: string | null }> | null;
@@ -80,10 +82,10 @@ interface RunRow {
 
 async function loadRun(
   db: SupabaseClient, orgId: string, runId: string,
-): Promise<{ periodFrom: string; periodTo: string; aggregatedAt: string } | null> {
+): Promise<{ periodFrom: string; periodTo: string; aggregatedAt: string; asOf: string } | null> {
   const { data } = await db
     .from('calculation_runs')
-    .select('period_from, period_to, started_at, finished_at, chunks')
+    .select('period_from, period_to, started_at, finished_at, chunks, as_of')
     .eq('organization_id', orgId)
     .eq('id', runId)
     .maybeSingle();
@@ -118,6 +120,7 @@ async function loadRun(
     // A run with no recorded chunk aggregated nothing; `started_at` is then the only honest answer,
     // and it is the same clock (ADR-063).
     aggregatedAt: instants[0] ?? row.started_at,
+    asOf: row.as_of,
   };
 }
 
