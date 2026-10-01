@@ -26,6 +26,8 @@ let adviser: string; let healthAdviser: string; let stranger: string;
 let X: string; let Y: string; let Z: string;
 const big: string[] = [];
 const all: string[] = [];
+/** Per HIGH-B organisation: the period start of its latest scored month, and of the one before. */
+const expectedHealth = new Map<string, { latest: string; previous: string }>();
 const edge: Record<'none' | 'one' | 'gap' | 'incomplete', string> = { none: '', one: '', gap: '', incomplete: '' };
 
 async function orgFor(holder: string, name: string): Promise<string> {
@@ -57,6 +59,12 @@ function seedActions(org: string, n: number, priority: string, due: string | nul
     select '${org}', '${priority} action ' || g, '${priority}', ${due === null ? 'null' : `'${due}'`}, 'open', 'user',
            now() - interval '${ageDays} days' + (g || ' seconds')::interval
       from generate_series(1, ${n}) g`);
+}
+
+/** Every fiscal period start of `org`, oldest first. */
+function periodStarts(org: string): string[] {
+  return adminSql(`select period_start from public.fiscal_periods where organization_id='${org}' order by period_start`)
+    .split('\n').map((l) => l.trim()).filter(Boolean);
 }
 
 /** Score every complete month of `org`; `score(periodStart)` returns the score or null to skip the month. */
@@ -94,10 +102,18 @@ beforeAll(async () => {
   seedActions(Z, 300, 'critical', '2026-01-01', 90);
 
   // ---- HIGH-B: 45 clients, 24 complete months each; the latest month At risk, the one before Stable ----
+  // `create_organization` materialises twelve months back and twelve forward from the database's
+  // `now()`, so WHICH 24 months exist depends on the day the suite runs. The latest and previous
+  // month are read from each organisation's own periods, never hard-coded to one calendar month.
   for (let i = 0; i < 45; i += 1) {
     const org = await orgFor(healthAdviser, `PS Health ${String(i).padStart(2, '0')} ${RUN}`);
     big.push(org);
-    scoreMonths(org, 'all', (start) => (start === '2027-08-01' ? 35 : 70));
+    const starts = periodStarts(org);
+    // 45 × 24 = 1,080 scored months: past PostgREST's 1,000-row cap, which is the point of HIGH-B.
+    if (starts.length !== 24) throw new Error(`expected 24 fiscal periods for ${org}, found ${starts.length}`);
+    const latest = starts[starts.length - 1]!;
+    expectedHealth.set(org, { latest, previous: starts[starts.length - 2]! });
+    scoreMonths(org, 'all', (start) => (start === latest ? 35 : 70));
   }
   // Edge cases, same portfolio.
   edge.none = await orgFor(healthAdviser, `PS Edge none ${RUN}`);
@@ -177,7 +193,8 @@ describe('HIGH-B — health for every client, from its latest two complete score
     expect(rows).toHaveLength(45);
     expect(rows.filter((c) => c.health === null)).toEqual([]);
     for (const row of rows) {
-      expect(row.health).toMatchObject({ periodStart: '2027-08-01', score: 35, band: 'at_risk', previous: { periodStart: '2027-07-01', score: 70, band: 'stable' } });
+      const { latest, previous } = expectedHealth.get(row.organisation.id)!;
+      expect(row.health).toMatchObject({ periodStart: latest, score: 35, band: 'at_risk', previous: { periodStart: previous, score: 70, band: 'stable' } });
       expect(row.attention!.reasons.map((r) => r.kind)).toEqual(expect.arrayContaining(['health_band_fell', 'health_at_risk']));
     }
     expect(view.attention.filter((c) => big.includes(c.organisation.id))).toHaveLength(45);

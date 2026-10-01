@@ -277,6 +277,64 @@ describe('the pointer rewrite (§2.4 step 8, F-B-16)', () => {
     components: {}, evidence_query: null,
   });
 
+  it('names, per cell, the NEWEST earlier run\'s snapshot as the one each pointer replaced', () => {
+    /*
+     * Migration 20261001000001 resolves `previous_snapshot_id` in one set-based pass instead of a
+     * correlated subquery per row (the per-row lookup was quadratic in a month's cells and timed out at
+     * ~1,000 customers). The answer must be the same, cell by cell: the newest EARLIER run's snapshot of
+     * exactly that (metric, dimension type, dimension id, dimension key) — NULL-safe on both dimension
+     * columns — and NULL for a cell no earlier run wrote.
+     */
+    const counterparty = (name: string): string => adminSql(`
+      insert into public.counterparties (organization_id, name, kind)
+      values ('${orgId}', '${name}', 'customer') returning id`).split('\n')[0]!.trim();
+    const customer = counterparty('Pointer Customer A');
+    const other = counterparty('Pointer Customer B');
+    const id = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`;
+    const counterpartySnapshot = (counterpartyId: string, value: string) => ({
+      ...snapshot('customer_revenue', value), dimension_type: 'counterparty', dimension_id: counterpartyId,
+    });
+    const withId = <T extends object>(n: number, s: T) => ({ ...s, id: id(n) });
+
+    const first = startRun('d1d1');
+    writeChunk(first, [
+      withId(101, snapshot('revenue', '100.00')),
+      withId(102, categorySnapshot('marketing', '10.00')),
+      withId(103, counterpartySnapshot(customer, '60.00')),
+    ]);
+    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
+
+    const second = startRun('d2d2');
+    writeChunk(second, [
+      withId(201, snapshot('revenue', '200.00')),
+      withId(202, categorySnapshot('rent', '20.00')),
+      withId(203, counterpartySnapshot(other, '70.00')),
+    ]);
+    serverRpc('finish_calculation_run', { p_org: orgId, p_run: second, p_status: 'succeeded' });
+
+    const third = startRun('d3d3');
+    writeChunk(third, [
+      withId(301, snapshot('revenue', '300.00')),
+      withId(302, categorySnapshot('marketing', '30.00')),
+      withId(303, categorySnapshot('rent', '31.00')),
+      withId(304, counterpartySnapshot(customer, '80.00')),
+      withId(305, counterpartySnapshot(other, '90.00')),
+      withId(306, categorySnapshot('software', '5.00')),
+    ]);
+
+    const replaced = adminSql(`
+      select string_agg(c.snapshot_id::text || '>' || coalesce(c.previous_snapshot_id::text, 'none'), ',' order by c.snapshot_id)
+        from public.metric_current c where c.organization_id = '${orgId}'`);
+    expect(replaced).toBe([
+      `${id(301)}>${id(201)}`, // revenue: the newest earlier run (second), not the first
+      `${id(302)}>${id(102)}`, // marketing: only the first run wrote it — by key, not any category
+      `${id(303)}>${id(202)}`, // rent: the second run
+      `${id(304)}>${id(103)}`, // the customer: by dimension_id, not the other customer's newer row
+      `${id(305)}>${id(203)}`, // the other customer
+      `${id(306)}>none`,       // a category no earlier run wrote
+    ].join(','));
+  });
+
   it('restores category-dimensioned pointers with their categories intact (ADR-055.1)', () => {
     /*
      * The defect this test was written for: the failed-run restore was last written before

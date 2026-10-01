@@ -71,55 +71,55 @@ interface SeedOptions {
   readonly categories?: boolean;
 }
 
-/** Complete months of a steady business, written the way the engine writes them. */
+/**
+ * Complete months of a steady business, written the way the engine writes them.
+ *
+ * ONE database round trip per organisation. Each `adminSql` is a `docker exec psql`, ~150 ms on a
+ * loaded machine; writing every cell as its own statement took ~620 round trips across this file's
+ * eight organisations and pushed `beforeAll` past its budget for reasons that had nothing to do
+ * with scenarios.
+ */
 function seedHistory(
   org: string, monthly: Readonly<Record<string, string>>, months = 6, options: SeedOptions = {},
 ): void {
   const currency = options.currency ?? 'GBP';
   const warnings = JSON.stringify(options.warnings ?? []);
   const categories = options.categories ?? true;
-  adminSql(`update public.organizations set base_currency = '${currency}' where id = '${org}'`);
-  const runId = one(`
+  const starts = Array.from({ length: months }, (_, i) => `'2026-${String(8 - i).padStart(2, '0')}-01'`).join(', ');
+  const cells: Array<[string, string | null, string]> = [
+    ...Object.entries(monthly).map(([metricKey, value]): [string, string | null, string] => [metricKey, null, value]),
+    // The engine's own breakdown of running costs, which a percentage assumption reads (§3).
+    ...(categories ? [['expense_by_category', 'payroll', '2000'], ['expense_by_category', 'marketing', '500']] as Array<[string, string, string]> : []),
+  ];
+  const values = cells.map(([metricKey, dimensionKey, value]) =>
+    `('${metricKey}', '${dimensionKey === null ? 'none' : 'standard_category'}', ${dimensionKey === null ? 'null' : `'${dimensionKey}'`}, '${value}')`).join(', ');
+  adminSql(`do $$ declare v_run uuid; begin
+    update public.organizations set base_currency = '${currency}' where id = '${org}';
     insert into public.calculation_runs
            (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
     select '${org}', 'recalc_manual', '1.0.0', p.id, p.id, '2026-08-31', 'succeeded'
       from public.fiscal_periods p
      where p.organization_id = '${org}' and p.period_start = '2026-08-01'
-    returning id`);
-
-  for (let i = 0; i < months; i += 1) {
-    const start = `2026-${String(8 - i).padStart(2, '0')}-01`;
-    const periodId = one(`
-      select id from public.fiscal_periods
-       where organization_id = '${org}' and period_start = '${start}'`);
-    adminSql(`update public.fiscal_periods set is_complete = true where id = '${periodId}'`);
-
-    const write = (metricKey: string, value: string, dimensionKey: string | null) => {
-      const dimensionType = dimensionKey === null ? 'none' : 'standard_category';
-      const key = dimensionKey === null ? 'null' : `'${dimensionKey}'`;
-      const snapshotId = one(`
-        insert into public.metric_snapshots
-               (organization_id, calculation_run_id, period_id, metric_key, dimension_type,
-                dimension_key, value, unit, currency, basis, assurance_level, data_quality)
-        values ('${org}', '${runId}', '${periodId}', '${metricKey}', '${dimensionType}',
-                ${key}, ${value}, 'money', '${currency}', 'ledger', 'verified',
-                '{"completeness": 1, "proxy": false, "warnings": ${warnings}, "missing": []}'::jsonb)
-        returning id`);
-      adminSql(`
-        insert into public.metric_current
-               (organization_id, period_id, metric_key, dimension_type, dimension_key,
-                snapshot_id, calculation_run_id)
-        values ('${org}', '${periodId}', '${metricKey}', '${dimensionType}', ${key},
-                '${snapshotId}', '${runId}')`);
-    };
-
-    for (const [metricKey, value] of Object.entries(monthly)) write(metricKey, value, null);
-    // The engine's own breakdown of running costs, which a percentage assumption reads (§3).
-    if (categories) {
-      write('expense_by_category', '2000', 'payroll');
-      write('expense_by_category', '500', 'marketing');
-    }
-  }
+    returning id into v_run;
+    update public.fiscal_periods set is_complete = true
+     where organization_id = '${org}' and period_start in (${starts});
+    insert into public.metric_snapshots
+           (organization_id, calculation_run_id, period_id, metric_key, dimension_type,
+            dimension_key, value, unit, currency, basis, assurance_level, data_quality)
+    select '${org}', v_run, p.id, v.metric_key, v.dimension_type::public.metric_dimension_enum,
+           v.dimension_key, v.value::numeric, 'money'::public.metric_unit_enum, '${currency}',
+           'ledger'::public.metric_basis_enum, 'verified'::public.assurance_level_enum,
+           '{"completeness": 1, "proxy": false, "warnings": ${warnings}, "missing": []}'::jsonb
+      from public.fiscal_periods p
+     cross join (values ${values}) as v(metric_key, dimension_type, dimension_key, value)
+     where p.organization_id = '${org}' and p.period_start in (${starts});
+    insert into public.metric_current
+           (organization_id, period_id, metric_key, dimension_type, dimension_key,
+            snapshot_id, calculation_run_id)
+    select organization_id, period_id, metric_key, dimension_type, dimension_key, id, calculation_run_id
+      from public.metric_snapshots
+     where organization_id = '${org}' and calculation_run_id = v_run;
+  end $$;`);
 }
 
 const REVENUE_UP_10 = {
@@ -190,7 +190,7 @@ beforeAll(async () => {
   for (const org of [orgNoCat, orgLimited, orgWarn, orgINR, orgAED, orgUSD]) {
     await generateForecast(ownerCtx(org));
   }
-});
+}, 300_000);
 
 afterAll(() => {
   adminSql(`

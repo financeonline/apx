@@ -2274,3 +2274,14 @@ Status: **IMPLEMENTED — engine 4.0.0** (with migration `20260930000004` for FU
 - FU-14's failed-run restore limit.
 - Month rollover (FU-6).
 - FU-2, FU-3 and FU-5 to FU-11: unchanged.
+
+### ADR-127 · The pointer rewrite resolves each cell's previous snapshot in one pass; three date- and load-sensitive tests fixed
+Status: **IMPLEMENTED** (migration `20261001000001`). Not independently audited. Found while gating ADR-126 on 2026-10-01: three integration tests that passed on 2026-09-30 failed on `main` (5797306) as well, on a clean database.
+
+1. **`api_server.finish_chunk` — a product defect (performance).**
+   - The `metric_current` insert looked up `previous_snapshot_id` with a correlated subquery per row on `dimension_id IS NOT DISTINCT FROM …`, which no index serves. That is quadratic in a month's cells: about 1,050 customers × 3 per-customer metrics took the chunk to 5–9 s against the 8 s statement timeout. So `adr123-remediation`'s BIGINV run passed or failed with machine load, and a real organisation with a few thousand customers would fail every time.
+   - The newest earlier run's snapshot of every cell is now picked once (`DISTINCT ON`, newest `started_at` first, as before) and joined with null-safe, hashable equality. The answer is unchanged. A new exact test (`engine-run.test.ts`, "names, per cell, the NEWEST earlier run's snapshot…") passes on the old and the new function. BIGINV's slowest `finish_chunk` call is now ≈ 1.8 s.
+2. **`portfolio-scale.test.ts` HIGH-B — a test defect (date).** It hard-coded `2027-08` as the latest period, but `api.create_organization` creates periods relative to `now()`, so from 1 October the latest is `2027-09`. The product was right. The test now reads each organisation's own latest and previous periods; its assertions are otherwise unchanged. *Known:* its HIGH-A cases still name `2026-08`, which stays inside the period window until about August 2027.
+3. **`scenarios.test.ts` — a test defect (setup time).** It seeded history with about 600 sequential `docker exec psql` calls and exceeded the 60 s hook timeout under load. It now writes the same rows in one block per organisation (setup ≈ 2 s), with an explicit hook budget.
+
+No rule, threshold, figure or permission changed.
