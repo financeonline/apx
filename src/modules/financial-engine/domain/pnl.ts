@@ -50,6 +50,7 @@ import type {
   MetricResult,
   MetricUnit,
   PeriodRef,
+  SourceCoverage,
 } from './types';
 
 // ---------------------------------------------------------------------------------------------
@@ -116,6 +117,15 @@ export interface PnlInput {
    * unavailable with THAT reason, not a zero and not "no such accounts" (ADR-104).
    */
   readonly costOfSalesInOtherSource?: boolean;
+  /**
+   * ADR-122 FU-12, the INVOICE basis only: whether committed full PURCHASE lists establish P's costs
+   * (`PeriodCoverage.invoiceCosts`). A sales list hands the P&L to the invoices source; it says nothing
+   * about purchases. When this does not cover P — or is omitted, since NULL is never zero — every
+   * expense-side figure and every figure derived from one is NULL `no_source_covers_period`, and the
+   * cost lines carry this coverage's `partial_month` when it covers P only to date. Ignored on every
+   * other basis.
+   */
+  readonly purchaseCoverage?: SourceCoverage;
 }
 
 /**
@@ -416,6 +426,14 @@ interface Builder {
   readonly baseQuality: Quality;
   readonly baseAssurance: AssuranceLevel;
   readonly hasCostOfSalesAccount: boolean;
+  /**
+   * FU-12: on the invoice basis, no full purchase list establishes P, so nothing states its costs.
+   * Every expense-side figure is unknown — not zero — and it takes precedence over the
+   * no-cost-of-sales-account path: gross profit does not fall back to revenue.
+   */
+  readonly costsUncovered: boolean;
+  /** The base quality of an expense-side figure: `baseQuality`, plus the purchase coverage's warnings. */
+  readonly costQuality: Quality;
   readonly results: MetricResult[];
   readonly figures: Map<string, Figure>;
 }
@@ -435,16 +453,16 @@ function totalOf(b: Builder, category: StandardCategory): CategoryTotal {
  * DIMENSIONED families (`expense_by_category`, `expense_by_account`), where writing a snapshot per
  * absent category would invent rows nobody has.
  */
-function coveredTotal(b: Builder, category: StandardCategory): Figure {
+function coveredTotal(b: Builder, category: StandardCategory, base: Quality = b.baseQuality): Figure {
   const total = totalOf(b, category);
   if (!total.present) {
-    return { value: ZERO, quality: b.baseQuality, assurance: b.baseAssurance };
+    return { value: ZERO, quality: base, assurance: b.baseAssurance };
   }
   if (total.value === null) {
     return {
       value: null,
-      quality: mergeQuality([b.baseQuality, {
-        completeness: b.baseQuality.completeness, proxy: b.baseQuality.proxy,
+      quality: mergeQuality([base, {
+        completeness: base.completeness, proxy: base.proxy,
         warnings: total.warnings, missing: total.missing,
       }]),
       assurance: b.baseAssurance,
@@ -452,10 +470,33 @@ function coveredTotal(b: Builder, category: StandardCategory): Figure {
   }
   return {
     value: total.value,
-    quality: mergeQuality([b.baseQuality, {
-      completeness: b.baseQuality.completeness, proxy: b.baseQuality.proxy,
+    quality: mergeQuality([base, {
+      completeness: base.completeness, proxy: base.proxy,
       warnings: total.warnings, missing: [],
     }]),
+    assurance: b.baseAssurance,
+  };
+}
+
+/**
+ * An expense-side figure (FU-12): NULL `no_source_covers_period` when no purchase list establishes
+ * P's costs on the invoice basis; otherwise the category's covered total, carrying the purchase
+ * coverage's warnings (`partial_month`, for the current month to date).
+ */
+function costTotal(b: Builder, category: StandardCategory): Figure {
+  return b.costsUncovered ? uncoveredCost(b) : coveredTotal(b, category, b.costQuality);
+}
+
+/** A cost nothing states: unknown, never 0.00 (§1.5, FU-12). The engine saw none of it. */
+function uncoveredCost(b: Builder): Figure {
+  return {
+    value: null,
+    quality: {
+      completeness: 0,
+      proxy: b.baseQuality.proxy,
+      warnings: b.baseQuality.warnings,
+      missing: ['no_source_covers_period'],
+    },
     assurance: b.baseAssurance,
   };
 }
@@ -575,17 +616,30 @@ export function computePnl(
   // nothing uncategorised either and the share is zero.
   const shareOfTotal = divide(uncategorisedAbs, totalAbs) ?? ZERO;
   const baseCompleteness = notBelowZero(1 - shareOfTotal.toNumber());
+  const baseQuality: Quality = {
+    completeness: baseCompleteness,
+    proxy: input.basis.proxy,
+    warnings: input.basis.warnings,
+    missing: [],
+  };
+
+  // FU-12: on the invoice basis the cost side needs purchase lists of its own (ADR-122).
+  const invoiceBasis = input.basis.basis === 'invoices';
+  const purchases = input.purchaseCoverage;
+  const costsUncovered = invoiceBasis && !(purchases?.covers ?? false);
+  // Covered to date (the current month), the cost lines say so as revenue does: by `partial_month`.
+  // Completeness stays the categorisation share, as for every P&L figure (ADR-125).
+  const costQuality: Quality = invoiceBasis && purchases !== undefined && purchases.covers
+    ? { ...baseQuality, warnings: uniqueInOrder([...baseQuality.warnings, ...purchases.warnings]) }
+    : baseQuality;
 
   const b: Builder = {
     input, ctx, resolve, totals,
-    baseQuality: {
-      completeness: baseCompleteness,
-      proxy: input.basis.proxy,
-      warnings: input.basis.warnings,
-      missing: [],
-    },
+    baseQuality,
     baseAssurance: input.basis.assurance,
     hasCostOfSalesAccount: hasUsableCostOfSalesAccount(input),
+    costsUncovered,
+    costQuality,
     results: [],
     figures: new Map(),
   };
@@ -735,9 +789,13 @@ function buildCostOfSales(b: Builder): Figure {
   const total = totalOf(b, 'cost_of_sales');
   // CD-05: an organization with no cost-of-sales account does not have a zero cost of sales; it has
   // an unknown one. Reporting zero would hand it a 100% gross margin.
-  const figure: Figure = b.hasCostOfSalesAccount
-    ? coveredTotal(b, 'cost_of_sales')
-    : {
+  // FU-12: costs nothing establishes come FIRST — the reason is that no purchase list states P, which
+  // is true whatever the chart holds, and it keeps gross profit from falling back to revenue.
+  let figure: Figure;
+  if (b.costsUncovered) figure = uncoveredCost(b);
+  else if (b.hasCostOfSalesAccount) figure = costTotal(b, 'cost_of_sales');
+  else {
+    figure = {
       value: null,
       // ADR-104: when the organisation's purchase invoices DO carry cost of sales but the chosen
       // basis does not, the reason is that mismatch — not the absence of an account.
@@ -747,11 +805,12 @@ function buildCostOfSales(b: Builder): Figure {
       },
       assurance: b.baseAssurance,
     };
+  }
   push(b, {
     key: 'cost_of_sales',
     unit: 'money',
     figure,
-    evidence: b.hasCostOfSalesAccount
+    evidence: b.hasCostOfSalesAccount && !b.costsUncovered
       ? leafEvidence(b.input, b.ctx, total.accountIds, 'expense')
       : null,
     components: {
@@ -839,7 +898,7 @@ function buildGrossMargin(
 }
 
 function buildOperatingExpenses(b: Builder): Figure {
-  const parts = OPEX_CATEGORIES.map((c) => ({ category: c, figure: coveredTotal(b, c) }));
+  const parts = OPEX_CATEGORIES.map((c) => ({ category: c, figure: costTotal(b, c) }));
   const merged = mergeQuality(parts.map((p) => p.figure.quality));
   const anyNull = parts.some((p) => p.figure.value === null);
   const value = anyNull ? null : sum(parts.map((p) => p.figure.value as Decimal));
@@ -851,7 +910,8 @@ function buildOperatingExpenses(b: Builder): Figure {
     key: 'operating_expenses',
     unit: 'money',
     figure,
-    evidence: leafEvidence(b.input, b.ctx, accountIds, 'expense'),
+    // An unknown figure re-selects no rows (FU-12): purchases nobody established for P are not it.
+    evidence: b.costsUncovered ? null : leafEvidence(b.input, b.ctx, accountIds, 'expense'),
     components: {
       categories: [...OPEX_CATEGORIES],
       account_ids: accountIds,
@@ -904,13 +964,13 @@ function buildBelowLine(b: Builder): Readonly<Record<string, Figure>> {
   const out: Record<string, Figure> = {};
   for (const category of BELOW_LINE_CATEGORIES) {
     if (category === 'other_income') continue; // written by buildOtherIncome, above the line here.
-    const figure = coveredTotal(b, category);
+    const figure = costTotal(b, category);
     const total = totalOf(b, category);
     push(b, {
       key: category,
       unit: 'money',
       figure,
-      evidence: leafEvidence(b.input, b.ctx, total.accountIds, 'expense'),
+      evidence: b.costsUncovered ? null : leafEvidence(b.input, b.ctx, total.accountIds, 'expense'),
       components: { categories: [category], account_ids: total.accountIds, row_count: total.rowCount },
     });
     out[category] = figure;
@@ -979,7 +1039,7 @@ function buildNetProfit(
  * is the MVP stand-in and is pending product sign-off — not a definition to copy elsewhere.
  */
 function buildContributionMargin(b: Builder, revenue: Figure, costOfSales: Figure): Figure {
-  const marketing = coveredTotal(b, 'marketing');
+  const marketing = costTotal(b, 'marketing');
   const absentByDesign = costOfSalesAbsentByDesign(costOfSales);
   const merged = mergeQuality([revenue.quality, costOfSales.quality, marketing.quality]);
   const warnings = absentByDesign
@@ -1025,12 +1085,17 @@ function buildExpenseByCategory(b: Builder): void {
   for (const category of EXPENSE_BY_CATEGORY_CATEGORIES) {
     const total = totalOf(b, category);
     if (!total.present) continue;
+    const expenseSide = CATEGORY_ACCOUNT_TYPE[category] === 'expense';
+    // FU-12: a category nothing establishes is not written, as no category is when no source covers
+    // the period (`noSourceResults`) — never a 0.00, nor a sum of purchases no list states for P.
+    if (expenseSide && b.costsUncovered) continue;
+    const base = expenseSide ? b.costQuality : b.baseQuality;
     const figure: Figure = {
       value: total.value,
       quality: {
-        completeness: b.baseQuality.completeness,
-        proxy: b.baseQuality.proxy,
-        warnings: uniqueInOrder([...b.baseQuality.warnings, ...total.warnings]),
+        completeness: base.completeness,
+        proxy: base.proxy,
+        warnings: uniqueInOrder([...base.warnings, ...total.warnings]),
         missing: total.value === null ? uniqueInOrder([...total.missing]) : [],
       },
       assurance: b.baseAssurance,

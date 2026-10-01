@@ -88,6 +88,13 @@ export interface VarianceObservation {
 export interface VariancePeriodInput {
   readonly periodId: string | null;
   readonly observations: readonly VarianceObservation[];
+  /**
+   * FU-12: true for a dimension whose ABSENCE from this period is unknown rather than a known zero —
+   * the period exists, but no source establishes that side of it (its headline is NULL with
+   * `no_source_covers_period`), so a category with no row there had nothing STATED, not nothing
+   * spent. Omitted: every absent dimension of a written period is a known zero (the rule above).
+   */
+  readonly absentUnknown?: (dimensionId: string) => boolean;
 }
 
 export interface VarianceInput {
@@ -99,6 +106,8 @@ export interface VarianceInput {
   readonly current: {
     readonly periodId: string;
     readonly observations: readonly VarianceObservation[];
+    /** As `VariancePeriodInput.absentUnknown`, for the current period. */
+    readonly absentUnknown?: (dimensionId: string) => boolean;
   };
   /**
    * `prev_period` and `same_period_last_year` take exactly one; `trailing_3m_avg` takes P−1, P−2,
@@ -203,6 +212,8 @@ function resolveComparison(
       // at all. A DIMENSION missing from a period that WAS written is different: the period is
       // covered and this category simply had nothing in it, so zero is what happened.
       if (dimensionId === null) return empty(insufficient, periodIds);
+      // FU-12: unless nothing establishes that side of the period — then the absence is unknown.
+      if (period.absentUnknown?.(dimensionId) === true) return empty('no_source_covers_period', periodIds);
       values.push(ZERO);
       continue;
     }
@@ -256,11 +267,16 @@ export function computeVariance(
 
     // A dimension that exists only in the comparison period fell to nothing this month. The source
     // covers the period, so that nothing is a known zero rather than an absence.
+    // FU-12: unless nothing establishes that side of this period — then the absence is unknown.
+    const currentUnknown = currentObservation === undefined && dimensionId !== null
+      && input.current.absentUnknown?.(dimensionId) === true;
     const currentValue = currentObservation === undefined
-      ? (dimensionId === null ? null : ZERO)
+      ? (dimensionId === null || currentUnknown ? null : ZERO)
       : currentObservation.value === null ? null : parseDecimal(currentObservation.value);
 
-    if (currentObservation !== undefined && currentObservation.value === null) {
+    if (currentUnknown) {
+      missing.push('no_source_covers_period');
+    } else if (currentObservation !== undefined && currentObservation.value === null) {
       const reasons = currentObservation.missing ?? [];
       missing.push(...(reasons.length > 0 ? reasons : ['no_source_covers_period' as DataQualityMissing]));
     } else if (currentObservation === undefined && dimensionId === null) {

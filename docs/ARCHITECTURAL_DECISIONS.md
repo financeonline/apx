@@ -2005,12 +2005,12 @@ Status: **open. Not fixed by ADR-120; each needs its own decision.** Listed so n
 | FU-6 | No daily `scheduled` calculation is enqueued | no caller of the `scheduled` trigger | Enqueue per organisation from the nightly route (as-of-only runs, ADR-047.8). |
 | FU-7 | P&L trial-balance drill-down totals ≠ monthly figure | cumulative differencing | Descriptor over the two statements, or a derived descriptor. |
 | FU-8 | `uuid` moderate advisory via `exceljs` | `npm audit` | Upgrade `exceljs` deliberately (breaking). |
-| FU-12 | Cost-side mirror of FU-1: with only a full SALES list establishing P, the invoice-basis P&L states `cost_of_sales`/`operating_expenses` 0.00 and profit = revenue; conversely a purchase-only list's costs are now NULL | ADR-125 | **OPEN.** Decide per-side P&L coverage for the invoice basis before Phase 16 relies on profit or cost figures from invoice-only organisations. |
+| FU-12 | Cost-side mirror of FU-1: with only a full SALES list establishing P, the invoice-basis P&L states `cost_of_sales`/`operating_expenses` 0.00 and profit = revenue; conversely a purchase-only list's costs are now NULL | ADR-125 | Decide per-side P&L coverage for the invoice basis before Phase 16 relies on profit or cost figures from invoice-only organisations. **FIXED (ADR-126, engine 5.0.0):** invoice-basis costs need a full purchase list that establishes the month. |
 | FU-13 | The import pipeline never wrote `invoice_list_kind = full`; every list committed through the app had a NULL kind | ADR-125 D-5 | **FIXED (ADR-125):** the kind is written at commit (trigger `app.invoice_list_kind_at_commit`) and committed batches were backfilled. |
 | FU-14 | A period that stops being complete kept the `health_current` pointer an earlier run left | ADR-125 D-6 | **FIXED (ADR-125):** `api_server.set_period_completeness` withdraws the pointer. Known limit: not restored if the run then fails. |
 | FU-15 | `invoiceSideCoverage` (AR/AP) does not yet limit a list to its commit date | ADR-125 | **OPEN.** Out of FU-1's scope by the owner's instruction (AR/AP unchanged). |
 
-FU-1, FU-13 and FU-14 are fixed by ADR-125 (below); FU-12 and FU-15 are open. FU-9 to FU-11 are in the ADR-122 amendment of 2026-09-30.
+FU-1, FU-13 and FU-14 are fixed by ADR-125 (below), and FU-12 by ADR-126; FU-15 is open. FU-9 to FU-11 are in the ADR-122 amendment of 2026-09-30.
 
 ### ADR-121 · Funding Readiness is calculated only while enabled, with eligible historical backfill on enablement
 Status: **decided by the product owner, 2026-09-30 (Phase 16 U-4, U-5).** The earlier proposal (calculate for every organisation and let the flag gate visibility only) is **REJECTED**.
@@ -2269,11 +2269,93 @@ Status: **IMPLEMENTED — engine 4.0.0** (with migration `20260930000004` for FU
   - Evidence sweep: 54 → 42 checked, 0 mismatches.
 
 **Remaining.**
-- FU-12 (cost side) OPEN.
+- FU-12 (cost side) OPEN — since fixed by ADR-126.
 - FU-15 (AR/AP commit-date limit) OPEN.
 - FU-14's failed-run restore limit.
 - Month rollover (FU-6).
 - FU-2, FU-3 and FU-5 to FU-11: unchanged.
+
+### ADR-126 · FU-12: invoice-basis costs are stated only from a purchase list that establishes the month
+Status: **IMPLEMENTED — engine 5.0.0.** No migration. Not independently audited: the owner has deferred the comprehensive independent audit until the remaining approved phases are built. Approved by the owner on 2026-10-01 as the fix to make before Phase 16 ("Fix FU-12 first"); Phase 16 not started. Implementation record: `docs/FU-12_IMPLEMENTATION.md`; regression record: `docs/FU-12_ENGINE_REGRESSION_RECORD.md`.
+
+**Context.** FU-12 (ADR-122 register, from ADR-125) is the cost-side twin of FU-1. Once a full SALES list establishes a month, §2.3 hands the invoices source the whole P&L. The invoice basis builds every cost line from PURCHASE invoices, but only the sales side was checked for coverage.
+- With a sales list alone, `cost_of_sales`, every expense category and `operating_expenses` came out **0.00**, calculated and complete.
+- Gross, operating and net profit therefore equalled revenue, and every margin read 100%.
+- Phase 16 reads `net_margin`, `operating_profit` and `net_profit` (F1, F2), so it would have scored invented profitability.
+
+**Root cause.** `pnl.ts` `coveredTotal` returns ZERO for a category with no cells. That is right when a source covers the period, and wrong when nothing established the purchases: the invoices source "covered" the month on the strength of its sales list alone.
+
+**Decisions.**
+1. **Purchase coverage** (`coverage.ts` `invoiceCostCoverage`, `PeriodCoverage.invoiceCosts`).
+   - Committed FULL PURCHASE lists (`purchase_invoices` / `purchase_report`, kind `full`) establish a month by FU-1's own rules, through one shared function `invoiceListCoverage(…, side)`:
+     - effective range = declared start → min(declared end, commit date);
+     - lists that meet combine;
+     - a completed month needs every day covered;
+     - the current month is covered to date with `partial_month`;
+     - a month not yet begun is never covered.
+   - It decides nothing about which source wins. A purchase-only list still does not make the invoices source cover P, because costs alone are no P&L.
+2. **Uncovered costs are NULL** (invoice P&L basis only).
+   - These are NULL with `no_source_covers_period`, completeness 0 and no evidence: `cost_of_sales`, every expense category (opex, other / interest / tax expense, marketing) and `operating_expenses`.
+   - Every figure derived from them follows: gross / operating / net profit, every margin, and contribution and its ratio.
+   - This takes precedence over the "no cost-of-sales account" path, so gross profit never falls back to revenue.
+   - No expense-side `expense_by_category` row is written.
+   - Revenue and `other_income` are unchanged.
+   - A covering purchase list with no purchase in the month is a genuine, stated 0.00.
+3. **The current month: the same days on both sides.**
+   - Both sides are stated to date. Current-month costs are covered only when the purchase lists reach exactly as far as the sales lists (equal completeness = equal days reached); otherwise they are NULL.
+   - Adversarial review showed why: sales reaching the 25th against purchases reaching the 3rd stated a 94% net margin, carrying only `partial_month`.
+   - A completed month is covered by both sides only in full, so the windows agree by construction.
+4. **Supplier family** (invoice counterparty basis).
+   - Uncovered: no `supplier_spend` rows, and `supplier_concentration_top1/top5` are NULL `no_source_covers_period` (never a 100% share of nothing).
+   - Covered to date: the figures carry `partial_month`.
+   - The customer side is unchanged.
+5. **Unestablished purchases are left out of the whole fold** (`compose.ts` `pnlCells`). A supplier's default category can be anything, including `other_income` or `revenue`. So purchases no list establishes for P are removed from every invoice-basis category, from the uncategorised share and from the VAT counts that qualify revenue — not only from the cost lines. *Found by review.*
+6. **Variance: an absent category is unknown where nothing establishes the spending** (`variance.ts`, `variance-pass.ts`).
+   - In a period whose `operating_expenses` is NULL `no_source_covers_period`, an expense category with no row is UNKNOWN, not a known zero. This applies on the current side and on every comparison side, including the trailing three-month average. `other_income` follows `revenue` the same way.
+   - Before this, a month with no purchase list read as "Marketing −100%, favourable" in Insights and the analyst's `get_expense_changes`.
+   - This also closes the same pre-existing leak for months no source covers at all, on EVERY basis: a ledger, balance or bank month next to a month no source covers now carries a NULL category variance where it read −100% or a 0.00 comparison (`new_in_period`). The golden corpus shows it (June after a May no source covers).
+   - Known limit (pre-existing): a comparison period that exists but has no stored `operating_expenses` row at all still reads absent categories as known zeros.
+   - *Blocker found by review.*
+7. **Days denominators.**
+   - `payablesExpenseBase` is NULL when costs are uncovered (cost of sales NULL), or when stated only to date (`partial_month`, `receivables-input.ts`). In either case `payables_days` is NULL.
+   - Its reason stays `insufficient_history`, as for `receivables_days` when revenue is unknown (pre-existing wording, unchanged).
+8. **P&L page.** An empty spending breakdown in a month whose spending nothing establishes now says the spending isn't known (and, for invoice lists, that a full purchase list must cover the month and, in the current month, reach the same day as the sales list), not "Nothing was recorded…" (`ProfitAndLossView.spendingKnown`).
+
+**What did not change.**
+- §2.3 precedence and fallthrough; FU-1's revenue rule.
+- AR/AP coverage (`invoiceSideCoverage`); cash; the levels on the ledger, balance and bank bases (their category variances change only next to a month no source covers — decision 6).
+- `app.invoice_net` and credit-note signs.
+- Health rules, weights and thresholds (`health.config.v1`); alert rules and thresholds (`alerts.rules.v1`).
+- RLS, grants and schema: no migration.
+
+**Consequences.**
+- **Engine 5.0.0** (major: existing values change). The golden hash was re-recorded, and the corpus carries the FU-12 cases. The upgrade sweep recomputes every organisation's history.
+- **Health.** Profitability and cost control drop out of a month's score through their requirement groups when `net_margin` / `operating_expenses` are NULL. Nothing became zero. See the regression record for which scores moved.
+- **Mixed bases (recorded, by the spec).** When the counterparty basis is invoices (a sales list) but the P&L basis is the ledger, §2.3's counterparty precedence still picks invoices. So the supplier side is NULL without a purchase list even though the ledger could state the costs.
+- **Known limits, unchanged:**
+  - uncovered cost lines still carry descriptive components (account ids, row counts); evidence is null;
+  - month rollover (FU-6);
+  - FU-15 (AR/AP commit-date limit).
+
+**Tests and gates** (details in `docs/FU-12_IMPLEMENTATION.md`):
+- *New tests:* `fu12-cost-coverage` and `fu12-review` (unit), `fu12-remediation` (24, integration, 7 organisations), golden FU-12 and variance cases.
+- *Meaningfulness:* 7 of the 24 integration tests fail on engine 4.0.0.
+- *Gates* on the final tree, clean database, run one at a time:
+  - tsc, eslint and build: pass.
+  - Unit 2,200 / 2,200, with the coverage gate passing.
+  - Eval 253 / 253.
+  - Integration 893 / 893.
+  - pgTAP 1,102 / 1,102.
+  - Schema drift: pass.
+  - Playwright: 69 passed, 1 skipped.
+- *27-organisation record (same day, 4.0.0 → 5.0.0):* 19 unchanged. 8 invoice-list organisations change; every changed figure goes from a value to NULL `no_source_covers_period`, and none becomes zero. Health changes only through profitability and cost control being excluded (`required_metric_missing`). One info alert is removed (INVONLY `variance.significant`).
+
+**Remaining.**
+- FU-15.
+- FU-6.
+- FU-14's restore limit.
+- The `finish_chunk` snapshot insert under load (see the implementation record).
+- FU-2, FU-3, FU-5 and FU-7 to FU-11: unchanged.
 
 ### ADR-127 · The pointer rewrite resolves each cell's previous snapshot in one pass; three date- and load-sensitive tests fixed
 Status: **IMPLEMENTED** (migration `20261001000001`). Not independently audited. Found while gating ADR-126 on 2026-10-01: three integration tests that passed on 2026-09-30 failed on `main` (5797306) as well, on a clean database.

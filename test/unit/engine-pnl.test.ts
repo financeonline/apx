@@ -543,6 +543,9 @@ describe('expense_by_account is only written where accounts exist (§3.1)', () =
       basis: { basis: 'invoices', assurance: 'verified', warnings: [], proxy: false },
       // An invoice has no account, so an expense figure is scoped by the suppliers that make it up.
       invoiceCounterparties: new Map([['cost_of_sales', ['00000000-0000-4000-8000-000000000501']]]),
+      // FU-12: an invoice-basis cost figure is stated (and so has evidence) only where a full purchase
+      // list establishes the period; this case is about a stated one.
+      purchaseCoverage: { covers: true, warnings: [], completeness: 1 },
     }));
     const descriptor = pick(results, 'revenue').evidenceQuery;
     expect(descriptor).toEqual({
@@ -563,6 +566,7 @@ describe('expense_by_account is only written where accounts exist (§3.1)', () =
     // A figure no supplier's purchases went into gets no descriptor rather than every purchase.
     const withoutSuppliers = run(scenario(FULL_MONTH, {
       basis: { basis: 'invoices', assurance: 'verified', warnings: [], proxy: false },
+      purchaseCoverage: { covers: true, warnings: [], completeness: 1 }, // FU-12, as above.
     }));
     expect(pick(withoutSuppliers, 'cost_of_sales').evidenceQuery).toBeNull();
   });

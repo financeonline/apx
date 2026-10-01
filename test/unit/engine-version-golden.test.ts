@@ -21,8 +21,8 @@ import {
  *
  * This test is. It runs the pure engine over a fixed corpus — every family: P&L on a ledger, cash
  * from per-account statement histories, receivables and payables from invoices, a balance sheet and
- * a dated opening journal, the AR/AP freshness matrix, the variance pass, and (ADR-122 FU-1) when an
- * invoice list may state a month's revenue — and hashes the
+ * a dated opening journal, the AR/AP freshness matrix, the variance pass, (ADR-122 FU-1) when an
+ * invoice list may state a month's revenue and (FU-12) when it may state its costs — and hashes the
  * canonical output. The hash is recorded beside the version it was produced by, in
  * `test/fixtures/engine-golden.json`:
  *
@@ -241,7 +241,7 @@ function corpus(): unknown {
   for (const [name, over] of boundary) {
     freshness[`boundary/${name}`] = [false, true].map((current) => invoiceSideCoverage([batch(90, over)], july, 'sales', current));
   }
-  return { periods: out, freshness, history: [...history.entries()], tolerance, lastDayJournal, fu1: fu1Corpus(ctx) };
+  return { periods: out, freshness, history: [...history.entries()], tolerance, lastDayJournal, fu1: fu1Corpus(ctx), fu12: fu12Corpus(ctx), fu12Variance: fu12VarianceCorpus(ctx) };
 }
 
 /**
@@ -299,6 +299,81 @@ function fu1Corpus(ctx: EngineContext): unknown {
       results,
     }];
   }));
+}
+
+/**
+ * ADR-122 FU-12: when an invoice list may state a month's COSTS. The invoice basis on its own again: a
+ * full sales list hands it the P&L, and only full PURCHASE lists establish the cost side. A regression
+ * that lets a sales list (or a purchase list that does not establish the month) state costs turns a
+ * NULL cost of sales, profit or supplier concentration here into a 0.00 or a sum, and changes the hash.
+ */
+const FU12_CELLS: AggregateCell[] = [
+  ...FU1_CELLS,
+  cell({ periodId: SEP.id, source: 'invoices', invoiceType: 'purchase', counterpartyId: SUPPLIER, amount: '120.00', debit: '24.00' }),
+];
+const PURCHASE_LIST: Partial<CoverageBatch> = { importType: 'purchase_invoices' };
+const FU12_CASES: Array<[string, PeriodRef, Array<Partial<CoverageBatch>>]> = [
+  // A sales list alone: revenue stated, every cost and profit figure NULL (was 0.00 / profit = revenue).
+  ['sales only', JUL, [{}]],
+  // Sales and purchase lists spanning the month: costs and profit stated.
+  ['sales and purchases', JUL, [{}, PURCHASE_LIST]],
+  // Purchase lists that do not establish July: stopping short, committed mid-month, committed before.
+  ['purchases stop short', JUL, [{}, { ...PURCHASE_LIST, periodEnd: '2026-07-20', committedAt: '2026-07-20T12:00:00Z' }]],
+  ['purchases committed mid-month', JUL, [{}, { ...PURCHASE_LIST, committedAt: '2026-07-20T12:00:00Z' }]],
+  ['purchases committed before', JUL, [{}, { ...PURCHASE_LIST, periodStart: '2026-03-01', periodEnd: '2026-03-31', committedAt: '2026-04-05T09:00:00Z' }]],
+  // Purchase halves that meet combine.
+  ['purchase halves', JUL, [{}, { ...PURCHASE_LIST, periodStart: '2026-07-01', periodEnd: '2026-07-15' }, { ...PURCHASE_LIST, periodStart: '2026-07-16', periodEnd: '2026-07-31' }]],
+  // The current month: purchases to date (partial_month), and purchases not reaching it.
+  // FU-12 review: costs to date only when the purchase lists reach exactly as far as the sales lists
+  // (both to the 12th); purchases reaching further (12th against sales to the 10th) — or falling short
+  // — are not the same days as the revenue, so costs are NULL.
+  ['current purchases to date', SEP, [
+    { periodEnd: '2026-09-12', committedAt: '2026-09-12T18:00:00Z' },
+    { ...PURCHASE_LIST, periodEnd: '2026-09-12', committedAt: '2026-09-12T18:00:00Z' },
+  ]],
+  ['current purchases unequal reach', SEP, [{ periodEnd: '2026-09-10' }, { ...PURCHASE_LIST, periodEnd: '2026-09-12', committedAt: '2026-09-12T18:00:00Z' }]],
+  ['current purchases unreached', SEP, [{ periodEnd: '2026-09-10' }, PURCHASE_LIST]],
+  // A covering purchase list with no purchases in the month: a genuine, stated 0.00.
+  ['genuine zero costs', AUG, [{}, PURCHASE_LIST]],
+  // A purchase list alone still does not hand the invoices source the P&L (FU-1 mirror).
+  ['purchases only', JUL, [PURCHASE_LIST]],
+];
+
+function fu12Corpus(ctx: EngineContext): unknown {
+  return Object.fromEntries(FU12_CASES.map(([name, period, overs]) => {
+    const batches = overs.map((o, i) => batch(84 + i, o));
+    const coverage = computeCoverage({ period, batches, bankAccounts: [], rowCounts: {}, asOf: ctx.asOf });
+    const results = composePeriod({
+      period, coverage, cells: FU12_CELLS, transferLegs: [], context: { ...ctx, bankAccounts: [] },
+      receivables: { invoices: [], batches, asOfIsPeriodEnd: period.id !== SEP.id, priorDenominators: [], ledger: null },
+    }).map((r, i) => ({ ...r, id: `fu12-${name}-${i}` }));
+    return [name, { invoices: coverage.bySource.invoices, costs: coverage.invoiceCosts ?? null, results }];
+  }));
+}
+
+/**
+ * FU-12 review: the variance pass across an invoice-basis month whose costs a purchase list states
+ * (July, cost of sales 900) and one whose costs nothing establishes (August, sales list only). An
+ * absent category in August is unknown, not a known zero: a regression to "−900.00, −100%" moves the hash.
+ */
+function fu12VarianceCorpus(ctx: EngineContext): unknown {
+  const salesList = { periodStart: '2026-07-01', periodEnd: '2026-08-31' };
+  const runFor = (period: PeriodRef, overs: Array<Partial<CoverageBatch>>, tag: string): MetricResult[] => {
+    const batches = overs.map((o, i) => batch(94 + i, o));
+    const coverage = computeCoverage({ period, batches, bankAccounts: [], rowCounts: {}, asOf: ctx.asOf });
+    return composePeriod({
+      period, coverage, cells: FU12_CELLS, transferLegs: [], context: { ...ctx, bankAccounts: [] },
+      receivables: { invoices: [], batches, asOfIsPeriodEnd: true, priorDenominators: [], ledger: null },
+    }).map((r, i) => ({ ...r, id: `fu12v-${tag}-${i}` }));
+  };
+  const july = runFor(JUL, [salesList, { ...PURCHASE_LIST, periodStart: '2026-07-01', periodEnd: '2026-07-31' }], 'jul');
+  const august = runFor(AUG, [salesList, { ...PURCHASE_LIST, periodStart: '2026-07-01', periodEnd: '2026-07-31' }], 'aug');
+  let minted = 0;
+  const variances = variancesForPeriod({
+    period: AUG, allPeriods: PERIODS, results: august, computed: new Map([[JUL.id, july]]), stored: [],
+    currency: 'GBP', mint: () => `fu12v-${(minted += 1)}`,
+  });
+  return { july, august, variances };
 }
 
 /** Canonical JSON: keys sorted at every level, so the hash depends on content and not on insertion order. */
@@ -366,5 +441,45 @@ describe('engine version golden (ADR-124 D-6)', () => {
       'committed mid-month', 'halves with a gap']) {
       expect(revenue(name), name).toBeNull();
     }
+  });
+
+  it('the FU-12 cases state costs exactly where a full purchase list establishes them', () => {
+    // Both sides of the rule again, or a regression could not move the hash.
+    const out = corpus() as { fu12: Record<string, { results: MetricResult[] }> };
+    const figure = (name: string, key: string): string | null =>
+      out.fu12[name]!.results.find((r) => r.key === key && r.dimensionType === 'none')?.value ?? null;
+    expect(figure('sales and purchases', 'cost_of_sales')).toBe('900.00');
+    expect(figure('sales and purchases', 'net_profit')).toBe('3100.00');
+    expect(figure('purchase halves', 'cost_of_sales')).toBe('900.00');
+    // FU-12 review: equal reach (both lists to the 12th) states costs to date.
+    expect(figure('current purchases to date', 'revenue')).toBe('500.00');
+    expect(figure('current purchases to date', 'cost_of_sales')).toBe('120.00');
+    expect(figure('current purchases to date', 'net_profit')).toBe('380.00');
+    expect(figure('genuine zero costs', 'cost_of_sales')).toBe('0.00');
+    expect(figure('genuine zero costs', 'net_profit')).toBe('0.00');
+    for (const name of ['sales only', 'purchases stop short', 'purchases committed mid-month', 'purchases committed before',
+      'current purchases unequal reach', 'current purchases unreached', 'purchases only']) {
+      expect(figure(name, 'cost_of_sales'), name).toBeNull();
+      expect(figure(name, 'net_profit'), name).toBeNull();
+      expect(figure(name, 'supplier_concentration_top1'), name).toBeNull();
+    }
+    expect(figure('sales only', 'revenue')).toBe('4000.00');
+    // FU-12 review: unequal reach states revenue to date but never revenue minus a different window's costs.
+    expect(figure('current purchases unequal reach', 'revenue')).toBe('500.00');
+  });
+
+  it('the FU-12 variance case: a category absent from a month whose costs nothing establishes is unknown', () => {
+    const out = corpus() as { fu12Variance: { july: MetricResult[]; august: MetricResult[]; variances: MetricResult[] } };
+    const { july, august, variances } = out.fu12Variance;
+    const headline = (rs: MetricResult[], key: string) => rs.find((r) => r.key === key && r.dimensionType === 'none');
+    expect(headline(july, 'cost_of_sales')?.value).toBe('900.00');
+    expect(headline(august, 'cost_of_sales')?.value).toBeNull();
+    expect(headline(august, 'revenue')?.value).toBe('0.00');
+    const row = variances.find((r) => r.key === 'expense_by_category.variance.prev_period'
+      && (r.dimensionKey ?? r.dimensionId) === 'cost_of_sales');
+    expect(row, 'August cost_of_sales prev_period').toBeDefined();
+    expect(row!.value).toBeNull();
+    expect(row!.dataQuality.missing).toContain('no_source_covers_period');
+    expect(row!.components.comparison).toBe('900.00');
   });
 });

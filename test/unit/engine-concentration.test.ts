@@ -129,6 +129,10 @@ function periodInput(overrides: Partial<ConcentrationPeriodInput> = {}): Concent
     customerRevenue: [],
     supplierSpend: [],
     revenue: null,
+    // FU-12: on the invoice basis the supplier side is stated only where a full purchase list
+    // establishes the period. These cases are about the arithmetic of a covered period, so the fixture
+    // says the purchases are covered; uncovered is test/unit/fu12-cost-coverage.test.ts.
+    supplierCoverage: { covers: true, warnings: [], completeness: 1 },
     ...overrides,
   };
 }

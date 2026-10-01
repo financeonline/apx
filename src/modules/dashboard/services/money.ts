@@ -341,6 +341,12 @@ export interface ProfitAndLossView {
   readonly scope: PeriodScope;
   readonly above: readonly MetricCardView[];
   readonly spending: readonly BreakdownRow[];
+  /**
+   * FU-12: false when no source establishes this month's spending (`operating_expenses` is NULL with
+   * `no_source_covers_period` — e.g. an invoice-basis month no purchase list covers). An empty
+   * breakdown then means "not known", never "nothing spent".
+   */
+  readonly spendingKnown: boolean;
   readonly below: readonly MetricCardView[];
 }
 
@@ -379,6 +385,8 @@ export async function loadProfitAndLoss(
           figure: toFigure(row, scope.period, byDimension.get(key ?? row.snapshotId) ?? null, options),
         };
       }),
+    spendingKnown: !(byKey.get('operating_expenses')?.value === null
+      && (byKey.get('operating_expenses')?.dataQuality.missing ?? []).includes('no_source_covers_period')),
     below: figuresFor(PNL_BELOW, byKey, scope.period, options),
   };
 }

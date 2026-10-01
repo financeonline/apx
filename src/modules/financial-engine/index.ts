@@ -66,6 +66,8 @@ export {
   isPeriodComplete,
   winningBalanceBatch,
   invoiceSideCoverage,
+  invoiceRevenueCoverage,
+  invoiceCostCoverage,
   AR_AP_FRESHNESS_DAYS,
   type InvoiceSide,
   type InvoiceSideCoverage,

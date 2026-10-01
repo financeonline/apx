@@ -35,6 +35,7 @@ import type {
   LeafDescriptor,
   MetricResult,
   PeriodRef,
+  SourceCoverage,
 } from './types';
 
 /** §3.5: the counterparty kinds each side of the business is drawn from. */
@@ -88,6 +89,15 @@ export interface ConcentrationPeriodInput {
    * Without it a figure on those bases carries no descriptor rather than one built from another rule.
    */
   readonly populations?: Readonly<Record<CommercialSide, CommercialPopulation>>;
+  /**
+   * ADR-122 FU-12, the INVOICE basis only: whether committed full PURCHASE lists establish P
+   * (`PeriodCoverage.invoiceCosts`). A sales list establishes the customer side and nothing about
+   * suppliers. When this does not cover P — or is omitted, since NULL is never zero — no
+   * `supplier_spend` row is written and the supplier concentrations are NULL
+   * `no_source_covers_period`, never 0.00 or a 100% share; when it covers P to date, the supplier
+   * figures carry its `partial_month`. Ignored on every other basis.
+   */
+  readonly supplierCoverage?: SourceCoverage;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -255,11 +265,48 @@ function computePeriod(ctx: EngineContext, input: ConcentrationPeriodInput): Met
 
   const costsBySurvivor = attributableCosts(input, ctx.counterparties);
 
+  // FU-12: the supplier side on the invoice basis answers to the purchase lists, not the sales list.
+  const supplierCoverage = input.supplierCoverage;
+  const invoiceBasis = input.basis.basis === 'invoices';
+  const suppliersUncovered = invoiceBasis && !(supplierCoverage?.covers ?? false);
+  const supplierInput: ConcentrationPeriodInput = invoiceBasis && !suppliersUncovered && supplierCoverage !== undefined
+    && supplierCoverage.warnings.length > 0
+    ? { ...input, basis: { ...input.basis, warnings: [...new Set([...input.basis.warnings, ...supplierCoverage.warnings])] } }
+    : input;
+
   return [
     ...customerAmounts(ctx, input, customers, costsBySurvivor, currency),
     ...concentration(input, customers, 'customer'),
-    ...supplierAmounts(ctx, input, suppliers, currency),
-    ...concentration(input, suppliers, 'supplier'),
+    ...(suppliersUncovered
+      ? uncoveredSuppliers(input)
+      : [
+        ...supplierAmounts(ctx, supplierInput, suppliers, currency),
+        ...concentration(supplierInput, suppliers, 'supplier'),
+      ]),
+  ];
+}
+
+/**
+ * FU-12: the invoice basis with no purchase list establishing P. Nothing states what was spent, or
+ * with whom: no `supplier_spend` row (an absent dimension is not written, as on an uncovered basis),
+ * and both supplier concentrations NULL `no_source_covers_period` — never 0.00, never a 100% share.
+ */
+function uncoveredSuppliers(input: ConcentrationPeriodInput): MetricResult[] {
+  const base = {
+    value: null,
+    unit: 'ratio',
+    basis: input.basis.basis,
+    assurance: input.basis.assurance,
+    dimensionType: 'none',
+    dimensionId: null,
+    currency: null,
+    components: { attributed_count: null, unattributed_share: null },
+    dataQuality: metricQuality(0, input.basis.warnings, ['no_source_covers_period'], input.basis.proxy),
+    evidenceQuery: null,
+  } as const;
+  return [
+    { ...base, key: 'supplier_concentration_top1' },
+    { ...base, key: 'supplier_concentration_top5' },
   ];
 }
 

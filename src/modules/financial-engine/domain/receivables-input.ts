@@ -305,6 +305,9 @@ export function denominatorInputsFor(
 
   // §3.4 / ADR-027.5: cost of sales + operating expense + marketing. A category the P&L emitted no
   // snapshot for is a known zero in a covered period; an uncovered P&L (cost of sales NULL) is not.
+  // FU-12: on the invoice basis with no purchase list establishing P, cost of sales is NULL
+  // `no_source_covers_period` (and no expense category is written), so the base is NULL here — the
+  // absent categories are never read as zeros of a period whose costs nothing states.
   const costOfSales = resultValue(results, 'cost_of_sales');
   let payablesExpenseBase: string | null = null;
   if (costOfSales !== null) {
@@ -327,11 +330,17 @@ export function denominatorInputsFor(
   const toDate = revenueResult !== undefined && revenueResult.basis === 'invoices'
     && revenueResult.dataQuality.warnings.includes('partial_month');
   const revenue = revenueResult === undefined || toDate ? null : revenueResult.value;
+  // FU-12: the expense base is that month's costs; costs stated only to date are no base either.
+  // Defence in depth: unreachable while coverage requires both sides to reach the same day (equal
+  // reach below the month end means revenue carries `partial_month` too, and `toDate` holds).
+  const costsToDate = results.some((r) => r.dimensionType === 'none'
+    && (r.key === 'cost_of_sales' || r.key === 'operating_expenses')
+    && r.basis === 'invoices' && r.dataQuality.warnings.includes('partial_month'));
 
   return {
     revenue,
     invoiceSalesTotal: toDate ? null : invoiceSalesTotal,
-    payablesExpenseBase: toDate ? null : payablesExpenseBase,
+    payablesExpenseBase: toDate || costsToDate ? null : payablesExpenseBase,
     hasOpenItemsList: sales.openItemsSpans,
   };
 }

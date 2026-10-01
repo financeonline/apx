@@ -57,7 +57,12 @@ function seedInvoices(org: string, rows: readonly InvoiceInput[]): void {
   }
 }
 
-/** A committed, FULL sales-invoice list spanning the quarter — what §2.2 asks of the revenue family. */
+/**
+ * A committed, FULL sales-invoice list spanning the quarter — what §2.2 asks of the revenue family —
+ * and the purchase list beside it (FU-12: costs need a full purchase list (ADR-126)), over the same
+ * range, so the invoice-basis cost lines are established: A's 900 cost of sales, and B's genuine
+ * 0.00 operating expenses (its purchase list has nothing in August).
+ */
 function seedInvoiceBatch(org: string, tag: string): void {
   const doc = one(`insert into public.source_documents
       (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
@@ -67,6 +72,12 @@ function seedInvoiceBatch(org: string, tag: string): void {
       (organization_id, source_document_id, import_type, target_table, status, extraction_method,
        period_start, period_end, committed_at, invoice_list_kind)
     values ('${org}', '${doc}', 'sales_invoices', 'invoices', 'committed', 'csv',
+            '2026-06-01', '2026-08-31', now(), 'full')`);
+  // FU-12: costs need a full purchase list (ADR-126).
+  adminSql(`insert into public.import_batches
+      (organization_id, source_document_id, import_type, target_table, status, extraction_method,
+       period_start, period_end, committed_at, invoice_list_kind)
+    values ('${org}', '${doc}', 'purchase_invoices', 'invoices', 'committed', 'csv',
             '2026-06-01', '2026-08-31', now(), 'full')`);
 }
 

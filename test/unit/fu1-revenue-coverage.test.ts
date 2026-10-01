@@ -146,9 +146,17 @@ describe('a full sales list establishes the months its range spans (R1, R3)', ()
     expect(revenue.assurance).toBe('calculated');
     expect(revenue.dataQuality.missing).toEqual([]);
     expect(revenue.dataQuality.warnings).not.toContain('partial_month');
-    expect(headline(results, 'cost_of_sales')?.value).toBe('900.00');
-    expect(headline(results, 'net_profit')?.value).toBe('3100.00');
+    // FU-12: a sales list states the month's revenue and nothing about its purchases, so with no
+    // purchase list the cost side is unknown — not the £900 of purchase invoices nobody established.
+    expect(headline(results, 'cost_of_sales')?.value).toBeNull();
+    expect(headline(results, 'cost_of_sales')?.dataQuality.missing).toEqual(['no_source_covers_period']);
+    expect(headline(results, 'net_profit')?.value).toBeNull();
     expect(results.find((r) => r.key === 'customer_revenue' && r.dimensionId === ACME.id)?.value).toBe('4000.00');
+    // With a full purchase list over the same range, the costs and profit are stated exactly.
+    const withPurchases = [SALES_JUN_AUG, list({ importType: 'purchase_invoices' })];
+    const stated = compose(JUL, withPurchases, CELLS);
+    expect(headline(stated, 'cost_of_sales')?.value).toBe('900.00');
+    expect(headline(stated, 'net_profit')?.value).toBe('3100.00');
   });
 
   it('keeps a genuine £0: a spanned month with no sales states 0.00, with nothing missing', () => {

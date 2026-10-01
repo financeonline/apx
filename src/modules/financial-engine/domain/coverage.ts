@@ -196,11 +196,15 @@ export function invoiceSideCoverage(
   };
 }
 
-/** A committed FULL list of SALES invoices: the only list that states a month's revenue (FU-1). */
-function isFullSalesList(b: CoverageBatch): boolean {
+/**
+ * A committed FULL list of one SIDE's invoices. A full SALES list is the only list that states a
+ * month's revenue (FU-1); a full PURCHASE list is the only list that states its invoice-basis costs
+ * (FU-12). An `open_items` list states what is owed, never a month's flow (ADR-047.10).
+ */
+function isFullList(b: CoverageBatch, side: InvoiceSide): boolean {
   return b.targetTable === 'invoices'
     && b.invoiceListKind === 'full'
-    && SIDE_IMPORT_TYPES.sales.includes(b.importType ?? '');
+    && SIDE_IMPORT_TYPES[side].includes(b.importType ?? '');
 }
 
 /** Whole days from `a` to `b`, both inclusive. */
@@ -209,19 +213,53 @@ function daysInclusive(a: string, b: string): number {
 }
 
 /**
- * The days a full sales list can state, as runs of consecutive days (FU-1). A list knows the invoices
- * of its declared range only up to the day it was COMMITTED: a range a reviewer declared past that day
- * — the upload form lets any end date be typed, and a new batch defaults to the whole current month —
- * describes days the list had not seen. So a list's effective range is its declared start to the
- * earlier of its declared end and its commit date, and lists that meet or overlap combine, as a
+ * The days a side's full lists can state, as runs of consecutive days (FU-1, FU-12). A list knows the
+ * invoices of its declared range only up to the day it was COMMITTED: a range a reviewer declared past
+ * that day — the upload form lets any end date be typed, and a new batch defaults to the whole current
+ * month — describes days the list had not seen. So a list's effective range is its declared start to
+ * the earlier of its declared end and its commit date, and lists that meet or overlap combine, as a
  * month's statements do (ADR-124 D-1).
  */
-function revenueRuns(batches: readonly CoverageBatch[]): ReadonlyArray<{ readonly start: string; readonly end: string }> {
-  return coveredRuns(batches.filter(isFullSalesList).flatMap((b) => {
+function listRuns(
+  batches: readonly CoverageBatch[],
+  side: InvoiceSide,
+): ReadonlyArray<{ readonly start: string; readonly end: string }> {
+  return coveredRuns(batches.filter((b) => isFullList(b, side)).flatMap((b) => {
     const committed = b.committedAt.slice(0, 10);
     const end = b.periodEnd < committed ? b.periodEnd : committed;
     return end >= b.periodStart ? [{ periodStart: b.periodStart, periodEnd: end }] : [];
   }));
+}
+
+/**
+ * Whether one side's committed FULL lists establish P (FU-1 for sales, FU-12 for purchases): their
+ * effective ranges (`listRuns`) contain every day of a COMPLETED P; for the CURRENT P, its first day
+ * and on, to date (`partial_month`, completeness = days reached ÷ days in P); never a P not yet begun.
+ */
+function invoiceListCoverage(
+  batches: readonly CoverageBatch[],
+  period: PeriodRef,
+  asOf: string,
+  side: InvoiceSide,
+): SourceCoverage {
+  const today = asOf.slice(0, 10);
+  if (period.periodStart > today) return NO_COVERAGE;
+  const runs = listRuns(batches, side);
+
+  if (today > period.periodEnd) {
+    return runsCover(runs, period.periodStart, period.periodEnd)
+      ? { covers: true, warnings: [], completeness: 1 }
+      : NO_COVERAGE;
+  }
+
+  // The current period: the run holding P's first day, never past today.
+  const run = runs.find((r) => r.start <= period.periodStart && r.end >= period.periodStart);
+  if (run === undefined) return NO_COVERAGE;
+  const reach = run.end < today ? run.end : today;
+  if (reach >= period.periodEnd) return { covers: true, warnings: [], completeness: 1 };
+  const covered = daysInclusive(period.periodStart, reach);
+  const days = daysInclusive(period.periodStart, period.periodEnd);
+  return { covers: true, warnings: ['partial_month'], completeness: covered / days };
 }
 
 /**
@@ -231,7 +269,7 @@ function revenueRuns(batches: readonly CoverageBatch[]): ReadonlyArray<{ readonl
  * invoices source "covers" P, precedence hands it the whole P&L (§2.3) and a month with no invoice
  * cells reads as revenue 0.00, calculated and complete. So the invoices source covers P ONLY when
  * committed `full` lists of SALES invoices (`sales_invoices` / `sales_report`) ESTABLISH P's revenue —
- * when their effective ranges (`revenueRuns`: declared start to the earlier of declared end and
+ * when their effective ranges (`listRuns`: declared start to the earlier of declared end and
  * commit date, lists that meet combined) contain:
  *
  *   - every day of P, for a COMPLETED period. When a list was committed matters only as the last day
@@ -259,35 +297,39 @@ function revenueRuns(batches: readonly CoverageBatch[]): ReadonlyArray<{ readonl
  * the P&L to the bank (a cash proxy), else NULL with `no_source_covers_period` — never zero. Lists
  * covering P with no sales in P still state a genuine, stated 0.00.
  */
-function invoiceRevenueCoverage(
+export function invoiceRevenueCoverage(
   batches: readonly CoverageBatch[],
   period: PeriodRef,
   asOf: string,
 ): SourceCoverage {
-  const today = asOf.slice(0, 10);
-  if (period.periodStart > today) return NO_COVERAGE;
-  const runs = revenueRuns(batches);
+  return invoiceListCoverage(batches, period, asOf, 'sales');
+}
 
-  if (today > period.periodEnd) {
-    return runsCover(runs, period.periodStart, period.periodEnd)
-      ? { covers: true, warnings: [], completeness: 1 }
-      : NO_COVERAGE;
-  }
-
-  // The current period: the run holding P's first day, never past today.
-  const run = runs.find((r) => r.start <= period.periodStart && r.end >= period.periodStart);
-  if (run === undefined) return NO_COVERAGE;
-  const reach = run.end < today ? run.end : today;
-  if (reach >= period.periodEnd) return { covers: true, warnings: [], completeness: 1 };
-  const covered = daysInclusive(period.periodStart, reach);
-  const days = daysInclusive(period.periodStart, period.periodEnd);
-  return { covers: true, warnings: ['partial_month'], completeness: covered / days };
+/**
+ * ADR-122 FU-12, the cost-side twin of FU-1: whether committed FULL PURCHASE lists
+ * (`purchase_invoices` / `purchase_report`) establish P's invoice-basis COSTS, by exactly the rules
+ * `invoiceRevenueCoverage` applies to sales — effective range declared start → min(declared end,
+ * commit date), lists that meet combine, a completed P needs every day, the current P is covered to
+ * date (`partial_month`), a P not yet begun never.
+ *
+ * It decides nothing about which source wins (a purchase-only list still does not make the invoices
+ * source cover P: costs alone are no P&L). Once a sales list has handed the P&L to the invoices source,
+ * it decides whether that P&L may state its cost lines and supplier figures: a sales list alone says
+ * nothing about purchases, and summing the purchase invoices nobody established for P stated costs
+ * 0.00 and profit = revenue. Uncovered, every expense-side figure is NULL `no_source_covers_period`.
+ */
+export function invoiceCostCoverage(
+  batches: readonly CoverageBatch[],
+  period: PeriodRef,
+  asOf: string,
+): SourceCoverage {
+  return invoiceListCoverage(batches, period, asOf, 'purchase');
 }
 
 /** The last day full sales lists state revenue for, never past the as-of date (`isPeriodComplete`). */
 function revenueDataDate(batches: readonly CoverageBatch[], asOf: string): string | null {
   const today = asOf.slice(0, 10);
-  const ends = revenueRuns(batches).map((r) => (r.end < today ? r.end : today)).sort();
+  const ends = listRuns(batches, 'sales').map((r) => (r.end < today ? r.end : today)).sort();
   return ends[ends.length - 1] ?? null;
 }
 
@@ -325,6 +367,20 @@ export function computeCoverage(input: CoverageInput): PeriodCoverage {
 
   // ---- invoices ----
   const invoices = invoiceRevenueCoverage(batches, period, asOf);
+  // FU-12: whether purchase lists establish P's invoice-basis costs. Not a source of its own — it
+  // never makes the invoices source cover P — but the cost lines and supplier figures of an invoice
+  // basis read it.
+  //
+  // In the CURRENT period both sides are stated to date, and a profit is revenue minus costs over the
+  // SAME days: sales reaching the 25th against purchases reaching the 3rd is 25 days of revenue less
+  // 3 days of costs — profit ≈ revenue again, with nothing to show the windows differ. So current-
+  // period costs are established only when the purchase lists reach exactly as far as the sales lists
+  // (equal reach ⇔ equal completeness: both are days reached ÷ days in P); otherwise they are NULL.
+  // A completed period is covered by both sides only in full, so the windows agree by construction.
+  const purchases = invoiceCostCoverage(batches, period, asOf);
+  const invoiceCosts = purchases.covers && invoices.covers && purchases.completeness !== invoices.completeness
+    ? NO_COVERAGE
+    : purchases;
 
   // ---- bank ----
   // EVERY in-scope cash-like account needs its statements to cover every day of the period it
@@ -370,6 +426,7 @@ export function computeCoverage(input: CoverageInput): PeriodCoverage {
   return {
     periodId: period.id,
     bySource: { period_balances: balances, ledger, invoices, bank },
+    invoiceCosts,
     bankCoverageRatio: bankRatio,
     latestDataDate,
   };

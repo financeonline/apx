@@ -266,6 +266,13 @@ export interface SourceCoverage {
 export interface PeriodCoverage {
   readonly periodId: string;
   readonly bySource: Readonly<Record<SourceKind, SourceCoverage>>;
+  /**
+   * ADR-122 FU-12: whether committed FULL PURCHASE lists establish P's invoice-basis COSTS
+   * (`invoiceCostCoverage`). It never makes the invoices source cover P; on an invoice basis, the cost
+   * lines and supplier figures read it, and are NULL `no_source_covers_period` when it does not cover
+   * P. Omitted, nothing establishes the costs.
+   */
+  readonly invoiceCosts?: SourceCoverage;
   /** Active cash-like accounts with a covering statement, over all active cash-like accounts. */
   readonly bankCoverageRatio: number;
   readonly latestDataDate: Readonly<Partial<Record<SourceKind, string>>>;

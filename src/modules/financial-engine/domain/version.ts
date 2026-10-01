@@ -39,7 +39,28 @@
  * `no_source_covers_period`. §6: existing values change, so the first run recomputes every
  * organisation's history. Record: docs/FU-1_ENGINE_REGRESSION_RECORD.md; ADR-122 amendment (FU-1).
  */
-export const ENGINE_VERSION = '4.0.0';
+/**
+ * 5.0.0 (ADR-122 FU-12): MAJOR. The cost-side twin of FU-1. On the INVOICE P&L basis the cost side is
+ * stated only where committed FULL PURCHASE lists establish the month, by FU-1's own rules (effective
+ * range declared start → min(declared end, commit date); lists that meet combine; the current month to
+ * date with `partial_month`; never a month not yet begun — `invoiceCostCoverage`). A sales list alone
+ * used to state cost of sales and every expense category 0.00, so gross, operating and net profit
+ * equalled revenue and every margin read 100%. Uncovered, every expense-side figure and every figure
+ * derived from one (gross / operating / net profit, the margins, contribution) is NULL
+ * `no_source_covers_period`, ahead of the no-cost-of-sales-account path; no expense category is
+ * written; and on an invoice counterparty basis no supplier spend is written and supplier
+ * concentration is NULL. Revenue, the customer side, AR/AP and the ledger / balance / bank bases are
+ * unchanged. In the CURRENT month costs are stated only when the purchase lists reach exactly as far
+ * as the sales lists (a profit is revenue less costs over the same days). Purchases no list
+ * establishes are left out of the whole invoice-basis fold (no income category, no uncategorised
+ * share), and an expense category absent from a month whose spending nothing establishes is unknown
+ * to the variance pass, never a known zero — on EVERY basis, so a ledger / balance / bank month next
+ * to a month no source covers now carries a NULL category variance where it read −100% or a 0.00
+ * comparison (`new_in_period`). ADR-126; regression record
+ * docs/FU-12_ENGINE_REGRESSION_RECORD.md. §6: existing values change, so the first run recomputes
+ * every organisation's history.
+ */
+export const ENGINE_VERSION = '5.0.0';
 
 /** Bumped independently of the engine (§6). */
 export const HEALTH_CONFIG_VERSION = 'health.config.v1';

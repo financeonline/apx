@@ -91,6 +91,12 @@ async function seed(name: string, withCostOfSales: boolean): Promise<string> {
   adminSql(`insert into public.import_batches
       (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind)
     values ('${org}', '${doc}', 'sales_invoices', 'invoices', 'committed', 'csv', '2026-08-01', '2026-08-31', now(), 'full')`);
+  // FU-12: costs need a full purchase list (ADR-126). Both organisations get one over the same range
+  // as the sales list, so the no-cost organisation still reaches the ADR-106 no-direct-cost-accounts
+  // reason rather than FU-12's no-coverage one.
+  adminSql(`insert into public.import_batches
+      (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind)
+    values ('${org}', '${doc}', 'purchase_invoices', 'invoices', 'committed', 'csv', '2026-08-01', '2026-08-31', now(), 'full')`);
   const jobId = adminSql(`insert into public.jobs (organization_id, job_type, payload, max_attempts)
     values ('${org}', 'calculation.run', '{"trigger":"recalc_manual","as_of":"2026-09-15"}'::jsonb, 3) returning id`).split('\n')[0]!.trim();
   expect(await drainUntilFinished(drainJobs, jobId)).toBe('succeeded');

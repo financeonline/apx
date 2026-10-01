@@ -76,7 +76,10 @@ const invoiceCell = (
   minDate: '2026-05-04', maxDate: '2026-05-28',
 });
 
-/** A committed FULL sales-invoice list spanning the month — what §2.2 requires of the revenue family. */
+/**
+ * Committed FULL sales- and purchase-invoice lists spanning the month — what §2.2 requires of the
+ * revenue family and (FU-12) of the cost lines.
+ */
 const invoiceCoverage = () => computeCoverage({
   period: may,
   batches: [{
@@ -85,6 +88,13 @@ const invoiceCoverage = () => computeCoverage({
     // FU-1: only a list of SALES invoices establishes revenue, so the fixture says what its docstring
     // always meant. Without the side the list states no revenue and every figure below would be NULL.
     importType: 'sales_invoices',
+    periodStart: '2026-05-01', periodEnd: '2026-05-31', committedAt: '2026-06-02T00:00:00Z',
+  }, {
+    // FU-12: only a list of PURCHASE invoices establishes the costs. These cases fold purchases into
+    // cost lines, so the fixture carries the purchase list they always assumed; without it every cost
+    // and profit figure below is NULL `no_source_covers_period` (test/unit/fu12-cost-coverage.test.ts).
+    id: 'b-pur', targetTable: 'invoices', balanceKind: null, balanceBasis: null,
+    bankAccountId: null, invoiceListKind: 'full', importType: 'purchase_invoices',
     periodStart: '2026-05-01', periodEnd: '2026-05-31', committedAt: '2026-06-02T00:00:00Z',
   }],
   bankAccounts: [], rowCounts: { invoices: 6 }, asOf: '2026-06-15',

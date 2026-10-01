@@ -76,7 +76,13 @@ export default async function ProfitAndLossPage({
             description="Each category as the engine recorded it for this month, biggest first."
           />
           <CardBody className="px-0 py-0">
-            {view.spending.length === 0 ? (
+            {view.spending.length === 0 && !view.spendingKnown ? (
+              <p className="px-5 py-4 text-sm text-ink-muted">
+                This month&apos;s spending isn&apos;t known: no source you have added covers it. If you
+                import invoice lists, a full purchase list must cover the month — and, for the current
+                month, reach the same day as your sales list.
+              </p>
+            ) : view.spending.length === 0 ? (
               <p className="px-5 py-4 text-sm text-ink-muted">
                 Nothing was recorded against a spending category this month.
               </p>

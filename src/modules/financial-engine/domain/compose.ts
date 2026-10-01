@@ -408,6 +408,17 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
       ? homeAccountFor(context.accounts, invoiceCategoryOf(cell, byCounterparty))?.category ?? null
       : cell.standardCategory);
 
+  /*
+   * FU-12: purchases no purchase list establishes for P are not P's purchases to report. They are left
+   * out of the invoice-basis fold entirely — not only out of the cost lines (which `computePnl` states
+   * NULL) but out of every category a supplier's default could put them in (`other_income`, even
+   * `revenue`) and out of the uncategorised share and VAT counts that qualify revenue (review finding).
+   */
+  const pnlCells = pnlSource === 'invoices' && coverage.invoiceCosts?.covers !== true
+    ? cells.filter((cell) => !(cell.source === 'invoices'
+      && (cell.invoiceType === 'purchase' || cell.invoiceType === 'purchase_credit_note')))
+    : cells;
+
   const pnlInput: PnlInput = {
     period,
     basis: pnlBasis,
@@ -422,17 +433,19 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
       || (pnlSource === 'invoices' && context.costOfSalesInInvoices),
     costOfSalesInOtherSource: pnlSource !== 'invoices' && !context.costOfSalesEverUsed && context.costOfSalesInInvoices,
     invoiceCounterparties: pnlSource === 'invoices'
-      ? invoiceCounterpartiesByCategory(cells, period.id, context.accounts, byCounterparty)
+      ? invoiceCounterpartiesByCategory(pnlCells, period.id, context.accounts, byCounterparty)
       : undefined,
     accountAmounts: pnlSource === 'invoices'
-      ? invoiceAccountAmounts(cells, period.id, context.accounts, byCounterparty)
+      ? invoiceAccountAmounts(pnlCells, period.id, context.accounts, byCounterparty)
       : pnlSource
         ? accountAmounts(cells, period.id, pnlSource, context.accounts)
         : [],
     uncategorised: pnlSource
-      ? uncategorisedExposure(cells, period.id, pnlSource, pnlCategoryOf)
+      ? uncategorisedExposure(pnlCells, period.id, pnlSource, pnlCategoryOf)
       : { absoluteAmount: '0', totalAbsoluteAmount: '0' },
-    invoiceVat: pnlSource === 'invoices' ? invoiceVatExposure(cells, period.id) : null,
+    invoiceVat: pnlSource === 'invoices' ? invoiceVatExposure(pnlCells, period.id) : null,
+    // FU-12: a sales list hands the P&L to the invoices source; only purchase lists state its costs.
+    purchaseCoverage: pnlSource === 'invoices' ? coverage.invoiceCosts : undefined,
   };
   results.push(...computePnl(pnlInput, context, resolve));
 
@@ -479,6 +492,8 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
         : [],
     populations,
     revenue: revenueResult,
+    // FU-12: on the invoice basis the supplier side is stated only where purchase lists establish P.
+    supplierCoverage: counterpartySource === 'invoices' ? coverage.invoiceCosts : undefined,
   };
   for (const periodMetrics of computeConcentration(context, [concentrationInput])) {
     if (periodMetrics.periodId === period.id) results.push(...periodMetrics.metrics);

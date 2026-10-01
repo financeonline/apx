@@ -3,6 +3,7 @@ import {
   COMPARISON_PERIOD_COUNT, VARIANCE_BASE_METRICS, VARIANCE_SUFFIXES, computeRevenueGrowth, computeVariance,
   type VarianceObservation, type VariancePeriodInput, type VarianceSuffix,
 } from './variance';
+import { CATEGORY_ACCOUNT_TYPE, type StandardCategory } from '@/modules/financials';
 import type { AssuranceLevel, DataQualityMissing, DataQualityWarning, MetricBasis, MetricResult, PeriodRef } from './types';
 
 /**
@@ -110,6 +111,37 @@ function observationsFromStored(stored: readonly StoredFigure[], periodId: strin
   }));
 }
 
+/** The headline whose NULL `no_source_covers_period` makes a P&L side of a period unknown. */
+const UNKNOWN_SIDE_HEADLINE = { expense: 'operating_expenses', income: 'revenue' } as const;
+
+/**
+ * FU-12: which absent dimensions of a dimensioned P&L family are UNKNOWN in a period, not zero.
+ *
+ * A period whose `operating_expenses` is NULL with `no_source_covers_period` (an invoice-basis month
+ * no purchase list establishes; a month no source covers at all) writes no expense category — and an
+ * absent category there is not "nothing spent". Read as zero, Insights and the analyst would report
+ * a category falling to nothing (−100%) or appearing from nothing. Income categories in the family
+ * (`other_income`) follow `revenue` the same way. Only `expense_by_category` and
+ * `expense_by_account` are dimensioned P&L families.
+ */
+function absentUnknownFor(
+  baseKey: string,
+  observations: (key: string) => readonly VarianceObservation[],
+): ((dimensionId: string) => boolean) | undefined {
+  if (baseKey !== 'expense_by_category' && baseKey !== 'expense_by_account') return undefined;
+  const unknown = (key: string): boolean => observations(key).some(
+    (o) => o.dimensionId === null && o.value === null && (o.missing ?? []).includes('no_source_covers_period'),
+  );
+  const expenseUnknown = unknown(UNKNOWN_SIDE_HEADLINE.expense);
+  const incomeUnknown = unknown(UNKNOWN_SIDE_HEADLINE.income);
+  if (!expenseUnknown && !incomeUnknown) return undefined;
+  return (dimensionId) => {
+    const side = baseKey === 'expense_by_category' && CATEGORY_ACCOUNT_TYPE[dimensionId as StandardCategory] === 'income'
+      ? incomeUnknown : expenseUnknown;
+    return side;
+  };
+}
+
 export function variancesForPeriod(input: VariancePassInput): MetricResult[] {
   const byStart = new Map(input.allPeriods.map((p) => [p.periodStart, p]));
   const minted: MetricResult[] = [];
@@ -129,17 +161,21 @@ export function variancesForPeriod(input: VariancePassInput): MetricResult[] {
     const ref = byStart.get(monthsBefore(input.period.periodStart, offset));
     if (ref === undefined) return { periodId: null, observations: [] };
     const computed = input.computed.get(ref.id);
+    const read = (key: string): VarianceObservation[] => computed !== undefined
+      ? observationsFromResults(computed, key)
+      : observationsFromStored(input.stored, ref.id, key);
+    const absentUnknown = absentUnknownFor(baseKey, read);
     return {
       periodId: ref.id,
-      observations: computed !== undefined
-        ? observationsFromResults(computed, baseKey)
-        : observationsFromStored(input.stored, ref.id, baseKey),
+      observations: read(baseKey),
+      ...(absentUnknown ? { absentUnknown } : {}),
     };
   };
 
   for (const baseKey of VARIANCE_BASE_METRICS) {
     const definition = metricDefinition(baseKey);
     const current = observationsFromResults(input.results, baseKey);
+    const currentAbsentUnknown = absentUnknownFor(baseKey, (key) => observationsFromResults(input.results, key));
     for (const suffix of VARIANCE_SUFFIXES) {
       const comparisons = comparisonOffsets(suffix).map((offset) => comparison(offset, baseKey));
       if (comparisons.length !== COMPARISON_PERIOD_COUNT[suffix]) continue;
@@ -150,7 +186,10 @@ export function variancesForPeriod(input: VariancePassInput): MetricResult[] {
         unit: definition.unit,
         dimensionType: definition.dimensionType,
         currency: definition.unit === 'money' ? input.currency : null,
-        current: { periodId: input.period.id, observations: current },
+        current: {
+          periodId: input.period.id, observations: current,
+          ...(currentAbsentUnknown ? { absentUnknown: currentAbsentUnknown } : {}),
+        },
         comparisons,
       }, resolve);
       for (const r of results) {
