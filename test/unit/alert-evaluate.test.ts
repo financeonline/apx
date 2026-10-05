@@ -423,6 +423,15 @@ describe('the plan a re-run produces', () => {
     expect(resolved[0]!.statusReasonCode).toBe('condition_cleared');
   });
 
+  it('FU-6: does NOT resolve an event alert of a period the run did not evaluate', () => {
+    // The alert belongs to PERIODS[5]; this run (a daily one, say) evaluated PERIODS[4] only.
+    const plan = planEvaluation(baseInput({
+      periods: [spikingPeriod(PERIODS[4]!, '2026-02-01', [])],
+      existing: new Map([[key, existingAlert({ dedupeKey: key, ruleKey: 'expense.spike_category' })]]),
+    }));
+    expect(plan.changes.filter((c) => c.kind === 'resolve')).toHaveLength(0);
+  });
+
   it('does NOT resolve an alert whose rule was suppressed in every period', () => {
     // "We did not look" must never read as "it cleared" (ADR-054.8, ADR-056.1).
     const suppressed = {

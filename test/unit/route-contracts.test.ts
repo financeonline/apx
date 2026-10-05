@@ -82,6 +82,9 @@ describe('the nightly sweep is scheduled (SERVICE_ARCHITECTURE.md §7, ADR-074)'
     const paths = crons.map((c) => c.path);
     expect(paths).toContain('/api/jobs/run');
     expect(paths).toContain('/api/jobs/nightly');
+    // ADR-135: the daily recalculation is enqueued hourly so each organisation is due just after ITS
+    // midnight; the database keeps it to one per organisation and local date.
+    expect(crons.find((c) => c.path === '/api/jobs/scheduled')?.schedule, 'hourly').toMatch(/^\d+ \* \* \* \*$/);
     expect(crons.find((c) => c.path === '/api/jobs/nightly')?.schedule, 'once a day, not once a minute').toMatch(/^\d+ \d+ \* \* \*$/);
     for (const path of paths) {
       expect(statSync(join('src/app', path, 'route.ts')).isFile(), `${path} has a handler`).toBe(true);

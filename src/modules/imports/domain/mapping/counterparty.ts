@@ -38,6 +38,34 @@ export function normalizedName(name: string): string {
 }
 
 // -----------------------------------------------------------------------------------------------
+// The stored key, and the letters it loses (Unicode-name release blocker, Step 0C)
+// -----------------------------------------------------------------------------------------------
+
+/**
+ * `app.normalize_name`, exactly: lower-case, every run of characters outside [a-z0-9] to one space.
+ * It is the uniqueness key of `counterparties` and `accounts`, and it DISCARDS every letter outside
+ * A–Z — "Müller GmbH" and "Möller GmbH" are both "m ller gmbh", and "株式会社トヨタ" is "".
+ */
+export function storedNameKey(name: string): string {
+  return name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+}
+
+/** The same comparison over EVERY letter and digit, in any script: what a person means by "same name". */
+export function letterNameKey(name: string): string {
+  return name.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
+}
+
+/** Two names the stored key calls one, that differ in letters it cannot see. */
+export function storedKeyCollides(a: string, b: string): boolean {
+  return storedNameKey(a) === storedNameKey(b) && letterNameKey(a) !== letterNameKey(b);
+}
+
+/** A real name the stored key cannot hold at all (it reduces to ""). */
+export function storedKeyEmpty(name: string): boolean {
+  return storedNameKey(name) === '' && letterNameKey(name) !== '';
+}
+
+// -----------------------------------------------------------------------------------------------
 // IMP-NAME-015 — names may not carry figures (ADR-045.3, R2-C-05)
 // -----------------------------------------------------------------------------------------------
 

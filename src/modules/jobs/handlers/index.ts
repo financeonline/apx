@@ -63,7 +63,7 @@ export const serverCalls = {
   persistAlerts,
 };
 
-export { runCalculationJob } from './calculation-run';
+export { runCalculationJob, runTriggerRef } from './calculation-run';
 export { runReportRenderJob } from './report-render';
 export { runStorageCleanupJob, ORPHAN_GRACE_MS, MAX_REMOVALS_PER_RUN } from './storage-cleanup';
 export { runOrgPurgeJob } from './org-purge';

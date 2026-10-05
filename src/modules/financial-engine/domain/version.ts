@@ -60,10 +60,39 @@
  * docs/FU-12_ENGINE_REGRESSION_RECORD.md. §6: existing values change, so the first run recomputes
  * every organisation's history.
  */
-export const ENGINE_VERSION = '5.0.0';
+/**
+ * 6.0.0 (Step 0B: ADR-128 FU-15, ADR-129 FU-9, ADR-130): MAJOR, three existing values change.
+ *   - FU-15: a completed month's receivables and payables are stated by an invoice list only when it
+ *     knows through the month's last day — min(declared end, commit date), the effective range revenue
+ *     and costs already use. A list committed mid-month with the form's default whole-month range used
+ *     to state the month-end position VERIFIED (missing everything after the commit); it now falls
+ *     through to the balance sheet / ledger, else NULL `stale_invoice_data`. Same range for the DSO
+ *     sales history (`fullListSpans`), and for an aged-debtors list's as-at date.
+ *   - FU-9: `payables_days` divides a VAT-inclusive balance by a base on the same footing, from recorded
+ *     data only — the purchase lists' gross on the invoice basis; a gross expense base otherwise, else
+ *     NULL `vat_basis_unknown`. It used to divide gross by net and overstate days by the VAT rate.
+ *   - ADR-130: a bank-sourced figure is no firmer than the bank rows under it (commit stamps AI-read rows
+ *     `inferred`, unreconciled PDF rows `calculated`); cash and bank-basis P&L / customer figures used to
+ *     be badged by source alone. Values unchanged; assurance changes.
+ * Regression record: docs/STEP_0B_ENGINE_REGRESSION_RECORD.md.
+ */
+/**
+ * 7.0.0 (Step 0C: ADR-133): MAJOR. 6.0.0 was never released; its hash is kept, and this bump follows
+ * the golden test's rule that a recorded version's outputs never change.
+ *   - `receivables_days` from a balance divides by revenue only when revenue is gross (`vatFooting`);
+ *     the receivable is never netted down by `default_vat_rate` (ADR-027.4's netting withdrawn). Net or
+ *     unknown footing: NULL `vat_basis_unknown`.
+ *   - Bank-proxy flows the proxy netted by a default rate are `unknown`, not gross, for both days
+ *     figures (6.0.0 treated bank costs as always gross).
+ */
+export const ENGINE_VERSION = '7.0.0';
 
 /** Bumped independently of the engine (§6). */
-export const HEALTH_CONFIG_VERSION = 'health.config.v1';
+/**
+ * health.config.v2 (ADR-134): a dimension resting on `inferred` (AI-read) figures takes the existing
+ * cap of 70 with its own reason, as `estimated` ones did. Scores that rested on AI-read cash can fall.
+ */
+export const HEALTH_CONFIG_VERSION = 'health.config.v2';
 export const ALERT_RULE_VERSION = 'alerts.rules.v1';
 
 /** At most this many consecutive months per chunk (§2.4). */

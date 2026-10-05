@@ -2367,3 +2367,133 @@ Status: **IMPLEMENTED** (migration `20261001000001`). Not independently audited.
 3. **`scenarios.test.ts` — a test defect (setup time).** It seeded history with about 600 sequential `docker exec psql` calls and exceeded the 60 s hook timeout under load. It now writes the same rows in one block per organisation (setup ≈ 2 s), with an explicit hook budget.
 
 No rule, threshold, figure or permission changed.
+
+---
+
+### ADR-128 · FU-15: an invoice list states a month-end position only through the day it knew
+
+**Status:** Accepted (Step 0B, 2026-10-05). Engine 6.0.0. Not independently audited; database suites not yet run (no Docker in the authoring environment).
+
+**Problem.** `invoiceSideCoverage` (§2.2, AR/AP) judged a completed month by the list's DECLARED range only. A full list committed on 10 August with the upload form's default range of 1–31 August stated 31 August's receivables and payables as `verified` — without the invoices raised on 11–31 August, and with everything paid after the 10th still open. The revenue/cost rule (`listRuns`, FU-1/FU-12) already capped a list at its commit date; the two answers disagreed for the same list.
+
+**Decision.** Four dates are kept apart: the declared range (what the list is about; for an aged-debtors list its end is the as-at date), the commit date (the last day it can know anything), the month asked about, and the run's as-of (which month is current). A list knows through `min(declared end, commit date)`:
+- a full list covers a completed P when that effective range spans P, or (unchanged, ADR-124 D-3) when it is fresh for P and reaches P's end;
+- an open-items list states P only when its as-at date is P's last day and it was committed on or after it;
+- the DSO sales history (`fullListSpans`) uses the same effective range;
+- the current month keeps ADR-123 F-9's rule (committed on or after its start); a list committed before the month began no longer covers it.
+A late upload of a valid month-end snapshot stays valid: a full list committed months later rebuilds the month-end position from each invoice's payment date (`payment_date_unknown` when one is missing). When no list establishes the month, the family falls through to the balance sheet / ledger, else NULL `stale_invoice_data` (label reworded: "Your invoice list does not show the position at the end of this month").
+
+**Evidence.** `test/unit/fu15-ar-ap-coverage.test.ts` (15 cases; 6 fail on 5.0.0, including the value-level case that showed a verified 0.00); golden boundary cases; golden diff: the FU-1/FU-12 "committed mid-month" receivables/payables/overdue move from `verified 0.00` to NULL `stale_invoice_data`, nothing else.
+
+### ADR-129 · FU-9: days payable on one VAT footing, from recorded data only
+
+**Status:** Accepted (Step 0B). Engine 6.0.0.
+
+**Problem.** `payables_days` divided a VAT-inclusive balance (invoice `balance_due`, or the AP control balance) by cost of sales + operating expense + marketing, which is VAT-exclusive on the invoice basis (`app.invoice_net`) and for a VAT-registered ledger — overstating days by the VAT rate, unflagged (the audit fixture read 37 for about 30). The +10-day deterioration trigger fired early.
+
+**Decision.** No rate is ever assumed — not 1.2, not `default_vat_rate`: nothing records which purchases were zero-rated, reduced or exempt.
+- Payables from INVOICES divide by the full purchase lists' GROSS totals (net + recorded tax, credit notes subtracted — `purchaseInvoiceGross`, the twin of `invoice_total_gross` for DSO). Mixed rates, zero rates and invoices with no tax column all read correctly. Every month of the window needs a full purchase list establishing it (FU-15's range), else `insufficient_history`.
+- Payables from a BALANCE or the LEDGER divide by the expense base only when its footing is gross (`expenseBaseFooting`): bank-proxy costs (payments as made), or a ledger / trial balance of an organisation EXPLICITLY not VAT-registered. A net footing (VAT-registered ledger, invoice nets) or an unknown one gives NULL `vat_basis_unknown`.
+- `vat_registered` unset is now distinguishable from false (`vatStatusKnown`), and is in the fingerprint.
+
+**Consequence (product decision required).** Nothing in the product sets `vat_registered`. Until it can be set, every ledger- or trial-balance-based organisation reads `payables_days` as unavailable with `vat_basis_unknown`; invoice-basis and bank-proxy organisations are unaffected. `receivables_days` is unchanged (it still nets by `default_vat_rate` when registered, with `vat_inclusive` otherwise) — aligning it is a separate decision.
+
+### ADR-130 · A bank figure is no firmer than the bank rows under it; promotion keeps a row's own assurance
+
+**Status:** Accepted (Step 0B). Engine 6.0.0 (assurance only — no value changes).
+
+**Problem.** Commit stamps each statement row's assurance (`pdf_claude` → `inferred`; `pdf_text` → `verified` when reconciled, else `calculated`; CSV/XLSX → `verified`), but metric assurance came from the SOURCE alone: cash from an AI-read statement was badged verified on Home, in Health and to the analyst, while the evidence drawer (which reads the rows) said "please check". Rollback promotion re-inserted dependants as `verified` whatever their batch, and dropped columns commit writes (an invoice's subtotal, tax and payment date — moving `app.invoice_net` to its fallback — a bank line's counterparty and running balance, a ledger line's counterparty and opening flag).
+
+**Decision.** Only bank statements can be read from PDF, so only bank rows can be weaker than verified. Each statement batch carries the level commit stamped on its rows (`statementRecordAssurance`, the commit CASE by name); a period's bank figures — cash, and P&L / customer figures whose basis is the bank — are weakened to the weakest statement overlapping the period (`bankRecordAssuranceFor`, conservative across accounts). `app.batch_record_assurance` is the same CASE in SQL; `app.promote_dependants` uses it for the DEPENDANT's batch and re-inserts the same columns commit does (migration `20261005000001`). `scripts/engine-compare.ts` now reports assurance-only changes and the days figures.
+
+**Not changed (decision):** Health treats only `estimated`/proxy as capped (`dimension.ts`), so an `inferred` cash figure still scores uncapped; opening cash carried from an earlier AI-read month is not downgraded (its anchor is a printed, verified balance).
+
+### ADR-131 · FU-6: a daily scheduled recalculation over the periods the date changes
+
+**Status:** Accepted (Step 0B). Amends ADR-047.8. Migration `20261005000002`.
+
+**Problem.** Nothing queued the `scheduled` trigger. A month that ended with no new data kept the figures computed while it was current (aged at the run date, invoice coverage judged by the current-month rule, never health-scored); overdue ageing, "stopped" recurring payments and their alerts moved only on an import. And the designed scheduled run would not have fixed it: it rewrote five as-of keys of the current month only (orphaning the rest of the snapshots it inserted), skipped Health, and left `receivables` beside overdue figures of another day.
+
+**Decision.**
+- Every run (any trigger) whose previous succeeded run's as-of lies in an earlier month recomputes from that month — so the month that closed is computed as completed: coverage, completeness, variances, Health.
+- The `scheduled` run writes every key of the current period (plus that rolled-over month); never history no date can change. `asOfDependentOnly` is no longer used by any trigger.
+- `api_server.enqueue_scheduled_recalculation()` (nightly, after the upgrade sweep — *amended by ADR-135: hourly, from `/api/jobs/scheduled`*): one job per ACTIVE organisation whose latest succeeded run is dated before its LOCAL today (`now() at time zone o.timezone`), with that date as the payload's `as_of`. The date is the skip test — unchanged rows never justify skipping. Idempotent per organisation and date (any status), skips an organisation with a calculation already queued, never runs suspended / closing / never-run organisations, and retries a dead day the next day.
+- Queue: a queued SCHEDULED job gives way to any other trigger coalescing into it (`app.enqueue_recalculation`). A failed or lost calculation whose key already has a queued twin is coalesced into it (`cancelled`, twin widened by `app.merged_calculation_payload`) instead of violating `jobs_idempotency_queued_unique` — reproduced on the 5.0.0 functions: `finish_job` and `reclaim_stale_jobs` (which runs inside every `claim_job`) both raised 23505, the second stalling the whole queue.
+- Alerts: an EVENT alert of a period the run did not evaluate is not resolved by its absence (a daily run over October no longer resolves September's duplicate payment as "cleared").
+**Cost.** Bounded: one period a day per active organisation, two on the first run after a month end; no full history. **Limitation:** the nightly cron is 02:00 UTC, so an organisation west of UTC gets its run on the previous local date (22:00 in New York); an hourly cron would remove that.
+
+### Follow-up register (Step 0B, 2026-10-05)
+
+| FU | Status |
+|---|---|
+| FU-6 | Implemented (ADR-131); database suites pending |
+| FU-9 | Implemented (ADR-129); product decision: a VAT-status setting |
+| FU-15 | Implemented (ADR-128) |
+| FU-5, FU-11, ADR-124 R-1 | Open, unchanged (recorded in `docs/STEP_0B_IMPLEMENTATION.md`) |
+| FU-16 (new) | Open: `app.enqueue_recalculation` keeps the QUEUED payload when two non-scheduled triggers coalesce (pre-existing), so a second import into an EARLIER month than the waiting job's is not recomputed until another trigger reaches it |
+
+---
+
+### ADR-132 · FU-16: a coalesced recalculation computes the union; one calculation per organisation at a time
+
+**Status:** Accepted (Step 0C, 2026-10-05). Migration `20261005000003`. Not yet run against real Supabase.
+
+**Problem.** One calculation can wait per organisation (`jobs_idempotency_queued_unique`). A second trigger coalesced into it and was DROPPED:
+- a January import arriving while a March import waited was never recomputed;
+- an account remap (every period) arriving after an import recomputed only from the import's month.
+
+A calculation could also be claimed while another for the same organisation was RUNNING (the index covers queued rows only), so two runs could interleave pointer writes.
+
+Separately: `calculation_runs.trigger_ref_id` accepts a reference only for `import_*` (a batch), `account_remapped` and `counterparty_merged` (`same_org_ref`). Yet `override_bank_category`, `mark_transfer` and `supersede_record` enqueue with a transaction or record id, and the opening-balance flag enqueues `import_commit` with a ledger-entry id. Read from the code, every such run was refused at insert and died after three attempts. The tests never drained one: they insert banking jobs by hand with no ref.
+
+**Decision.**
+- `app.merged_calculation_payload` keeps the union. A full-range trigger wins; a `scheduled` payload gives way; otherwise every trigger reference is kept in `refs`, and the handler recomputes the union of the periods they touched (`periodsTouchedByAll`).
+- `app.enqueue_recalculation` is one `insert … on conflict do update` merge.
+- `api_server.claim_job` serialises claims (a transaction-scoped advisory lock) and never claims a calculation for an organisation with one running.
+- Failed and lost runs coalesce into a queued twin with the same merge (ADR-131).
+- The handler records only a reference the table accepts (`runTriggerRef`), still using the original reference to decide the periods.
+
+**Tests:** `test/integration/calculation-coalescing.test.ts` (queued union, full-range dominance, earlier import while one RUNS, retry and lost-worker coalescing, banking/supersede/opening-flag runs succeed) — not yet run; `test/unit/run-trigger-ref.test.ts` (the mapping read from the migration).
+
+### ADR-133 · Days figures on one VAT footing from recorded facts; a VAT-status setting
+
+**Status:** Accepted (Step 0C). Engine 7.0.0. Migration `20261005000004`.
+
+- `receivables_days` follows ADR-129's rule. From invoices: the sales lists' gross totals. From a balance: revenue only when its footing is gross (`vatFooting`). It no longer divides the receivable by `1 + default_vat_rate` (ADR-027.4's netting withdrawn: one rate cannot describe zero-rated, exempt and reduced-rate sales). A net or unknown footing gives NULL `vat_basis_unknown`.
+- Bank-proxy flows the proxy netted by a default rate (registered, with a rate: CD-33) are `unknown`, not gross, for both days figures. 6.0.0 wrongly treated bank costs as always gross.
+- `api.set_vat_registration(org, 'registered' | 'not_registered' | 'unknown')`:
+  - requires `settings.manage` and is throttled;
+  - merges only its own key (`api.update_organization` replaces the whole `settings` object);
+  - `unknown` removes the key and is never stored as false;
+  - audited `org.vat_status_changed`;
+  - a change queues a full recalculation (`settings_changed`).
+- UI: Settings → VAT, three answers including "Not set".
+
+### ADR-134 · Health: AI-read inputs take the existing cap, with their own reason
+
+**Status:** Accepted for sign-off (Step 0C). `health.config.v2`.
+
+**Problem.** §7.2 / ADR-035 cap a dimension at 70 when a required input is `estimated` or a proxy, with the note "based on bank data only". `inferred` (read from a PDF by AI) is the weakest rung of the assurance ladder, yet had no treatment, so it scored uncapped.
+
+**Decision (proposed rule; no new number).**
+- A dimension with an `inferred` required input is capped at the EXISTING 70.
+- Its reason says why: "includes figures read from a PDF by AI", or both reasons together.
+- The explanation renders the stored reason (`capNote`); before, it always printed the bank-only note.
+
+**Scoring impact.** Only dimensions whose required inputs are inferred — in practice cash flow and banking health in months whose cash comes from an AI-read statement (ADR-130) — and only when they scored above 70. They fall to 70. The total moves by (score − 70) × that dimension's applied weight.
+
+**Sign-off asked:** if inferred inputs should be treated differently from estimated ones (a lower cap, or exclusion), that is a new number and a product decision.
+
+### ADR-135 · The daily recalculation is enqueued hourly, one run per organisation and local date
+
+**Status:** Accepted (Step 0C). Route `/api/jobs/scheduled` (`5 * * * *`).
+
+At 02:00 UTC an organisation in Los Angeles was still on yesterday (19:00 local), and one in Kiritimati was 16 hours into its day. Now:
+- An hourly tick queues only organisations whose latest succeeded run is dated before their local today.
+- The database refuses a second scheduled job for the same organisation and local date.
+- Each organisation is therefore queued in the first hour after its own midnight, whatever its offset or DST state.
+- Cost: one indexed query an hour and still at most one run per organisation a day.
+- `p_now` exists for the DST and offset tests (pgTAP 19).
+- The nightly route goes back to the sweep and the engine upgrade only.
+
+"Due" is defined by the latest SUCCEEDED run's `as_of`, so a failed or dead day is retried. The range rule (ADR-131) recomputes from the month that run last saw as current, so a closed month missed by any number of days is recomputed by the next run of any trigger.

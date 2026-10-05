@@ -84,6 +84,12 @@ export async function runDocumentExtractJob(job: ClaimedJob, scope: { db: unknow
   if (!b || !d || d.deleted_at !== null || b.source_document_id !== d.id) {
     return { status: 'failed', error: 'the batch and the document do not belong together in this organisation' };
   }
+  // The model's schema is a bank statement's (`extractStatementPage`); reading an invoice or a trial
+  // balance with it would charge pages for rows of the wrong shape. The wizard no longer starts a
+  // batch for any other PDF, so this only guards a batch created before that.
+  if (b.import_type !== 'bank_statement') {
+    return { status: 'failed', error: 'only a bank statement PDF can be read with AI' };
+  }
 
   // The text layer, page by page, with the deterministic date-line count `IMP-PDF-002` needs.
   const bytes = await getObject({ orgId, userId: job.requestedBy }, d.storage_bucket ?? SOURCE_DOCUMENTS_BUCKET, d.storage_path);

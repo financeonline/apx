@@ -183,3 +183,13 @@ export function orderedDimensions(
     return (a.score ?? 0) - (b.score ?? 0);
   });
 }
+
+
+/**
+ * The sentence under a capped dimension (ADR-134): the cap and its stored reason — bank data only,
+ * figures an AI read from a PDF, or both. Null for a dimension that is not capped.
+ */
+export function capNote(dimension: Pick<DimensionBreakdown, 'capped' | 'cap_reason'>): string | null {
+  if (!dimension.capped) return null;
+  return `Capped at 70 — ${dimension.cap_reason ?? PROXY_CAP_NOTE}.`;
+}

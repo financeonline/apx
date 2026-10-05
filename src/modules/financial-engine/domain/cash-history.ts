@@ -67,6 +67,44 @@ export interface StatementRef {
   readonly closingBalance: string | null;
   /** The rows did not add up to the printed balances at import (IMP-BAL-006/007). */
   readonly unreconciled: boolean;
+  /**
+   * The assurance commit stamped on every row of this statement (`statementRecordAssurance`). Absent
+   * means `verified` — a CSV or Excel statement, which is what every caller before ADR-130 loaded.
+   */
+  readonly assurance?: AssuranceLevel;
+}
+
+/**
+ * The assurance `app.commit_import_batch` writes on each row of a statement batch (ADR-033; migration
+ * 20260908000006, the `v_assurance` CASE): rows an AI read are `inferred`; rows the deterministic PDF
+ * reader produced are `verified` only when they reconcile to the printed balances, else `calculated`;
+ * a CSV or Excel statement is `verified`. One value per batch, so the batch states the records' level.
+ */
+export function statementRecordAssurance(extractionMethod: string | null, unreconciled: boolean): AssuranceLevel {
+  if (extractionMethod === 'pdf_claude') return 'inferred';
+  if (extractionMethod === 'pdf_text') return unreconciled ? 'calculated' : 'verified';
+  return 'verified';
+}
+
+const RECORD_STRENGTH: Readonly<Record<AssuranceLevel, number>> = {
+  verified: 3, calculated: 2, estimated: 1, inferred: 0,
+};
+
+/**
+ * ADR-130: the weakest assurance of the bank rows that can feed P — those of every statement whose
+ * declared range overlaps P. Bank figures used to be badged by their SOURCE alone, so a month read
+ * from a PDF by AI showed its cash and its bank-proxy P&L as verified; only the evidence drawer,
+ * which reads the rows, said "please check". Conservative across accounts: one AI-read statement in
+ * the month marks the month's bank figures.
+ */
+export function bankRecordAssuranceFor(statements: readonly StatementRef[], period: PeriodRef): AssuranceLevel {
+  let weakest: AssuranceLevel = 'verified';
+  for (const statement of statements) {
+    if (statement.periodStart > period.periodEnd || statement.periodEnd < period.periodStart) continue;
+    const level = statement.assurance ?? 'verified';
+    if (RECORD_STRENGTH[level] < RECORD_STRENGTH[weakest]) weakest = level;
+  }
+  return weakest;
 }
 
 /** The sum of one account's accepted, current rows on one day — every row, transfers included. */

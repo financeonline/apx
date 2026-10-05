@@ -1,0 +1,3 @@
+Invoice Number,Supplier,Invoice Date,Due Date,Total,Amount Paid,Status
+BILL-77,Office Supplies Co,2026-08-04,2026-09-03,240.00,240.00,Paid
+BILL-78,Acme Ltd,2026-08-12,2026-09-11,90.00,0.00,Awaiting payment

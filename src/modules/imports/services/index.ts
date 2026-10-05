@@ -207,3 +207,23 @@ export async function createImportAccounts(
     })),
   }, requestId);
 }
+
+/**
+ * Creates the customers or suppliers an invoice list names that MOTION does not have yet (§6.6).
+ *
+ * `invoices.counterparty_id` is NOT NULL, so an invoice for a customer MOTION has never seen could
+ * not commit until it existed — and nothing created one. Only names are sent: the KIND (customer for
+ * a sales list, supplier for a purchase list) is decided in SQL from the batch, never by the caller.
+ */
+export async function createImportCounterparties(
+  db: SupabaseClient,
+  batchId: string,
+  names: readonly string[],
+  requestId?: string,
+): Promise<number> {
+  if (names.length === 0) return 0;
+  return callApi<number>(db, 'create_import_counterparties', {
+    p_batch: batchId,
+    p_names: names,
+  }, requestId);
+}

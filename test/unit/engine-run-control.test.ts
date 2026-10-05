@@ -205,23 +205,69 @@ describe('which periods a run computes (§2.4)', () => {
     }
   });
 
-  it('touches only the current period, and only as-of keys, on a scheduled run', () => {
+  it('recomputes the current period with every key on a scheduled run (FU-6)', () => {
     const range = affectedRange({
       trigger: 'scheduled', changedPeriodIds: [], allPeriods: all, currentPeriodId: 'p24',
     });
     expect(range.affectedFrom).toBe('p24');
     expect(range.to).toBe('p24');
-    expect(range.asOfDependentOnly, 'a nightly run must not rewrite a year of snapshots').toBe(true);
+    // Every key: ageing moves the balances it ages, and the invoice coverage "to date" moves with
+    // the date. The old as-of-only run left receivables beside overdue figures of another day.
+    expect(range.asOfDependentOnly).toBe(false);
   });
 
-  it('does nothing on a scheduled run when there is no current period', () => {
-    // An organization whose calendar has not reached today yet. The nightly run has nothing to
-    // recompute rather than falling back to the whole range.
+  it('does nothing on a scheduled run when there is no current period and nothing rolled over', () => {
+    // An organization whose calendar has not reached today yet.
     const range = affectedRange({
       trigger: 'scheduled', changedPeriodIds: [], allPeriods: all, currentPeriodId: null,
     });
     expect(range.affectedFrom).toBeNull();
-    expect(range.asOfDependentOnly).toBe(true);
+  });
+
+  describe('FU-6 · a month that ended since the last run is recomputed as completed', () => {
+    const months = ['2026-07', '2026-08', '2026-09', '2026-10', '2026-11'].map((ym, i) => ({
+      id: `m${i}`, periodStart: `${ym}-01`, periodEnd: `${ym}-${ym.endsWith('09') || ym.endsWith('11') ? '30' : '31'}`,
+      fiscalYear: 2026, fiscalQuarter: 3, label: ym, isComplete: false,
+    }));
+    const base = { changedPeriodIds: [] as string[], allPeriods: months };
+
+    it('the first scheduled run of October recomputes September from its first day, through October', () => {
+      const range = affectedRange({ ...base, trigger: 'scheduled', currentPeriodId: 'm3', previousAsOf: '2026-09-30', asOf: '2026-10-01' });
+      expect([range.affectedFrom, range.to]).toEqual(['m2', 'm3']);
+      expect(range.asOfDependentOnly).toBe(false);
+    });
+
+    it('a later run in the same month recomputes only the current month', () => {
+      const range = affectedRange({ ...base, trigger: 'scheduled', currentPeriodId: 'm3', previousAsOf: '2026-10-01', asOf: '2026-10-02' });
+      expect([range.affectedFrom, range.to]).toEqual(['m3', 'm3']);
+    });
+
+    it('after months without a run, it recomputes from the month that was last current', () => {
+      const range = affectedRange({ ...base, trigger: 'scheduled', currentPeriodId: 'm4', previousAsOf: '2026-08-15', asOf: '2026-11-03' });
+      expect([range.affectedFrom, range.to]).toEqual(['m1', 'm4']);
+    });
+
+    it('an import after a month end also recomputes the month that closed', () => {
+      const range = affectedRange({ ...base, trigger: 'import_commit', changedPeriodIds: ['m3'], currentPeriodId: 'm3', previousAsOf: '2026-09-29', asOf: '2026-10-02' });
+      expect(range.affectedFrom).toBe('m2');
+      // An import's range still runs to the last period, as before.
+      expect(range.to).toBe('m4');
+    });
+
+    it('an import inside the same month keeps its own range', () => {
+      const range = affectedRange({ ...base, trigger: 'import_commit', changedPeriodIds: ['m3'], currentPeriodId: 'm3', previousAsOf: '2026-10-01', asOf: '2026-10-02' });
+      expect(range.affectedFrom).toBe('m3');
+    });
+
+    it('an organisation never run has nothing to roll over', () => {
+      const range = affectedRange({ ...base, trigger: 'scheduled', currentPeriodId: 'm3', previousAsOf: null, asOf: '2026-10-02' });
+      expect(range.affectedFrom).toBe('m3');
+    });
+
+    it('with no current period, the closed month is still recomputed', () => {
+      const range = affectedRange({ ...base, trigger: 'scheduled', currentPeriodId: null, previousAsOf: '2026-11-29', asOf: '2026-12-01' });
+      expect([range.affectedFrom, range.to]).toEqual(['m4', 'm4']);
+    });
   });
 
   it('does nothing on a scheduled run when the current period is not one of ours', () => {

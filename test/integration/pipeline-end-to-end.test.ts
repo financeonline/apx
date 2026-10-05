@@ -137,7 +137,8 @@ describe('a queued calculation actually runs (ADR-057.1)', () => {
         join public.health_scores h
           on h.organization_id = c.organization_id and h.id = c.health_score_id
        where c.organization_id = '${orgId}' and c.period_id = '${mayPeriodId}'`);
-    expect(score).toContain('|6|health.config.v1');
+    // The run stamps the CURRENT config (health.config.v2 since ADR-134).
+    expect(score).toContain('|6|health.config.v2');
 
     // The breakdown is what the explainability panel reads; an empty one would render nothing.
     const dimensions = one(`

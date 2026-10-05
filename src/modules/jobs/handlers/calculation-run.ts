@@ -7,7 +7,7 @@ import {
 } from '@/core/db';
 import {
   composePeriod, runCalculation,
-  type AccountPeriodState, type AggregateCell, type CalculationTrigger, type CashSeriesOptions,
+  type AccountPeriodState, type AggregateCell, type AssuranceLevel, type CalculationTrigger, type CashSeriesOptions,
   type EngineContext, type MetricResult,
   type PeriodCoverage, type PeriodRef, type ReceivablesComposeInput,
 } from '@/modules/financial-engine';
@@ -96,9 +96,23 @@ export async function runCalculationJob(
     : typeof payload.trigger_ref === 'string' ? payload.trigger_ref
     : null;
 
+  /*
+   * FU-16 (ADR-132): a job other triggers coalesced into carries every one of them in `refs`; the
+   * run recomputes the UNION of the periods they touched, so an earlier-period import that arrived
+   * while a later one waited is never dropped.
+   */
+  const refs = Array.isArray(payload.refs)
+    ? (payload.refs as unknown[]).map((r) => {
+        const ref = (r ?? {}) as Record<string, unknown>;
+        return typeof ref.triggerRefId === 'string' ? ref.triggerRefId : null;
+      })
+    : null;
+
   const changedPeriodIds = Array.isArray(payload.period_ids)
     ? (payload.period_ids as unknown[]).filter((id): id is string => typeof id === 'string')
-    : await periodsTouchedBy(scoped, orgId, triggerRefId);
+    : refs !== null && refs.length > 0
+      ? await periodsTouchedByAll(scoped, orgId, refs)
+      : await periodsTouchedBy(scoped, orgId, triggerRefId);
 
   /*
    * "Today" in the organisation's timezone, resolved once and passed in (ADR-030.5). The engine
@@ -121,6 +135,8 @@ export async function runCalculationJob(
         receivables?: ReceivablesComposeInput;
         // ADR-124: every cash-like account's state in the period, from the per-account history.
         cashAccounts?: readonly AccountPeriodState[];
+        // ADR-130: the weakest assurance on the bank rows that can feed the period.
+        bankRecordAssurance?: AssuranceLevel;
       };
       return composeWithIds({
         period: input.period as PeriodRef,
@@ -131,6 +147,7 @@ export async function runCalculationJob(
         cashOptions: aggregates.cashOptions,
         receivables: aggregates.receivables,
         cashAccounts: aggregates.cashAccounts,
+        bankRecordAssurance: aggregates.bankRecordAssurance,
       });
     },
     startRun: startCalculationRun,
@@ -148,7 +165,10 @@ export async function runCalculationJob(
   }, {
     organizationId: orgId,
     trigger,
-    triggerRefId,
+    // Only a reference `calculation_runs`' own rule accepts (`runTriggerRef`); the ref still decided
+    // the periods above.
+    triggerRefId: runTriggerRef(
+      trigger, triggerRefId, triggerRefId !== null && await isImportBatch(scoped, orgId, triggerRefId)),
     asOf,
     jobId: job.jobId,
     changedPeriodIds,
@@ -228,6 +248,41 @@ async function organisationToday(db: SupabaseClient, orgId: string): Promise<str
  * back to every period the organisation has — a wider recompute is wasteful, and silently computing
  * nothing after somebody imported a file is not.
  */
+/**
+ * The reference a run may RECORD (ADR-132). `calculation_runs.trigger_ref_id` is checked by
+ * `app.same_org_ref` (migration 20260911000002): `import_commit` / `import_rollback` name an import
+ * batch, `account_remapped` an account, `counterparty_merged` a counterparty, and every other trigger
+ * names nothing. Callers enqueue with the row that caused the change — a bank transaction for a
+ * `banking_edit`, a superseded record, a ledger entry for the opening-balance flag (`import_commit`) —
+ * so passing it through refused the run's insert and the job died after three attempts.
+ */
+export function runTriggerRef(trigger: CalculationTrigger, ref: string | null, refIsImportBatch: boolean): string | null {
+  if (ref === null) return null;
+  switch (trigger) {
+    case 'import_commit':
+    case 'import_rollback':
+      return refIsImportBatch ? ref : null;
+    case 'account_remapped':
+    case 'counterparty_merged':
+      return ref;
+    default:
+      return null;
+  }
+}
+
+async function isImportBatch(db: SupabaseClient, orgId: string, id: string): Promise<boolean> {
+  const { data } = await db.from('import_batches').select('id').eq('organization_id', orgId).eq('id', id).maybeSingle();
+  return data !== null;
+}
+
+/** The union of the periods each coalesced trigger touched (FU-16). */
+export async function periodsTouchedByAll(
+  db: SupabaseClient, orgId: string, refs: ReadonlyArray<string | null>,
+): Promise<string[]> {
+  const sets = await Promise.all([...new Set(refs)].map((ref) => periodsTouchedBy(db, orgId, ref)));
+  return [...new Set(sets.flat())].sort();
+}
+
 async function periodsTouchedBy(
   db: SupabaseClient, orgId: string, batchId: string | null,
 ): Promise<string[]> {

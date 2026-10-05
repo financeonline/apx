@@ -280,8 +280,14 @@ export function planEvaluation(input: EvaluateInput): EvaluationPlan {
 
   // §8.3: everything open that did not recur is resolved as `condition_cleared`.
   const evaluatedRules = new Set(RULE_ORDER);
+  const evaluatedPeriods = new Set(input.periods.map((p) => p.ctx.periodId));
   for (const [key, existing] of input.existing) {
     if (seenKeys.has(key)) continue;
+    // An EVENT alert belongs to one period (`rule|period|subject`, catalogue `dedupeKey`). A run that
+    // did not evaluate that period did not look at it, so its absence here says nothing: a daily run
+    // over the current month must not resolve last month's duplicate payment as "cleared" (FU-6).
+    const [, keyPeriod] = key.split('|');
+    if (keyPeriod !== undefined && keyPeriod !== 'state' && !evaluatedPeriods.has(keyPeriod)) continue;
     // Only rules this run actually evaluated may resolve their alerts. A rule that was
     // data-suppressed did not look, and "we did not look" must never read as "it cleared".
     if (!evaluatedRules.has(existing.ruleKey as AlertRuleKey)) continue;

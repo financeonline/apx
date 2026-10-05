@@ -8,6 +8,16 @@
     {
       "path": "/api/jobs/nightly",
       "schedule": "0 2 * * *"
+    },
+    {
+      "path": "/api/jobs/scheduled",
+      "schedule": "5 * * * *"
     }
-  ]
+  ],
+  "git": {
+    "deploymentEnabled": {
+      "fix/step0-import-type-mapping": false,
+      "fix/step0-*": false
+    }
+  }
 }

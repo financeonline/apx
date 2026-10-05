@@ -303,12 +303,29 @@ export function denominatorInputsFor(
     invoiceSalesTotal = toMoneyString(total);
   }
 
+  // FU-9: the purchase side's twin — the gross a full purchase list billed in P, so payables from
+  // invoices divide by a base on their own VAT footing. `amount` is net of the recorded tax and
+  // `debit` the tax, so their sum is the gross at whatever rate (or none) each invoice carried.
+  const purchases = invoiceSideCoverage(batches, period, 'purchase');
+  let purchaseInvoiceGross: string | null = null;
+  if (purchases.fullListSpans) {
+    let total = new Decimal(0);
+    for (const cell of cells) {
+      if (cell.periodId !== period.id || cell.source !== 'invoices' || cell.invoiceType === null) continue;
+      if (!PURCHASES.has(cell.invoiceType)) continue;
+      const gross = (parseDecimalOrNull(cell.amount) ?? new Decimal(0)).plus(parseDecimalOrNull(cell.debit) ?? new Decimal(0));
+      total = cell.invoiceType === 'purchase_credit_note' ? total.minus(gross) : total.plus(gross);
+    }
+    purchaseInvoiceGross = toMoneyString(total);
+  }
+
   // §3.4 / ADR-027.5: cost of sales + operating expense + marketing. A category the P&L emitted no
   // snapshot for is a known zero in a covered period; an uncovered P&L (cost of sales NULL) is not.
   // FU-12: on the invoice basis with no purchase list establishing P, cost of sales is NULL
   // `no_source_covers_period` (and no expense category is written), so the base is NULL here — the
   // absent categories are never read as zeros of a period whose costs nothing states.
   const costOfSales = resultValue(results, 'cost_of_sales');
+  const costOfSalesResult = results.find((r) => r.key === 'cost_of_sales' && r.dimensionType === 'none');
   let payablesExpenseBase: string | null = null;
   if (costOfSales !== null) {
     const opex = resultValue(results, 'expense_by_category', 'operating_expense') ?? '0';
@@ -339,8 +356,11 @@ export function denominatorInputsFor(
 
   return {
     revenue,
+    revenueBasis: revenueResult?.basis ?? null,
     invoiceSalesTotal: toDate ? null : invoiceSalesTotal,
     payablesExpenseBase: toDate || costsToDate ? null : payablesExpenseBase,
+    payablesExpenseBasis: costOfSalesResult?.basis ?? null,
+    purchaseInvoiceGross: toDate || costsToDate ? null : purchaseInvoiceGross,
     hasOpenItemsList: sales.openItemsSpans,
   };
 }

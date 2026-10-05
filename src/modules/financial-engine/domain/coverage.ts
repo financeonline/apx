@@ -174,11 +174,29 @@ export function invoiceSideCoverage(
     (b) => b.targetTable === 'invoices' && SIDE_IMPORT_TYPES[side].includes(b.importType ?? ''),
   );
   const openItems = (b: CoverageBatch): boolean => b.invoiceListKind === 'open_items';
+  /*
+   * FU-15 (ADR-128). A list's DECLARED range is what it is about; its COMMIT date is the last day it
+   * can know anything. A full list committed on 10 August, declared 1–31 August (the upload form's
+   * default range), holds none of the invoices raised on 11–31 August and shows as open everything
+   * paid after the 10th — it cannot state the position at 31 August, however the range was typed.
+   * So a list knows through the EARLIER of its declared end and its commit date, exactly the
+   * effective range revenue and costs already use (`listRuns`). A late upload loses nothing: a list
+   * committed after the month end knows through its declared end, and it rebuilds the month-end
+   * position from each invoice's payment date. An aged-debtors (open-items) list states only its own
+   * as-at date, which must be P's last day and must not lie after the day it was committed.
+   */
+  const knownThrough = (b: CoverageBatch): string => {
+    const committed = b.committedAt.slice(0, 10);
+    return b.periodEnd < committed ? b.periodEnd : committed;
+  };
   /** The batch states the position at the close of `P.period_end`. */
   const statesMonthEnd = (b: CoverageBatch): boolean => (openItems(b)
-    ? b.periodEnd === period.periodEnd
-    : b.periodStart <= period.periodEnd && b.periodEnd >= period.periodEnd);
-  const spanning = (b: CoverageBatch): boolean => spans(b, period) && (current || !openItems(b) || statesMonthEnd(b));
+    ? b.periodEnd === period.periodEnd && knownThrough(b) === period.periodEnd
+    : b.periodStart <= period.periodEnd && knownThrough(b) >= period.periodEnd);
+  /** Its effective range — declared start to what it knows through — contains every day of P. */
+  const spansKnown = (b: CoverageBatch): boolean =>
+    b.periodStart <= period.periodStart && knownThrough(b) >= period.periodEnd;
+  const spanning = (b: CoverageBatch): boolean => spansKnown(b) && (current || !openItems(b) || statesMonthEnd(b));
   const fresh = (b: CoverageBatch): boolean => {
     const committed = b.committedAt.slice(0, 10);
     if (current) {
@@ -191,7 +209,9 @@ export function invoiceSideCoverage(
   return {
     covers: ofSide.some((b) => spanning(b) || fresh(b)),
     anyBatch: ofSide.length > 0,
-    fullListSpans: ofSide.some((b) => b.invoiceListKind === 'full' && spans(b, period)),
+    // The DSO denominator's sales history: the same effective range (FU-15), so a list committed
+    // mid-month never supplies a month of sales it had not seen.
+    fullListSpans: ofSide.some((b) => b.invoiceListKind === 'full' && spansKnown(b)),
     openItemsSpans: ofSide.some((b) => openItems(b) && spans(b, period)),
   };
 }

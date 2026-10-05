@@ -14,26 +14,38 @@ import { startImportAction } from '../actions';
  * may PROPOSE, and the person always decides (§2.6).
  */
 
+/** The choices offered, and how each is described. Whether one needs a bank account is the server's
+ *  answer (`IMPORT_TYPE_SPECS`), passed in by the page, so the two cannot drift again. */
 export const IMPORT_TYPES: ReadonlyArray<{ value: string; label: string; hint: string }> = [
   { value: 'bank_statement', label: 'Bank statement', hint: 'A list of transactions from your bank' },
   { value: 'general_ledger', label: 'General ledger', hint: 'Every journal entry, from your accounting system' },
   { value: 'trial_balance', label: 'Trial balance', hint: 'Account balances at a point in time' },
   { value: 'pnl_report', label: 'Profit and loss report', hint: 'A summary by category' },
+  { value: 'balance_sheet', label: 'Balance sheet', hint: 'What the business owns and owes at a date' },
   { value: 'sales_invoices', label: 'Sales invoices', hint: 'What your customers owe you' },
   { value: 'purchase_invoices', label: 'Purchase invoices', hint: 'What you owe your suppliers' },
+  { value: 'sales_report', label: 'Sales report', hint: 'A sales report with one line per invoice' },
+  { value: 'purchase_report', label: 'Purchase report', hint: 'A purchase report with one line per invoice' },
+  { value: 'receipts', label: 'Receipts', hint: 'A list of receipts, each against an expense account' },
 ];
 
 export function UploadForm({
   orgSlug,
   bankAccounts,
+  bankAccountTypes,
+  pdfReadTypes,
 }: {
   orgSlug: string;
   bankAccounts: ReadonlyArray<{ id: string; label: string }>;
+  /** The import types that belong to a bank account. */
+  bankAccountTypes: readonly string[];
+  /** The import types whose PDF figures MOTION reads. */
+  pdfReadTypes: readonly string[];
 }) {
   const [state, action] = useActionState(startImportAction, null);
   const [importType, setImportType] = useState('bank_statement');
 
-  const needsBankAccount = importType === 'bank_statement' || importType === 'receipts';
+  const needsBankAccount = bankAccountTypes.includes(importType);
   const hint = IMPORT_TYPES.find((t) => t.value === importType)?.hint;
 
   return (
@@ -83,8 +95,24 @@ export function UploadForm({
         </Field>
       </div>
 
-      <Field label="The file" htmlFor="file" hint="CSV or Excel, up to 25 MB.">
-        <Input id="file" type="file" name="file" accept=".csv,.xlsx,.xlsm,.txt,text/csv" required />
+      {/*
+        A PDF is always kept as a source document; only a bank statement's figures are read from one
+        (IMPORT_ENGINE.md §5.3). The hint says which, for the type chosen, before anything is sent.
+      */}
+      <Field
+        label="The file"
+        htmlFor="file"
+        hint={pdfReadTypes.includes(importType)
+          ? 'CSV, Excel or a PDF statement, up to 25 MB.'
+          : 'CSV or Excel, up to 25 MB. A PDF is stored as a document, but its figures are not read.'}
+      >
+        <Input
+          id="file"
+          type="file"
+          name="file"
+          accept=".csv,.xlsx,.xlsm,.txt,.pdf,text/csv,application/pdf"
+          required
+        />
       </Field>
 
       <div className="flex items-center gap-3">

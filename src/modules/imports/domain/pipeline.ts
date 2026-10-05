@@ -23,7 +23,9 @@ import { checkBatch, looksLikeOpenItems, requiredConfirmations, statusForIssues,
 import type {
   BatchIssue, ParsedTable, RowIssue, TargetField, Transforms, ValidatedRow,
 } from './pipeline-types';
-import type { ImportTarget, ImportType } from './types';
+import { IMPORT_TYPE_SPECS, type ImportTarget, type ImportType } from './types';
+import { classifyInvoice } from './invoices';
+import { nameCarriesFigure, storedKeyCollides, storedKeyEmpty, storedNameKey } from './mapping/counterparty';
 import type { FinancialRecordTable } from '@/modules/financials';
 
 export interface AccountRef {
@@ -35,6 +37,8 @@ export interface AccountRef {
 export interface CounterpartyRef {
   readonly id: string;
   readonly normalizedName: string;
+  /** The name as stored, so a match on the stored key can be checked letter by letter (Step 0C). */
+  readonly name?: string;
 }
 
 /** The target fields that hold money (§6.1), read through the §6.4 number transform before signs. */
@@ -153,6 +157,8 @@ export function runPipeline(input: PipelineInput): PipelineResult {
 
   const unmappedAccounts = new Set<string>();
   const newCounterparties = new Set<string>();
+  /** Rows whose counterparty name the stored key cannot tell apart, or cannot hold (Step 0C). */
+  const nameIssues = new Map<number, RowIssue>();
 
   // ---- Pass A: map every line, resolve identities, collect what is missing ----
   interface Staged {
@@ -224,6 +230,18 @@ export function runPipeline(input: PipelineInput): PipelineResult {
       normaliseMoney(mapped, input.targetTable, input.transforms);
     }
 
+    /*
+     * An invoice row's type comes from the list it is in (§6.1): `invoices.invoice_type` is NOT
+     * NULL and nothing in the file says it. A negative total is a credit note, with all four money
+     * fields negated together so it is stored as a positive amount subtracted by type (CD-28,
+     * ADR-047.5). The status a file writes ("Paid", "Part paid") is read into the enum here, or
+     * left as written so `IMP-INV-013` names it rather than the commit failing on a cast.
+     */
+    const invoiceSide = IMPORT_TYPE_SPECS[input.importType].invoiceSide;
+    if (!nonTabular && input.targetTable === 'invoices' && invoiceSide !== null) {
+      classifyInvoice(mapped, invoiceSide);
+    }
+
     if (!nonTabular && accountValue) {
       const byCode = mapped.code ? accountsByCode.get(mapped.code.toLowerCase()) : undefined;
       const byName = accountsByName.get(accountValue.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim());
@@ -234,10 +252,24 @@ export function runPipeline(input: PipelineInput): PipelineResult {
 
     const counterpartyValue = mapped.counterparty ?? mapped.customer ?? mapped.supplier ?? null;
     if (!nonTabular && counterpartyValue) {
-      const key = counterpartyValue.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+      const key = storedNameKey(counterpartyValue);
       const existing = counterpartiesByName.get(key);
-      if (existing) mapped.counterparty_id = existing.id;
-      else newCounterparties.add(counterpartyValue);
+      /*
+       * The stored key (`app.normalize_name`) drops every letter outside A–Z, so a match on it is not
+       * yet a match: "Möller GmbH" would land on "Müller GmbH". Such a row is stopped (IMP-CP-017),
+       * and a name the key cannot hold at all is refused with its own reason (IMP-CP-018), until the
+       * key is Unicode-aware. Never a silent merge, never a silent drop.
+       */
+      if (storedKeyEmpty(counterpartyValue)) {
+        nameIssues.set(row.rowNumber, nameIssue('IMP-CP-018', counterpartyValue, null));
+      } else if (existing && existing.name !== undefined && storedKeyCollides(existing.name, counterpartyValue)) {
+        nameIssues.set(row.rowNumber, nameIssue('IMP-CP-017', counterpartyValue, existing.name));
+      } else if (existing) {
+        mapped.counterparty_id = existing.id;
+      // ADR-045.3: a name carrying a figure is never created; the row says so (IMP-NAME-015).
+      } else if (!nameCarriesFigure(counterpartyValue)) {
+        newCounterparties.add(counterpartyValue);
+      }
     }
 
     // The masked description is derived here, once, so no reader has to remember to mask
@@ -317,14 +349,16 @@ export function runPipeline(input: PipelineInput): PipelineResult {
 
   const issuesByRow = new Map<number, RowIssue[]>();
   for (const s of staged) {
-    issuesByRow.set(
-      s.rowNumber,
-      validateRow(
-        { rowNumber: s.rowNumber, mapped: s.mapped, nonTabular: s.nonTabular, fieldCountMismatch: s.fieldCountMismatch },
-        validationCtx,
-        requiredFields,
-      ),
+    const issues = validateRow(
+      { rowNumber: s.rowNumber, mapped: s.mapped, nonTabular: s.nonTabular, fieldCountMismatch: s.fieldCountMismatch },
+      validationCtx,
+      requiredFields,
     );
+    const nameIssueOfRow = nameIssues.get(s.rowNumber);
+    // The specific reason replaces the generic "could not be matched" (IMP-CP-016) it would cause.
+    issuesByRow.set(s.rowNumber, nameIssueOfRow === undefined
+      ? issues
+      : [...issues.filter((i) => i.code !== 'IMP-CP-016'), nameIssueOfRow]);
   }
 
   // ---- Pass C: duplicates, over the rows that could actually commit ----
@@ -452,6 +486,21 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     unmappedAccounts: [...unmappedAccounts],
     newCounterparties: [...newCounterparties],
   };
+}
+
+/** The two Unicode-name refusals, worded for the person who has to fix the file. */
+function nameIssue(code: 'IMP-CP-017' | 'IMP-CP-018', name: string, existing: string | null): RowIssue {
+  return code === 'IMP-CP-017'
+    ? {
+        code, severity: 'error', field: 'customer',
+        message: `"${name}" differs from "${existing}" only in letters MOTION cannot yet tell apart, so it has not been matched or added.`,
+        suggestion: 'Skip the row for now; it will import once names outside A–Z are supported.',
+      }
+    : {
+        code, severity: 'error', field: 'customer',
+        message: `"${name}" uses letters MOTION cannot yet store as a customer name.`,
+        suggestion: 'Skip the row for now; it will import once names outside A–Z are supported.',
+      };
 }
 
 /**

@@ -134,3 +134,15 @@ describe('SOW §9', () => {
     expect(NOT_ENOUGH_DATA_TITLE).toBe('Not enough data yet');
   });
 });
+
+describe('ADR-134 · the cap sentence a reader sees', () => {
+  it('says why: bank data only, AI-read figures, or both — and nothing when not capped', async () => {
+    const { capNote } = await import('@/components/dashboard/health-presentation');
+    const { INFERRED_CAP_NOTE, PROXY_CAP_NOTE } = await import('@/modules/health');
+    expect(capNote({ capped: false, cap_reason: null })).toBeNull();
+    expect(capNote({ capped: true, cap_reason: PROXY_CAP_NOTE })).toBe('Capped at 70 — based on bank data only.');
+    expect(capNote({ capped: true, cap_reason: INFERRED_CAP_NOTE })).toBe('Capped at 70 — includes figures read from a PDF by AI.');
+    // A breakdown stored before ADR-134 has no reason: it was the bank-only cap.
+    expect(capNote({ capped: true, cap_reason: null })).toBe('Capped at 70 — based on bank data only.');
+  });
+});

@@ -63,6 +63,11 @@ export interface RequirementVerdict {
   readonly minCompleteness: number;
   /** Any satisfying observation is `estimated` or carries `proxy: true` (§7.2, ADR-035). */
   readonly proxy: boolean;
+  /**
+   * ADR-134: any satisfying observation is `inferred` — read from a document by AI. Weaker than
+   * `estimated` on the assurance ladder, so it takes the same cap, never less.
+   */
+  readonly inferred: boolean;
   /** The warnings carried by the satisfying observations, deduplicated, in first-seen order. */
   readonly warnings: readonly string[];
 }
@@ -75,6 +80,7 @@ export function testRequirements(
   let satisfied = true;
   let minCompleteness = 1;
   let proxy = false;
+  let inferred = false;
   const warnings: string[] = [];
 
   for (const group of requirements) {
@@ -86,6 +92,7 @@ export function testRequirements(
     }
     minCompleteness = Math.min(minCompleteness, observation.dataQuality.completeness);
     if (observation.assurance === 'estimated' || observation.dataQuality.proxy) proxy = true;
+    if (observation.assurance === 'inferred') inferred = true;
     for (const warning of observation.dataQuality.warnings) {
       if (!warnings.includes(warning)) warnings.push(warning);
     }
@@ -95,5 +102,5 @@ export function testRequirements(
   // coverage test is applied separately.
   if (requirements.length === 0) minCompleteness = 1;
 
-  return { satisfied, minCompleteness, proxy, warnings };
+  return { satisfied, minCompleteness, proxy, inferred, warnings };
 }

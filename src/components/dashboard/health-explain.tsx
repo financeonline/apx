@@ -4,7 +4,7 @@ import { METRIC_LABELS } from '@/modules/financials';
 import type { DimensionBreakdown, HealthCardView } from '@/modules/health';
 import { Disclaimer } from './health-score-card';
 import {
-  BAND_SCALE, DIMENSION_DESCRIPTIONS, DIMENSION_LABELS, EXCLUSION_TEXT, PROXY_CAP_NOTE,
+  BAND_SCALE, DIMENSION_DESCRIPTIONS, DIMENSION_LABELS, EXCLUSION_TEXT, capNote,
   RULE_LABELS, bandText, bandTone, dimensionsNote, orderedDimensions, pointsText, skipText,
 } from './health-presentation';
 
@@ -144,7 +144,7 @@ function DimensionPanel({
         </div>
 
         {dimension.capped ? (
-          <p className="mt-2 text-xs text-ink-muted">Capped at 70 — {PROXY_CAP_NOTE}.</p>
+          <p className="mt-2 text-xs text-ink-muted">{capNote(dimension)}</p>
         ) : null}
 
         <RuleTable dimension={dimension} />

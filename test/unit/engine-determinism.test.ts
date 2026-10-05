@@ -253,6 +253,7 @@ const repository = vi.hoisted(() => ({
   loadCoverageBatches: vi.fn(),
   // ADR-120: the receivables family's reads and the engine-version gate.
   loadLatestEngineVersion: vi.fn(),
+  loadLatestRunAsOf: vi.fn(),
   loadAgingInvoices: vi.fn(),
   loadOpeningJournal: vi.fn(),
   loadStatements: vi.fn(),
@@ -299,6 +300,7 @@ describe('a run reads the ledger at one instant, and that instant is the databas
     repository.loadTransferLegs.mockResolvedValue([]);
     repository.loadCoverageBatches.mockResolvedValue([]);
     repository.loadLatestEngineVersion.mockResolvedValue(null);
+    repository.loadLatestRunAsOf.mockResolvedValue(null);
     repository.loadAgingInvoices.mockResolvedValue([]);
     repository.loadOpeningJournal.mockResolvedValue(null);
     repository.loadStatements.mockResolvedValue([]);

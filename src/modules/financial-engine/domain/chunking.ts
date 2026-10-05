@@ -34,6 +34,15 @@ export interface AffectedPeriodsInput {
   readonly allPeriods: readonly PeriodRef[];
   /** The current month in the organization's timezone, for the scheduled trigger. */
   readonly currentPeriodId: string | null;
+  /**
+   * FU-6: the as-of date of the organisation's latest succeeded run. When it lies in an earlier month
+   * than today, that month was computed while it was still current — aged at the run date, its
+   * invoice coverage judged by the current-month rule, its health not scored — and every run from
+   * now on must recompute it as a completed month. Absent (or null) for an organisation never run.
+   */
+  readonly previousAsOf?: string | null;
+  /** Today in the organisation's timezone: the run's as-of date. */
+  readonly asOf?: string;
 }
 
 export interface RunRange {
@@ -55,19 +64,39 @@ export function affectedRange(input: AffectedPeriodsInput): RunRange {
   const indexOf = new Map(allPeriods.map((p, i) => [p.id, i]));
   const lastIndex = allPeriods.length - 1;
 
-  // A daily scheduled run touches the current period only, and only the keys whose value depends on
-  // today (ADR-047.8). Anything wider would rewrite a year of unchanged snapshots every night.
+  /*
+   * FU-6: the month a previous run computed as CURRENT, if today is past it. Found by the previous
+   * run's as-of date, not by the calendar alone: a quiet organisation with no run for three months
+   * still recomputes from the month it was last current in.
+   */
+  const rolledOverIndex = (() => {
+    const previous = input.previousAsOf ?? null;
+    const today = input.asOf ?? null;
+    if (previous === null || today === null) return null;
+    const index = allPeriods.findIndex((p) => p.periodStart <= previous && p.periodEnd >= previous);
+    if (index < 0 || allPeriods[index]!.periodEnd >= today) return null;
+    return index;
+  })();
+
+  /*
+   * The daily scheduled run (FU-6; ADR-047.8 as amended by ADR-131): the periods whose figures depend
+   * on the date — the CURRENT period, every key (ageing, and the invoice coverage that reaches "to
+   * date", move with the date, and so do the balances they age) — and, after a month end, the month
+   * that has just closed, from its first day, so it is recomputed as a completed month: coverage,
+   * completeness, variances and its health score. Never history no date can change.
+   */
   if (trigger === 'scheduled') {
-    if (!currentPeriodId || !indexOf.has(currentPeriodId)) {
-      return { affectedFrom: null, readFrom: null, to: null, asOfDependentOnly: true };
+    const currentIndex = currentPeriodId !== null ? indexOf.get(currentPeriodId) : undefined;
+    const from = rolledOverIndex ?? currentIndex;
+    if (from === undefined) {
+      return { affectedFrom: null, readFrom: null, to: null, asOfDependentOnly: false };
     }
-    const index = indexOf.get(currentPeriodId)!;
-    const readIndex = Math.max(0, index - COMPARISON_LOOKBACK_MONTHS);
+    const to = currentIndex ?? lastIndex;
     return {
-      affectedFrom: currentPeriodId,
-      readFrom: allPeriods[readIndex]!.id,
-      to: currentPeriodId,
-      asOfDependentOnly: true,
+      affectedFrom: allPeriods[from]!.id,
+      readFrom: allPeriods[Math.max(0, from - COMPARISON_LOOKBACK_MONTHS)]!.id,
+      to: allPeriods[Math.max(from, to)]!.id,
+      asOfDependentOnly: false,
     };
   }
 
@@ -83,6 +112,9 @@ export function affectedRange(input: AffectedPeriodsInput): RunRange {
     }
     firstAffectedIndex = Math.min(...indices);
   }
+  // FU-6: whatever triggered it, a run after a month end also recomputes the month that closed —
+  // otherwise an import on the 2nd would leave the 1st's predecessor as computed while current.
+  if (rolledOverIndex !== null) firstAffectedIndex = Math.min(firstAffectedIndex, rolledOverIndex);
 
   // Comparisons need twelve months of history before the first affected period. Those months are
   // READ, never written — writing them would rewrite snapshots nothing changed about.

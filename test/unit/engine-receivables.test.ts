@@ -363,38 +363,45 @@ describe('receivables_days (§3.4, ADR-027.4)', () => {
     expect(days.unit).toBe('days');
   });
 
-  it('nets the receivable down by the VAT rate when the denominator is net revenue', () => {
-    const inputs = [0, 1, 2].map((index) =>
-      periodInput(index, {
-        invoices: null,
-        receivablesFallback: { accountIds: [AR_ACCOUNT], periodBalanceClosing: '1200.00' },
-        revenue: '1000.00',
-      }),
-    );
-    const results = computeReceivables(context({ vatRegistered: true, defaultVatRate: '0.20' }), inputs);
+  // ADR-133: a VAT-inclusive receivable over revenue only when the revenue is gross too; never
+  // netted down by a single default rate.
+  const fromBalance = (revenueBasis: MetricResult['basis']) => [0, 1, 2].map((index) =>
+    periodInput(index, {
+      invoices: null,
+      receivablesFallback: { accountIds: [AR_ACCOUNT], periodBalanceClosing: '1200.00' },
+      revenue: '1000.00',
+      revenueBasis,
+    }));
+
+  it('a business that is not VAT-registered: ledger revenue is gross, so the ratio is published', () => {
+    const results = computeReceivables(context({ vatRegistered: false, vatStatusKnown: true }), fromBalance('ledger'));
     const days = metric(results, 2, 'receivables_days');
-    expect(days.components).toMatchObject({
-      denominator_basis: 'revenue_net_of_vat',
-      denominator: '3000.00',
-      numerator: '1000.00',
-      vat_rate_applied: '0.20',
-    });
-    expect(days.value).toBe('30');
+    expect(days.components).toMatchObject({ denominator_basis: 'revenue_gross', denominator: '3000.00', numerator: '1200.00' });
+    // 1200 / 3000 × 91.25 = 36.5 → 37 days: both sides as billed.
+    expect(days.value).toBe('37');
   });
 
-  it('still writes the figure when the VAT rate is unknown, carrying vat_inclusive', () => {
-    const inputs = [0, 1, 2].map((index) =>
-      periodInput(index, {
-        invoices: null,
-        receivablesFallback: { accountIds: [AR_ACCOUNT], periodBalanceClosing: '1200.00' },
-        revenue: '1000.00',
-      }),
-    );
-    const results = computeReceivables(context(), inputs);
+  it('a VAT-registered business: net ledger revenue under a gross receivable is not comparable — no rate is assumed', () => {
+    // ADR-027.4 used to divide the receivable by 1 + default_vat_rate, wrong for every zero-rated or
+    // exempt sale; nothing records which those are.
+    const results = computeReceivables(context({ vatRegistered: true, vatStatusKnown: true, defaultVatRate: '0.20' }), fromBalance('ledger'));
     const days = metric(results, 2, 'receivables_days');
-    expect(days.components).toMatchObject({ denominator_basis: 'revenue_vat_unknown' });
-    expect(days.dataQuality.warnings).toContain('vat_inclusive');
-    expect(days.value).toBe('37');
+    expect(days.value).toBeNull();
+    expect(days.dataQuality.missing).toEqual(['vat_basis_unknown']);
+    expect(days.components).not.toHaveProperty('vat_rate_applied');
+  });
+
+  it('VAT status unknown: the figure is unavailable, not published with a warning', () => {
+    const results = computeReceivables(context({ vatRegistered: false, vatStatusKnown: false }), fromBalance('period_balances'));
+    expect(metric(results, 2, 'receivables_days').dataQuality.missing).toEqual(['vat_basis_unknown']);
+  });
+
+  it('bank-proxy revenue netted by a default rate is an assumption, not a record: unavailable', () => {
+    const results = computeReceivables(context({ vatRegistered: true, vatStatusKnown: true, defaultVatRate: '0.20' }), fromBalance('bank'));
+    expect(metric(results, 2, 'receivables_days').dataQuality.missing).toEqual(['vat_basis_unknown']);
+    // Not netted (no rate): money as it moved, gross — comparable.
+    const gross = computeReceivables(context({ vatRegistered: true, vatStatusKnown: true, defaultVatRate: null }), fromBalance('bank'));
+    expect(metric(gross, 2, 'receivables_days').value).toBe('37');
   });
 
   it('is NULL with open_items_only when an aged-debtors list covers the window (ADR-047.10)', () => {
@@ -423,7 +430,7 @@ describe('receivables_days (§3.4, ADR-027.4)', () => {
     const days = metric(computeReceivables(context(), inputs), 2, 'receivables_days');
     expect(days.value).toBeNull();
     expect(days.dataQuality.missing).toContain('open_items_only');
-    expect(days.components).toMatchObject({ denominator_basis: 'revenue_net_of_vat' });
+    expect(days.components).toMatchObject({ denominator_basis: 'revenue_gross' });
   });
 
   it('is NULL when a month of the revenue window has no revenue figure', () => {
@@ -502,36 +509,85 @@ describe('receivables_days (§3.4, ADR-027.4)', () => {
   });
 });
 
-describe('payables_days (§3.4, ADR-027.5)', () => {
-  it('divides by cost of sales, operating expense and marketing only', () => {
-    // `payablesExpenseBase` is 6,000 a month while total costs including payroll are far higher:
-    // payroll and depreciation never pass through accounts payable, so they never reach here.
-    const inputs = [0, 1, 2].map((index) =>
-      periodInput(index, {
-        invoices: [invoice({ id: uuid(9), invoiceType: 'purchase', balanceDue: '6000.00', totalAmount: '6000.00' })],
-        payablesExpenseBase: '6000.00',
-        revenue: '90000.00',
-      }),
-    );
-    const results = computeReceivables(context(), inputs);
+describe('payables_days (§3.4, ADR-027.5; FU-9, ADR-129)', () => {
+  // From invoices: VAT-inclusive balances over the same lists' VAT-inclusive totals.
+  const fromInvoices = (gross: (string | null)[], over: Partial<ReceivablesPeriodInput> = {}) => [0, 1, 2].map((index) =>
+    periodInput(index, {
+      invoices: [invoice({ id: uuid(9), invoiceType: 'purchase', balanceDue: '6000.00', totalAmount: '6000.00' })],
+      payablesExpenseBase: '5000.00',
+      payablesExpenseBasis: 'invoices',
+      purchaseInvoiceGross: gross[index] ?? null,
+      ...over,
+    }));
+
+  it('from invoices: divides by the purchase lists\' gross totals, not by net costs', () => {
+    const results = computeReceivables(context(), fromInvoices(['6000.00', '6000.00', '6000.00']));
     const days = metric(results, 2, 'payables_days');
     expect(days.components).toMatchObject({
-      denominator_basis: 'expense_categories',
-      denominator: '18000.00',
-      numerator: '6000.00',
+      denominator_basis: 'purchase_invoice_total_gross', denominator: '18000.00', numerator: '6000.00',
     });
-    // 6000 / 18000 × 91.25 = 30.4 → 30 days, not the ~20 a payroll-inclusive denominator would give.
+    // 6000 / 18000 × 91.25 = 30.4 → 30. The old ratio put the same 6,000 over the NET base (15,000)
+    // and said 37 — the VAT rate, read as days.
     expect(days.value).toBe('30');
   });
 
+  it('mixed rates, a zero rate and no tax column all read correctly: each invoice\'s gross is what was billed', () => {
+    // 1,200 (20%) + 1,050 (5%) + 1,000 (zero-rated) + 700 (no tax recorded) = 3,950 a month.
+    const results = computeReceivables(context(), fromInvoices(['3950.00', '3950.00', '3950.00'], {
+      invoices: [invoice({ id: uuid(9), invoiceType: 'purchase', balanceDue: '3950.00', totalAmount: '3950.00' })],
+    }));
+    expect(metric(results, 2, 'payables_days').value).toBe('30');
+  });
+
+  it('from invoices with a month no full purchase list establishes: insufficient history, not a guess', () => {
+    const results = computeReceivables(context(), fromInvoices(['6000.00', null, '6000.00']));
+    expect(metric(results, 2, 'payables_days').value).toBeNull();
+    expect(metric(results, 2, 'payables_days').dataQuality.missing).toContain('insufficient_history');
+  });
+
+  // From a balance: a VAT-inclusive AP balance over cost of sales + opex + marketing.
+  const fromLedger = (basis: MetricResult['basis'], base = '18250.00') => [0, 1, 2].map((index) =>
+    periodInput(index, {
+      invoices: null,
+      basis: { basis: 'period_balances', assurance: 'calculated', warnings: [], proxy: false },
+      payablesFallback: { accountIds: [AP_ACCOUNT], periodBalanceClosing: '6000.00', periodBalanceKind: 'trial_balance' },
+      payablesExpenseBase: base,
+      payablesExpenseBasis: basis,
+    }));
+
+  it('a business that is not VAT-registered books costs gross: the ratio is published', () => {
+    const results = computeReceivables(context({ vatRegistered: false, vatStatusKnown: true }), fromLedger('ledger'));
+    const days = metric(results, 2, 'payables_days');
+    expect(days.components).toMatchObject({ denominator_basis: 'expense_categories_gross', denominator: '54750.00' });
+    expect(days.value).toBe('10');
+  });
+
+  it('a VAT-registered business books costs net: VAT-inclusive payables over them are not comparable', () => {
+    const results = computeReceivables(context({ vatRegistered: true, vatStatusKnown: true, defaultVatRate: '0.2' }), fromLedger('ledger'));
+    const days = metric(results, 2, 'payables_days');
+    // No rate is assumed — not even the organisation's default: nothing records which purchases were
+    // zero-rated or exempt.
+    expect(days.value).toBeNull();
+    expect(days.dataQuality.missing).toEqual(['vat_basis_unknown']);
+  });
+
+  it('when nobody has said whether the business is VAT-registered, the footing is unknown', () => {
+    const results = computeReceivables(context({ vatRegistered: false, vatStatusKnown: false }), fromLedger('period_balances'));
+    expect(metric(results, 2, 'payables_days').dataQuality.missing).toEqual(['vat_basis_unknown']);
+  });
+
+  it('net invoice costs under a ledger balance are not comparable either', () => {
+    const results = computeReceivables(context({ vatStatusKnown: true }), fromLedger('invoices'));
+    expect(metric(results, 2, 'payables_days').dataQuality.missing).toEqual(['vat_basis_unknown']);
+  });
+
+  it('bank-proxy costs are payments as made, VAT included: comparable', () => {
+    const results = computeReceivables(context({ vatRegistered: true, vatStatusKnown: true }), fromLedger('bank'));
+    expect(metric(results, 2, 'payables_days').value).toBe('10');
+  });
+
   it('is NULL when the denominator is zero or negative', () => {
-    const inputs = [0, 1, 2].map((index) =>
-      periodInput(index, {
-        invoices: [invoice({ id: uuid(9), invoiceType: 'purchase', balanceDue: '600.00' })],
-        payablesExpenseBase: '0.00',
-      }),
-    );
-    const results = computeReceivables(context(), inputs);
+    const results = computeReceivables(context(), fromInvoices(['0.00', '0.00', '0.00']));
     expect(metric(results, 2, 'payables_days').value).toBeNull();
     expect(metric(results, 2, 'payables_days').dataQuality.missing).toContain('comparison_is_zero');
   });

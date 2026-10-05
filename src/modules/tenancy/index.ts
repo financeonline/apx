@@ -5,6 +5,9 @@ export { getAccessContext, getPlatformContext, resolveAccessFresh, resolvePlatfo
 export {
   createOrganization,
   updateOrganization,
+  setVatRegistration,
+  vatStatusOf,
+  VatStatus,
   requestDeletion,
   cancelDeletion,
   listMyOrganizations,

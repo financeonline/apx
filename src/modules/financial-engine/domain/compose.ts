@@ -12,7 +12,7 @@
 import { Decimal, parseDecimalOrNull } from '@/core/money';
 import { invoiceSignFor, ledgerAmount, naturalToReporting } from './sign';
 import {
-  computeCash, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions,
+  computeCash, weakerAssurance, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions,
 } from './cash';
 import type { AccountPeriodState } from './cash-history';
 import type { TransferKind } from '@/modules/banking';
@@ -27,7 +27,7 @@ import { choosePrecedence } from './coverage';
 import { isCashLikeBankAccount } from './categories';
 import type { InvoiceType, StandardCategory } from '@/modules/financials';
 import type {
-  AggregateCell, BasisChoice, CounterpartyRef, EngineContext, MetricResult, PeriodCoverage,
+  AggregateCell, AssuranceLevel, BasisChoice, CounterpartyRef, EngineContext, MetricResult, PeriodCoverage,
   PeriodRef,
 } from './types';
 
@@ -60,6 +60,18 @@ export interface ComposeInput {
    * under which a month with no statement reported a known 0.00 movement (ADR-120).
    */
   readonly cashAccounts?: readonly AccountPeriodState[];
+  /**
+   * ADR-130: the weakest assurance commit stamped on the bank rows that can feed P
+   * (`bankRecordAssuranceFor`). A figure is never firmer than the records under it, so every
+   * bank-sourced figure — cash, and the P&L and customer figures when the bank is their basis — is
+   * weakened to it. Values are unchanged. Absent means the rows are all `verified`.
+   */
+  readonly bankRecordAssurance?: AssuranceLevel;
+}
+
+/** ADR-130: a bank basis is no firmer than the bank rows it reads. */
+function withBankRecords(choice: BasisChoice, bankRecords: AssuranceLevel): BasisChoice {
+  return choice.basis === 'bank' ? { ...choice, assurance: weakerAssurance(choice.assurance, bankRecords) } : choice;
 }
 
 /** The aggregate source each basis reads from. */
@@ -393,7 +405,8 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
   const results: MetricResult[] = [];
 
   // ---- P&L ----
-  const pnlBasis = choosePrecedence(coverage, 'pnl');
+  const bankRecords = input.bankRecordAssurance ?? 'verified';
+  const pnlBasis = withBankRecords(choosePrecedence(coverage, 'pnl'), bankRecords);
   const pnlSource = sourceForBasis(pnlBasis.basis);
 
   const byCounterparty = new Map(context.counterparties.map((c) => [c.id, c]));
@@ -457,11 +470,15 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
   };
   const cashSeries = computeCash(context, [cashInput], input.cashOptions ?? {});
   for (const periodMetrics of cashSeries) {
-    if (periodMetrics.periodId === period.id) results.push(...periodMetrics.metrics);
+    if (periodMetrics.periodId !== period.id) continue;
+    // Cash is stated from the bank alone (ADR-124): its figures are as firm as those rows (ADR-130).
+    results.push(...periodMetrics.metrics.map((m) => (m.basis === 'bank'
+      ? { ...m, assurance: weakerAssurance(m.assurance, bankRecords) }
+      : m)));
   }
 
   // ---- Customers and suppliers ----
-  const counterpartyBasis = choosePrecedence(coverage, 'counterparty');
+  const counterpartyBasis = withBankRecords(choosePrecedence(coverage, 'counterparty'), bankRecords);
   const counterpartySource = sourceForBasis(counterpartyBasis.basis);
   const revenueResult = results.find((r) => r.key === 'revenue' && r.dimensionType === 'none') ?? null;
 

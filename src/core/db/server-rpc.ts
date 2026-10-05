@@ -536,6 +536,14 @@ export async function enqueueEngineUpgrade(engineVersion: string): Promise<numbe
   return serverRpc<number>('enqueue_engine_upgrade', { p_engine_version: engineVersion });
 }
 
+/**
+ * FU-6 (ADR-131): one `calculation.run` (trigger `scheduled`) per active organisation whose latest
+ * succeeded run is dated before today in its own timezone. Idempotent per organisation and date.
+ */
+export async function enqueueScheduledRecalculation(): Promise<number> {
+  return serverRpc<number>('enqueue_scheduled_recalculation', {});
+}
+
 export async function startCalculationRun(
   input: Record<string, unknown>,
 ): Promise<{ runId: string; noChange: boolean }> {

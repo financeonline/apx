@@ -129,10 +129,19 @@ export interface BalanceSheetTerm {
 export interface DenominatorInputs {
   /** Net `revenue` for the period (§3.1). */
   readonly revenue: string | null;
+  /** ADR-133: the P&L basis revenue was stated on, which fixes its VAT footing. */
+  readonly revenueBasis?: MetricBasis | null;
   /** Σ invoice `total_amount` net of credit notes, from `full` lists only (ADR-047.10). */
   readonly invoiceSalesTotal: string | null;
   /** `cost_of_sales + operating_expense + marketing` — payroll and depreciation never pass through AP. */
   readonly payablesExpenseBase: string | null;
+  /** FU-9: the P&L basis the expense base was stated on, which fixes its VAT footing. */
+  readonly payablesExpenseBasis?: MetricBasis | null;
+  /**
+   * FU-9: Σ purchase invoice GROSS totals (net + recorded tax, credit notes subtracted) from full
+   * purchase lists establishing the period — the payables twin of `invoiceSalesTotal`.
+   */
+  readonly purchaseInvoiceGross?: string | null;
   /** An `open_items` invoice list covering the period makes the DSO denominator meaningless. */
   readonly hasOpenItemsList: boolean;
 }
@@ -379,11 +388,14 @@ export type DenominatorBasis =
   | 'invoice_total_gross'
   | 'revenue_net_of_vat'
   | 'revenue_vat_unknown'
-  | 'expense_categories';
+  | 'revenue_gross'
+  | 'expense_categories'
+  | 'expense_categories_gross'
+  | 'purchase_invoice_total_gross';
 
 /** The label recorded in `components.denominator_basis` before the VAT branch refines it. */
 function denominatorLabel(useInvoiceTotals: boolean): DenominatorBasis {
-  return useInvoiceTotals ? 'invoice_total_gross' : 'revenue_net_of_vat';
+  return useInvoiceTotals ? 'invoice_total_gross' : 'revenue_gross';
 }
 
 interface DaysOutcome {
@@ -399,19 +411,20 @@ function toDaysString(value: Decimal): string {
 }
 
 /**
- * `balance / Σ flow(3 periods) × 91.25`, with both sides on the same VAT footing (ADR-027.4).
+ * `balance / Σ flow(3 periods) × 91.25`, with both sides on the same VAT footing (ADR-027.4, ADR-133).
  *
- * When receivables come from invoices the denominator is Σ invoice `total_amount`, which includes
- * VAT exactly as the receivable does. Otherwise the denominator is net revenue, and the receivable
- * is netted down by `default_vat_rate` — when the rate is unknown the figure is still written, with
- * `vat_inclusive`, because a DSO overstated by 20% is more useful than no DSO at all as long as the
- * warning travels with it.
+ * The receivable is VAT-inclusive (what customers owe includes the VAT charged). When it comes from
+ * invoices the denominator is the same lists' Σ `total_amount` — gross, the same population. Otherwise
+ * the denominator is revenue, used only when its footing is gross (`vatFooting`); a net or unknown
+ * footing is NULL `vat_basis_unknown`. The receivable is never netted down by `default_vat_rate`: one
+ * rate cannot describe zero-rated, exempt and reduced-rate sales, and nothing records which those are
+ * (ADR-133 withdraws ADR-027.4's netting).
  */
 function daysFrom(
   numerator: Decimal | null,
   window: readonly DenominatorInputs[] | null,
   useInvoiceTotals: boolean,
-  vatRate: string | null,
+  settings: EngineContext['settings'],
 ): DaysOutcome {
   if (window === null) {
     return { value: null, components: {}, warnings: [], missing: ['insufficient_history'] };
@@ -427,62 +440,122 @@ function daysFrom(
     };
   }
 
+  const basis: DenominatorBasis = useInvoiceTotals ? 'invoice_total_gross' : 'revenue_gross';
   const raw = window.map((entry) => (useInvoiceTotals ? entry.invoiceSalesTotal : entry.revenue));
   const stated = raw.filter((value): value is string => value !== null);
   if (stated.length < raw.length || numerator === null) {
-    return {
-      value: null,
-      components: { denominator_basis: denominatorLabel(useInvoiceTotals) },
-      warnings: [],
-      missing: ['insufficient_history'],
-    };
+    return { value: null, components: { denominator_basis: basis }, warnings: [], missing: ['insufficient_history'] };
   }
-
-  const denominator = sum(stated);
-  const warnings: DataQualityWarning[] = [];
-  let basis: DenominatorBasis = 'invoice_total_gross';
-  let adjusted = numerator;
-
   if (!useInvoiceTotals) {
-    if (vatRate !== null) {
-      basis = 'revenue_net_of_vat';
-      const netted = divide(numerator, add(1, vatRate));
-      if (netted === null) return { value: null, components: {}, warnings: [], missing: ['comparison_is_zero'] };
-      adjusted = netted;
-    } else {
-      basis = 'revenue_vat_unknown';
-      warnings.push('vat_inclusive');
+    const footings = window.map((entry) => vatFooting(entry.revenueBasis, settings));
+    if (footings.some((f) => f !== 'gross')) {
+      return {
+        value: null,
+        components: { denominator_basis: basis, revenue_footings: footings, receivables_footing: 'gross' },
+        warnings: [],
+        missing: ['vat_basis_unknown'],
+      };
     }
   }
 
+  const denominator = sum(stated);
   const components = {
     denominator_basis: basis,
     denominator: toMoneyString(denominator),
-    numerator: toMoneyString(adjusted),
+    numerator: toMoneyString(numerator),
     days_in_window: DAYS_PER_QUARTER,
-    vat_rate_applied: basis === 'revenue_net_of_vat' ? vatRate : null,
   };
-
   if (!isPositive(denominator)) {
     // A quarter with no sales gives no meaningful days figure. §3.4: "Σ ≤ 0 → NULL".
-    return { value: null, components, warnings, missing: ['comparison_is_zero'] };
+    return { value: null, components, warnings: [], missing: ['comparison_is_zero'] };
   }
-  const ratio = divide(adjusted, denominator);
-  if (ratio === null) return { value: null, components, warnings, missing: ['comparison_is_zero'] };
-  return { value: multiply(ratio, DAYS_PER_QUARTER), components, warnings, missing: [] };
+  const ratio = divide(numerator, denominator);
+  if (ratio === null) return { value: null, components, warnings: [], missing: ['comparison_is_zero'] };
+  return { value: multiply(ratio, DAYS_PER_QUARTER), components, warnings: [], missing: [] };
 }
 
-/** `payables_days`, whose denominator excludes payroll and depreciation (ADR-027.5). */
+/**
+ * The VAT footing of a FLOW the days figures divide by — revenue for `receivables_days`, the expense
+ * base for `payables_days` — from the P&L basis that stated it (ADR-129, ADR-133). Recorded facts only:
+ *
+ *   - ledger / trial balance / P&L report: a VAT-registered business books its sales and costs net and
+ *     the VAT through the VAT account — `net`; a business that is not registered charges and reclaims
+ *     none — `gross`; when nobody has said which (`vatStatusKnown === false`) — `unknown`;
+ *   - invoices: `app.invoice_net` strips each invoice's recorded tax — `net`;
+ *   - bank: money as it moved, VAT included — `gross` — UNLESS the proxy netted it down by the
+ *     organisation's default rate (registered, with a rate: CD-33), which is an assumption about every
+ *     line, not a record of any — `unknown`;
+ *   - mixed or none: `unknown`.
+ */
+export function vatFooting(
+  basis: MetricBasis | null | undefined,
+  settings: EngineContext['settings'],
+): 'gross' | 'net' | 'unknown' {
+  switch (basis) {
+    case 'bank':
+      return settings.vatRegistered && settings.defaultVatRate !== null ? 'unknown' : 'gross';
+    case 'invoices': return 'net';
+    case 'ledger':
+    case 'period_balances':
+      if (settings.vatStatusKnown === false) return 'unknown';
+      return settings.vatRegistered ? 'net' : 'gross';
+    default: return 'unknown';
+  }
+}
+
+/** @deprecated name kept for the FU-9 tests: the expense base's footing is `vatFooting`. */
+export const expenseBaseFooting = vatFooting;
+
+/**
+ * `payables_days`: what is owed to suppliers over three months of what was bought, ×91.25 — with
+ * BOTH sides on the same VAT footing, from recorded data only (FU-9, ADR-129).
+ *
+ * What is owed is always VAT-inclusive: an invoice's `balance_due` and an AP control balance both
+ * carry the VAT the supplier charged. So the denominator must be too:
+ *
+ *   - payables from INVOICES divide by the same lists' GROSS totals (net + recorded tax, credit notes
+ *     subtracted), the twin of `receivables_days` over `invoice_total_gross` (ADR-027.4). Every rate,
+ *     a zero rate and an invoice with no tax column all read correctly: each row's gross is what the
+ *     supplier billed. All three months need a full purchase list, else `insufficient_history`.
+ *   - payables from a BALANCE or the LEDGER divide by cost of sales + operating expense + marketing
+ *     (ADR-027.5) only when that base is gross too (`expenseBaseFooting`). A net base — a VAT-registered
+ *     business's ledger, or invoice nets — or an unknown one gives NULL `vat_basis_unknown`.
+ *
+ * No rate is ever assumed: dividing by `default_vat_rate` (or 1.2) would be wrong for every zero-rated,
+ * exempt or reduced-rate purchase, and nothing records which those are. The ratio this replaces put a
+ * VAT-inclusive balance over a VAT-exclusive base and overstated days by the VAT rate, unflagged.
+ */
 function payablesDaysFrom(
   numerator: Decimal | null,
   window: readonly DenominatorInputs[] | null,
+  payablesBasis: MetricBasis,
+  settings: EngineContext['settings'],
 ): DaysOutcome {
   if (window === null || numerator === null) {
     return { value: null, components: {}, warnings: [], missing: ['insufficient_history'] };
   }
-  const raw = window.map((entry) => entry.payablesExpenseBase);
+
+  let basis: 'purchase_invoice_total_gross' | 'expense_categories_gross';
+  let raw: ReadonlyArray<string | null>;
+  if (payablesBasis === 'invoices') {
+    basis = 'purchase_invoice_total_gross';
+    raw = window.map((entry) => entry.purchaseInvoiceGross ?? null);
+  } else {
+    basis = 'expense_categories_gross';
+    const footings = window.map((entry) => vatFooting(entry.payablesExpenseBasis, settings));
+    if (window.every((entry) => entry.payablesExpenseBase !== null) && footings.some((f) => f !== 'gross')) {
+      return {
+        value: null,
+        components: { denominator_basis: basis, expense_base_footings: footings, payables_footing: 'gross' },
+        warnings: [],
+        missing: ['vat_basis_unknown'],
+      };
+    }
+    raw = window.map((entry) => entry.payablesExpenseBase);
+  }
+
+  const components = { denominator_basis: basis as DenominatorBasis, days_in_window: DAYS_PER_QUARTER };
   const stated = raw.filter((value): value is string => value !== null);
-  const components = { denominator_basis: 'expense_categories' as DenominatorBasis, days_in_window: DAYS_PER_QUARTER };
   if (stated.length < raw.length) {
     return { value: null, components, warnings: [], missing: ['insufficient_history'] };
   }
@@ -542,13 +615,8 @@ export function computeReceivables(
     };
 
     const window = denominatorWindow(ordered, prior, index);
-    const receivablesDays = daysFrom(
-      receivables.value,
-      window,
-      receivables.basis === 'invoices',
-      ctx.settings.vatRegistered ? ctx.settings.defaultVatRate : null,
-    );
-    const payablesDays = payablesDaysFrom(payables.value, window);
+    const receivablesDays = daysFrom(receivables.value, window, receivables.basis === 'invoices', ctx.settings);
+    const payablesDays = payablesDaysFrom(payables.value, window, payables.basis, ctx.settings);
 
     const metrics: MetricResult[] = [
       balanceMetric('receivables', receivables, asOfComponents, currency),

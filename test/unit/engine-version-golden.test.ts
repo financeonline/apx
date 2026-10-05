@@ -6,9 +6,10 @@ import { describe, expect, it } from 'vitest';
 import { Decimal } from '@/core/money';
 
 import {
-  buildCashHistory, composePeriod, computeCoverage, ENGINE_VERSION, invoiceSideCoverage, isPeriodComplete, variancesForPeriod,
+  bankRecordAssuranceFor, buildCashHistory, composePeriod, computeCoverage, computeReceivables, denominatorInputsFor,
+  ENGINE_VERSION, invoiceSideCoverage, isPeriodComplete, statementRecordAssurance, variancesForPeriod,
   type AccountRef, type AggregateCell, type AgingInvoice, type BankAccountRef, type CoverageBatch,
-  type DailyMovement, type EngineContext, type MetricResult, type PeriodRef, type StatementRef,
+  type DailyMovement, type EngineContext, type MetricResult, type PeriodRef, type ReceivablesPeriodInput, type StatementRef,
 } from '@/modules/financial-engine';
 
 /**
@@ -217,6 +218,11 @@ function corpus(): unknown {
     ['open-items later', { invoiceListKind: 'open_items', periodStart: '2026-08-05', periodEnd: '2026-08-05', committedAt: '2026-08-06T00:00:00Z' }],
     ['open-items spanning', { invoiceListKind: 'open_items', periodStart: '2026-01-01', periodEnd: '2026-08-05', committedAt: '2026-08-06T00:00:00Z' }],
     ['stops short', { periodStart: '2026-06-01', periodEnd: '2026-07-30', committedAt: '2026-08-02T00:00:00Z' }],
+    // FU-15 (ADR-128): a list knows through min(declared end, commit date).
+    ['declared past commit', { periodStart: '2026-07-01', periodEnd: '2026-07-31', committedAt: '2026-07-10T00:00:00Z' }],
+    ['late month-end', { periodStart: '2026-07-01', periodEnd: '2026-07-31', committedAt: '2026-11-20T00:00:00Z' }],
+    ['open-items as at end, committed before it', { invoiceListKind: 'open_items', periodStart: '2026-07-31', periodEnd: '2026-07-31', committedAt: '2026-07-20T00:00:00Z' }],
+    ['committed before the month, range over it', { periodStart: '2026-07-01', periodEnd: '2026-07-31', committedAt: '2026-06-28T00:00:00Z' }],
   ];
   // A printed closing a penny and two pennies off the chain, for the §3.3 cross-check's tolerance; and a
   // journal dated on a month's last day, for "effective by P's end".
@@ -241,7 +247,91 @@ function corpus(): unknown {
   for (const [name, over] of boundary) {
     freshness[`boundary/${name}`] = [false, true].map((current) => invoiceSideCoverage([batch(90, over)], july, 'sales', current));
   }
-  return { periods: out, freshness, history: [...history.entries()], tolerance, lastDayJournal, fu1: fu1Corpus(ctx), fu12: fu12Corpus(ctx), fu12Variance: fu12VarianceCorpus(ctx) };
+  return {
+    periods: out, freshness, history: [...history.entries()], tolerance, lastDayJournal,
+    fu1: fu1Corpus(ctx), fu12: fu12Corpus(ctx), fu12Variance: fu12VarianceCorpus(ctx),
+    fu9: fu9Corpus(ctx), adr130: adr130Corpus(ctx), adr133: adr133Corpus(ctx),
+  };
+}
+
+/**
+ * FU-9 (ADR-129): payables days on one VAT footing. The invoice path over the purchase lists' gross;
+ * the balance path over a gross expense base only — a net or unknown base is NULL `vat_basis_unknown`.
+ */
+function fu9Corpus(ctx: EngineContext): unknown {
+  const purchaseList = batch(95, { importType: 'purchase_invoices', periodStart: '2026-06-01', periodEnd: '2026-08-31' });
+  const gross = [JUN, JUL, AUG].map((p) => denominatorInputsFor(p, [], [
+    cell({ periodId: p.id, source: 'invoices', invoiceType: 'purchase', counterpartyId: SUPPLIER, amount: '1000.00', debit: '200.00' }),
+    cell({ periodId: p.id, source: 'invoices', invoiceType: 'purchase', counterpartyId: SUPPLIER, amount: '500.00', debit: '0.00' }),
+    cell({ periodId: p.id, source: 'invoices', invoiceType: 'purchase_credit_note', counterpartyId: SUPPLIER, amount: '100.00', debit: '20.00' }),
+  ], [purchaseList]));
+  const ap = INVOICES.filter((i) => i.invoiceType === 'purchase');
+  const input = (p: PeriodRef, i: number, over: Partial<ReceivablesPeriodInput>): ReceivablesPeriodInput => ({
+    ...gross[i]!,
+    period: p, basis: { basis: 'invoices', assurance: 'verified', warnings: [], proxy: false }, asOfIsPeriodEnd: true,
+    invoices: ap, receivablesFallback: { accountIds: [] }, payablesFallback: { accountIds: [AP!] },
+    balanceSheetClosings: {}, closingCash: null,
+    payablesExpenseBase: '6000.00', payablesExpenseBasis: 'ledger', ...over,
+  });
+  const days = (settings: Partial<EngineContext['settings']>, over: Partial<ReceivablesPeriodInput>) =>
+    computeReceivables({ ...ctx, settings: { ...ctx.settings, ...settings } }, [JUN, JUL, AUG].map((p, i) => input(p, i, over)))
+      .map((pm) => pm.metrics.find((m) => m.key === 'payables_days'));
+  const fromBalance = { invoices: null, purchaseInvoices: null, payablesFallback: { accountIds: [AP!], periodBalanceClosing: '2600.00', periodBalanceKind: 'balance_sheet' as const } };
+  return {
+    gross: gross.map((g) => g.purchaseInvoiceGross),
+    invoices: days({}, {}),
+    notRegistered: days({ vatRegistered: false, vatStatusKnown: true }, fromBalance),
+    registered: days({ vatRegistered: true, vatStatusKnown: true }, fromBalance),
+    unknown: days({ vatRegistered: false, vatStatusKnown: false }, fromBalance),
+    bank: days({ vatRegistered: true, vatStatusKnown: true }, { ...fromBalance, payablesExpenseBasis: 'bank' }),
+  };
+}
+
+/**
+ * ADR-133: `receivables_days` over gross revenue only (no default-rate netting), and a bank flow the
+ * proxy netted by a default rate is `unknown` for both days figures.
+ */
+function adr133Corpus(ctx: EngineContext): unknown {
+  const input = (p: PeriodRef, revenueBasis: ReceivablesPeriodInput['revenueBasis']): ReceivablesPeriodInput => ({
+    period: p, basis: { basis: 'period_balances', assurance: 'calculated', warnings: [], proxy: false }, asOfIsPeriodEnd: true,
+    invoices: null, salesInvoices: null, purchaseInvoices: null,
+    receivablesFallback: { accountIds: [AR!], periodBalanceClosing: '8100.00', periodBalanceKind: 'balance_sheet' },
+    payablesFallback: { accountIds: [AP!], periodBalanceClosing: '2600.00', periodBalanceKind: 'balance_sheet' },
+    balanceSheetClosings: {}, closingCash: null, revenue: '9000.00', revenueBasis, invoiceSalesTotal: null,
+    payablesExpenseBase: '6000.00', payablesExpenseBasis: revenueBasis, hasOpenItemsList: false,
+  });
+  const days = (settings: Partial<EngineContext['settings']>, basis: ReceivablesPeriodInput['revenueBasis']) =>
+    computeReceivables({ ...ctx, settings: { ...ctx.settings, ...settings } }, [JUN, JUL, AUG].map((p) => input(p, basis)))[2]!
+      .metrics.filter((m) => m.key.endsWith('_days')).map((m) => [m.key, m.value, m.dataQuality.missing, m.components.denominator_basis ?? null]);
+  return {
+    ledgerNotRegistered: days({ vatRegistered: false, vatStatusKnown: true }, 'ledger'),
+    ledgerRegistered: days({ vatRegistered: true, vatStatusKnown: true, defaultVatRate: '0.20' }, 'ledger'),
+    ledgerUnknown: days({ vatRegistered: false, vatStatusKnown: false }, 'ledger'),
+    bankNetted: days({ vatRegistered: true, vatStatusKnown: true, defaultVatRate: '0.20' }, 'bank'),
+    bankGross: days({ vatRegistered: false, vatStatusKnown: true, defaultVatRate: null }, 'bank'),
+  };
+}
+
+/**
+ * ADR-130: a bank figure is no firmer than the bank rows under it. The main corpus with August's
+ * statement read by AI (inferred) and July's PDF unreconciled (calculated): cash and every bank-basis
+ * figure carry the weaker level; values are unchanged.
+ */
+function adr130Corpus(ctx: EngineContext): unknown {
+  const statements: StatementRef[] = STATEMENTS.map((st) => (st.batchId === id(43)
+    ? { ...st, assurance: statementRecordAssurance('pdf_claude', st.unreconciled) }
+    : st.batchId === id(42) ? { ...st, assurance: statementRecordAssurance('pdf_text', true) } : st));
+  const history = buildCashHistory({ bankAccounts: BANKS, statements, movements: MOVEMENTS, periods: PERIODS });
+  const bankOnly = BATCHES.filter((b) => b.targetTable === 'bank_transactions');
+  return Object.fromEntries([JUN, JUL, AUG].map((period) => {
+    const coverage = computeCoverage({ period, batches: bankOnly, bankAccounts: BANKS, rowCounts: { bank: 1 }, asOf: ctx.asOf, statements });
+    const level = bankRecordAssuranceFor(statements, period);
+    const results = composePeriod({
+      period, coverage, cells: CELLS.filter((c) => c.source === 'bank'), transferLegs: [], context: ctx,
+      cashAccounts: history.get(period.id) ?? [], bankRecordAssurance: level,
+    }).map((r) => [r.key, r.dimensionId, r.value, r.basis, r.assurance]);
+    return [period.label, { level, results }];
+  }));
 }
 
 /**

@@ -16,9 +16,11 @@ import { parsePdfText } from '../domain/parsers/pdf-text';
 import { parseXlsx } from '../domain/parsers/xlsx';
 import type { ParsedTable, TargetField, Transforms } from '../domain/pipeline-types';
 import type { PipelineInput } from '../domain/pipeline';
-import type { ExtractionMethod, ImportTarget, ImportType } from '../domain/types';
-import { parseAndValidate } from './parse-and-validate';
-import { createImportAccounts, startImportBatch } from './index';
+import {
+  IMPORT_TYPE_SPECS, isImportType, type ExtractionMethod, type ImportTarget, type ImportType,
+} from '../domain/types';
+import { loadCounterparties, parseAndValidate } from './parse-and-validate';
+import { createImportAccounts, createImportCounterparties, startImportBatch } from './index';
 
 /**
  * The import wizard's one server-side journey (IMPORT_ENGINE.md §2–§7).
@@ -52,6 +54,8 @@ export interface StartImportResult {
   readonly counts: Record<string, number>;
   /** Accounts the file named that the chart did not have, now created as `uncategorised` (§6.5). */
   readonly accountsCreated: number;
+  /** Customers or suppliers an invoice list named that MOTION did not have, now created (§6.6). */
+  readonly counterpartiesCreated: number;
   readonly requiredConfirmations: readonly string[];
   readonly columns: readonly string[];
   readonly columnMap: Readonly<Record<string, TargetField>>;
@@ -65,21 +69,72 @@ export interface StartImportResult {
   readonly parseFailure?: string;
 }
 
-const TARGET_BY_TYPE: Readonly<Record<ImportType, ImportTarget>> = {
-  general_ledger: 'ledger_entries',
-  trial_balance: 'period_balances',
-  pnl_report: 'period_balances',
-  balance_sheet: 'period_balances',
-  bank_statement: 'bank_transactions',
-  sales_invoices: 'invoices',
-  purchase_invoices: 'invoices',
-  sales_report: 'period_balances',
-  purchase_report: 'period_balances',
-  receipts: 'bank_transactions',
+/** The record table an import type commits into — `IMPORT_TYPE_SPECS`, never a local copy. */
+export function targetFor(importType: ImportType): ImportTarget {
+  return IMPORT_TYPE_SPECS[importType].target;
+}
+
+/** What the reader calls each type, for the refusals below. */
+const TYPE_NOUN: Readonly<Record<ImportType, string>> = {
+  general_ledger: 'general ledger',
+  trial_balance: 'trial balance',
+  pnl_report: 'profit and loss report',
+  balance_sheet: 'balance sheet',
+  bank_statement: 'bank statement',
+  sales_invoices: 'sales invoice list',
+  purchase_invoices: 'purchase invoice list',
+  sales_report: 'sales report',
+  purchase_report: 'purchase report',
+  receipts: 'receipts list',
 };
 
-export function targetFor(importType: ImportType): ImportTarget {
-  return TARGET_BY_TYPE[importType];
+/**
+ * Refuses a combination MOTION cannot import, BEFORE anything is stored (ADR-058.1).
+ *
+ * The type arrives from a form field, so it is checked rather than cast. A bank account belongs on a
+ * statement and nowhere else. A PDF is never refused here: what MOTION can do with one is decided by
+ * `pdfHandling` below, and every PDF is at least kept as a source document.
+ */
+export function assertImportSupported(input: {
+  readonly importType: string;
+  readonly bankAccountId: string | null;
+}): ImportType {
+  if (!isImportType(input.importType)) {
+    throw new ValidationError('Choose what kind of file this is.', [
+      { path: 'import_type', message: 'Choose what kind of file this is.' },
+    ]);
+  }
+  const spec = IMPORT_TYPE_SPECS[input.importType];
+  if (spec.bankAccount === 'required' && input.bankAccountId === null) {
+    throw new ValidationError('Choose which bank account this statement belongs to.', [
+      { path: 'bank_account_id', message: 'Choose which bank account this statement belongs to.' },
+    ]);
+  }
+  if (spec.bankAccount === 'not_allowed' && input.bankAccountId !== null) {
+    throw new ValidationError(`A ${TYPE_NOUN[input.importType]} is not imported into a bank account.`, [
+      { path: 'bank_account_id', message: 'Only a bank statement belongs to a bank account.' },
+    ]);
+  }
+  return input.importType;
+}
+
+/**
+ * What happens to a PDF of each type (IMPORT_ENGINE.md §5.3–§5.5; agreement §8).
+ *
+ * Storing a document and extracting figures from it are different promises. Every PDF is STORED as
+ * a source document under its kind, access-controlled and traceable like any other file. Only a bank
+ * statement is READ: the deterministic reader knows statement layouts, and the AI path is
+ * statement-shaped too, so running either over an invoice or a trial balance would produce rows of
+ * the wrong shape and advice about statements. Those PDFs are kept, and the reader is told how to
+ * get their figures in.
+ */
+export function pdfHandling(importType: ImportType): 'read' | 'store_only' {
+  return IMPORT_TYPE_SPECS[importType].pdfSupported ? 'read' : 'store_only';
+}
+
+export function storedNotReadMessage(importType: ImportType): string {
+  return `The PDF is stored as a source document, but MOTION reads figures from PDF bank statements only. `
+    + `To import the figures, export the ${TYPE_NOUN[importType]} as CSV or Excel and upload that.`;
 }
 
 /** Reads a spreadsheet or delimited file into the shape the pipeline expects. */
@@ -214,6 +269,44 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
     );
   }
 
+  const importType = assertImportSupported({
+    importType: input.importType,
+    bankAccountId: input.bankAccountId,
+  });
+  const spec = IMPORT_TYPE_SPECS[importType];
+  const isPdf = validation.detectedKind === 'pdf' || input.file.name.toLowerCase().endsWith('.pdf');
+
+  if (isPdf && pdfHandling(importType) === 'store_only') {
+    /*
+     * Stored, not read (see `pdfHandling`). The document is registered under its kind, so it is
+     * listed, access-controlled and linkable as evidence; no batch is started, because no rows can
+     * come from it, and a failed batch would offer the statement-shaped "Read with AI" path.
+     */
+    const stored = await uploadDocument(
+      {
+        orgId: organizationId,
+        userId,
+        db,
+        requestId,
+        registerDocument: (meta) => registerDocument(actor, organizationId, meta),
+        finalizeUpload: (documentId, byteSize, scanResult, status) =>
+          finalizeUpload(actor, organizationId, { documentId, byteSize, scanResult, status }),
+      },
+      {
+        filename: input.file.name,
+        declaredMimeType: input.file.type || 'application/pdf',
+        bytes,
+        documentKind: spec.documentKind,
+      },
+    );
+    if (stored.status === 'quarantined') {
+      throw new ValidationError('That file did not pass the safety check, so it has not been imported.');
+    }
+    throw new ValidationError(storedNotReadMessage(importType), [
+      { path: 'file', message: `Stored as document ${stored.documentId}; no figures were imported.` },
+    ]);
+  }
+
   /*
    * Parse BEFORE anything is stored.
    *
@@ -245,7 +338,9 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
       filename: input.file.name,
       declaredMimeType: input.file.type || 'application/octet-stream',
       bytes,
-      documentKind: input.importType,
+      // A `document_kind_enum` value. The import type itself is not one for invoice lists or
+      // receipts, and the cast in `register_document` refused the whole upload.
+      documentKind: spec.documentKind,
     },
   );
 
@@ -273,7 +368,8 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
     const reason = parsed.kind === 'pdf_unparsed' ? parsed.reason : PDF_UNPARSED_MESSAGE;
     await failImportBatch(actor, organizationId, batchId, 'parsing', reason);
     return {
-      batchId, documentId: uploaded.documentId, accountsCreated: 0, counts: {}, requiredConfirmations: [],
+      batchId, documentId: uploaded.documentId, accountsCreated: 0, counterpartiesCreated: 0,
+      counts: {}, requiredConfirmations: [],
       columns: [], columnMap: {}, headerConfirmationRequired: false, parseFailure: reason,
     };
   }
@@ -286,12 +382,24 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
    * `/data/accounts` and marks everything it feeds incomplete until a human confirms it. Doing this
    * BEFORE the rows are written means the rows resolve, rather than every ledger commit failing on
    * `account_id` being NOT NULL (ADR-058.3).
+   *
+   * The same pass names the customers or suppliers an invoice list introduces (§6.6), created for
+   * the same reason: `invoices.counterparty_id` is NOT NULL.
    */
-  const created = await createMissingAccounts({
-    db, organizationId, actor, batchId, importType: input.importType,
-    table, columnMap, transforms, periodStart: input.periodStart, periodEnd: input.periodEnd,
-    bankAccountId: input.bankAccountId,
-  });
+  let created: { accounts: number; counterparties: number };
+  try {
+    created = await createMissingReferences({
+      db, organizationId, actor, batchId, importType: input.importType,
+      table, columnMap, transforms, periodStart: input.periodStart, periodEnd: input.periodEnd,
+      bankAccountId: input.bankAccountId,
+    });
+  } catch (cause) {
+    // The document and the batch exist by now: a refusal here must leave the batch FAILED with a
+    // reason, never half-prepared — and the reader gets a sentence, not a SQLSTATE.
+    const reason = 'MOTION could not add the accounts or customers this file names. Check the names, then upload it again.';
+    await failImportBatch(actor, organizationId, batchId, 'mapping', reason).catch(() => undefined);
+    throw new ValidationError(reason, [{ path: 'file', message: cause instanceof Error ? cause.message : String(cause) }]);
+  }
 
   const result = await validateBatch({
     db, organizationId, actor,
@@ -308,7 +416,8 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
   return {
     batchId,
     documentId: uploaded.documentId,
-    accountsCreated: created,
+    accountsCreated: created.accounts,
+    counterpartiesCreated: created.counterparties,
     counts: result.counts,
     requiredConfirmations: result.requiredConfirmations,
     columns: table.columns,
@@ -389,14 +498,18 @@ export async function validateBatch(input: ValidateBatchInput): Promise<{
  * because nothing should be WRITTEN until the accounts exist — otherwise the rows are written once
  * with a null account and again after the create, and a reader sees the batch change under them.
  */
-async function createMissingAccounts(input: ValidateBatchInput): Promise<number> {
+async function createMissingReferences(
+  input: ValidateBatchInput,
+): Promise<{ accounts: number; counterparties: number }> {
   const { db, organizationId, batchId } = input;
 
+  // Counterparties are read only where the batch may create them, so a ledger or statement import
+  // does exactly the work it did before.
+  const createsCounterparties = IMPORT_TYPE_SPECS[input.importType].invoiceSide !== null;
   const [accounts, counterparties] = await Promise.all([
     loadAccountRefs(db, organizationId),
-    Promise.resolve([] as never[]),
+    createsCounterparties ? loadCounterparties(db, organizationId, input.actor.requestId) : Promise.resolve([]),
   ]);
-  void counterparties;
 
   const dryRun = runPipeline({
     organizationId,
@@ -410,14 +523,24 @@ async function createMissingAccounts(input: ValidateBatchInput): Promise<number>
     declaredPeriodStart: input.periodStart,
     declaredPeriodEnd: input.periodEnd,
     accounts,
-    counterparties: [],
+    counterparties,
     existingRecords: [],
   });
 
-  const missing: string[] = [...new Set(dryRun.unmappedAccounts)];
-  if (missing.length === 0) return 0;
+  // One name per normalised key: "Acme Ltd" and "ACME LTD" are one customer (`app.normalize_name`).
+  const newNames = new Map<string, string>();
+  for (const name of dryRun.newCounterparties) {
+    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    if (key !== '' && !newNames.has(key)) newNames.set(key, name.trim());
+  }
+  const counterpartiesCreated = createsCounterparties
+    ? await createImportCounterparties(db, batchId, [...newNames.values()], input.actor.requestId)
+    : 0;
 
-  return createImportAccounts(
+  const missing: string[] = [...new Set(dryRun.unmappedAccounts)];
+  if (missing.length === 0) return { accounts: 0, counterparties: counterpartiesCreated };
+
+  const accountsCreated = await createImportAccounts(
     db,
     batchId,
     missing.map((name) => {
@@ -435,6 +558,7 @@ async function createMissingAccounts(input: ValidateBatchInput): Promise<number>
       };
     }),
   );
+  return { accounts: accountsCreated, counterparties: counterpartiesCreated };
 }
 
 async function loadAccountRefs(

@@ -6,6 +6,7 @@ import {
 import { log, newRequestId } from '@/core/logging';
 import { uploadDocument, checkDeclaredLength, MAX_FILE_BYTES } from '@/modules/documents';
 import { getAccessContext } from '@/modules/tenancy';
+import { isDocumentKind } from '@/modules/imports';
 import { can } from '@/core/permissions';
 
 /**
@@ -72,7 +73,12 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Checked, not cast: `register_document` casts it to `document_kind_enum`, and an unknown value
+    // surfaced as a Postgres error rather than a sentence.
     const documentKind = String(form.get('documentKind') ?? 'unknown');
+    if (!isDocumentKind(documentKind)) {
+      throw new ValidationError('That is not a kind of document MOTION keeps.');
+    }
     const bytes = new Uint8Array(await file.arrayBuffer());
 
     const result = await uploadDocument(

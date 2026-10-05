@@ -7,7 +7,7 @@ import { log } from '@/core/logging';
 import { affectedRange, chunkPeriods, chunkWindow, type CalculationTrigger } from '../domain/chunking';
 import { computeCoverage, isPeriodComplete } from '../domain/coverage';
 import type { CashSeriesOptions } from '../domain/cash';
-import { buildCashHistory, type CashHistory, type StatementRef } from '../domain/cash-history';
+import { bankRecordAssuranceFor, buildCashHistory, type CashHistory, type StatementRef } from '../domain/cash-history';
 import type { DenominatorInputs } from '../domain/receivables';
 import { denominatorInputsFor, type ReceivablesComposeInput } from '../domain/receivables-input';
 import { computeFingerprint } from '../domain/fingerprint';
@@ -237,7 +237,10 @@ export async function runCalculation(
    * stored figures of the period before their range, and figures an older engine wrote are not a
    * starting point this one can build on.
    */
-  const lastVersion = await repo.loadLatestEngineVersion(scoped, orgId);
+  const [lastVersion, previousAsOf] = await Promise.all([
+    repo.loadLatestEngineVersion(scoped, orgId),
+    repo.loadLatestRunAsOf(scoped, orgId),
+  ]);
   const versionChanged = lastVersion !== null && lastVersion !== VERSION;
 
   const range = affectedRange({
@@ -245,6 +248,8 @@ export async function runCalculation(
     changedPeriodIds: request.changedPeriodIds,
     allPeriods,
     currentPeriodId: currentPeriod?.id ?? null,
+    previousAsOf,
+    asOf: request.asOf,
   });
 
   if (!range.affectedFrom || !range.to) {
@@ -278,6 +283,8 @@ export async function runCalculation(
       baseCurrency: settings.baseCurrency,
       fiscalYearStartMonth: settings.fiscalYearStartMonth,
       vatRegistered: settings.vatRegistered,
+      // FU-9: setting the VAT status (even to "not registered") changes which days figures exist.
+      vatStatusKnown: settings.vatStatusKnown ?? null,
       defaultVatRate: settings.defaultVatRate,
       taxableCategories: [...settings.taxableCategories],
     },
@@ -494,6 +501,7 @@ export async function runCalculation(
           aggregates: {
             aggregates, transferLegs, coverage, cashOptions, receivables,
             cashAccounts: cashHistory.get(period.id) ?? [],
+            bankRecordAssurance: bankRecordAssuranceFor(statements, period),
           },
           context,
         });

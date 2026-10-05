@@ -138,8 +138,10 @@ select is(
       -- list with the Phase 4 financial schema and are pure in exactly the same sense; so do
       -- `invoice_net` and `invoice_net_is_vat_fallback`, which are arithmetic on three columns
       -- their callers already hold (ADR-103).
+      -- `merged_calculation_payload` (ADR-132) is jsonb arithmetic on two payloads its callers hold.
       and p.proname not in ('ceiling_allows', 'fiscal_position', 'invoice_net',
                             'invoice_net_is_vat_fallback', 'job_max_runtime', 'jwt',
+                            'merged_calculation_payload',
                             'normalize_name', 'role_claim', 'role_rank', 'slugify',
                             'standard_category_label', 'uid')),
   0, 'every app.* function that touches a table is SECURITY DEFINER');

@@ -24,7 +24,7 @@
 import { Decimal, ROUND_HALF_UP } from '@/core/money';
 import {
   DIMENSION_BASELINE, DIMENSION_WEIGHTS, HEALTH_CONFIG_VERSION, HEALTH_DIMENSION_KEYS,
-  MIN_DIMENSIONS_FOR_SCORE, MIN_REQUIRED_COMPLETENESS, PROXY_CAP, PROXY_CAP_NOTE, bandFor,
+  MIN_DIMENSIONS_FOR_SCORE, MIN_REQUIRED_COMPLETENESS, PROXY_CAP, PROXY_CAP_NOTE, bandFor, capReasonFor,
 } from './config';
 import { scoreFromRules } from './apply';
 import { testRequirements, type DimensionEvaluation } from './dimension';
@@ -55,6 +55,8 @@ interface Assessed {
   readonly exclusionReason: ExclusionReason | null;
   readonly rawScore: number;
   readonly capped: boolean;
+  /** ADR-134: the words for the cap — bank-only data, AI-read figures, or both. */
+  readonly capReason?: string | null;
   readonly completeness: number;
   readonly warnings: readonly DataQualityWarning[];
 }
@@ -89,14 +91,16 @@ function assess(input: HealthInput, evaluation: DimensionEvaluation): Assessed {
   }
 
   const scored = scoreFromRules(evaluation.rules, DIMENSION_BASELINE);
-  const capped = verdict.proxy && scored > PROXY_CAP;
+  const capping = verdict.proxy || verdict.inferred;
+  const capped = capping && scored > PROXY_CAP;
 
   return {
     evaluation,
     included: true,
     exclusionReason: null,
     rawScore: capped ? PROXY_CAP : scored,
-    capped: verdict.proxy,
+    capped: capping,
+    capReason: capReasonFor(verdict.proxy, verdict.inferred),
     completeness: verdict.minCompleteness,
     warnings: verdict.warnings as readonly DataQualityWarning[],
   };
@@ -153,7 +157,7 @@ export function computeHealthScore(input: HealthInput): HealthScore | null {
     rules: a.evaluation.rules,
     conditions: a.evaluation.conditions,
     capped: a.capped,
-    cap_reason: a.capped ? PROXY_CAP_NOTE : null,
+    cap_reason: a.capped ? (a.capReason ?? PROXY_CAP_NOTE) : null,
     positives: a.evaluation.positives.map((p) => p.text),
     negatives: a.evaluation.negatives.map((n) => n.text),
     positives_structured: a.evaluation.positives,

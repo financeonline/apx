@@ -75,6 +75,27 @@ export async function updateOrganization(
   return callApi<string>(ctx.db, 'update_organization', { p_org: ctx.orgId, p_patch: parsed }, ctx.requestId);
 }
 
+/** ADR-133: the three VAT states. "unknown" is a state, never stored as false. */
+export const VatStatus = z.enum(['registered', 'not_registered', 'unknown']);
+export type VatStatus = z.infer<typeof VatStatus>;
+
+/**
+ * Sets the organisation's VAT status through its own audited path (`api.set_vat_registration`): it
+ * merges its key only, and a change queues a full recalculation, because it decides which days
+ * figures can be stated at all (ADR-129, ADR-133).
+ */
+export async function setVatRegistration(ctx: AccessContext, status: unknown): Promise<VatStatus> {
+  assertCan(ctx, 'settings.manage');
+  const parsed = parse(VatStatus, status);
+  return callApi<VatStatus>(ctx.db, 'set_vat_registration', { p_org: ctx.orgId, p_status: parsed }, ctx.requestId);
+}
+
+/** The stored setting read back as one of the three states. */
+export function vatStatusOf(settings: unknown): VatStatus {
+  const value = (settings as Record<string, unknown> | null)?.vat_registered;
+  return value === true ? 'registered' : value === false ? 'not_registered' : 'unknown';
+}
+
 export async function requestDeletion(ctx: AccessContext): Promise<string> {
   assertCan(ctx, 'org.delete');
   return callApi<string>(ctx.db, 'request_deletion', { p_org: ctx.orgId }, ctx.requestId);

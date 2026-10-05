@@ -1,0 +1,182 @@
+name: Validate Step 0–0C
+
+# The real-Supabase validation of Steps 0, 0B and 0C: every gate of ci.yml, PLUS the migrations applied
+# as an UPGRADE from the released baseline, the Playwright journeys, and the 27-organisation engine
+# comparison against the baseline.
+#
+# Isolation: every database here is the runner's own `supabase start` (Docker on the runner), created
+# from this repository's migrations and destroyed with the runner. No secret is used: the keys in
+# `.env.local` are the local stack's own demo keys, written by scripts/write-local-env.sh, which
+# refuses any URL that is not 127.0.0.1/localhost. Nothing here links, pushes to or deploys anything.
+#
+# Logs: every suite's output is written to logs/<job>/*.log and uploaded on success AND failure, with
+# the Supabase containers' logs when a step fails. `.env.local` is never uploaded.
+
+on:
+  workflow_dispatch:
+    inputs:
+      baseline:
+        description: Commit the engine comparison and the upgrade start from
+        default: 2783240
+  push:
+    branches: ['fix/step0-*']
+
+permissions:
+  contents: read
+
+concurrency:
+  group: validate-step0-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  NODE_VERSION: '24.14.0'
+  BASELINE: ${{ github.event.inputs.baseline || '2783240' }}
+  # The Supabase CLI pinned by package.json (devDependency), not "latest": the same CLI as a developer's.
+  SUPABASE: npx --no-install supabase
+  CRON_SECRET: local-cron-secret
+
+jobs:
+  static-unit-build:
+    name: typecheck · lint · unit (coverage gate) · AI eval · build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+      - run: npm ci
+      - run: mkdir -p logs/static
+      - name: typecheck
+        run: npm run typecheck 2>&1 | tee logs/static/typecheck.log
+      - name: lint
+        run: npm run lint 2>&1 | tee logs/static/lint.log
+      - name: unit with the coverage gate
+        run: npx vitest run --project unit --coverage --reporter=default --reporter=junit --outputFile.junit=logs/static/unit.junit.xml 2>&1 | tee logs/static/unit.log
+      - name: AI eval (recorded)
+        run: npx vitest run --project eval --reporter=default --reporter=junit --outputFile.junit=logs/static/eval.junit.xml 2>&1 | tee logs/static/eval.log
+      - name: production build
+        run: npm run build 2>&1 | tee logs/static/build.log
+        env:
+          NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54421
+          NEXT_PUBLIC_SUPABASE_ANON_KEY: build-time-placeholder
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: logs-static, path: logs/static, if-no-files-found: warn }
+
+  clean-database:
+    name: clean database — pgTAP · schema drift · integration · Playwright
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+      - run: npm ci && mkdir -p logs/clean
+      - name: start an isolated Supabase from every migration
+        run: $SUPABASE start 2>&1 | tee logs/clean/supabase-start.log
+      - name: pgTAP
+        run: $SUPABASE test db 2>&1 | tee logs/clean/pgtap.log
+      - name: schema and documentation agree
+        run: npx tsx scripts/check-schema-drift.ts 2>&1 | tee logs/clean/schema-drift.log
+      - name: local env (local stack only)
+        run: scripts/write-local-env.sh
+      - name: integration
+        run: npx vitest run --project integration --reporter=default --reporter=junit --outputFile.junit=logs/clean/integration.junit.xml 2>&1 | tee logs/clean/integration.log
+      - name: Unicode-name dry-run report (read-only) on the test database
+        run: psql "$(npx --no-install supabase status -o json | jq -r .DB_URL)" -v ON_ERROR_STOP=1 -f scripts/sql/unicode-names-dry-run.sql 2>&1 | tee logs/clean/unicode-names-dry-run.log
+      - name: build for the journeys
+        run: npm run build 2>&1 | tee logs/clean/build.log
+      - name: Playwright journeys
+        run: |
+          npx playwright install --with-deps chromium
+          npx playwright test --reporter=list,html,junit 2>&1 | tee logs/clean/playwright.log
+        env:
+          PLAYWRIGHT_JUNIT_OUTPUT_NAME: logs/clean/playwright.junit.xml
+      - name: container logs on failure
+        if: failure()
+        run: for c in $(docker ps -a --format '{{.Names}}' | grep -i supabase); do docker logs "$c" > "logs/clean/container-$c.log" 2>&1 || true; done
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: logs-clean-database
+          path: |
+            logs/clean
+            playwright-report
+            test-results
+          if-no-files-found: warn
+
+  upgrade:
+    name: upgrade from the baseline — migrations · pgTAP · drift · integration
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+      - run: npm ci && mkdir -p logs/upgrade
+      - name: set the new migrations aside; start on the BASELINE's migrations only
+        run: |
+          mkdir -p "$RUNNER_TEMP/new-migrations"
+          git diff --name-only --diff-filter=A "$BASELINE" -- supabase/migrations \
+            | tee logs/upgrade/new-migrations.txt \
+            | xargs -r -I{} mv {} "$RUNNER_TEMP/new-migrations/"
+          $SUPABASE start 2>&1 | tee logs/upgrade/supabase-start-baseline.log
+      - name: compute 5.0.0 figures with the BASELINE's code (what production holds)
+        run: |
+          scripts/write-local-env.sh
+          git worktree add "$RUNNER_TEMP/baseline" "$BASELINE"
+          ln -s "$GITHUB_WORKSPACE/node_modules" "$RUNNER_TEMP/baseline/node_modules"
+          cp .env.local "$RUNNER_TEMP/baseline/"
+          (cd "$RUNNER_TEMP/baseline" && npx vitest run --project integration test/integration/engine-end-to-end.test.ts) 2>&1 | tee logs/upgrade/baseline-data.log
+      - name: apply the new migrations as an UPGRADE
+        run: |
+          mv "$RUNNER_TEMP"/new-migrations/*.sql supabase/migrations/
+          $SUPABASE migration up 2>&1 | tee logs/upgrade/migration-up.log
+      - name: pgTAP on the upgraded database
+        run: $SUPABASE test db 2>&1 | tee logs/upgrade/pgtap.log
+      - name: schema drift on the upgraded database
+        run: npx tsx scripts/check-schema-drift.ts 2>&1 | tee logs/upgrade/schema-drift.log
+      - name: integration on the upgraded database
+        run: npx vitest run --project integration --reporter=default --reporter=junit --outputFile.junit=logs/upgrade/integration.junit.xml 2>&1 | tee logs/upgrade/integration.log
+      - name: container logs on failure
+        if: failure()
+        run: for c in $(docker ps -a --format '{{.Names}}' | grep -i supabase); do docker logs "$c" > "logs/upgrade/container-$c.log" 2>&1 || true; done
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with: { name: logs-upgrade, path: logs/upgrade, if-no-files-found: warn }
+
+  engine-comparison:
+    name: 27-organisation engine comparison against the baseline
+    runs-on: ubuntu-latest
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0 }
+      - uses: actions/setup-node@v4
+        with: { node-version: '${{ env.NODE_VERSION }}', cache: npm }
+      - run: npm ci && mkdir -p logs/compare compare
+      - name: baseline dump (its own migrations and engine)
+        run: |
+          git worktree add "$RUNNER_TEMP/baseline" "$BASELINE"
+          cd "$RUNNER_TEMP/baseline"
+          npm ci
+          npx --no-install supabase start
+          "$GITHUB_WORKSPACE/scripts/write-local-env.sh"
+          ENGINE_COMPARE_LABEL=baseline ENGINE_COMPARE_OUT="$GITHUB_WORKSPACE/compare" npm run engine:compare
+          npx --no-install supabase stop --no-backup
+        shell: bash -o pipefail {0}
+      - name: this branch's dump
+        run: |
+          $SUPABASE start
+          scripts/write-local-env.sh
+          ENGINE_COMPARE_LABEL=branch ENGINE_COMPARE_OUT="$GITHUB_WORKSPACE/compare" npm run engine:compare 2>&1 | tee logs/compare/branch.log
+      - name: compare
+        run: npx tsx scripts/engine-compare.ts compare/baseline.json compare/branch.json > compare/record.md
+      - if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: engine-comparison
+          path: |
+            compare
+            logs/compare
+          if-no-files-found: warn

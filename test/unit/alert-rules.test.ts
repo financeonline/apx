@@ -328,6 +328,23 @@ describe('receivables.deterioration and payables.deterioration', () => {
     expect(outcome.evidence!.filter((e) => e.itemType === 'invoice')).toHaveLength(2);
   });
 
+  it('FU-9: a payables slowdown fires on comparable days, and stays silent when the days are unavailable', () => {
+    // Ten more days on a consistent VAT footing: a real slowdown.
+    expect(evaluatePayablesDeterioration(ctx('payables', '0', '10000', '10'))[0]!.thresholdSummary.trigger)
+      .toBe('days_increase');
+    // `payables_days` NULL `vat_basis_unknown` has no variance: no days trigger is invented from it…
+    const unavailable = emptyRuleContext({
+      snapshots: [
+        snapshot({ key: 'payables', value: '10000', unit: 'money' }),
+        snapshot({ key: 'payables_overdue', value: '0', unit: 'money' }),
+        snapshot({ key: 'payables_days.variance.prev_period', value: null, unit: 'days' }),
+      ],
+    });
+    expect(evaluatePayablesDeterioration(unavailable)).toHaveLength(0);
+    // … while the overdue share, which needs no VAT footing, still works.
+    expect(evaluatePayablesDeterioration(ctx('payables', '4000', '10000'))).toHaveLength(1);
+  });
+
   it('works the same way for payables', () => {
     const outcome = evaluatePayablesDeterioration(ctx('payables', '4000', '10000'))[0]!;
     expect(outcome.ruleKey).toBe('payables.deterioration');

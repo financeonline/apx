@@ -69,19 +69,46 @@ async function loadAccounts(
   }));
 }
 
-async function loadCounterparties(
+const COUNTERPARTY_PAGE = 1000;
+
+export async function loadCounterparties(
   db: SupabaseClient, orgId: string, requestId?: string,
 ): Promise<CounterpartyRef[]> {
-  const { data, error } = await db
-    .from('counterparties')
-    .select('id, normalized_name')
-    .eq('organization_id', orgId)
-    .is('merged_into_id', null);
-  if (error) throw toMotionError(error, requestId);
-  return (data ?? []).map((c) => ({
-    id: c.id as string,
-    normalizedName: c.normalized_name as string,
-  }));
+  // Paged: PostgREST stops at `max_rows` (1,000), and a customer past that line would look new,
+  // could not be created (its name is taken) and would block its invoice row.
+  const data: Array<Record<string, unknown>> = [];
+  for (let from = 0; ; from += COUNTERPARTY_PAGE) {
+    const page = await db
+      .from('counterparties')
+      .select('id, name, normalized_name, merged_into_id')
+      .eq('organization_id', orgId)
+      .order('id')
+      .range(from, from + COUNTERPARTY_PAGE - 1);
+    if (page.error) throw toMotionError(page.error, requestId);
+    data.push(...(page.data ?? []));
+    if ((page.data ?? []).length < COUNTERPARTY_PAGE) break;
+  }
+
+  /*
+   * A merged-away counterparty keeps its name, and `normalized_name` is unique across merged rows
+   * too — so a file naming it can neither match it (it is not current) nor create it again (the
+   * name is taken). Its name resolves to the counterparty it was merged into, following the chain,
+   * which is what the engine already does with `merged_into_id`.
+   */
+  const rows = data as Array<{ id: string; name: string; normalized_name: string; merged_into_id: string | null }>;
+  const mergedInto = new Map(rows.map((c) => [c.id, c.merged_into_id]));
+  const survivor = (id: string): string => {
+    let current = id;
+    for (let hop = 0; hop < rows.length; hop += 1) {
+      const next = mergedInto.get(current);
+      if (next === null || next === undefined) return current;
+      current = next;
+    }
+    return current;
+  };
+  // The name of the row the stored key matched — not the survivor's — is what a file's spelling is
+  // compared with letter by letter (Step 0C).
+  return rows.map((c) => ({ id: survivor(c.id), normalizedName: c.normalized_name, name: c.name }));
 }
 
 /**

@@ -4,6 +4,7 @@ import { revalidatePath } from 'next/cache';
 import {
   getAccessContext,
   updateOrganization,
+  setVatRegistration,
   inviteMember,
   revokeInvitation,
   changeMemberRole,
@@ -41,6 +42,23 @@ export async function updateOrganizationAction(
     return done('Saved.');
   } catch (error) {
     return fail(error, { requestId, action: 'settings.updateOrganization' });
+  }
+}
+
+export async function setVatRegistrationAction(
+  _previous: ActionResult | null,
+  form: FormData,
+): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    await setVatRegistration(ctx, text(form, 'vat_status'));
+    revalidatePath(`/app/${orgSlug}/settings`);
+    return done('Saved. Your figures are being recalculated.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'settings.setVatRegistration' });
   }
 }
 

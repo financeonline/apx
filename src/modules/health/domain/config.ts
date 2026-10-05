@@ -59,6 +59,20 @@ export const MIN_REQUIRED_COMPLETENESS = 0.6;
  */
 export const PROXY_CAP = 70;
 export const PROXY_CAP_NOTE = 'based on bank data only';
+/**
+ * ADR-134: a dimension resting on figures an AI read from a PDF (`inferred`) is capped like one on
+ * estimated figures — the existing cap, not a new number — and says why. `inferred` is the weakest
+ * rung of the assurance ladder; scoring it uncapped claimed more certainty than an estimate gets.
+ */
+export const INFERRED_CAP_NOTE = 'includes figures read from a PDF by AI';
+
+/** Why a capped dimension was capped, in the words the explanation shows. */
+export function capReasonFor(proxy: boolean, inferred: boolean): string | null {
+  if (proxy && inferred) return `${PROXY_CAP_NOTE}, and ${INFERRED_CAP_NOTE}`;
+  if (inferred) return INFERRED_CAP_NOTE;
+  if (proxy) return PROXY_CAP_NOTE;
+  return null;
+}
 
 /** §7.2: fewer than three dimensions cannot describe a business, so the score is NULL. */
 export const MIN_DIMENSIONS_FOR_SCORE = 3;

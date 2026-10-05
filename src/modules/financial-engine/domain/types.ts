@@ -57,6 +57,11 @@ export const DATA_QUALITY_MISSING = [
   'no_bank_accounts',
   /** Cost of sales exists in a source the chosen P&L basis is not reading (ADR-104). */
   'cost_of_sales_in_other_source',
+  /**
+   * FU-9 (ADR-129): a ratio's two sides are not on the same VAT footing and no recorded tax data can
+   * put them on one — VAT-inclusive payables over VAT-exclusive costs, or a VAT status nobody set.
+   */
+  'vat_basis_unknown',
 ] as const;
 export type DataQualityMissing = (typeof DATA_QUALITY_MISSING)[number];
 
@@ -242,6 +247,11 @@ export interface OrganizationSettings {
   readonly fiscalYearStartMonth: number;
   readonly timezone: string;
   readonly vatRegistered: boolean;
+  /**
+   * FU-9: whether `vatRegistered` was actually SET for the organisation, rather than defaulted to
+   * false. Absent means known — the contexts written before FU-9 state their footing deliberately.
+   */
+  readonly vatStatusKnown?: boolean;
   readonly defaultVatRate: string | null;
   /** The categories the bank proxy nets down for VAT (CD-33). */
   readonly taxableCategories: readonly StandardCategory[];

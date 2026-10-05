@@ -23,6 +23,10 @@ export const StartImportBatchInput = z
     message: 'Choose which bank account this statement belongs to',
     path: ['bankAccountId'],
   })
+  .refine((v) => v.importType === 'bank_statement' || v.bankAccountId === undefined, {
+    message: 'Only a bank statement belongs to a bank account',
+    path: ['bankAccountId'],
+  })
   .refine(
     (v) => v.periodStart === undefined || v.periodEnd === undefined || v.periodEnd >= v.periodStart,
     { message: 'The end of the range cannot be before its start', path: ['periodEnd'] },

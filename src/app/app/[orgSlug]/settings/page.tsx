@@ -1,8 +1,9 @@
 import Link from 'next/link';
-import { getAccessContext } from '@/modules/tenancy';
+import { getAccessContext, vatStatusOf } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody } from '@/components/ui/surfaces';
 import { OrganizationForm } from './organization-form';
+import { VatForm } from './vat-form';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
@@ -14,7 +15,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
 
   const { data } = await ctx.db
     .from('organizations')
-    .select('name, timezone, fiscal_year_start_month, base_currency, status')
+    .select('name, timezone, fiscal_year_start_month, base_currency, status, settings')
     .eq('id', ctx.orgId!)
     .single();
 
@@ -44,6 +45,14 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
               fiscalYearStartMonth={data?.fiscal_year_start_month ?? 1}
               baseCurrency={data?.base_currency ?? 'GBP'}
             />
+          </CardBody>
+        </Card>
+      </div>
+      <div className="mt-8">
+        <Card>
+          <CardHeader title="VAT" description="Whether your sales and costs are recorded with or without VAT." />
+          <CardBody>
+            <VatForm orgSlug={orgSlug} status={vatStatusOf(data?.settings)} />
           </CardBody>
         </Card>
       </div>

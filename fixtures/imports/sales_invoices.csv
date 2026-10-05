@@ -1,0 +1,5 @@
+Invoice Number,Customer,Invoice Date,Due Date,Subtotal,Tax,Total,Amount Paid,Status
+INV-1001,Acme Ltd,2026-08-03,2026-09-02,1000.00,200.00,1200.00,1200.00,Paid
+INV-1002,Beta Trading,2026-08-10,2026-09-09,500.00,100.00,600.00,0.00,Unpaid
+CN-1003,Acme Ltd,2026-08-20,2026-08-20,-250.00,-50.00,-300.00,-300.00,Paid
+INV-1004,Gamma Stores,2026-08-25,2026-09-24,"2,000.00",400.00,"2,400.00",0.00,Part paid

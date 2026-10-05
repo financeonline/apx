@@ -29,6 +29,8 @@ interface Dump {
 const FIGURES = [
   'opening_cash', 'net_cash_movement', 'closing_cash', 'cash_runway_months',
   'receivables', 'receivables_overdue', 'payables', 'payables_overdue', 'working_capital',
+  // FU-9: the days figures change basis (payables) and must be compared too.
+  'receivables_days', 'payables_days',
   // The P&L family (FU-1): revenue and what is derived from it.
   'revenue', 'cost_of_sales', 'gross_profit', 'operating_expenses', 'operating_profit', 'net_profit',
   'gross_margin', 'net_margin', 'customer_concentration_top1',
@@ -46,11 +48,14 @@ const after = JSON.parse(readFileSync(afterPath, 'utf8')) as Dump;
 function figures(metrics: readonly string[]): Map<string, string> {
   const out = new Map<string, string>();
   for (const line of metrics) {
-    const [period, key, value, , , , missing] = line.split('|');
+    const [period, key, value, , assurance, , missing] = line.split('|');
     if (!(FIGURES as readonly string[]).includes(key!)) continue;
     const shown = value === 'NULL' ? 'NULL' : new Decimal(value!).toFixed(key === 'cash_runway_months' ? 1 : key!.endsWith('margin') || key!.startsWith('customer_concentration') ? 4 : 2);
     const reason = missing?.startsWith('m=') && missing !== 'm=[]' ? ` ${missing.slice(2).replace(/"/g, '')}` : '';
-    out.set(`${period!.slice(0, 7)}|${key}`, `${shown}${value === 'NULL' ? reason : ''}`);
+    // ADR-130: an assurance-only change (a figure re-badged inferred / calculated) is a change too —
+    // the dump always carried the field, and the comparison used to drop it.
+    const level = value === 'NULL' || assurance === undefined || assurance === 'verified' ? '' : ` [${assurance}]`;
+    out.set(`${period!.slice(0, 7)}|${key}`, `${shown}${value === 'NULL' ? reason : ''}${level}`);
   }
   return out;
 }

@@ -3,10 +3,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { toMotionError } from '@/core/errors';
 import { aggregatePeriods, aggregateTransferLegs, bankDailyMovements, batchCoverage } from '@/core/db';
 import type {
-  AccountRef, AggregateCell, BankAccountRef, CounterpartyRef, OrganizationSettings, PeriodRef,
+  AccountRef, AggregateCell, AssuranceLevel, BankAccountRef, CounterpartyRef, OrganizationSettings, PeriodRef,
 } from '../domain/types';
 import type { CoverageBatch } from '../domain/coverage';
-import type { DailyMovement } from '../domain/cash-history';
+import { statementRecordAssurance, type DailyMovement } from '../domain/cash-history';
 import type { AgingInvoice } from '../domain/receivables';
 import type { OpeningJournalLine, PreJournalLine } from '../domain/receivables-input';
 
@@ -223,6 +223,9 @@ export async function loadSettings(
     fiscalYearStartMonth: Number(data?.fiscal_year_start_month ?? 1),
     timezone: (data?.timezone as string) ?? 'Europe/London',
     vatRegistered: settings.vat_registered === true,
+    // FU-9: nothing in the product sets `vat_registered` yet, so "not set" must stay distinguishable
+    // from "not registered" — only the second makes ledger costs VAT-inclusive.
+    vatStatusKnown: typeof settings.vat_registered === 'boolean',
     defaultVatRate: settings.default_vat_rate === undefined || settings.default_vat_rate === null
       ? null : String(settings.default_vat_rate),
     // CD-33: the categories the bank proxy nets down. The platform default is applied by the
@@ -646,6 +649,24 @@ export async function loadLatestEngineVersion(
   return rows[0]?.engine_version ?? null;
 }
 
+/**
+ * FU-6: the as-of date of the latest succeeded run, so a run after a month end can recompute the
+ * month that was current when it last ran. Null for an organisation never run.
+ */
+export async function loadLatestRunAsOf(
+  scoped: SupabaseClient, orgId: string,
+): Promise<string | null> {
+  const { data, error } = await scoped
+    .from('calculation_runs')
+    .select('as_of, finished_at')
+    .eq('organization_id', orgId)
+    .eq('status', 'succeeded')
+    .order('finished_at', { ascending: false, nullsFirst: false })
+    .limit(1);
+  const rows = unwrap(data, error) as Array<{ as_of: string | null }>;
+  return rows[0]?.as_of ?? null;
+}
+
 /** A committed bank statement: its declared range and the balances printed on it (IMP-BAL). */
 export interface StatementBatch {
   readonly batchId: string;
@@ -658,6 +679,8 @@ export interface StatementBatch {
   readonly closingBalance: string | null;
   /** The rows did not add up to the printed balances at import (IMP-BAL-006/007). */
   readonly unreconciled: boolean;
+  /** What commit stamped on the statement's rows (ADR-130). */
+  readonly assurance: AssuranceLevel;
 }
 
 /**
@@ -672,7 +695,7 @@ export async function loadStatements(
   return paged(
     (from, to) => scoped
       .from('import_batches')
-      .select('id, bank_account_id, period_start, period_end, committed_at, statement_opening_balance, statement_closing_balance, batch_issues')
+      .select('id, bank_account_id, period_start, period_end, committed_at, statement_opening_balance, statement_closing_balance, batch_issues, extraction_method')
       .eq('organization_id', orgId)
       .eq('status', 'committed')
       .eq('target_table', 'bank_transactions')
@@ -690,6 +713,11 @@ export async function loadStatements(
         openingBalance: r.statement_opening_balance === null ? null : String(r.statement_opening_balance),
         closingBalance: r.statement_closing_balance === null ? null : String(r.statement_closing_balance),
         unreconciled: issues.some((issue) => issue.code === 'IMP-BAL-006' || issue.code === 'IMP-BAL-007'),
+        // ADR-130: what commit stamped on this statement's rows, from the same two facts.
+        assurance: statementRecordAssurance(
+          r.extraction_method === null || r.extraction_method === undefined ? null : String(r.extraction_method),
+          issues.some((issue) => issue.code === 'IMP-BAL-006' || issue.code === 'IMP-BAL-007'),
+        ),
       };
     },
   );

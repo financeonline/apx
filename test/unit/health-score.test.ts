@@ -1,7 +1,7 @@
 import { describe, it, expect } from 'vitest';
 import {
   DIMENSION_WEIGHTS, HEALTH_CONFIG_VERSION, HEALTH_DIMENSION_KEYS, MIN_REQUIRED_COMPLETENESS,
-  PROXY_CAP, PROXY_CAP_NOTE, computeHealthScore, dimensionScoreFromRules, scoreFromBreakdown,
+  INFERRED_CAP_NOTE, PROXY_CAP, PROXY_CAP_NOTE, computeHealthScore, dimensionScoreFromRules, scoreFromBreakdown,
   type DimensionBreakdown, type RuleApplication,
 } from '@/modules/health';
 import {
@@ -126,6 +126,34 @@ describe('§7.2 the proxy cap (F-B-09)', () => {
       .breakdown.find((d) => d.key === 'profitability')!;
     expect(dimension.capped).toBe(true);
     expect(dimension.score).toBe(PROXY_CAP);
+  });
+
+  it('ADR-134: a dimension resting on AI-read (inferred) figures is capped too, and says so', () => {
+    let snapshots = withMetric(baselineSnapshots(), { key: 'net_margin', value: '0.30', assurance: 'inferred' });
+    snapshots = withMetric(snapshots, { key: 'gross_margin', value: '0.60', assurance: 'inferred' });
+    const score = computeHealthScore(healthInput({ snapshots }))!;
+    const profitability = score.breakdown.find((d) => d.key === 'profitability')!;
+    expect(profitability.included).toBe(true);
+    expect(profitability.score).toBe(PROXY_CAP);
+    expect(profitability.capped).toBe(true);
+    expect(profitability.cap_reason).toBe(INFERRED_CAP_NOTE);
+    expect(score.capped).toBe(true);
+  });
+
+  it('ADR-134: the same strong figures, verified, are not capped — the cap is about assurance alone', () => {
+    let snapshots = withMetric(baselineSnapshots(), { key: 'net_margin', value: '0.30', assurance: 'verified' });
+    snapshots = withMetric(snapshots, { key: 'gross_margin', value: '0.60', assurance: 'verified' });
+    const profitability = computeHealthScore(healthInput({ snapshots }))!.breakdown.find((d) => d.key === 'profitability')!;
+    expect(profitability.capped).toBe(false);
+    expect(profitability.score).toBeGreaterThan(PROXY_CAP);
+    expect(profitability.cap_reason).toBeNull();
+  });
+
+  it('ADR-134: bank-only AND AI-read names both reasons', () => {
+    let snapshots = withMetric(baselineSnapshots(), { key: 'net_margin', value: '0.30', assurance: 'inferred' });
+    snapshots = withMetric(snapshots, { key: 'gross_margin', value: '0.60', assurance: 'estimated', proxy: true });
+    const profitability = computeHealthScore(healthInput({ snapshots }))!.breakdown.find((d) => d.key === 'profitability')!;
+    expect(profitability.cap_reason).toBe(`${PROXY_CAP_NOTE}, and ${INFERRED_CAP_NOTE}`);
   });
 
   it('does not raise a weak dimension to the cap', () => {

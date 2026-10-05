@@ -6,7 +6,14 @@
  * (Phase 5) — see the note in `services/index.ts`.
  */
 export {
+  DOCUMENT_KINDS,
   IMPORT_TARGET,
+  IMPORT_TYPES,
+  isDocumentKind,
+  IMPORT_TYPE_SPECS,
+  isImportType,
+  type ImportTypeSpec,
+  type InvoiceSide,
   type DocumentKind,
   type DocumentStatus,
   type ImportBatch,
@@ -108,6 +115,8 @@ export * from './domain/transforms';
  */
 export {
   startImport,
+  assertImportSupported,
+  pdfHandling,
   targetFor,
   type StartImportInput,
   type StartImportResult,

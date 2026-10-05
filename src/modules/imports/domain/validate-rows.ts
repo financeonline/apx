@@ -29,7 +29,9 @@ import type { StandardCategory } from '@/modules/financials';
 import type {
   BatchIssue, MappedRow, RowIssue, ValidatedRow,
 } from './pipeline-types';
-import type { ImportTarget, ImportType } from './types';
+import { IMPORT_TYPE_SPECS, type ImportTarget, type ImportType } from './types';
+import { INVOICE_STATUSES } from './invoices';
+import { nameFigureIssue } from './mapping/counterparty';
 
 /** Required and optional target fields per import type (§6.1). */
 export const REQUIRED_FIELDS: Readonly<Record<ImportType, readonly string[][]>> = {
@@ -330,6 +332,30 @@ export function validateRow(
       issues.push({
         code: 'IMP-INV-009', severity: 'warning', field: 'due_date',
         message: 'The due date is before the issue date.',
+      });
+    }
+
+    // The pipeline reads a status it recognises into the enum; anything else would fail the cast
+    // at commit and take the whole batch down with a Postgres sentence.
+    const status = value('status');
+    if (status && !(INVOICE_STATUSES as readonly string[]).includes(status)) {
+      issues.push({
+        code: 'IMP-INV-013', severity: 'error', field: 'status',
+        message: `MOTION does not recognise the invoice status "${status}".`,
+        suggestion: 'Use Open, Part paid, Paid or Void, or skip the row. A draft invoice has not been issued.',
+      });
+    }
+
+    // `invoices.counterparty_id` is NOT NULL. The wizard creates the names a list introduces before
+    // it validates (§6.6), so an unresolved name here is one that could not be created — and it
+    // must stop the row, not the commit.
+    const party = value('customer') ?? value('supplier') ?? value('counterparty');
+    if (party && !value('counterparty_id')) {
+      const role = IMPORT_TYPE_SPECS[ctx.importType].invoiceSide === 'purchase' ? 'supplier' : 'customer';
+      issues.push(nameFigureIssue(party, role) ?? {
+        code: 'IMP-CP-016', severity: 'error', field: role,
+        message: `"${party}" could not be matched to or added as a ${role}.`,
+        suggestion: 'Upload the file again, or correct the name.',
       });
     }
 
