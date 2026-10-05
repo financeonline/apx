@@ -193,12 +193,19 @@ describe('N-3 · a corrected report replaces the previous one', () => {
       expect(r.error, r.error?.message).toBeNull();
       expect(r.data).toMatchObject({ status: 'committed', committed: 3, superseded: 3 });
     }
-    // Exactly one current line per account, all from the batch committed last.
+    // Exactly one current line per account, all from ONE of the two corrections (the one that took the
+    // lock second). Not judged by `committed_at`: that is the transaction's start, and the commit that
+    // waited for the lock can start first.
     expect(one(`select count(*) from (select account_id from public.period_balances where organization_id = '${o}'
       and period_start = '2026-07-01' and record_status = 'accepted' and superseded_by is null group by account_id having count(*) > 1) d`)).toBe('0');
-    const last = one(`select id from public.import_batches where id in ('${a}', '${b}') order by committed_at desc limit 1`);
-    expect(one(`select string_agg(distinct import_batch_id::text, ',') from public.period_balances where organization_id = '${o}'
-      and period_start = '2026-07-01' and record_status = 'accepted' and superseded_by is null`)).toBe(last);
+    const last = one(`select string_agg(distinct import_batch_id::text, ',') from public.period_balances where organization_id = '${o}'
+      and period_start = '2026-07-01' and record_status = 'accepted' and superseded_by is null`);
+    expect([a, b]).toContain(last);
+    const other = last === a ? b : a;
+    // …and every line of the other correction was superseded by a line of that one.
+    expect(lines(`select count(*) || '|' || count(*) filter (where nw.import_batch_id = '${last}')
+      from public.period_balances old join public.period_balances nw on nw.id = old.superseded_by and nw.organization_id = old.organization_id
+     where old.import_batch_id = '${other}'`)).toEqual(['3|3']);
     await calculateAndAlert(o);
     expect(value(o, '2026-07', 'revenue')).toBe(last === a ? '1200.00' : '1300.00');
   }, 300_000);
@@ -247,7 +254,8 @@ describe('N-6 · a Debit / Credit report is never sign-flipped a second time', (
 describe('N-5 · a trial-balance expense spike cites the report, not the ledger', () => {
   it('marketing 6,000 → 9,000 on revenue 100,000: the alert pins period_balances rows of the winning report', async () => {
     const { id: o } = await org('TBSPIKE');
-    for (const [ym, mkt] of [['2026-06', '6000'], ['2026-07', '6000'], ['2026-08', '9000']] as const) {
+    // June differs from July only so the two files are not one upload (the duplicate-file guard).
+    for (const [ym, mkt] of [['2026-06', '5900'], ['2026-07', '6000'], ['2026-08', '9000']] as const) {
       const cash = new Decimal(100000).minus(mkt).toFixed(2);
       await commit(await upload(o, 'trial_balance', ym, `Account,Debit,Credit\nRevenue,,100000.00\nMarketing,${mkt}.00,\nCash,${cash},\n`), 'movement');
     }
