@@ -404,3 +404,54 @@ describe('N-1 · report completeness decides what an absent category means, and 
     expect(coverage.bySource.period_balances.reportComplete).toBe(false);
   });
 });
+
+/**
+ * Step 0F follow-up: the owner's per-month attestation for an existing import, the two reasons an
+ * absent category is unknown, and the rule that completeness never raises assurance.
+ */
+describe('report completeness per month, and completeness is not accuracy', () => {
+  const tb = (p: PeriodRef, accountId: string, amount: string) => bal(p, 'trial_balance', 'movement', accountId, amount);
+  const julCells = [tb(JUL, REV, '-1100'), tb(JUL, OPEX, '300'), tb(JUL, CASH, '800')];
+  const withMonths = (map: Record<string, 'complete' | 'partial'> | null, recordAssurance: 'verified' | 'inferred' = 'verified'): CoverageBatch => ({
+    ...batch('tb-jul', 'trial_balance', 'movement', JUL.periodStart, JUL.periodEnd, null, ['2026-07-01']),
+    reportComplete: undefined, completenessByMonth: map, recordAssurance,
+  });
+
+  it('never answered → NULL report_completeness_unconfirmed (a confirmation is still possible)', () => {
+    const r = run(JUL, julCells, [withMonths({})]);
+    expect(v(r, 'net_profit')).toBeNull();
+    expect(fig(r, 'net_profit').dataQuality.missing).toContain('report_completeness_unconfirmed');
+  });
+
+  it('answered partial for the month → NULL category_not_in_report', () => {
+    const r = run(JUL, julCells, [withMonths({ '2026-07-01': 'partial' })]);
+    expect(fig(r, 'net_profit').dataQuality.missing).toContain('category_not_in_report');
+    expect(fig(r, 'net_profit').dataQuality.missing).not.toContain('report_completeness_unconfirmed');
+  });
+
+  it('confirmed complete for THIS month → absent categories are zero: net profit 1,100 − 300 = 800', () => {
+    expect(v(run(JUL, julCells, [withMonths({ '2026-07-01': 'complete' })]), 'net_profit')).toBe('800.00');
+  });
+
+  it('confirmed for ANOTHER month only → this month is still unconfirmed', () => {
+    const r = run(JUL, julCells, [withMonths({ '2026-08-01': 'complete' })]);
+    expect(fig(r, 'net_profit').dataQuality.missing).toContain('report_completeness_unconfirmed');
+  });
+
+  it('an AI-read report confirmed complete: every figure, the zeros included, stays inferred', () => {
+    const r = run(JUL, julCells, [withMonths({ '2026-07-01': 'complete' }, 'inferred')]);
+    expect([v(r, 'revenue'), v(r, 'net_profit')]).toEqual(['1100.00', '800.00']);
+    for (const key of ['revenue', 'operating_expenses', 'net_profit']) expect(fig(r, key).assurance, key).toBe('inferred');
+  });
+
+  it('a cumulative month rests on the PRIOR report too: an AI-read June makes July inferred', () => {
+    const cells = [bal(JUN, 'trial_balance', 'cumulative', REV, '-1000'), bal(JUN, 'trial_balance', 'cumulative', CASH, '1000'),
+      bal(JUL, 'trial_balance', 'cumulative', REV, '-2100'), bal(JUL, 'trial_balance', 'cumulative', CASH, '2100')];
+    const b = (p: PeriodRef, ra: 'verified' | 'inferred'): CoverageBatch => ({
+      ...batch(`c-${p.label}`, 'trial_balance', 'cumulative', p.periodStart, p.periodEnd, null, [p.periodStart]),
+      reportComplete: undefined, completenessByMonth: { [p.periodStart]: 'complete' }, recordAssurance: ra });
+    const r = run(JUL, cells, [b(JUN, 'inferred'), b(JUL, 'verified')]);
+    expect(v(r, 'revenue')).toBe('1100.00');
+    expect(fig(r, 'revenue').assurance).toBe('inferred');
+  });
+});

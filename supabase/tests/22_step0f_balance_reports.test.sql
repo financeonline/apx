@@ -22,12 +22,15 @@ values
   ('b9000000-0000-0000-0000-000000000003', 'e9000000-0000-0000-0000-0000000000e9', 'd9000000-0000-0000-0000-000000000001', 'trial_balance', 'period_balances',
    'committed', '2026-09-01', '2026-09-30', 'csv', now(), 'movement', '{}');
 
-select is((select report_complete from app.batch_coverage('e9000000-0000-0000-0000-0000000000e9', '2026-07-01', '2026-07-31')
-            where batch_id = 'b9000000-0000-0000-0000-000000000001'), true, 'attested complete → report_complete');
-select is((select report_complete from app.batch_coverage('e9000000-0000-0000-0000-0000000000e9', '2026-08-01', '2026-08-31')
-            where batch_id = 'b9000000-0000-0000-0000-000000000002'), false, 'attested partial → not complete');
-select is((select report_complete from app.batch_coverage('e9000000-0000-0000-0000-0000000000e9', '2026-09-01', '2026-09-30')
-            where batch_id = 'b9000000-0000-0000-0000-000000000003'), false, 'no attestation (an import before the question existed) → not complete');
+-- (Answers are per month the batch STATES; these batches hold no rows, so the map is empty for all
+-- three — the per-month cases run through real imports in test/integration/report-completeness-attestation.test.ts.)
+select is((select completeness_by_month from app.batch_coverage('e9000000-0000-0000-0000-0000000000e9', '2026-07-01', '2026-07-31')
+            where batch_id = 'b9000000-0000-0000-0000-000000000001'), '{}'::jsonb, 'no rows → no month answered, whatever the import said');
+select is((select record_assurance::text from app.batch_coverage('e9000000-0000-0000-0000-0000000000e9', '2026-08-01', '2026-08-31')
+            where batch_id = 'b9000000-0000-0000-0000-000000000002'), 'verified', 'a csv report''s own record assurance');
+select ok(exists (select 1 from information_schema.columns where table_schema = 'public'
+            and table_name = 'report_completeness_attestations' and column_name = 'supersedes_id'),
+          'owner attestations are stored append-only with what they correct');
 
 -- N-1: the attestation is an answer, one of two.
 select ok(position('IMP-TB-016' in pg_get_functiondef('api.record_batch_confirmation(uuid, text, jsonb)'::regprocedure)) > 0,

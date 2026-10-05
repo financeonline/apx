@@ -131,4 +131,8 @@ export {
   type ImportHistoryRow,
 } from './services/review';
 export { validateBatch, proposeColumnMap, type ValidateBatchInput } from './services/wizard';
+export {
+  attestReportCompleteness, loadReportCompleteness,
+  type CompletenessAnswer, type CompletenessAttestationView, type CompletenessMonth, type ReportCompletenessView, type ReportScope,
+} from './services/completeness';
 export { setStatementBalancesAndRevalidate, type BalanceComparison, type RevalidationResult } from './services/statement-balances';

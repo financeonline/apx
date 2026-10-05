@@ -121,8 +121,11 @@ export async function loadCoverageBatches(
     // Step 0E: the months this balance batch has rows in (a batch states only those, or its whole range
     // when it has none). NULL for other targets.
     rowMonths: Array.isArray(r.row_months) ? (r.row_months as unknown[]).map(String) : null,
-    // N-1 (Step 0F): the reviewer's attestation that the report lists every account (IMP-TB-016).
-    reportComplete: r.report_complete === true,
+    // N-1 (Step 0F): what is known, per month, about whether the report lists every account — an
+    // owner's attestation, else the import's answer (IMP-TB-016); a month absent is unconfirmed.
+    completenessByMonth: r.completeness_by_month && typeof r.completeness_by_month === 'object'
+      ? r.completeness_by_month as Record<string, 'complete' | 'partial'> : null,
+    recordAssurance: (r.record_assurance as AssuranceLevel | null | undefined) ?? null,
     bankAccountId: r.bank_account_id as string | null,
     invoiceListKind: r.invoice_list_kind as CoverageBatch['invoiceListKind'],
     importType: (r.import_type as string | null) ?? null,
@@ -289,6 +292,8 @@ export interface FingerprintSources {
   readonly accountCategories: Record<string, string>;
   readonly counterpartyMerges: Record<string, string>;
   readonly categoryHistoryHeads: Record<string, string>;
+  /** Step 0F: `import|month` → the current completeness attestation id. */
+  readonly completenessHeads?: Record<string, string>;
 }
 
 /**
@@ -424,7 +429,7 @@ export async function loadFirstPeriodWithData(
 export async function loadFingerprintSources(
   scoped: SupabaseClient, orgId: string,
 ): Promise<FingerprintSources> {
-  const [events, accounts, counterparties, history] = await Promise.all([
+  const [events, accounts, counterparties, history, attestations] = await Promise.all([
     scoped.from('record_status_events').select('at').eq('organization_id', orgId)
       .order('at', { ascending: false }).limit(1),
     scoped.from('accounts').select('id, standard_category').eq('organization_id', orgId),
@@ -432,6 +437,9 @@ export async function loadFingerprintSources(
       .not('merged_into_id', 'is', null),
     scoped.from('category_history').select('id, bank_transaction_id').eq('organization_id', orgId)
       .is('valid_to', null),
+    // Step 0F: an owner's completeness attestation changes figures without moving any record.
+    scoped.from('report_completeness_attestations').select('id, import_batch_id, period_start')
+      .eq('organization_id', orgId).order('attested_at').order('id'),
   ]);
 
   const rowCounts: Record<string, number> = {};
@@ -456,6 +464,10 @@ export async function loadFingerprintSources(
     ),
     categoryHistoryHeads: Object.fromEntries(
       (history.data ?? []).map((h) => [h.bank_transaction_id as string, h.id as string]),
+    ),
+    // The current attestation per (import, month): the last in time order.
+    completenessHeads: Object.fromEntries(
+      (attestations.data ?? []).map((a) => [`${a.import_batch_id as string}|${a.period_start as string}`, a.id as string]),
     ),
   };
 }

@@ -20,7 +20,7 @@ import { bankCoverageFor, coveredRuns, runsCover } from './cash-history';
 
 import { Decimal, parseDecimalOrNull } from '@/core/money';
 import type {
-  AggregateCell, BankAccountRef, BasisChoice, DataQualityWarning, PeriodCoverage, PeriodRef, SourceCoverage,
+  AggregateCell, AssuranceLevel, BankAccountRef, BasisChoice, DataQualityWarning, PeriodCoverage, PeriodRef, SourceCoverage,
   SourceKind,
 } from './types';
 
@@ -55,13 +55,23 @@ export interface CoverageBatch {
    */
   readonly rowMonths?: readonly string[] | null;
   /**
-   * N-1 (Step 0F): the reviewer ATTESTED at import that this balance report lists every account for
-   * its period, including accounts with nothing in them (confirmation IMP-TB-016, stored with who and
-   * when). Absent or false: not attested — an import made before the question existed is never
-   * assumed complete. Attestation is necessary, not sufficient: a trial balance must also balance.
+   * N-1 (Step 0F): the reviewer's answer at import (IMP-TB-016) for the whole batch: true complete,
+   * false partial, absent unanswered. Superseded by `completenessByMonth` where that is given.
    */
   readonly reportComplete?: boolean | null;
+  /**
+   * The current answer per month the batch states (`YYYY-MM-01` → complete | partial): an owner's
+   * attestation for that month, else the import's answer. A month absent from it is UNCONFIRMED — an
+   * import made before the question existed is never assumed complete. Attestation is necessary, not
+   * sufficient: a trial balance must also balance.
+   */
+  readonly completenessByMonth?: Readonly<Record<string, 'complete' | 'partial'>> | null;
+  /** The weakest assurance of the batch's own records (extraction method). Never raised by completeness. */
+  readonly recordAssurance?: AssuranceLevel | null;
 }
+
+/** What is known about whether a report lists every account for a month (N-1). */
+export type ReportCompleteness = 'complete' | 'partial' | 'unconfirmed';
 
 export interface CoverageInput {
   readonly period: PeriodRef;
@@ -186,28 +196,40 @@ export function balancePnlContext(input: {
   readonly batches: readonly CoverageBatch[];
   readonly cells: readonly AggregateCell[];
   readonly organisationFiscalYearStartMonth: number;
-}): { priorPeriodId: string | null; priorBatch: boolean; isFirstFiscalMonth: boolean; currentComplete: boolean; priorComplete: boolean } {
+}): {
+  priorPeriodId: string | null; priorBatch: boolean; isFirstFiscalMonth: boolean; currentComplete: boolean; priorComplete: boolean;
+  currentCompleteness: ReportCompleteness; priorCompleteness: ReportCompleteness; priorAssurance: AssuranceLevel | null;
+} {
   const balances = input.coverage.bySource.period_balances;
   const kind = balances.covers ? balances.balanceKind : null;
   if (!kind) {
-    return { priorPeriodId: input.prior?.id ?? null, priorBatch: false, isFirstFiscalMonth: false, currentComplete: false, priorComplete: false };
+    return { priorPeriodId: input.prior?.id ?? null, priorBatch: false, isFirstFiscalMonth: false, currentComplete: false, priorComplete: false,
+      currentCompleteness: 'unconfirmed', priorCompleteness: 'unconfirmed', priorAssurance: null };
   }
   const basis = balances.balanceBasis ?? 'movement';
   const winning = winningBalanceBatch(input.batches, input.period, kind);
   const fyStart = winning?.fiscalYearStartMonthAtCommit ?? input.organisationFiscalYearStartMonth;
   const month = Number(input.period.periodStart.slice(5, 7));
   let priorBatch = false;
+  let priorAssurance: AssuranceLevel | null = null;
   if (input.prior !== undefined) {
     const priorWinning = winningBalanceBatch(input.batches, input.prior, kind);
     const priorRows = balanceRowsByKind(input.cells, input.prior.id)[kind];
     priorBatch = priorWinning !== null && (priorWinning.balanceBasis ?? 'movement') === basis && priorRows > 0;
+    priorAssurance = priorBatch ? priorWinning?.recordAssurance ?? null : null;
   }
+  const currentCompleteness = balanceReportCompleteness(input.batches, input.cells, input.period, kind);
+  const priorCompleteness = input.prior === undefined
+    ? 'unconfirmed' : balanceReportCompleteness(input.batches, input.cells, input.prior, kind);
   return {
     priorPeriodId: input.prior?.id ?? null,
     priorBatch,
     isFirstFiscalMonth: month === fyStart,
-    currentComplete: balanceReportComplete(input.batches, input.cells, input.period, kind),
-    priorComplete: input.prior === undefined ? false : balanceReportComplete(input.batches, input.cells, input.prior, kind),
+    currentComplete: currentCompleteness === 'complete',
+    priorComplete: priorCompleteness === 'complete',
+    currentCompleteness,
+    priorCompleteness,
+    priorAssurance,
   };
 }
 
@@ -226,13 +248,34 @@ export function balanceReportComplete(
   period: PeriodRef,
   kind: BalanceKind,
 ): boolean {
+  return balanceReportCompleteness(batches, cells, period, kind) === 'complete';
+}
+
+/**
+ * The three states behind `balanceReportComplete`: `complete` (answered complete for P — at import
+ * or by an owner's attestation for that month — and, for a trial balance, balancing); `partial`
+ * (answered partial, or answered complete by a trial balance that does not balance); `unconfirmed`
+ * (never answered for P). Only `complete` lets an absent category be zero; the other two differ only
+ * in the reason a figure gives, so a reader knows whether a confirmation is still possible.
+ */
+export function balanceReportCompleteness(
+  batches: readonly CoverageBatch[],
+  cells: readonly AggregateCell[] | undefined,
+  period: PeriodRef,
+  kind: BalanceKind,
+): ReportCompleteness {
   const winning = winningBalanceBatch(batches, period, kind);
-  if (winning === null || winning.reportComplete !== true) return false;
-  if (kind !== 'trial_balance') return true;
+  if (winning === null) return 'unconfirmed';
+  const answer = winning.completenessByMonth != null
+    ? winning.completenessByMonth[period.periodStart] ?? null
+    : winning.reportComplete === true ? 'complete' : winning.reportComplete === false ? 'partial' : null;
+  if (answer === null) return 'unconfirmed';
+  if (answer === 'partial') return 'partial';
+  if (kind !== 'trial_balance') return 'complete';
   const rows = (cells ?? []).filter((c) => c.periodId === period.id && c.source === 'period_balances' && c.balanceKind === kind);
-  if (rows.length === 0) return false;
+  if (rows.length === 0) return 'partial';
   const sum = rows.reduce((t, c) => t.plus(parseDecimalOrNull(c.amount) ?? new Decimal(0)), new Decimal(0));
-  return sum.abs().lessThanOrEqualTo('0.01');
+  return sum.abs().lessThanOrEqualTo('0.01') ? 'complete' : 'partial';
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -580,7 +623,11 @@ export function computeCoverage(input: CoverageInput): PeriodCoverage {
   const passOver = reportIncomplete && (ledger.covers || invoices.covers);
   const balancesFinal: SourceCoverage = passOver
     ? NO_COVERAGE
-    : pnlBalance ? { ...balances, reportComplete: !reportIncomplete } : balances;
+    : pnlBalance ? {
+      ...balances,
+      reportComplete: !reportIncomplete,
+      recordAssurance: winningBalanceBatch(batches, period, pnlBalance.kind)?.recordAssurance ?? null,
+    } : balances;
 
   return {
     periodId: period.id,

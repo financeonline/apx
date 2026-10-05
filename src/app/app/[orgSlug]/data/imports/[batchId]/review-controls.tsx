@@ -4,7 +4,7 @@ import { useActionState } from 'react';
 import { Input } from '@/components/ui/field';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import {
-  commitBatchAction, confirmBatchAction, decideRowsAction, rejectBatchAction,
+  attestCompletenessAction, commitBatchAction, confirmBatchAction, decideRowsAction, rejectBatchAction,
 } from '../actions';
 
 /**
@@ -90,7 +90,7 @@ export function DuplicateDecisions({
 }
 
 export function ConfirmationPrompt({
-  orgSlug, batchId, code, question, values, choice,
+  orgSlug, batchId, code, question, values, choice, help,
 }: {
   orgSlug: string;
   batchId: string;
@@ -98,6 +98,8 @@ export function ConfirmationPrompt({
   question: string;
   /** Fields the confirmation SETS rather than acknowledges — the export range, for instance. */
   values?: Readonly<Record<string, string>>;
+  /** Step 0F: a sentence saying what the answer changes. */
+  help?: string;
   /** A confirmation the reviewer must answer rather than agree to. */
   choice?: { name: string; label: string; options: ReadonlyArray<{ value: string; label: string }>; explicit?: boolean };
 }) {
@@ -113,6 +115,7 @@ export function ConfirmationPrompt({
       ))}
 
       <span className="text-ink">{question}</span>
+      {help ? <p className="w-full text-ink-muted">{help}</p> : null}
 
       {choice ? (
         <label className="flex items-center gap-2">
@@ -232,6 +235,41 @@ export function SkipUnreadableRows({
         </SubmitButton>
       </div>
 
+      <ActionMessage state={state} />
+    </form>
+  );
+}
+
+/**
+ * Step 0F follow-up: an owner or admin records what ONE month of an imported report covers, after
+ * reviewing the stored file. One month per answer, a reason every time, nothing pre-selected.
+ */
+export function CompletenessAttestationForm({
+  orgSlug, batchId, month, monthLabel, completeLabel, partialLabel,
+}: {
+  orgSlug: string; batchId: string; month: string; monthLabel: string; completeLabel: string; partialLabel: string;
+}) {
+  const [state, action] = useActionState(attestCompletenessAction, null);
+  return (
+    <form action={action} className="mt-2 flex flex-col gap-2 text-sm">
+      <input type="hidden" name="org_slug" value={orgSlug} />
+      <input type="hidden" name="batch_id" value={batchId} />
+      <input type="hidden" name="month" value={month} />
+      <label className="flex flex-col gap-1">
+        <span className="text-ink">What does this report cover for {monthLabel}?</span>
+        <select name="coverage" required defaultValue="" className="rounded-md border border-line bg-surface px-2 py-1 text-sm">
+          <option value="" disabled>Choose an answer</option>
+          <option value="complete">{completeLabel}</option>
+          <option value="partial">{partialLabel}</option>
+        </select>
+      </label>
+      <label className="flex flex-col gap-1">
+        <span className="text-ink">What did you check?</span>
+        <Input name="reason" required maxLength={2000} placeholder="For example: compared it with the full trial balance in our accounts" />
+      </label>
+      <div>
+        <SubmitButton pendingLabel="Recording…">Record for {monthLabel}</SubmitButton>
+      </div>
       <ActionMessage state={state} />
     </form>
   );

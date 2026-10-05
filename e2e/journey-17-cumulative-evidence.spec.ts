@@ -13,8 +13,8 @@ import { cleanUpOwn, drainQueue, onboard, seedUser, signIn, sql, uniqueName } fr
  * the engine's back, the page says so — on that side, and in the formula.
  */
 
-const ORGS = { ask: uniqueName('Completeness Question'), show: uniqueName('Cumulative Evidence'), fault: uniqueName('Cumulative Fault') };
-const OWNERS = { ask: 'journey17-ask', show: 'journey17-show', fault: 'journey17-fault' };
+const ORGS = { ask: uniqueName('Completeness Question'), show: uniqueName('Cumulative Evidence'), fault: uniqueName('Cumulative Fault'), later: uniqueName('Completeness Later') };
+const OWNERS = { ask: 'journey17-ask', show: 'journey17-show', fault: 'journey17-fault', later: 'journey17-later' };
 
 // Year to date, natural sign, balancing through Cash; Debit / Credit columns so no sign question.
 const TB: Record<string, string> = {
@@ -35,7 +35,7 @@ async function importTrialBalance(page: Page, slug: string, ym: string): Promise
   await page.waitForURL(/\/data\/imports\/[0-9a-f-]{36}/, { timeout: 60_000 });
 
   // N-1: answered as the reviewer would, where the question is asked (its own test checks it is).
-  const completeness = page.getByLabel('Every account listed');
+  const completeness = page.getByLabel('Report completeness');
   if (await completeness.count() > 0) await completeness.selectOption('complete');
   // Year to date is the basis (the first choice); the remaining questions are confirmations.
   await page.getByLabel('Balance basis').selectOption('cumulative');
@@ -76,8 +76,9 @@ test('N-1: the completeness question is asked with nothing pre-selected, and the
   await page.getByLabel(/the file/i).setInputFiles({ name: 'tb.csv', mimeType: 'text/csv', buffer: Buffer.from(TB['2026-07']!, 'utf8') });
   await page.getByRole('button', { name: /upload and check/i }).click();
   await page.waitForURL(/\/data\/imports\/[0-9a-f-]{36}/, { timeout: 60_000 });
-  await expect(page.getByText('Does this report list every account for the period, including accounts with nothing in them?')).toBeVisible();
-  const completeness = page.getByLabel('Every account listed');
+  await expect(page.getByText('Is this the full trial balance — every account with a balance for the period: income, expenses, assets, liabilities and equity?')).toBeVisible();
+  await expect(page.getByText(/categories it has no line for will show as unknown, never as zero/)).toBeVisible();
+  const completeness = page.getByLabel('Report completeness');
   await expect(completeness).toHaveValue('');
   await completeness.selectOption('complete');
   const form = page.locator('form').filter({ has: completeness });
@@ -136,4 +137,47 @@ test('N-2: a July row changed behind the engine\'s back is stated on that side a
   await expect(broken).toContainText(/£2,000\.00 from 1 row — does not match the £2,100\.00 the calculation used/);
   await expect(broken.getByTestId('difference-formula'))
     .toHaveText('£3,310.00 − £2,000.00 = £1,310.00, which does not match the figure of £1,210.00. Please tell us — a figure that does not reconcile is a fault.');
+});
+
+test('an owner confirms what an imported report covers later, from the stored file, and can correct it', async ({ page }) => {
+  await signIn(page, seedUser(OWNERS.later));
+  const slug = await onboard(page, ORGS.later);
+  // Imported as "only part of it"…
+  await page.goto(`/app/${slug}/data/imports/new`);
+  await page.getByLabel(/what kind of file/i).selectOption('trial_balance');
+  await page.getByLabel(/covers from/i).fill('2026-07-01');
+  await page.getByLabel(/covers to/i).fill('2026-07-31');
+  await page.getByLabel(/the file/i).setInputFiles({ name: 'tb-later.csv', mimeType: 'text/csv', buffer: Buffer.from(TB['2026-07']!, 'utf8') });
+  await page.getByRole('button', { name: /upload and check/i }).click();
+  await page.waitForURL(/\/data\/imports\/[0-9a-f-]{36}/, { timeout: 60_000 });
+  const importUrl = page.url();
+  await page.getByLabel('Report completeness').selectOption('partial');
+  await page.getByLabel('Balance basis').selectOption('cumulative');
+  const question = page.getByRole('button', { name: /yes, that is right|save this answer/i });
+  for (let remaining = await question.count(); remaining > 0; remaining -= 1) {
+    await question.first().click();
+    await expect(question).toHaveCount(remaining - 1, { timeout: 15_000 });
+  }
+  await page.getByRole('button', { name: /^import \d+ rows?$/i }).click();
+  await expect(page.getByText(/this file has already been imported/i)).toBeVisible({ timeout: 30_000 });
+
+  // …then confirmed complete from the import page: no re-upload, a reason, one month.
+  await page.goto(importUrl);
+  const july = page.getByTestId('completeness-2026-07-01');
+  await expect(july).toContainText('Part of the accounts (answered at import)');
+  await expect(page.getByRole('link', { name: /open the stored file/i })).toBeVisible();
+  await july.getByLabel(/what does this report cover for july 2026/i).selectOption('complete');
+  await july.getByLabel(/what did you check/i).fill('Compared it with the full trial balance in our accounts');
+  await july.getByRole('button', { name: /record for july 2026/i }).click();
+  await expect(page.getByTestId('completeness-2026-07-01')).toContainText('Full report (confirmed after import)', { timeout: 15_000 });
+  await expect(page.getByTestId('completeness-history')).toContainText('Compared it with the full trial balance in our accounts');
+
+  // A mistaken answer is corrected by another, and both stay in the history.
+  const again = page.getByTestId('completeness-2026-07-01');
+  await again.getByLabel(/what does this report cover for july 2026/i).selectOption('partial');
+  await again.getByLabel(/what did you check/i).fill('The payroll section is missing after all');
+  await again.getByRole('button', { name: /record for july 2026/i }).click();
+  await expect(page.getByTestId('completeness-2026-07-01')).toContainText('Part of the accounts (confirmed after import)', { timeout: 15_000 });
+  await expect(page.getByTestId('completeness-history').locator('li')).toHaveCount(2);
+  await expect(page.getByTestId('completeness-history')).toContainText('replacing an earlier answer');
 });

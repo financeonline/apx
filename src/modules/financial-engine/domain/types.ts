@@ -63,6 +63,8 @@ export const DATA_QUALITY_MISSING = [
    * not known to mean zero.
    */
   'account_absent_unconfirmed',
+  // Step 0F: a report category with no line, where nobody has yet said whether the report is complete.
+  'report_completeness_unconfirmed',
   /**
    * N-1 (Step 0F): P's balance report has no line in this P&L category and does not establish its
    * completeness (no attestation, IMP-TB-016), so the category is unknown — never an inferred zero.
@@ -314,6 +316,8 @@ export interface SourceCoverage {
   readonly balanceKind?: 'trial_balance' | 'pnl_report' | 'balance_sheet';
   /** N-1: for balances, whether the winning report is complete (attested, IMP-TB-016; a TB balances). */
   readonly reportComplete?: boolean;
+  /** The winning report's own record assurance (extraction method); a ceiling for its figures. */
+  readonly recordAssurance?: AssuranceLevel | null;
   readonly balanceBasis?: 'cumulative' | 'movement';
 }
 

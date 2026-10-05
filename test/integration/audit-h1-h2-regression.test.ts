@@ -173,11 +173,12 @@ describe('H-2 · a trial balance states its P&L', () => {
     expect(metric(tbcum, '2026-06', 'revenue')).toContain('no_prior_trial_balance');
   });
 
-  it('…and what they have no line for is NULL category_not_in_report, so expenses and net profit are NULL, never inferred (N-1)', () => {
+  it('…and what they have no line for is NULL report_completeness_unconfirmed, so expenses and net profit are NULL, never inferred (N-1)', () => {
     for (const o of [tbmov, tbdc]) {
       expect(values(o, 'operating_expenses')).toEqual(['NULL', 'NULL', 'NULL']);
       expect(values(o, 'net_profit')).toEqual(['NULL', 'NULL', 'NULL']);
-      expect(metric(o, '2026-08', 'operating_expenses')).toContain('category_not_in_report');
+      // Never answered (an import made before the question existed): a confirmation is still possible.
+      expect(metric(o, '2026-08', 'operating_expenses')).toContain('report_completeness_unconfirmed');
     }
     expect(values(tbcum, 'operating_expenses')).toEqual(['NULL', 'NULL', 'NULL']);
   });

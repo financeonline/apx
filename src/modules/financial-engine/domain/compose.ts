@@ -61,6 +61,11 @@ export interface BalancePnlContext {
    */
   readonly currentComplete?: boolean;
   readonly priorComplete?: boolean;
+  /** Step 0F: why not complete — `unconfirmed` (never answered) or `partial` (answered, or an unbalanced trial balance). */
+  readonly currentCompleteness?: 'complete' | 'partial' | 'unconfirmed';
+  readonly priorCompleteness?: 'complete' | 'partial' | 'unconfirmed';
+  /** The prior month's report's own record assurance, for a cumulative month (it is half the figure). */
+  readonly priorAssurance?: AssuranceLevel | null;
 }
 
 export interface ComposeInput {
@@ -271,16 +276,23 @@ function balanceAccountAmounts(
    * is NULL — `category_not_in_report`, or `no_prior_trial_balance` where the prior report is absent —
    * and so is every figure built on it. An explicit line of 0.00 is a line: a stated zero.
    */
+  // Never answered → the reason says a confirmation is still possible; answered partial → it is not.
+  const unknownReason = (...states: Array<'complete' | 'partial' | 'unconfirmed' | undefined>): DataQualityMissing =>
+    states.some((s) => s === undefined || s === 'unconfirmed') ? 'report_completeness_unconfirmed' : 'category_not_in_report';
+  const currentState = context.currentCompleteness ?? (context.currentComplete === true ? 'complete' : undefined);
+  const priorState = context.priorCompleteness ?? (context.priorComplete === true ? 'complete' : undefined);
   const stated = new Set(out.map((a) => a.category));
   for (const category of PNL_CATEGORIES) {
     if (stated.has(category)) continue;
     let missing: DataQualityMissing | null;
     if (basis === 'movement' || context.isFirstFiscalMonth) {
-      missing = context.currentComplete === true ? null : 'category_not_in_report';
+      missing = context.currentComplete === true ? null : unknownReason(currentState);
     } else if (!context.priorBatch) {
       missing = 'no_prior_trial_balance';
     } else {
-      missing = context.currentComplete === true && context.priorComplete === true ? null : 'category_not_in_report';
+      missing = context.currentComplete === true && context.priorComplete === true
+        ? null
+        : unknownReason(...[currentState, priorState].filter((s) => s !== 'complete'));
     }
     if (missing === null) continue;
     const home = homeAccountFor(accounts, category);
@@ -541,7 +553,21 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
 
   // ---- P&L ----
   const bankRecords = input.bankRecordAssurance ?? 'verified';
-  const pnlBasis = withBankRecords(choosePrecedence(coverage, 'pnl'), bankRecords);
+  const chosenPnl = withBankRecords(choosePrecedence(coverage, 'pnl'), bankRecords);
+  /*
+   * Step 0F: completeness is not accuracy. A report-basis P&L is no firmer than the report rows it
+   * reads — P's and, on a cumulative month, the prior month's — whatever is known about what the
+   * report covers. An attestation that a report is complete never raises this (an AI-read report's
+   * figures, and the zeros its completeness implies, stay at the report's own assurance).
+   */
+  const reportCeiling = chosenPnl.basis === 'period_balances'
+    ? [coverage.bySource.period_balances.recordAssurance ?? null,
+      (chosenPnl.balanceBasis === 'cumulative' && input.balancePnl?.priorBatch && !input.balancePnl.isFirstFiscalMonth)
+        ? input.balancePnl.priorAssurance ?? null : null]
+      .filter((a): a is AssuranceLevel => a !== null)
+    : [];
+  const pnlBasis = reportCeiling.length === 0 ? chosenPnl
+    : { ...chosenPnl, assurance: reportCeiling.reduce<AssuranceLevel>((a, b) => weakerAssurance(a, b), chosenPnl.assurance) };
   const pnlSource = sourceForBasis(pnlBasis.basis);
 
   const byCounterparty = new Map(context.counterparties.map((c) => [c.id, c]));

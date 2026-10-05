@@ -1,14 +1,15 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
-import { loadBatchReview, type BatchIssueGroup } from '@/modules/imports';
+import { loadBatchReview, loadReportCompleteness, type BatchIssueGroup } from '@/modules/imports';
 import { PageHeader, Card, CardBody, Badge, Banner } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import {
-  CommitControls, ConfirmationPrompt, DuplicateDecisions, SkipUnreadableRows,
+  CommitControls, CompletenessAttestationForm, ConfirmationPrompt, DuplicateDecisions, SkipUnreadableRows,
 } from './review-controls';
 import { AiReadingRequest, DocumentPageView, PageConfirmation, StatementBalancesForm } from './pdf-review';
 import { requirePermission } from '@/app/_lib/authz';
+import { can } from '@/core/permissions';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,16 +33,44 @@ const CONFIRMATION_QUESTIONS: Readonly<Record<string, string>> = {
   'IMP-RANGE-015': 'This file covers the whole period you entered, even where its rows stop earlier.',
   'IMP-TB-012': 'Are these balances year-to-date totals, or just this period’s movements?',
   'IMP-TB-013': 'How are costs shown in this file?',
-  'IMP-TB-016': 'Does this report list every account for the period, including accounts with nothing in them?',
   'IMP-COV-013': 'This file replaces the report already imported for the same month. The earlier report is kept in its history but no longer counted.',
   'IMP-INV-012': 'This list is every open invoice, not only the ones raised in the period.',
   'IMP-ROW-005': 'We took the row we found as the column headings.',
   'IMP-DATE-003': 'Dates in this file are day-first (25/12 is December).',
 };
 
-function questionFor(code: string): string {
+/**
+ * Step 0F: what IMP-TB-016 asks depends on what the report is for. A trial balance lists EVERY
+ * account — income, expenses, assets, liabilities, equity; a P&L report only income and expenses, so
+ * asking it about "every account" would ask about lines it never contains. Neither is expected to
+ * list accounts with no balance: an account left out of a complete report is the zero. The stored
+ * scope (`all_accounts` | `income_and_expense`) is set by the server from the import type.
+ */
+const COMPLETENESS: Readonly<Record<'trial_balance' | 'pnl_report', { question: string; help: string; complete: string; partial: string }>> = {
+  trial_balance: {
+    question: 'Is this the full trial balance — every account with a balance for the period: income, expenses, assets, liabilities and equity?',
+    help: 'Answer yes only for the complete trial balance from your accounting system. Accounts with nothing in them may be left out: we will count any category with no line as zero, so a trial balance must also balance. If this file is an extract — some accounts or sections removed — answer no: categories it has no line for will show as unknown, never as zero.',
+    complete: 'Yes — the full trial balance (accounts left out had nothing in them)',
+    partial: 'No — an extract: some accounts or sections are missing',
+  },
+  pnl_report: {
+    question: 'Is this the full P&L report — every income and expense line for the period?',
+    help: 'Balance-sheet accounts are not expected here. Answer yes only if no income or expense line was removed (lines with nothing in them may be left out; grouped lines are fine if every amount is inside one). We will count any income or expense category with no line as zero. If this is part of a P&L — for example costs only — answer no: categories with no line will show as unknown, never as zero.',
+    complete: 'Yes — the full P&L (lines left out had nothing in them)',
+    partial: 'No — only part of the P&L',
+  },
+};
+
+function questionFor(code: string, importType: string): string {
+  if (code === 'IMP-TB-016') return COMPLETENESS[importType === 'pnl_report' ? 'pnl_report' : 'trial_balance'].question;
   return CONFIRMATION_QUESTIONS[code]
     ?? `Please confirm this file is as expected before importing (${code}).`;
+}
+
+function choiceFor(code: string, importType: string): (typeof CHOICES)[string] | undefined {
+  if (code !== 'IMP-TB-016') return CHOICES[code];
+  const c = COMPLETENESS[importType === 'pnl_report' ? 'pnl_report' : 'trial_balance'];
+  return { ...CHOICES[code]!, options: [{ value: 'complete', label: c.complete }, { value: 'partial', label: c.partial }] };
 }
 
 const CHOICES: Readonly<Record<string, {
@@ -57,13 +86,13 @@ const CHOICES: Readonly<Record<string, {
   },
   'IMP-TB-016': {
     name: 'report_complete',
-    label: 'Every account listed',
+    label: 'Report completeness',
     // N-1: nothing is pre-selected. "Complete" turns every missing line into a zero, so it has to be
-    // the reviewer's answer, never the form's default.
+    // the reviewer's answer, never the form's default. The wording is per report type (`choiceFor`).
     explicit: true,
     options: [
-      { value: 'complete', label: 'Yes — every account, including those with nothing in them' },
-      { value: 'partial', label: 'No — only some accounts or sections' },
+      { value: 'complete', label: 'Yes — the full report' },
+      { value: 'partial', label: 'No — only part of it' },
     ],
   },
   'IMP-TB-013': {
@@ -88,6 +117,14 @@ export default async function ReviewBatchPage({
   const review = await loadBatchReview(ctx.db, ctx.orgId!, batchId, ctx.requestId);
   // Cross-organisation or invented: NOT FOUND, never FORBIDDEN (SECURITY_MODEL.md §14).
   if (review === null) notFound();
+
+  // Step 0F follow-up: owners and admins may record what an imported report covers. Only they hold
+  // both permissions below; the database enforces the role itself, this only decides whether to
+  // show the form.
+  const completeness = review.batch.status === 'committed'
+    ? await loadReportCompleteness(ctx.db, ctx.orgId!, batchId)
+    : null;
+  const canAttest = can(ctx, 'imports.review') && can(ctx, 'settings.manage');
 
   const total = Object.values(review.counts).reduce((sum, n) => sum + n, 0);
 
@@ -128,6 +165,71 @@ export default async function ReviewBatchPage({
             Its rows are part of your figures. Roll it back from the imports list if it was wrong.
           </Banner>
         ) : null}
+
+        {/*
+          * Step 0F follow-up: what an imported trial balance or P&L report covers, per month. An owner
+          * or admin can record it after reviewing the stored file — no re-upload — and correct it
+          * later; every answer is kept. Completeness is not accuracy: it changes which categories can
+          * be zero, never how firm the figures are.
+          */}
+        {completeness === null ? null : (
+          <Card>
+            <CardBody className="p-4">
+              <h2 className="font-serif text-lg text-ink">What this report covers</h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                {completeness.scope === 'all_accounts'
+                  ? 'A full trial balance lists every account with a balance — income, expenses, assets, liabilities and equity.'
+                  : 'A full P&L report lists every income and expense line with an amount.'}{' '}
+                Only for a full report do we count a category with no line as zero; otherwise it shows as
+                unknown. This says nothing about whether the amounts are right, and does not change how
+                firm the figures are.{' '}
+                <Link href={`/app/${orgSlug}/data/documents/${review.batch.sourceDocumentId}`} className="text-accent underline underline-offset-2">
+                  Open the stored file
+                </Link>
+                {' '}to check it.
+              </p>
+              <ul className="mt-3 space-y-4">
+                {completeness.months.map((m) => {
+                  const label = new Date(`${m.month}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+                  const status = m.current === 'complete' ? 'Full report' : m.current === 'partial' ? 'Part of the accounts' : 'Not yet confirmed';
+                  return (
+                    <li key={m.month} className="border-b border-line pb-3 last:border-0" data-testid={`completeness-${m.month}`}>
+                      <p className="text-sm text-ink">
+                        <span className="font-medium">{label}</span>: {status}
+                        {m.source === 'owner_review' ? ' (confirmed after import)' : m.source === 'import_review' ? ' (answered at import)' : ''}
+                        {' · '}{m.lines} {m.lines === 1 ? 'line' : 'lines'}
+                      </p>
+                      {m.balances === false ? (
+                        <p className="text-sm text-warn">These lines do not balance, so this trial balance cannot count as a full one whatever the answer.</p>
+                      ) : null}
+                      {canAttest ? (
+                        <CompletenessAttestationForm
+                          orgSlug={orgSlug} batchId={batchId} month={m.month} monthLabel={label}
+                          completeLabel={completeness.scope === 'all_accounts' ? 'The full trial balance (accounts left out had nothing in them)' : 'The full P&L (lines left out had nothing in them)'}
+                          partialLabel={completeness.scope === 'all_accounts' ? 'An extract — some accounts or sections are missing' : 'Only part of the P&L'}
+                        />
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+              {completeness.history.length === 0 ? null : (
+                <div className="mt-4">
+                  <h3 className="text-sm font-medium text-ink">History</h3>
+                  <ul className="mt-1 space-y-1 text-sm text-ink-muted" data-testid="completeness-history">
+                    {completeness.history.map((h) => (
+                      <li key={h.id} className="[overflow-wrap:anywhere]">
+                        {h.attestedAt.slice(0, 16).replace('T', ' ')} — {h.attestedBy} ({h.attestedRole}) recorded {h.month.slice(0, 7)} as{' '}
+                        {h.coverage === 'complete' ? 'a full report' : 'part of the accounts'}
+                        {h.supersedesId ? ', replacing an earlier answer' : ''}: “{h.reason}”
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </CardBody>
+          </Card>
+        )}
         {review.batch.status === 'failed' ? (
           <Banner tone="danger" title="MOTION could not read this file.">
             {review.batch.errorSummary?.message ?? 'Nothing was imported. The file is stored as a source document.'}
@@ -251,11 +353,14 @@ export default async function ReviewBatchPage({
                     orgSlug={orgSlug}
                     batchId={batchId}
                     code={code}
-                    question={questionFor(code)}
+                    question={questionFor(code, review.batch.importType)}
+                    help={code === 'IMP-TB-016'
+                      ? COMPLETENESS[review.batch.importType === 'pnl_report' ? 'pnl_report' : 'trial_balance'].help
+                      : undefined}
                     values={code === 'IMP-RANGE-015' && review.batch.periodStart && review.batch.periodEnd
                       ? { period_start: review.batch.periodStart, period_end: review.batch.periodEnd }
                       : undefined}
-                    choice={CHOICES[code]}
+                    choice={choiceFor(code, review.batch.importType)}
                   />
                 ))}
               </div>

@@ -33,6 +33,12 @@ export interface FingerprintInput {
   readonly categoryHistoryHeads: Readonly<Record<string, string>>;
   /** counterparty id → survivor, so a merge is caught. */
   readonly counterpartyMerges: Readonly<Record<string, string>>;
+  /**
+   * Step 0F: `import|month` → the current completeness attestation. An owner confirming (or
+   * correcting) what a report covers moves no record, yet changes which categories are zero and which
+   * source states the P&L; without this the recalculation it queues would finish `no_change`.
+   */
+  readonly completenessHeads?: Readonly<Record<string, string>>;
   /** Organization settings that change figures: currency, fiscal year, VAT. */
   readonly settings: Readonly<Record<string, unknown>>;
   /** The banking detector version; changing the detector must change the fingerprint (§4.3). */

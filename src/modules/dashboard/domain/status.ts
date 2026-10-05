@@ -93,7 +93,8 @@ const MISSING_REASONS: Readonly<Record<string, string>> = {
   no_opening_balance: 'We need an opening balance for this account first.',
   no_prior_trial_balance: 'The previous month’s figures are missing, so this cannot be worked out.',
   account_absent_unconfirmed: 'An account appears in one month’s report but not the other’s, and the report does not show it is complete, so this month cannot be worked out.',
-  category_not_in_report: 'Your report has no line for this, and it was not confirmed as listing every account, so we cannot treat it as zero.',
+  category_not_in_report: 'Your report has no line for this and is only part of your accounts, so we cannot treat it as zero.',
+  report_completeness_unconfirmed: 'Your report has no line for this, and nobody has yet confirmed whether the report lists every account. An owner or admin can confirm it on the import.',
   stale_invoice_data: 'Your invoice list does not show the position at the end of this month.',
   vat_basis_unknown: 'What you owe includes VAT but your costs do not, so the days cannot be compared fairly.',
   // The cost-of-sales reasons are the shared ones (ADR-106): Home, the report and the analyst all

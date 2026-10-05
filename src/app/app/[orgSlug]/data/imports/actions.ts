@@ -7,8 +7,9 @@ import { callApi, enqueueServerJob } from '@/core/db';
 import { parseMoney } from '@/core/money';
 import { setStatementBalancesAndRevalidate } from '@/modules/imports';
 import { assertCan } from '@/core/permissions';
+import { ValidationError } from '@/core/errors';
 import {
-  commitImportBatch, decideImportRows, recordBatchConfirmation, rejectImportBatch,
+  attestReportCompleteness, commitImportBatch, decideImportRows, recordBatchConfirmation, rejectImportBatch,
   rollbackImportBatch, startImport,
 } from '@/modules/imports';
 import type { ImportType } from '@/modules/imports';
@@ -316,5 +317,36 @@ export async function statementBalancesAction(_previous: ActionResult | null, fo
         : 'Saved. The transactions do not add up to those balances; see the note above.');
   } catch (error) {
     return fail(error, { requestId, action: 'imports.balances' });
+  }
+}
+
+/**
+ * Step 0F follow-up: an owner or admin confirms what an EXISTING report covers, for one import and
+ * one month, after reviewing the stored file — no re-upload. The database enforces the role, the
+ * month and the reason, keeps every earlier answer, audits it and queues the recalculation.
+ */
+export async function attestCompletenessAction(
+  _previous: ActionResult | null,
+  form: FormData,
+): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    assertCan(ctx, 'imports.review');
+    const batchId = text(form, 'batch_id');
+    const coverage = text(form, 'coverage');
+    if (coverage !== 'complete' && coverage !== 'partial') {
+      return fail(new ValidationError('Choose whether the report is complete or only part of it.'), { requestId, action: 'imports.attest' });
+    }
+    await attestReportCompleteness(ctx.db, {
+      batchId, month: text(form, 'month'), coverage, reason: text(form, 'reason'),
+    }, requestId);
+    revalidatePath(`/app/${orgSlug}/data/imports/${batchId}`);
+    revalidatePath(`/app/${orgSlug}/home`);
+    return done('Recorded. Your figures are being recalculated.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'imports.attest' });
   }
 }

@@ -133,7 +133,21 @@
  *   - N-2: each term of a `difference` evidence query states the total the engine read for it
  *     (`expected`), so each side's records reconcile to their own value and then the formula.
  */
-export const ENGINE_VERSION = '11.0.0';
+/**
+ * 12.0.0 (Step 0F follow-up, ADR-139 amendment): MAJOR. 11.0.0 was never released; its hash is kept
+ * with the commit under review (4e3913c).
+ *   - A report's completeness is per MONTH: an owner's or admin's attestation for that month, else
+ *     the import's answer (IMP-TB-016). An absent category the report was never asked about is NULL
+ *     `report_completeness_unconfirmed` (a confirmation is still possible); one it was answered
+ *     partial for stays `category_not_in_report`. 11.0.0 gave both the latter.
+ *   - Completeness is not accuracy: a report-basis P&L takes the weakest of the report's own record
+ *     assurance (and, for a cumulative month, the prior report's). No current import produces a report
+ *     weaker than verified (AI reading is refused for anything but bank statements), so no stored
+ *     assurance changes; the rule stops an attestation from ever raising one.
+ *   - The run fingerprint includes the current attestation per (import, month), so confirming or
+ *     correcting one recalculates instead of finishing `no_change`.
+ */
+export const ENGINE_VERSION = '12.0.0';
 
 /** Bumped independently of the engine (§6). */
 /**

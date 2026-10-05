@@ -34,6 +34,8 @@ env:
   # Step 0E: the commit frozen for review (engine 8.0.0). A remediation's own effect is the frozen → branch record.
   FROZEN: c5a84735aff228603693aa0c51834769ad9333ed
   # Step 0F: the Step 0E commit the re-review tested (engine 10.0.0). Step 0F's own effect is step0e → branch.
+  # Step 0F follow-up: the Step 0F commit under re-review (engine 11.0.0). This follow-up's own effect is step0f → branch.
+  STEP0F: 4e3913c557d9ebf207238d911f964cbe9df1431d
   STEP0E: 39711f54243d4deedfd627f1e28dc24087a1a011
   # The Supabase CLI pinned by package.json (devDependency), not "latest": the same CLI as a developer's.
   SUPABASE: npx --no-install supabase
@@ -239,6 +241,18 @@ jobs:
           done
           npx --no-install supabase stop --no-backup
         shell: bash -eo pipefail {0}
+      - name: Step 0F dump (4e3913c, engine 11.0.0) — isolates the completeness follow-up
+        run: |
+          git worktree add "$RUNNER_TEMP/step0f" "$STEP0F"
+          cd "$RUNNER_TEMP/step0f"
+          npm ci
+          npx --no-install supabase start
+          "$GITHUB_WORKSPACE/scripts/write-local-env.sh"
+          for f in test/regression/engine-comparison.test.ts test/regression/engine-comparison-step0d.test.ts; do
+            ENGINE_COMPARE_LABEL=step0f ENGINE_COMPARE_OUT="$GITHUB_WORKSPACE/compare" npx vitest run --project regression "$f"
+          done
+          npx --no-install supabase stop --no-backup
+        shell: bash -eo pipefail {0}
       - name: this branch's dump
         run: |
           $SUPABASE start
@@ -254,6 +268,8 @@ jobs:
           npx tsx scripts/engine-compare.ts compare/frozen-step0d.json compare/branch-step0d.json > compare/record-frozen-step0d.md
           npx tsx scripts/engine-compare.ts compare/step0e.json compare/branch.json > compare/record-step0e.md
           npx tsx scripts/engine-compare.ts compare/step0e-step0d.json compare/branch-step0d.json > compare/record-step0e-step0d.md
+          npx tsx scripts/engine-compare.ts compare/step0f.json compare/branch.json > compare/record-step0f.md
+          npx tsx scripts/engine-compare.ts compare/step0f-step0d.json compare/branch-step0d.json > compare/record-step0f-step0d.md
       - if: always()
         uses: actions/upload-artifact@v4
         with:

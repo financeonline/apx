@@ -279,6 +279,7 @@ export async function runCalculation(
     accountCategories: fingerprintSources.accountCategories,
     categoryHistoryHeads: fingerprintSources.categoryHistoryHeads,
     counterpartyMerges: fingerprintSources.counterpartyMerges,
+    completenessHeads: fingerprintSources.completenessHeads ?? {},
     settings: {
       baseCurrency: settings.baseCurrency,
       fiscalYearStartMonth: settings.fiscalYearStartMonth,
