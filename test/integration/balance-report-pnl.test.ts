@@ -26,9 +26,15 @@ let owner: string;
 const ownerDb = () => clientFor(owner, { email: `owner@${DOMAIN}` });
 
 async function org(label: string): Promise<string> {
-  const r = await clientFor(owner).schema('api').rpc('create_organization', { p_name: `ITest BalancePnl ${label} ${RUN}` });
+  // `create_organization` is throttled per user: a separate creator per organisation, then the shared
+  // user joins as admin (ownership is sole; admin holds imports.review), so one token reads them all.
+  const creator = createAuthUser(`${label.toLowerCase()}-creator@${DOMAIN}`);
+  const r = await clientFor(creator).schema('api').rpc('create_organization', { p_name: `ITest BalancePnl ${label} ${RUN}` });
   if (r.error) throw new Error(r.error.message);
-  return r.data as unknown as string;
+  const id = r.data as unknown as string;
+  adminSql(`set local app.bootstrap = 'on';
+    insert into public.organization_memberships (organization_id, user_id, role) values ('${id}', '${owner}', 'admin');`);
+  return id;
 }
 
 const END: Record<string, string> = { '2026-06': '2026-06-30', '2026-07': '2026-07-31', '2026-08': '2026-08-31' };
