@@ -172,3 +172,11 @@ That run reported success, but it **hid three failures**: a step's default shell
 | 1 | Integration, clean and upgraded (`import-wizard-types`) | "balance sheets › commit into period balances": InternalError | Pre-existing (not from Step 0–0C): `loadExistingRecords` and `app.rerun_dedupe` read `dedupe_hash`, which `period_balances` does not have. Every trial balance, P&L and balance-sheet wizard import failed. | Not selected for `period_balances`; migration `20261005000005` returns 0 from `app.rerun_dedupe` for that target (balances supersede at batch scope) |
 | 2 | Integration, clean and upgraded | "a purchase list … makes a known customer both": got `customer` | A name matched to an existing counterparty was not sent to `create_import_counterparties`, so its kind was never widened | The wizard sends matched names too (deduplicated by stored key, 5,000 per call) |
 | 3 | Playwright, `accessibility.spec.ts` 320×568 | "Health score explained overflows at 320px" (18 px) | "The figures this used" shows a composed variance key (`operating_expenses.variance.prev_period`) as one unbreakable word. The Health rules and this list are unchanged since `2783240`, so this depends on the seeded data; not shown to be caused by Step 0–0C | The link wraps (`overflow-wrap: anywhere`); the assertion is unchanged |
+
+### Found by the second run (37268036752, `3121e61`)
+
+With pipefail in place the run went red honestly. pgTAP passed (23 files, 1,178 tests) on both databases. Integration ran 916 tests, 915 passed and 1 failed, on both databases. Playwright did not run, because the job stopped at integration.
+
+| # | Failure | Cause | Fix |
+|---|---|---|---|
+| 4 | "balance sheets › commit": `VALIDATION: period_start is required to assign a fiscal period` | Pre-existing, and it hid behind #1. A balance report with no period column produced rows with no `period_start`. The declared range was never applied, and validation did not require a period, so every such row failed at commit in `app.period_assign`. | When the declared range lies inside one calendar month, rows take that month (`period_start`/`period_end`). A wider range is never guessed: each row gets **IMP-PERIOD-005**, so the reviewer sees it before commit. Unit tests cover both cases and fail against the previous code. |

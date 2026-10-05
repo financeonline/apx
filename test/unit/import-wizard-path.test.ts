@@ -220,7 +220,10 @@ function fixture(name: string, mime = 'text/csv'): File {
   return new File([new Uint8Array(readFileSync(path.resolve(process.cwd(), 'fixtures/imports', name)))], name, { type: mime });
 }
 
-async function run(name: string, importType: string, bankAccountId: string | null = null, mime?: string) {
+async function run(
+  name: string, importType: string, bankAccountId: string | null = null, mime?: string,
+  period: { start: string; end: string } = { start: '2026-08-01', end: '2026-08-31' },
+) {
   return startImport({
     organizationId: ORG,
     userId: '0a000000-0000-4000-8000-000000000001',
@@ -228,8 +231,8 @@ async function run(name: string, importType: string, bankAccountId: string | nul
     db: fakeDb as never,
     file: fixture(name, mime),
     importType: importType as never,
-    periodStart: '2026-08-01',
-    periodEnd: '2026-08-31',
+    periodStart: period.start,
+    periodEnd: period.end,
     bankAccountId,
   });
 }
@@ -381,9 +384,25 @@ describe('balance sheets', () => {
       expect(row.status, JSON.stringify(row.issues)).not.toBe('error');
       expect(row.mapped_data.account_id).toBeTruthy();
       expect(row.mapped_data.closing_balance).toBeTruthy();
+      // No date column: the one-month declared range is the period. Without it the commit failed on
+      // `period_assign` ("period_start is required"), found by the Step 0C validation run.
+      expect(row.mapped_data).toMatchObject({ period_start: '2026-08-01', period_end: '2026-08-31' });
     }
     // A single signed column must be confirmed as reporting or natural sign before commit (IMP-TB-013).
     expect(result.requiredConfirmations).toEqual(expect.arrayContaining(['IMP-RANGE-015', 'IMP-TB-012', 'IMP-TB-013']));
+  });
+});
+
+describe('a balance report with no period column', () => {
+  it('declared over more than one month: every row asks for its period (IMP-PERIOD-005), none is guessed', async () => {
+    await run('balance_sheet.csv', 'balance_sheet', null, undefined, { start: '2026-07-01', end: '2026-08-31' });
+    const rows = dataRows();
+    expect(rows).toHaveLength(4);
+    for (const row of rows) {
+      expect(row.status).toBe('error');
+      expect(row.issues.map((i) => i.code)).toContain('IMP-PERIOD-005');
+      expect(row.mapped_data.period_start ?? null).toBeNull();
+    }
   });
 });
 

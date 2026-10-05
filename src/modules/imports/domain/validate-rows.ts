@@ -195,6 +195,15 @@ export function validateRow(
   // ---- Dates ----
   const dateField = primaryDateField(ctx.targetTable);
   const dateValue = value(dateField);
+  // A balance row's period comes from the file or from a one-month declared range (pipeline); with
+  // neither, the database cannot assign a fiscal period, so the reviewer is asked here.
+  if (dateValue === null && ctx.targetTable === 'period_balances' && populated.length > 0) {
+    issues.push({
+      code: 'IMP-PERIOD-005', severity: 'error', field: dateField,
+      message: 'This balance has no period: the file has no period column and the declared range covers more than one month.',
+      suggestion: 'Upload one month per file, or map the column that names each period.',
+    });
+  }
   if (dateValue !== null) {
     if (!isValidIsoDate(dateValue)) {
       issues.push({

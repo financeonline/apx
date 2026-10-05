@@ -50,6 +50,15 @@ const MONEY_FIELDS = [
 /** The target fields that hold a date (§6.1), read through the §6.4 transform. */
 const DATE_FIELDS = ['entry_date', 'transaction_date', 'issue_date', 'due_date', 'paid_date', 'posted_date', 'period_start', 'period_end'] as const;
 
+/** The calendar month a declared range lies inside, or null when it spans more than one. */
+function singleMonthOf(start: string, end: string): { start: string; end: string } | null {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(start) || !/^\d{4}-\d{2}-\d{2}$/.test(end)) return null;
+  if (start.slice(0, 7) !== end.slice(0, 7) || end < start) return null;
+  const [y, m] = start.split('-').map(Number) as [number, number];
+  const last = new Date(Date.UTC(y, m, 0)).getUTCDate();
+  return { start: `${start.slice(0, 7)}-01`, end: `${start.slice(0, 7)}-${String(last).padStart(2, '0')}` };
+}
+
 function primaryDateFieldOf(target: ImportTarget): string {
   switch (target) {
     case 'ledger_entries': return 'entry_date';
@@ -340,6 +349,27 @@ export function runPipeline(input: PipelineInput): PipelineResult {
       : named.trim().toUpperCase();
   }
   const hiddenRows = new Set(staged.filter((s) => s.hidden).map((s) => s.rowNumber));
+
+  /*
+   * A balance report (trial balance, P&L, balance sheet) usually has no date column: the period is
+   * the one the upload declared. `period_balances.period_start` assigns the fiscal period, so a row
+   * without it reached commit and failed every such import on `period_assign` (validation, Step 0C).
+   * Only a declared range inside ONE calendar month names the period; any wider range leaves the row
+   * without one, and IMP-PERIOD-005 asks the reviewer instead of guessing a month.
+   */
+  if (input.targetTable === 'period_balances') {
+    const month = singleMonthOf(input.declaredPeriodStart, input.declaredPeriodEnd);
+    if (month !== null) {
+      for (const s of staged) {
+        if (s.nonTabular) continue;
+        const start = s.mapped.period_start;
+        if (start !== undefined && start !== null && start.trim() !== '') continue;
+        s.mapped.period_start = month.start;
+        const end = s.mapped.period_end;
+        if (end === undefined || end === null || end.trim() === '') s.mapped.period_end = month.end;
+      }
+    }
+  }
 
   const validationCtx = {
     importType: input.importType,
