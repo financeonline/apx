@@ -218,6 +218,55 @@ export async function importLedger(
     .toBeVisible({ timeout: 30_000 });
 }
 
+/**
+ * Adds a bank account through the Banking page, the way an owner does (journey 13's steps).
+ */
+export async function addBankAccount(page: Page, slug: string, name: string): Promise<void> {
+  await page.goto(`/app/${slug}/money/banking`);
+  await page.getByLabel(/what do you call this account/i).fill(name);
+  await page.getByLabel(/which bank is it with/i).fill('Test Bank');
+  await page.getByLabel(/last four digits/i).fill('1234');
+  await page.getByRole('button', { name: /add this account/i }).click();
+  await expect(page.getByText(/account added/i)).toBeVisible({ timeout: 15_000 });
+}
+
+/** Imports a bank statement through the real wizard (journey 13's steps), answering its questions. */
+export async function importStatement(
+  page: Page, slug: string, csv: string, filename: string, from: string, to: string,
+): Promise<void> {
+  await page.goto(`/app/${slug}/data/imports/new`);
+  await page.getByLabel(/what kind of file/i).selectOption('bank_statement');
+  await page.getByLabel(/covers from/i).fill(from);
+  await page.getByLabel(/covers to/i).fill(to);
+  await page.getByLabel(/the file/i).setInputFiles({ name: filename, mimeType: 'text/csv', buffer: Buffer.from(csv, 'utf8') });
+  await page.getByRole('button', { name: /upload and check/i }).click();
+  await page.waitForURL(/\/data\/imports\/[0-9a-f-]{36}/, { timeout: 60_000 });
+  const question = page.getByRole('button', { name: /yes, that is right|save this answer/i });
+  for (let remaining = await question.count(); remaining > 0; remaining -= 1) {
+    await question.first().click();
+    await expect(question).toHaveCount(remaining - 1, { timeout: 15_000 });
+  }
+  const skip = page.getByRole('button', { name: /^skip \d+ rows?$/i });
+  if (await skip.count() > 0) { await skip.click(); await expect(skip).toHaveCount(0, { timeout: 15_000 }); }
+  await page.getByRole('button', { name: /^import \d+ rows?$/i }).click();
+  await expect(page.getByText(/this file has already been imported/i)).toBeVisible({ timeout: 30_000 });
+}
+
+/**
+ * The bank statement behind GL_CSV's May (its cash side: in 25,000 and 15,000; out 9,000, 3,000 and
+ * 12,000), with a running balance from 10,000. Since Step 0E (H-1) a business with no bank data is
+ * not scored on banking at all, so the seeded organisation carries real bank data for the Health
+ * history the accessibility sweep reads.
+ */
+export const STATEMENT_MAY_CSV = [
+  'Date,Description,Paid Out,Paid In,Balance',
+  '2026-05-10,FPS CREDIT INVOICE 1001,,25000.00,35000.00',
+  '2026-05-12,MATERIALS SUPPLIER,9000.00,,26000.00',
+  '2026-05-18,FPS CREDIT INVOICE 1002,,15000.00,41000.00',
+  '2026-05-20,CAMPAIGN AGENCY,3000.00,,38000.00',
+  '2026-05-25,PAYROLL MAY,12000.00,,26000.00',
+].join('\n');
+
 /** A month of ordinary trading, in the shape a small accounting package exports. */
 export const GL_CSV = [
   'Date,Account Code,Account Name,Description,Debit,Credit',

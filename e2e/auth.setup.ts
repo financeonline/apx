@@ -1,8 +1,8 @@
 import { writeFileSync } from 'node:fs';
 import { expect, test as setup } from '@playwright/test';
 import {
-  AUTH_STATE, GL_CSV, SEEDED_ORG, drainQueue, importLedger, onboard, seedUser, signIn,
-  sweepOldFixtures, uniqueName,
+  AUTH_STATE, GL_CSV, SEEDED_ORG, STATEMENT_MAY_CSV, addBankAccount, drainQueue, importLedger, importStatement,
+  onboard, seedUser, signIn, sweepOldFixtures, uniqueName,
 } from './fixtures';
 
 /**
@@ -22,6 +22,9 @@ setup('sign in and seed an organisation with figures', async ({ page }) => {
 
   const slug = await onboard(page, uniqueName('Accessible Ltd'));
   await importLedger(page, slug, GL_CSV, 'gl-may.csv');
+  // Real bank data for the same month: Banking Health is scored only on bank evidence (Step 0E, H-1).
+  await addBankAccount(page, slug, 'Main current account');
+  await importStatement(page, slug, STATEMENT_MAY_CSV, 'statement-may.csv', '2026-05-01', '2026-05-31');
   await drainQueue(page, slug);
 
   // The figures must actually be there, or every check downstream is vacuous.
