@@ -6,7 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { Decimal } from '@/core/money';
 
 import {
-  bankRecordAssuranceFor, buildCashHistory, composePeriod, computeCoverage, computeReceivables, denominatorInputsFor,
+  balancePnlContext, balanceRowsByKind, bankRecordAssuranceFor, buildCashHistory, composePeriod, computeCoverage, computeReceivables, denominatorInputsFor,
   ENGINE_VERSION, invoiceSideCoverage, isPeriodComplete, statementRecordAssurance, variancesForPeriod,
   type AccountRef, type AggregateCell, type AgingInvoice, type BankAccountRef, type CoverageBatch,
   type DailyMovement, type EngineContext, type MetricResult, type PeriodRef, type ReceivablesPeriodInput, type StatementRef,
@@ -250,7 +250,7 @@ function corpus(): unknown {
   return {
     periods: out, freshness, history: [...history.entries()], tolerance, lastDayJournal,
     fu1: fu1Corpus(ctx), fu12: fu12Corpus(ctx), fu12Variance: fu12VarianceCorpus(ctx),
-    fu9: fu9Corpus(ctx), adr130: adr130Corpus(ctx), adr133: adr133Corpus(ctx), step0d: step0dCorpus(),
+    fu9: fu9Corpus(ctx), adr130: adr130Corpus(ctx), adr133: adr133Corpus(ctx), step0d: step0dCorpus(), step0e: step0eCorpus(ctx),
   };
 }
 
@@ -355,6 +355,52 @@ function step0dCorpus(): unknown {
   };
   // The chain reaches 12,700 at 31 August (May's printed 10,000 plus every row since).
   return { carried: run(null), attested: run('12700') };
+}
+
+/**
+ * Step 0E (ADR-138). H-2: a trial balance / P&L report states the P&L from `closing_balance` — movement
+ * as is, cumulative by §3's difference (no prior → NULL), the winning kind only. H-1: coverage's bank
+ * evidence is NULL with no cash-like account in scope.
+ */
+function step0eCorpus(ctx: EngineContext): unknown {
+  const bal = (p: PeriodRef, kind: 'trial_balance' | 'pnl_report', basis: 'movement' | 'cumulative', accountId: string, category: AggregateCell['standardCategory'], closing: string) =>
+    cell({ periodId: p.id, source: 'period_balances', balanceKind: kind, balanceBasis: basis, accountId, standardCategory: category, amount: closing });
+  const tb = (prefix: string, kind: 'trial_balance' | 'pnl_report', basis: 'movement' | 'cumulative', periods: PeriodRef[]) =>
+    periods.map((p, i) => batch(70 + i + (prefix === 'c' ? 10 : prefix === 'r' ? 20 : 0), {
+      targetTable: 'period_balances', invoiceListKind: null, importType: kind, balanceKind: kind, balanceBasis: basis,
+      periodStart: p.periodStart, periodEnd: p.periodEnd,
+    }));
+  const cases: Record<string, { cells: AggregateCell[]; batches: CoverageBatch[] }> = {
+    movement: {
+      cells: [JUN, JUL].flatMap((p, i) => [bal(p, 'trial_balance', 'movement', REV!, 'revenue', i ? '-1100' : '-1000'),
+        bal(p, 'trial_balance', 'movement', COS!, 'cost_of_sales', i ? '440' : '400'), bal(p, 'trial_balance', 'movement', OPEX!, 'operating_expense', '300')]),
+      batches: tb('m', 'trial_balance', 'movement', [JUN, JUL]),
+    },
+    cumulative: {
+      cells: [JUN, JUL].flatMap((p, i) => [bal(p, 'trial_balance', 'cumulative', REV!, 'revenue', i ? '-2100' : '-1000'),
+        bal(p, 'trial_balance', 'cumulative', COS!, 'cost_of_sales', i ? '840' : '400')]),
+      batches: tb('c', 'trial_balance', 'cumulative', [JUN, JUL]),
+    },
+    kinds: {
+      cells: [bal(JUL, 'trial_balance', 'movement', REV!, 'revenue', '-1100'), bal(JUL, 'pnl_report', 'movement', REV!, 'revenue', '-9999')],
+      batches: [...tb('m', 'trial_balance', 'movement', [JUL]), ...tb('r', 'pnl_report', 'movement', [JUL])],
+    },
+  };
+  const periods = [MAY, JUN, JUL];
+  const out: Record<string, unknown> = {};
+  for (const [name, c] of Object.entries(cases)) {
+    out[name] = [JUN, JUL].map((period) => {
+      const coverage = computeCoverage({ period, batches: c.batches, bankAccounts: [], rowCounts: { period_balances: 1 }, asOf: ctx.asOf,
+        balanceRowsByKind: balanceRowsByKind(c.cells, period.id) });
+      const prior = periods[periods.findIndex((p) => p.id === period.id) - 1];
+      const balancePnl = balancePnlContext({ period, prior, coverage, batches: c.batches, cells: c.cells, organisationFiscalYearStartMonth: 1 });
+      return composePeriod({ period, coverage, cells: c.cells, transferLegs: [], context: { ...ctx, bankAccounts: [] }, balancePnl })
+        .filter((r) => r.dimensionType === 'none')
+        .map((r) => [r.key, r.value, r.basis, r.assurance, r.dataQuality.missing, r.evidenceQuery === null ? null : 'q']);
+    });
+  }
+  out.bankEvidence = computeCoverage({ period: JUL, batches: [], bankAccounts: [], rowCounts: {}, asOf: ctx.asOf }).bankEvidenceRatio;
+  return out;
 }
 
 /**
@@ -546,6 +592,18 @@ describe('engine version golden (ADR-124 D-6)', () => {
       out.step0d[variant].find(([label]) => label === '2026-09')![1].find((a) => a.bankAccountId === BANK_A)!.opening!.assurance;
     expect(septemberA('carried')).toBe('inferred');
     expect(septemberA('attested')).toBe('verified');
+  });
+
+  it('the Step 0E cases state balance-report P&L from closing balances, and no bank evidence as NULL', () => {
+    const out = corpus() as { step0e: Record<string, Array<Array<[string, string | null, string, string, string[], string | null]>>> & { bankEvidence: unknown } };
+    const revenue = (name: string, i: number) => out.step0e[name]![i]!.find((r) => r[0] === 'revenue')!;
+    expect(revenue('movement', 0)[1]).toBe('1000.00');
+    expect(revenue('movement', 1)[1]).toBe('1100.00');
+    expect(revenue('cumulative', 0)[1]).toBeNull();
+    expect(revenue('cumulative', 0)[4]).toContain('no_prior_trial_balance');
+    expect(revenue('cumulative', 1)[1]).toBe('1100.00');
+    expect(revenue('kinds', 1)[1]).toBe('1100.00');
+    expect(out.step0e.bankEvidence).toBeNull();
   });
 
   it('the FU-1 cases state revenue exactly where a full sales list establishes it', () => {

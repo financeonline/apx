@@ -555,3 +555,50 @@ describe('names outside ASCII (ADR-136)', () => {
     expect(dataRows()[0]!.mapped_data.counterparty_id).toBe('cp-izmir');
   });
 });
+
+/**
+ * H-2 (Step 0E): every supported balance-report layout produces the `closing_balance` commit stores
+ * (NOT NULL) and the engine reads. A Debit/Credit trial balance and a single-amount P&L report never
+ * did: their rows validated, then failed the commit.
+ */
+describe('balance report layouts → closing_balance', () => {
+  const upload = (importType: string, header: string, rows: string[]) => startImport({
+    organizationId: ORG, userId: '0a000000-0000-4000-8000-000000000001', requestId: 'unit', db: fakeDb as never,
+    file: new File([[header, ...rows].join('\n')], 'balances.csv', { type: 'text/csv' }),
+    importType: importType as never, periodStart: '2026-08-01', periodEnd: '2026-08-31', bankAccountId: null,
+  });
+
+  it('a Debit / Credit trial balance: closing = debit − credit, both totals kept, no sign question', async () => {
+    const result = await upload('trial_balance', 'Account,Debit,Credit', ['Sales,,1210.00', 'Cost of Sales,484.00,', 'Rent,300.00,0']);
+    const rows = dataRows();
+    for (const row of rows) expect(row.status, JSON.stringify(row.issues)).not.toBe('error');
+    expect(rows.map((r) => [r.mapped_data.closing_balance, r.mapped_data.debit_total ?? null, r.mapped_data.credit_total ?? null])).toEqual([
+      ['-1210.00', null, '1210.00'], ['484.00', '484.00', null], ['300.00', '300.00', '0.00'],
+    ]);
+    expect(result.requiredConfirmations).not.toContain('IMP-TB-013');
+  });
+
+  it('a movement trial balance may state both a debit and a credit total for one account', async () => {
+    await upload('trial_balance', 'Account,Debit,Credit', ['Sales,40.00,1250.00']);
+    expect(dataRows()[0]!.mapped_data.closing_balance).toBe('-1210.00');
+  });
+
+  it('a row with neither a debit nor a credit is an error, never a 0.00', async () => {
+    await upload('trial_balance', 'Account,Debit,Credit', ['Sales,,', 'Rent,300.00,']);
+    const [blank, rent] = dataRows();
+    expect(blank!.status).toBe('error');
+    expect(blank!.mapped_data.closing_balance ?? null).toBeNull();
+    expect(rent!.mapped_data.closing_balance).toBe('300.00');
+  });
+
+  it('a P&L report with one Amount column: closing_balance = amount, and the sign is asked (IMP-TB-013)', async () => {
+    const result = await upload('pnl_report', 'Account,Amount', ['Sales,1210.00', 'Rent,300.00']);
+    expect(dataRows().map((r) => r.mapped_data.closing_balance)).toEqual(['1210.00', '300.00']);
+    expect(result.requiredConfirmations).toContain('IMP-TB-013');
+  });
+
+  it('a stated zero stays a zero', async () => {
+    await upload('pnl_report', 'Account,Amount', ['Sales,0.00']);
+    expect(dataRows()[0]!.mapped_data.closing_balance).toBe('0.00');
+  });
+});

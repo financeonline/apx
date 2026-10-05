@@ -7,7 +7,7 @@ import {
 } from '@/core/db';
 import {
   composePeriod, runCalculation,
-  type AccountPeriodState, type AggregateCell, type AssuranceLevel, type CalculationTrigger, type CashSeriesOptions,
+  type AccountPeriodState, type AggregateCell, type AssuranceLevel, type BalancePnlContext, type CalculationTrigger, type CashSeriesOptions,
   type EngineContext, type MetricResult,
   type PeriodCoverage, type PeriodRef, type ReceivablesComposeInput,
 } from '@/modules/financial-engine';
@@ -137,6 +137,8 @@ export async function runCalculationJob(
         cashAccounts?: readonly AccountPeriodState[];
         // ADR-130: the weakest assurance on the bank rows that can feed the period.
         bankRecordAssurance?: AssuranceLevel;
+        // H-2: the prior-month facts a cumulative balance report's P&L needs (§3).
+        balancePnl?: BalancePnlContext;
       };
       return composeWithIds({
         period: input.period as PeriodRef,
@@ -148,6 +150,7 @@ export async function runCalculationJob(
         receivables: aggregates.receivables,
         cashAccounts: aggregates.cashAccounts,
         bankRecordAssurance: aggregates.bankRecordAssurance,
+        balancePnl: aggregates.balancePnl,
       });
     },
     startRun: startCalculationRun,

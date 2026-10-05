@@ -283,8 +283,18 @@ export interface PeriodCoverage {
    * P. Omitted, nothing establishes the costs.
    */
   readonly invoiceCosts?: SourceCoverage;
-  /** Active cash-like accounts with a covering statement, over all active cash-like accounts. */
+  /**
+   * For `is_complete` (§2.2, ADR-030.1): covered over in-scope cash-like accounts, and 1 when there is
+   * nothing to cover (no active cash-like account) — such an organisation's months are not held back.
+   * NOT a fact about banking: read `bankEvidenceRatio` for that.
+   */
   readonly bankCoverageRatio: number;
+  /**
+   * H-1 (Step 0E): what is known about the business's banking in P — covered over in-scope cash-like
+   * accounts (ADR-124 D-2), or NULL when no cash-like account is in scope (none at all, only closed,
+   * or only credit-card / loan accounts). NULL is absence of evidence: neither good nor poor banking.
+   */
+  readonly bankEvidenceRatio: number | null;
   readonly latestDataDate: Readonly<Partial<Record<SourceKind, string>>>;
 }
 

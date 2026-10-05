@@ -221,6 +221,41 @@ export function glFromDebitCredit(
   return { direction: null, amount: null, issue: null };
 }
 
+/** What a balance report row's money columns state, in natural sign (§3, ADR-047.3). */
+export interface BalanceFromColumns {
+  /** debit − credit; NULL when neither column holds a figure (the row states no balance). */
+  readonly closing: string | null;
+  readonly debitTotal: string | null;
+  readonly creditTotal: string | null;
+}
+
+/**
+ * H-2 (Step 0E): a trial balance's Debit / Credit columns → its natural-sign balance.
+ *
+ * Unlike a journal line (`glFromDebitCredit`), a balance row may carry BOTH: a movement trial
+ * balance states the period's debit and credit totals per account. The balance is their difference,
+ * natural sign by construction (§6.1), so no sign question is asked of it. A blank column is a side
+ * with no figure; BOTH blank is a row that states nothing — left NULL for validation to report
+ * (the "neither debit nor credit" required-field error), never a 0.00. Unreadable cells are left for
+ * the column's own number check (IMP-AMT-002).
+ */
+export function balanceFromDebitCredit(
+  debit: string | null | undefined,
+  credit: string | null | undefined,
+): BalanceFromColumns {
+  const debitRead = readMoneyCell(debit, 'debit');
+  const creditRead = readMoneyCell(credit, 'credit');
+  if (debitRead.issue !== null || creditRead.issue !== null) return { closing: null, debitTotal: null, creditTotal: null };
+  if (debitRead.value === null && creditRead.value === null) return { closing: null, debitTotal: null, creditTotal: null };
+  const d = debitRead.value ?? ZERO;
+  const c = creditRead.value ?? ZERO;
+  return {
+    closing: toMoneyString(d.minus(c)),
+    debitTotal: debitRead.value === null ? null : toMoneyString(debitRead.value),
+    creditTotal: creditRead.value === null ? null : toMoneyString(creditRead.value),
+  };
+}
+
 /**
  * A signed single column: "positive = debit unless the user overrides in `transforms.glSign`"
  * (§6.4). Unlike the bank sign this one HAS a stated default, so it does not ask.

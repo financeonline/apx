@@ -113,7 +113,11 @@ export async function loadCoverageBatches(
     id: r.batch_id as string,
     targetTable: r.target_table as CoverageBatch['targetTable'],
     balanceKind: r.balance_kind as CoverageBatch['balanceKind'],
-    balanceBasis: null,
+    // H-2: the basis the reviewer confirmed (IMP-TB-012). It was hard-coded NULL, so every report was
+    // read as a movement report and a cumulative trial balance's year-to-date as the month.
+    balanceBasis: (r.balance_basis as CoverageBatch['balanceBasis'] | undefined) ?? null,
+    fiscalYearStartMonthAtCommit: r.fiscal_year_start_month_at_commit === null || r.fiscal_year_start_month_at_commit === undefined
+      ? null : Number(r.fiscal_year_start_month_at_commit),
     bankAccountId: r.bank_account_id as string | null,
     invoiceListKind: r.invoice_list_kind as CoverageBatch['invoiceListKind'],
     importType: (r.import_type as string | null) ?? null,

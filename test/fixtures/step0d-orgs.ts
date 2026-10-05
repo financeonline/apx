@@ -15,8 +15,12 @@ import { adminSql, clientFor, createAuthUser } from '../integration/setup';
  * comparison must show.
  */
 
-export type Step0dKey = 'AICARRY' | 'AIATTEST' | 'AIMIXED' | 'UNICODE';
-export const STEP0D_KEYS: readonly Step0dKey[] = ['AICARRY', 'AIATTEST', 'AIMIXED', 'UNICODE'];
+export type Step0dKey = 'AICARRY' | 'AIATTEST' | 'AIMIXED' | 'UNICODE' | 'GLBANK' | 'NOBANK' | 'TBMOVE' | 'TBCUMUL';
+/**
+ * Step 0E added GLBANK, NOBANK, TBMOVE and TBCUMUL: three months of P&L with at least three Health
+ * dimensions, so the comparison shows TOTAL scores (H-1: no bank data; H-2: trial balances).
+ */
+export const STEP0D_KEYS: readonly Step0dKey[] = ['AICARRY', 'AIATTEST', 'AIMIXED', 'UNICODE', 'GLBANK', 'NOBANK', 'TBMOVE', 'TBCUMUL'];
 
 const COMMITTED_AT = '2026-09-10T10:00:00Z';
 const q = (s: string): string => s.replace(/'/g, "''");
@@ -104,6 +108,77 @@ function salesList(org: string, sales: ReadonlyArray<readonly [string, string]>)
   end $$;`);
 }
 
+/** One of the organisation's seeded accounts of a category (every organisation is seeded with them). */
+function systemAccount(org: string, category: string): string {
+  return adminSql(`select id from public.accounts where organization_id = '${org}' and standard_category = '${category}'
+    order by is_system desc, id limit 1`).split('\n')[0]!.trim();
+}
+
+/** A committed general-ledger batch for one month: revenue in, cost of sales and an expense out, via cash. */
+function ledgerMonth(org: string, ym: string, end: string, revenue: string, cos: string, opex: string): void {
+  const lines: Array<[string, string, string, string]> = [
+    [`${ym}-05`, 'cash', 'debit', revenue], [`${ym}-05`, 'revenue', 'credit', revenue],
+    [`${ym}-12`, 'cost_of_sales', 'debit', cos], [`${ym}-12`, 'cash', 'credit', cos],
+    [`${ym}-25`, 'operating_expense', 'debit', opex], [`${ym}-25`, 'cash', 'credit', opex],
+  ];
+  const values = lines.map(([d, c, dir, a]) => `('${d}'::date, '${systemAccount(org, c)}'::uuid, '${dir}', ${a}::numeric)`).join(',');
+  adminSql(`do $$ declare v_doc uuid; v_b uuid; v_row uuid; v_id uuid; r record; n int := 0; begin
+    insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
+      values ('${org}', '${org}/step0d/gl-' || gen_random_uuid(), 'gl.csv', 'text/csv', 10, digest(gen_random_uuid()::text, 'sha256'), 'ready', 'general_ledger')
+      returning id into v_doc;
+    insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
+        period_start, period_end, committed_at)
+      values ('${org}', v_doc, 'general_ledger', 'ledger_entries', 'committed', 'csv', '${ym}-01', '${end}', '${COMMITTED_AT}'::timestamptz)
+      returning id into v_b;
+    for r in select * from (values ${values}) v(d, a, dir, amt) loop
+      n := n + 1;
+      insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
+        values ('${org}', v_b, n, 'r' || n, '{}'::jsonb, '{}'::jsonb, 'committed') returning id into v_row;
+      insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status,
+          source_document_id, import_batch_id, import_row_id, source_ref, is_opening_balance)
+        values ('${org}', r.d, r.a, r.dir::public.entry_direction_enum, r.amt, '00000000-0000-0000-0000-000000000000', 'accepted',
+          v_doc, v_b, v_row, 'g' || n || v_b, false) returning id into v_id;
+      insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id)
+        values ('${org}', 'ledger_entries', v_id, 'accepted', v_b);
+    end loop;
+  end $$;`);
+}
+
+/**
+ * A committed trial balance for one month: rows in natural sign (`closing_balance`), as commit stores
+ * them. No debit/credit totals — no import writes them for a single-balance file.
+ */
+function trialBalanceMonth(org: string, ym: string, end: string, basis: 'movement' | 'cumulative', rows: ReadonlyArray<readonly [string, string]>): void {
+  const values = rows.map(([c, v]) => `('${systemAccount(org, c)}'::uuid, ${v}::numeric)`).join(',');
+  adminSql(`do $$ declare v_doc uuid; v_b uuid; v_row uuid; v_id uuid; r record; n int := 0; begin
+    insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
+      values ('${org}', '${org}/step0d/tb-' || gen_random_uuid(), 'tb.csv', 'text/csv', 10, digest(gen_random_uuid()::text, 'sha256'), 'ready', 'trial_balance')
+      returning id into v_doc;
+    insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
+        period_start, period_end, committed_at, balance_basis)
+      values ('${org}', v_doc, 'trial_balance', 'period_balances', 'committed', 'csv', '${ym}-01', '${end}', '${COMMITTED_AT}'::timestamptz, '${basis}')
+      returning id into v_b;
+    for r in select * from (values ${values}) v(a, val) loop
+      n := n + 1;
+      insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
+        values ('${org}', v_b, n, 'r' || n, '{}'::jsonb, '{}'::jsonb, 'committed') returning id into v_row;
+      insert into public.period_balances (organization_id, period_start, period_id, account_id, closing_balance,
+          balance_kind, balance_basis, source_document_id, import_batch_id, import_row_id, source_ref, record_status)
+        values ('${org}', '${ym}-01', '00000000-0000-0000-0000-000000000000', r.a, r.val, 'trial_balance', '${basis}',
+          v_doc, v_b, v_row, 'p' || n || v_b, 'accepted') returning id into v_id;
+      insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id)
+        values ('${org}', 'period_balances', v_id, 'accepted', v_b);
+    end loop;
+  end $$;`);
+}
+
+const HT_MONTHS: ReadonlyArray<readonly [string, string, string, string, string]> = [
+  // month, end, revenue, cost of sales, operating expense
+  ['2026-06', '2026-06-30', '1000', '400', '300'],
+  ['2026-07', '2026-07-31', '1100', '440', '300'],
+  ['2026-08', '2026-08-31', '1210', '484', '300'],
+];
+
 function seedOne(key: Step0dKey, org: string): void {
   switch (key) {
     case 'AICARRY': {
@@ -133,6 +208,37 @@ function seedOne(key: Step0dKey, org: string): void {
       statement(org, reserve, { start: '2026-06-01', end: '2026-06-30', extraction: 'csv', opening: '2000', moves: [['2026-06-15', '100']], tag: 'am-r-jun' });
       statement(org, reserve, { start: '2026-07-01', end: '2026-07-31', extraction: 'pdf_text', unreconciled: true, moves: [['2026-07-15', '100']], tag: 'am-r-jul' });
       statement(org, reserve, { start: '2026-08-01', end: '2026-08-31', extraction: 'csv', moves: [['2026-08-15', '100']], tag: 'am-r-aug' });
+      break;
+    }
+    case 'GLBANK': {
+      // A ledger and a bank that mirrors it (CSV statements): the control. Health scores on both engines.
+      for (const [ym, end, r, c, o] of HT_MONTHS) ledgerMonth(org, ym, end, r, c, o);
+      const main = bankAccount(org, 'Main');
+      for (const [ym, end, r, c, o] of HT_MONTHS) {
+        statement(org, main, { start: `${ym}-01`, end, extraction: 'csv', ...(ym === '2026-06' ? { opening: '5000', closing: '5300' } : {}),
+          moves: [[`${ym}-05`, r], [`${ym}-12`, `-${c}`], [`${ym}-25`, `-${o}`]], tag: `gb-${ym}` });
+      }
+      break;
+    }
+    case 'NOBANK': {
+      // The same ledger and NO bank account (H-1: banking must not be scored).
+      for (const [ym, end, r, c, o] of HT_MONTHS) ledgerMonth(org, ym, end, r, c, o);
+      break;
+    }
+    case 'TBMOVE': {
+      // The same P&L as a MOVEMENT trial balance, no bank (H-2).
+      for (const [ym, end, r, c, o] of HT_MONTHS) {
+        trialBalanceMonth(org, ym, end, 'movement', [['revenue', `-${r}`], ['cost_of_sales', c], ['operating_expense', o]]);
+      }
+      break;
+    }
+    case 'TBCUMUL': {
+      // The same P&L as a CUMULATIVE (year-to-date) trial balance, fiscal year from the organisation's default.
+      const ytd: Record<string, [string, string, string]> = { '2026-06': ['-1000', '400', '300'], '2026-07': ['-2100', '840', '600'], '2026-08': ['-3310', '1324', '900'] };
+      for (const [ym, end] of HT_MONTHS) {
+        const [r, c, o] = ytd[ym]!;
+        trialBalanceMonth(org, ym, end, 'cumulative', [['revenue', r], ['cost_of_sales', c], ['operating_expense', o]]);
+      }
       break;
     }
     case 'UNICODE': {

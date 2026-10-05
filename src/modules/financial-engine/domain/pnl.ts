@@ -112,6 +112,12 @@ export interface PnlInput {
    */
   readonly invoiceCounterparties?: ReadonlyMap<StandardCategory, readonly string[]>;
   /**
+   * H-2 (Step 0E): the balance basis is a CUMULATIVE report outside the fiscal year's first month, so
+   * each figure is closing(P) − closing(P_prev). No leaf selection of rows totals to a difference
+   * (ADR-109), so no leaf descriptor is written for these figures.
+   */
+  readonly balanceDifferenced?: boolean;
+  /**
    * Cost of sales exists in a source the chosen basis is not reading (purchase invoices from a
    * cost-of-sales supplier, while the P&L comes from a ledger that states none). The figure is
    * unavailable with THAT reason, not a zero and not "no such accounts" (ADR-104).
@@ -324,6 +330,24 @@ function leafEvidence(
           category_account_ids: accountIds,
           direction: side === 'income' ? 'inflow' : 'outflow',
           exclude_transfers: 'all',
+        },
+        as_of: asOf,
+      },
+    };
+  }
+  if (table === 'period_balances') {
+    if (input.balanceDifferenced === true) return null;
+    // H-2: only the winning report kind's rows are the figure (a balance sheet's or a P&L report's
+    // rows for the same account would otherwise be totalled too).
+    return {
+      kind: 'leaf',
+      descriptor: {
+        v: 1,
+        table,
+        filters: {
+          period_ids,
+          account_ids: accountIds,
+          ...(input.basis.balanceKind ? { balance_kind: input.basis.balanceKind } : {}),
         },
         as_of: asOf,
       },

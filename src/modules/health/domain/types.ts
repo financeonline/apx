@@ -122,8 +122,11 @@ export interface HealthInput {
   /** ISO 4217, from `organizations.base_currency`; factor sentences carry the right symbol (§8.2). */
   readonly currency: string;
   readonly snapshots: readonly MetricObservation[];
-  /** Active cash-like accounts with a covering statement, over all of them (§2.2). */
-  readonly bankCoverageRatio: number;
+  /**
+   * In-scope cash-like accounts with a covering statement, over all of them (§2.2), or NULL when no
+   * cash-like account is in scope: no bank data, which excludes banking_health (§7.1, H-1).
+   */
+  readonly bankCoverageRatio: number | null;
   /** The shared alert-rule context for this period, or NULL when record-level data was not loaded. */
   readonly conditions: RuleContext | null;
 }

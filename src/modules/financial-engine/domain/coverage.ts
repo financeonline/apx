@@ -19,7 +19,7 @@ import { bankCoverageFromRatio, completenessHolds } from '@/core/periods';
 import { bankCoverageFor, coveredRuns, runsCover } from './cash-history';
 
 import type {
-  BankAccountRef, BasisChoice, DataQualityWarning, PeriodCoverage, PeriodRef, SourceCoverage,
+  AggregateCell, BankAccountRef, BasisChoice, DataQualityWarning, PeriodCoverage, PeriodRef, SourceCoverage,
   SourceKind,
 } from './types';
 
@@ -42,6 +42,11 @@ export interface CoverageBatch {
   readonly periodStart: string;
   readonly periodEnd: string;
   readonly committedAt: string;
+  /**
+   * H-2: the fiscal year's first month as FROZEN on the batch at commit
+   * (`import_batches.fiscal_year_start_month_at_commit`, §3) — where a cumulative report resets.
+   */
+  readonly fiscalYearStartMonthAtCommit?: number | null;
 }
 
 export interface CoverageInput {
@@ -50,6 +55,12 @@ export interface CoverageInput {
   readonly bankAccounts: readonly BankAccountRef[];
   /** Periods that actually carry accepted rows, per source, so an empty declared range is caught. */
   readonly rowCounts: Readonly<Partial<Record<SourceKind, number>>>;
+  /**
+   * H-2: accepted balance rows in P per report kind. Supplied, a kind whose batch merely SPANS P but
+   * holds no row for it does not cover P (as §2.2 already requires of the ledger), so a report that
+   * states nothing about the month cannot override a source that does. Omitted, rows are not checked.
+   */
+  readonly balanceRowsByKind?: Readonly<Partial<Record<'trial_balance' | 'pnl_report' | 'balance_sheet', number>>>;
   /**
    * Today, to tell the CURRENT period (the one containing it) for the invoices source's revenue-to-date
    * rule (FU-1). Explicit, never read from a clock (§1.1).
@@ -100,15 +111,64 @@ export function chooseBalanceKind(
   batches: readonly CoverageBatch[],
   period: PeriodRef,
   family: 'pnl' | 'balance',
+  rowsByKind?: Readonly<Partial<Record<'trial_balance' | 'pnl_report' | 'balance_sheet', number>>>,
 ): { kind: 'trial_balance' | 'pnl_report' | 'balance_sheet'; batch: CoverageBatch } | null {
   const order: Array<'trial_balance' | 'pnl_report' | 'balance_sheet'> =
     family === 'pnl' ? ['trial_balance', 'pnl_report'] : ['trial_balance', 'balance_sheet'];
 
   for (const kind of order) {
+    if (rowsByKind !== undefined && (rowsByKind[kind] ?? 0) <= 0) continue;
     const batch = winningBalanceBatch(batches, period, kind);
     if (batch) return { kind, batch };
   }
   return null;
+}
+
+type BalanceKind = 'trial_balance' | 'pnl_report' | 'balance_sheet';
+
+/** H-2: accepted balance rows in a period, per report kind (the cells' row counts). */
+export function balanceRowsByKind(
+  cells: readonly AggregateCell[],
+  periodId: string,
+): Record<BalanceKind, number> {
+  const out: Record<BalanceKind, number> = { trial_balance: 0, pnl_report: 0, balance_sheet: 0 };
+  for (const cell of cells) {
+    if (cell.periodId !== periodId || cell.source !== 'period_balances' || cell.balanceKind === null) continue;
+    out[cell.balanceKind] += cell.rowCount;
+  }
+  return out;
+}
+
+/**
+ * H-2: what §3's cumulative differencing needs for P, decided here so compose stays pure arithmetic.
+ *
+ * - `priorBatch`: the month before P has a winning batch of the SAME kind AND the SAME basis as P's,
+ *   with rows for that month (never a movement-basis month, never an earlier month).
+ * - `isFirstFiscalMonth`: by the fiscal year FROZEN ON P's winning batch, else the organisation's.
+ */
+export function balancePnlContext(input: {
+  readonly period: PeriodRef;
+  /** The calendar month before P when it exists, else undefined. */
+  readonly prior: PeriodRef | undefined;
+  readonly coverage: PeriodCoverage;
+  readonly batches: readonly CoverageBatch[];
+  readonly cells: readonly AggregateCell[];
+  readonly organisationFiscalYearStartMonth: number;
+}): { priorPeriodId: string | null; priorBatch: boolean; isFirstFiscalMonth: boolean } {
+  const balances = input.coverage.bySource.period_balances;
+  const kind = balances.covers ? balances.balanceKind : null;
+  if (!kind) return { priorPeriodId: input.prior?.id ?? null, priorBatch: false, isFirstFiscalMonth: false };
+  const basis = balances.balanceBasis ?? 'movement';
+  const winning = winningBalanceBatch(input.batches, input.period, kind);
+  const fyStart = winning?.fiscalYearStartMonthAtCommit ?? input.organisationFiscalYearStartMonth;
+  const month = Number(input.period.periodStart.slice(5, 7));
+  let priorBatch = false;
+  if (input.prior !== undefined) {
+    const priorWinning = winningBalanceBatch(input.batches, input.prior, kind);
+    const priorRows = balanceRowsByKind(input.cells, input.prior.id)[kind];
+    priorBatch = priorWinning !== null && (priorWinning.balanceBasis ?? 'movement') === basis && priorRows > 0;
+  }
+  return { priorPeriodId: input.prior?.id ?? null, priorBatch, isFirstFiscalMonth: month === fyStart };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -360,7 +420,7 @@ export function computeCoverage(input: CoverageInput): PeriodCoverage {
   const { period, batches, bankAccounts, rowCounts, asOf } = input;
 
   // ---- period_balances ----
-  const pnlBalance = chooseBalanceKind(batches, period, 'pnl');
+  const pnlBalance = chooseBalanceKind(batches, period, 'pnl', input.balanceRowsByKind);
   const balances: SourceCoverage = pnlBalance
     ? {
         covers: true,
@@ -448,6 +508,12 @@ export function computeCoverage(input: CoverageInput): PeriodCoverage {
     bySource: { period_balances: balances, ledger, invoices, bank },
     invoiceCosts,
     bankCoverageRatio: bankRatio,
+    // H-1 (Step 0E): evidence, not completeness. NULL when no cash-like account is in scope for P, so
+    // nothing about the business's banking is known; `bankRatio` above reads 1 then, which is right for
+    // `is_complete` (nothing to wait for) and wrong as a fact about banking.
+    bankEvidenceRatio: bankScope.inScope.length === 0
+      ? null
+      : bankScope.covered.length / bankScope.inScope.length,
     latestDataDate,
   };
 }

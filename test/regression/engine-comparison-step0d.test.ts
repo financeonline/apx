@@ -18,7 +18,7 @@ it('seeds, computes and dumps the Step 0D comparison set', async () => {
   const out = process.env.ENGINE_COMPARE_OUT ?? path.resolve('test/regression/out');
   const tag = `s0d${Date.now().toString(36)}`;
   const orgs = await seedStep0dOrgs(tag);
-  expect(Object.keys(orgs)).toHaveLength(4);
+  expect(Object.keys(orgs)).toHaveLength(8);
 
   try {
     const dumps: Record<string, unknown> = {};

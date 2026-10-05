@@ -2542,3 +2542,46 @@ The TypeScript mirror (`storedNameKey`) is compared with the database over every
 - Evidence: both figures carry `rests_on_statements` (per account and in total). The evidence drawer names those statements. The "Please check" tooltip says the figure may be carried from a month read by AI.
 - Health needs no new rule: ADR-134's cap of 70 (still awaiting product approval) applies to the carried figure.
 
+
+### ADR-138 · H-1: no bank data is not banking evidence. H-2: a balance report's P&L is its closing balances by §3
+
+**Status:** Accepted (Step 0E, remediation of the independent audit of `step0d-review-frozen`). Engine 9.0.0; `health.config.v3`; migration `20261007000001`. For re-review.
+
+**H-1 problem.** `computeCoverage` returns `bankCoverageRatio = 1` when no cash-like account is in scope. That is right for `is_complete` (nothing to wait for). The run handed the same number to Health as a fact about banking, so an organisation with no bank account got Banking Health 60 with B4 "full coverage +10", and totals that should be NULL were published.
+
+**H-1 decision.**
+- Coverage states a second value, `bankEvidenceRatio`: covered over in-scope cash-like accounts, or **NULL** when none is in scope (no account, only closed ones, or only credit-card and loan accounts).
+- Health reads it. NULL or 0 → banking_health is excluded (`no_bank_coverage`) by the existing rule, and the weights renormalise. B4 is never "full" and never a penalty for absence.
+- Completeness is unchanged.
+- Consumers reviewed:
+  - `isPeriodComplete` / `completenessHolds`: completeness, unchanged.
+  - `run.ts` → `score-run.ts` → `banking-health.ts`: now evidence.
+  - `cash.ts` `bank_coverage_ratio`: its own computation, unaffected.
+
+**H-2 problem.** For a trial balance or P&L report, `compose` read `debit_total` / `credit_total`, which no import fills, so every such month's P&L was 0.00 `verified`. Three related faults:
+- §3's differencing (`sign.ts` `periodBalancePnlAmount`) had no caller.
+- The batch's basis was hard-coded NULL ("movement").
+- Every report kind covering the month was summed.
+
+On the import side, a Debit/Credit trial balance and a single-Amount P&L report never produced the NOT NULL `closing_balance`. Their rows validated and then failed the commit.
+
+**H-2 decision.**
+- **Import:** each layout produces a natural-sign `closing_balance`.
+  - A balance column: as given; its sign is confirmed by IMP-TB-013 and applied at commit.
+  - Debit/Credit: debit − credit, both totals kept, natural sign by construction, so no sign question is asked.
+  - One Amount column: the amount, with IMP-TB-013.
+  - A row with no figure stays an error. It is never a zero.
+- **Engine (§3):** only the winning report kind is read (trial balance before P&L report, §2.2).
+  - Movement basis: the month is `closing_balance`.
+  - Cumulative basis: closing(P) − closing(P−1), with P−1 the same kind AND basis. The fiscal year's first month, as frozen on the batch, is its own closing. A prior report lacking the account gives a known zero with `account_absent_prior`. No prior report gives NULL `no_prior_trial_balance`.
+  - `app.batch_coverage` now returns `balance_basis` and `fiscal_year_start_month_at_commit`.
+- **Coverage:** a report kind whose batch spans P but holds no row for P does not cover P, as §2.2 already requires of the ledger. A report that states nothing about the month cannot override a source that does.
+- **Evidence:** balance drill-downs filter by report kind. A cumulative month's figure is a difference, which no leaf selection totals to (ADR-109), so it carries no leaf descriptor.
+
+**Policy questions flagged, not decided here:**
+1. A cumulative report with no prior month keeps covering P and states NULL (`no_prior_trial_balance`), per §2.2's existing text. It does not fall back to a ledger or bank source that could state P. Should it fall back?
+2. In a cumulative report, an account stated last month and absent this month is read as a year-to-date zero (month = −prior). §3 states this inference only for the prior side.
+3. Evidence for cumulative-basis figures: none is shown (above). A two-row "difference" evidence form would need a descriptor extension.
+4. A report kind with no rows for P now falls through §2.3. This is a precedence change by analogy with the ledger rule.
+
+**Not changed:** H-3, R-2, R-3, U-1, U-2 and every LOW finding of the audit remain open. The cap of 70 (D-2) and the VAT rule (D-1) are unapproved.

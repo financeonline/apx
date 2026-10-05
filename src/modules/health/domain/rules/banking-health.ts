@@ -105,12 +105,19 @@ export function evaluateBankingHealth(input: HealthInput): DimensionEvaluation {
   const trend = balanceTrendRule(input);
   const anomalies = bankingAnomalies(input);
 
+  /*
+   * §7.1: banking_health requires "any bank coverage for P". NULL means no cash-like account is in
+   * scope at all — nothing is known about the business's banking — and 0 that none of its accounts is
+   * covered. Either way the dimension is excluded (below) and the weights renormalise; absence is
+   * scored neither as healthy banking (B4 "full", which a ratio of 1 for "no accounts" used to award,
+   * H-1) nor as poor banking.
+   */
   const coverage = input.bankCoverageRatio;
-  const b4 = coverage >= 1
-    ? flatRule('B4', 'full', B4_FULL_POINTS, String(coverage))
-    : coverage > 0
-      ? flatRule('B4', 'partial', B4_PARTIAL_POINTS, String(coverage))
-      : skippedRule('B4', 'no_bank_coverage');
+  const b4 = coverage === null || coverage <= 0
+    ? skippedRule('B4', 'no_bank_coverage')
+    : coverage >= 1
+      ? flatRule('B4', 'full', B4_FULL_POINTS, String(coverage))
+      : flatRule('B4', 'partial', B4_PARTIAL_POINTS, String(coverage));
 
   const rules: RuleApplication[] = [
     trend.rule,
@@ -154,7 +161,7 @@ export function evaluateBankingHealth(input: HealthInput): DimensionEvaluation {
     ],
     conditions,
     requirements: [],
-    coverageSatisfied: coverage > 0,
+    coverageSatisfied: coverage !== null && coverage > 0,
     positives,
     negatives,
   };

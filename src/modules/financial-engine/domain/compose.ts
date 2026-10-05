@@ -10,7 +10,7 @@
  */
 
 import { Decimal, parseDecimalOrNull } from '@/core/money';
-import { invoiceSignFor, ledgerAmount, naturalToReporting } from './sign';
+import { invoiceSignFor, ledgerAmount, naturalToReporting, periodBalancePnlAmount } from './sign';
 import {
   computeCash, weakerAssurance, type BankAggregateCell, type CashPeriodInput, type CashSeriesOptions,
 } from './cash';
@@ -37,6 +37,23 @@ export interface TransferLegCell {
   readonly transferKind: string;
   readonly inflow: string;
   readonly outflow: string;
+}
+
+/**
+ * H-2 (Step 0E): what §3's cumulative differencing needs beyond P's own cells. The calculation run
+ * supplies it from the committed batches; a caller that omits it gets the conservative answer — a
+ * cumulative P&L that is not the fiscal year's first month is NULL `no_prior_trial_balance`.
+ */
+export interface BalancePnlContext {
+  /** The calendar month before P, when it exists (consecutive); its cells sit in `cells`. */
+  readonly priorPeriodId: string | null;
+  /**
+   * Whether that month has a winning batch of P's report KIND and BASIS with rows in it (§3: never a
+   * movement-basis month, never an earlier month).
+   */
+  readonly priorBatch: boolean;
+  /** P is the first month of the fiscal year FROZEN ON P's winning batch (`fiscal_year_start_month_at_commit`). */
+  readonly isFirstFiscalMonth: boolean;
 }
 
 export interface ComposeInput {
@@ -67,6 +84,8 @@ export interface ComposeInput {
    * weakened to it. Values are unchanged. Absent means the rows are all `verified`.
    */
   readonly bankRecordAssurance?: AssuranceLevel;
+  /** H-2: the prior-month facts a cumulative trial balance or P&L report needs (§3). */
+  readonly balancePnl?: BalancePnlContext;
 }
 
 /** ADR-130: a bank basis is no firmer than the bank rows it reads. */
@@ -152,6 +171,85 @@ function accountAmounts(
     });
   }
   // Sorted so the written snapshot order — and therefore the run's output — is deterministic.
+  return out.sort((a, b) => a.accountId.localeCompare(b.accountId));
+}
+
+/**
+ * H-2 (Step 0E): a TRIAL BALANCE or P&L REPORT's P&L amounts (§3, ADR-047.4), in reporting sign.
+ *
+ * A balance row states `closing_balance` (natural sign). Its debit and credit totals are optional —
+ * a file with one balance column has none — so they are never the P&L. Only the winning batch's KIND
+ * is read (§2.2: a trial balance over a P&L report; a balance sheet states no P&L), never the sum of
+ * every report that happens to cover the month.
+ *
+ *   movement basis   → the month's amount IS `closing_balance`;
+ *   cumulative basis → `closing(P) − closing(P_prev)`, P_prev the same account, kind and basis in the
+ *                      month before; the fiscal year's first month is `closing(P)`; a prior batch that
+ *                      lacks the account gives a known zero with `account_absent_prior`; no prior batch
+ *                      → NULL `no_prior_trial_balance` (never zero, never an earlier month).
+ *
+ * The arithmetic is `sign.ts#periodBalancePnlAmount`, which had no caller: the fold read
+ * `debit_total`/`credit_total`, which no import fills, so every such P&L was a verified 0.00.
+ */
+function balanceAccountAmounts(
+  cells: readonly AggregateCell[],
+  periodId: string,
+  kind: NonNullable<AggregateCell['balanceKind']>,
+  basis: 'cumulative' | 'movement',
+  context: BalancePnlContext,
+  accounts: EngineContext['accounts'],
+): AccountAmount[] {
+  const byAccount = new Map(accounts.map((a) => [a.id, a]));
+  const ofKind = (pid: string | null) => cells.filter((c) => pid !== null && c.periodId === pid
+    && c.source === 'period_balances' && c.balanceKind === kind && (c.balanceBasis ?? 'movement') === basis
+    && c.accountId !== null);
+  const closingBy = (rows: readonly AggregateCell[]) => {
+    const out = new Map<string, { closing: Decimal; rowCount: number }>();
+    for (const c of rows) {
+      const prev = out.get(c.accountId!);
+      out.set(c.accountId!, {
+        closing: (prev?.closing ?? new Decimal(0)).plus(parseDecimalOrNull(c.amount) ?? new Decimal(0)),
+        rowCount: (prev?.rowCount ?? 0) + c.rowCount,
+      });
+    }
+    return out;
+  };
+  const current = closingBy(ofKind(periodId));
+  const prior = basis === 'cumulative' && context.priorBatch ? closingBy(ofKind(context.priorPeriodId)) : new Map();
+
+  /*
+   * A cumulative report is year to date: an account the prior month stated and this month does not
+   * now stands at zero for the year, so its month is −prior (the same inference §3 makes for an
+   * account absent from the PRIOR batch). Not on the fiscal year's first month, which resets.
+   */
+  const ids = new Set(current.keys());
+  if (basis === 'cumulative' && context.priorBatch && !context.isFirstFiscalMonth) {
+    for (const id of prior.keys()) ids.add(id);
+  }
+
+  const out: AccountAmount[] = [];
+  for (const accountId of ids) {
+    const account = byAccount.get(accountId);
+    if (!account) continue;
+    const here = current.get(accountId);
+    const before = prior.get(accountId);
+    const result = periodBalancePnlAmount({
+      accountType: account.accountType,
+      balanceBasis: basis,
+      closing: here?.closing ?? new Decimal(0),
+      isFirstFiscalMonth: context.isFirstFiscalMonth,
+      priorState: !context.priorBatch ? 'no_batch' : before === undefined ? 'account_absent' : 'same_kind_and_basis',
+      priorClosing: before?.closing ?? null,
+    });
+    out.push({
+      accountId,
+      category: account.standardCategory,
+      amount: result.amount === null ? null : result.amount.toFixed(2),
+      rowCount: here?.rowCount ?? 0,
+      ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
+      ...(result.missing.length > 0 ? { missing: result.missing } : {}),
+    });
+  }
   return out.sort((a, b) => a.accountId.localeCompare(b.accountId));
 }
 
@@ -430,7 +528,14 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
   const pnlCells = pnlSource === 'invoices' && coverage.invoiceCosts?.covers !== true
     ? cells.filter((cell) => !(cell.source === 'invoices'
       && (cell.invoiceType === 'purchase' || cell.invoiceType === 'purchase_credit_note')))
-    : cells;
+    // H-2: on a balance basis only the winning report kind is P's P&L (a balance sheet's rows, or a
+    // P&L report beside a trial balance, are not).
+    : pnlSource === 'period_balances'
+      ? cells.filter((cell) => cell.source !== 'period_balances' || cell.balanceKind === pnlBasis.balanceKind)
+      : cells;
+  const balanceBasis = pnlBasis.balanceBasis ?? 'movement';
+  const balanceContext: BalancePnlContext = input.balancePnl
+    ?? { priorPeriodId: null, priorBatch: false, isFirstFiscalMonth: false };
 
   const pnlInput: PnlInput = {
     period,
@@ -450,9 +555,15 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
       : undefined,
     accountAmounts: pnlSource === 'invoices'
       ? invoiceAccountAmounts(pnlCells, period.id, context.accounts, byCounterparty)
-      : pnlSource
-        ? accountAmounts(cells, period.id, pnlSource, context.accounts)
-        : [],
+      : pnlSource === 'period_balances' && pnlBasis.balanceKind
+        ? balanceAccountAmounts(cells, period.id, pnlBasis.balanceKind, balanceBasis, balanceContext, context.accounts)
+        : pnlSource
+          ? accountAmounts(cells, period.id, pnlSource, context.accounts)
+          : [],
+    // H-2: a cumulative month's figure is a DIFFERENCE of two months' rows, which no leaf selection of
+    // records can total to (ADR-109); the descriptor is omitted rather than one that does not reconcile.
+    balanceDifferenced: pnlSource === 'period_balances' && balanceBasis === 'cumulative'
+      && !balanceContext.isFirstFiscalMonth,
     uncategorised: pnlSource
       ? uncategorisedExposure(pnlCells, period.id, pnlSource, pnlCategoryOf)
       : { absoluteAmount: '0', totalAbsoluteAmount: '0' },

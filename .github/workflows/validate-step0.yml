@@ -31,6 +31,8 @@ concurrency:
 env:
   NODE_VERSION: '24.14.0'
   BASELINE: ${{ github.event.inputs.baseline || '2783240' }}
+  # Step 0E: the commit frozen for review (engine 8.0.0). A remediation's own effect is the frozen → branch record.
+  FROZEN: c5a84735aff228603693aa0c51834769ad9333ed
   # The Supabase CLI pinned by package.json (devDependency), not "latest": the same CLI as a developer's.
   SUPABASE: npx --no-install supabase
   CRON_SECRET: local-cron-secret
@@ -189,6 +191,20 @@ jobs:
           done
           npx --no-install supabase stop --no-backup
         shell: bash -eo pipefail {0}
+      - name: frozen-commit dump (c5a8473, engine 8.0.0) — isolates this remediation's own changes
+        run: |
+          git worktree add "$RUNNER_TEMP/frozen" "$FROZEN"
+          cp test/fixtures/step0d-orgs.ts "$RUNNER_TEMP/frozen/test/fixtures/"
+          cp test/regression/engine-comparison-step0d.test.ts "$RUNNER_TEMP/frozen/test/regression/"
+          cd "$RUNNER_TEMP/frozen"
+          npm ci
+          npx --no-install supabase start
+          "$GITHUB_WORKSPACE/scripts/write-local-env.sh"
+          for f in test/regression/engine-comparison.test.ts test/regression/engine-comparison-step0d.test.ts; do
+            ENGINE_COMPARE_LABEL=frozen ENGINE_COMPARE_OUT="$GITHUB_WORKSPACE/compare" npx vitest run --project regression "$f"
+          done
+          npx --no-install supabase stop --no-backup
+        shell: bash -eo pipefail {0}
       - name: this branch's dump
         run: |
           $SUPABASE start
@@ -200,6 +216,8 @@ jobs:
         run: |
           npx tsx scripts/engine-compare.ts compare/baseline.json compare/branch.json > compare/record.md
           npx tsx scripts/engine-compare.ts compare/baseline-step0d.json compare/branch-step0d.json > compare/record-step0d.md
+          npx tsx scripts/engine-compare.ts compare/frozen.json compare/branch.json > compare/record-frozen.md
+          npx tsx scripts/engine-compare.ts compare/frozen-step0d.json compare/branch-step0d.json > compare/record-frozen-step0d.md
       - if: always()
         uses: actions/upload-artifact@v4
         with:

@@ -33,8 +33,8 @@ export interface HealthChunkRequest {
   readonly currency: string;
   /** `is_complete` per period id, as the run computed it. */
   readonly completeness: ReadonlyMap<string, boolean>;
-  /** Bank coverage ratio per period id, as the run computed it (§2.2). */
-  readonly bankCoverage: ReadonlyMap<string, number>;
+  /** Bank evidence ratio per period id, as the run computed it (§2.2); NULL = no bank data (H-1). */
+  readonly bankCoverage: ReadonlyMap<string, number | null>;
   /** The organisation's earliest period that has any data, for the first-period gate (§8.1). */
   readonly firstPeriodWithDataId: string | null;
   /** The chart of accounts and counterparty names the rules render sentences from (§8.2). */
@@ -134,7 +134,7 @@ export async function scoreChunk(
       isComplete: true,
       currency: request.currency,
       snapshots,
-      bankCoverageRatio: request.bankCoverage.get(periodId) ?? 0,
+      bankCoverageRatio: request.bankCoverage.get(periodId) ?? null,
       conditions,
     };
 

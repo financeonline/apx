@@ -5,7 +5,7 @@ import { toMotionError } from '@/core/errors';
 import { bankingRuleVersions } from '@/modules/banking';
 import { log } from '@/core/logging';
 import { affectedRange, chunkPeriods, chunkWindow, type CalculationTrigger } from '../domain/chunking';
-import { computeCoverage, isPeriodComplete } from '../domain/coverage';
+import { balancePnlContext, balanceRowsByKind, computeCoverage, isPeriodComplete } from '../domain/coverage';
 import type { CashSeriesOptions } from '../domain/cash';
 import { bankRecordAssuranceFor, buildCashHistory, type CashHistory, type StatementRef } from '../domain/cash-history';
 import type { DenominatorInputs } from '../domain/receivables';
@@ -139,7 +139,7 @@ export interface HealthChunkInput {
   readonly aggregatedAt: string;
   readonly currency: string;
   readonly completeness: ReadonlyMap<string, boolean>;
-  readonly bankCoverage: ReadonlyMap<string, number>;
+  readonly bankCoverage: ReadonlyMap<string, number | null>;
   readonly firstPeriodWithDataId: string | null;
   readonly periodEnds: ReadonlyMap<string, string>;
   readonly accounts: ReadonlyArray<{ id: string; name: string; standardCategory: string }>;
@@ -447,7 +447,8 @@ export async function runCalculation(
       );
       const completePeriods: string[] = [];
       const completeFlags: boolean[] = [];
-      const bankCoverage = new Map<string, number>();
+      // H-1: the evidence ratio, NULL when nothing about banking is known (never the completeness 1).
+      const bankCoverage = new Map<string, number | null>();
 
       for (const period of chunk) {
         const rowCounts: Record<string, number> = {};
@@ -461,6 +462,7 @@ export async function runCalculation(
 
         const coverage = computeCoverage({
           period, batches, bankAccounts, rowCounts, asOf: request.asOf, statements,
+          balanceRowsByKind: balanceRowsByKind(aggregates, period.id),
         });
 
         const index = allPeriods.findIndex((p) => p.id === period.id);
@@ -502,6 +504,11 @@ export async function runCalculation(
             aggregates, transferLegs, coverage, cashOptions, receivables,
             cashAccounts: cashHistory.get(period.id) ?? [],
             bankRecordAssurance: bankRecordAssuranceFor(statements, period),
+            // H-2: §3's prior-month facts for a cumulative trial balance or P&L report.
+            balancePnl: balancePnlContext({
+              period, prior: prev, coverage, batches, cells: aggregates,
+              organisationFiscalYearStartMonth: settings.fiscalYearStartMonth,
+            }),
           },
           context,
         });
@@ -516,7 +523,7 @@ export async function runCalculation(
 
         completePeriods.push(period.id);
         completeFlags.push(isPeriodComplete(coverage, period, bankAccounts));
-        bankCoverage.set(period.id, coverage.bankCoverageRatio);
+        bankCoverage.set(period.id, coverage.bankEvidenceRatio);
       }
 
       const written = await deps.finishChunk({

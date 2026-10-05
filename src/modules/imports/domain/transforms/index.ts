@@ -36,6 +36,7 @@ export {
   bankAmountFromSigned,
   bankReconciliation,
   detectBalanceSign,
+  balanceFromDebitCredit,
   glFromDebitCredit,
   glFromSigned,
   isLiabilityBankAccount,

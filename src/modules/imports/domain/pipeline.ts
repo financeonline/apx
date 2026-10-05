@@ -16,7 +16,7 @@ import { maskDescription } from './transforms';
 import { detectDateColumn, parseDateValue, readsDifferentlyUnderAlternate } from './transforms/dates';
 import { detectNumberColumn, parseAmount } from './transforms/numbers';
 import {
-  bankAmountFromInOut, bankAmountFromSigned, glFromDebitCredit, glFromSigned,
+  balanceFromDebitCredit, bankAmountFromInOut, bankAmountFromSigned, glFromDebitCredit, glFromSigned,
 } from './transforms/signs';
 import { detectDuplicates, dedupeHash, normalizeDescription, scopeKey, type DedupeCandidateRow, type ExistingInvoice, type ExistingRecord } from './dedupe';
 import { checkBatch, looksLikeOpenItems, requiredConfirmations, statusForIssues, validateRow, satisfiedFieldSet } from './validate-rows';
@@ -587,6 +587,32 @@ function normaliseMoney(
         mapped.direction = result.direction;
         mapped.amount = result.amount;
       }
+    }
+    return;
+  }
+
+  /*
+   * H-2 (Step 0E): a TB / P&L / balance-sheet row is stored as `closing_balance` (NOT NULL), which is
+   * what the engine reads. The three supported layouts (§6.1 REQUIRED_FIELDS):
+   *   - a balance column → `closing_balance` as given (its sign confirmed at IMP-TB-013, applied at commit);
+   *   - Debit and Credit columns → closing = debit − credit, natural sign, and both totals kept;
+   *   - one signed amount column → `closing_balance` = amount (IMP-TB-013 again).
+   * Before this, the last two never produced a closing balance, so such a row validated and then failed
+   * the commit on the NOT NULL column. A row with no figure in any of them is left without one: the
+   * required-field check reports it, nothing turns it into a zero.
+   */
+  if (targetTable === 'period_balances') {
+    const given = mapped.closing_balance;
+    const hasClosing = given !== undefined && given !== null && given.trim() !== '';
+    if (mapped.debit !== undefined || mapped.credit !== undefined) {
+      const result = balanceFromDebitCredit(mapped.debit, mapped.credit);
+      if (result.debitTotal !== null) mapped.debit_total = result.debitTotal;
+      if (result.creditTotal !== null) mapped.credit_total = result.creditTotal;
+      if (!hasClosing && result.closing !== null) mapped.closing_balance = result.closing;
+      return;
+    }
+    if (!hasClosing && mapped.amount !== undefined && mapped.amount !== null && mapped.amount.trim() !== '') {
+      mapped.closing_balance = mapped.amount;
     }
     return;
   }

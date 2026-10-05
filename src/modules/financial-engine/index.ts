@@ -69,6 +69,8 @@ export {
   invoiceRevenueCoverage,
   invoiceCostCoverage,
   AR_AP_FRESHNESS_DAYS,
+  balancePnlContext,
+  balanceRowsByKind,
   type InvoiceSide,
   type InvoiceSideCoverage,
   type CoverageBatch,
@@ -103,7 +105,7 @@ export * from './domain/receivables-input';
 export * from './domain/concentration';
 export * from './domain/commercial-population';
 
-export { composePeriod, type ComposeInput, type TransferLegCell } from './domain/compose';
+export { composePeriod, type BalancePnlContext, type ComposeInput, type TransferLegCell } from './domain/compose';
 
 /**
  * The calculation run itself (§2.4).

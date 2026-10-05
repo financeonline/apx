@@ -97,14 +97,31 @@
  *     on them), and a closing attested by a verified printed balance is verified.
  *   - Both carry `rests_on_statements` (the weaker batches) in their components, per account and total.
  */
-export const ENGINE_VERSION = '8.0.0';
+/**
+ * 9.0.0 (Step 0E, ADR-138): MAJOR. 8.0.0 was never released; its hash is kept.
+ *   - H-2: a trial balance's or P&L report's P&L is stated from `closing_balance` by §3: as is on a
+ *     movement report; closing(P) − closing(P_prev) of the same kind and basis on a cumulative one
+ *     (the fiscal year frozen on the batch resets it; no prior report → NULL `no_prior_trial_balance`).
+ *     It was a verified 0.00 for every such month (the fold read debit/credit totals no import fills).
+ *     Only the winning report kind is read; a kind with no row for P does not cover P; the batch's
+ *     confirmed basis is read (it was hard-coded movement). Balance evidence filters by report kind and
+ *     is omitted for a cumulative difference (no leaf can total to it, ADR-109).
+ *   - H-1: coverage also states `bankEvidenceRatio` (NULL = no cash-like account in scope), which
+ *     Health reads instead of the completeness ratio (see HEALTH_CONFIG_VERSION).
+ */
+export const ENGINE_VERSION = '9.0.0';
 
 /** Bumped independently of the engine (§6). */
 /**
  * health.config.v2 (ADR-134): a dimension resting on `inferred` (AI-read) figures takes the existing
  * cap of 70 with its own reason, as `estimated` ones did. Scores that rested on AI-read cash can fall.
  */
-export const HEALTH_CONFIG_VERSION = 'health.config.v2';
+/**
+ * health.config.v3 (Step 0E, H-1): banking_health is excluded (`no_bank_coverage`) when no cash-like
+ * account is in scope; it used to score 60 with B4 "full coverage", from the completeness ratio of 1.
+ * Weights, thresholds and caps are unchanged; the cap of 70 for AI-read inputs still awaits approval.
+ */
+export const HEALTH_CONFIG_VERSION = 'health.config.v3';
 export const ALERT_RULE_VERSION = 'alerts.rules.v1';
 
 /** At most this many consecutive months per chunk (§2.4). */
