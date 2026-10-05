@@ -39,6 +39,12 @@ export interface DimensionEvaluation {
    * (§7.1). NULL for every other dimension, which is requirement-tested on metrics alone.
    */
   readonly coverageSatisfied: boolean | null;
+  /**
+   * H-3: every figure the dimension's rules actually SCORED — earlier months a trend rule read
+   * included. The ADR-134 / ADR-035 cap looks at these as well as at the required metrics, so a score
+   * resting on an AI-read or estimated figure is capped whichever rule read it.
+   */
+  readonly scoredInputs?: ReadonlyArray<{ readonly periodId: string; readonly metricKey: string }>;
   readonly positives: readonly FactorSentence[];
   readonly negatives: readonly FactorSentence[];
 }

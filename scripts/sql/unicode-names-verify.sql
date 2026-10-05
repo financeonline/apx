@@ -65,9 +65,13 @@ begin
   end;
   begin
     insert into public.counterparties (organization_id, name) values ('e9000000-0000-4000-8000-0000000000e1', 'ISTANBUL CO');
-    raise exception 'a held name (one record merged away, one active) was created again';
+    raise exception 'the survivor of a merge was duplicated by its own name in capitals';
   exception when unique_violation then null;
   end;
+  -- U-2: the survivor of a pre-upgrade merge is not held, so imports naming it are not refused.
+  if (select normalized_name from public.counterparties where id = 'e9c00000-0000-4000-8000-000000000008') <> 'istanbul co' then
+    raise exception 'the survivor of a merge made before the upgrade is held';
+  end if;
   begin
     insert into public.accounts (organization_id, name, account_type, standard_category) values ('e9000000-0000-4000-8000-0000000000e1', 'UMSÄTZE', 'income', 'revenue');
     raise exception 'a held account name was created again';

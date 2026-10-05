@@ -101,13 +101,17 @@ describe('the numbers in the prose come from threshold_summary (ADR-032.7)', () 
       ruleKey: 'cash.decline',
       thresholdSummary: { trigger: 'consecutive_months', consecutive_months: '3', current: '12000' },
     }, 'GBP');
-    expect(consecutive.whatHappened).toBe('Cash has fallen for 3 months in a row, to £12,000.');
+    // R-4: what was measured is three months of net outflow, not a falling balance.
+    expect(consecutive.title).toBe('More money went out than came in');
+    expect(consecutive.whatHappened).toBe('More money has gone out than come in for 3 months in a row. Cash now stands at £12,000.');
+    expect(consecutive.whatHappened).not.toMatch(/fallen/);
 
     const single = renderAlert({
       ruleKey: 'cash.decline',
       thresholdSummary: { trigger: 'single_month', current: '12000', comparison: '30000' },
     }, 'GBP');
     expect(single.whatHappened).toBe('Cash fell from £30,000 to £12,000 this period.');
+    expect(single.title).toBe('Cash fell');
   });
 
   it('drops the overdue clause from the runway advice when there is nothing to collect', () => {

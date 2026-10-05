@@ -144,9 +144,12 @@ export const TEMPLATES: Readonly<Record<AlertRuleKey | typeof OVERFLOW_RULE_KEY,
       'We flag gross margin down more than 3 points on its 3-month average, or net margin down more than 5 points on the previous month.',
   },
   'cash.decline': {
-    title: () => 'Cash fell',
+    title: (v) => v.trigger === 'consecutive_months' ? 'More money went out than came in' : 'Cash fell',
+    // R-4: the consecutive trigger is NET MOVEMENT below zero for N months. It is not the balance:
+    // an account joining the scope can lift the balance while money keeps flowing out, and "cash has
+    // fallen … to 9,100" beside a balance that rose from 7,500 contradicted itself.
     whatHappened: (v, c) => v.trigger === 'consecutive_months'
-      ? `Cash has fallen for ${count(v.consecutive_months)} months in a row, to ${money(v.current, c)}.`
+      ? `More money has gone out than come in for ${count(v.consecutive_months)} months in a row. Cash now stands at ${money(v.current, c)}.`
       : `Cash fell from ${money(v.comparison, c)} to ${money(v.current, c)} this period.`,
     whyItMatters: () =>
       'Cash is the only figure that decides whether the business can pay what it owes next month.',

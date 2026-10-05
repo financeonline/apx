@@ -159,12 +159,21 @@ export const ENGINE_VERSION = '12.0.0';
  * account is in scope; it used to score 60 with B4 "full coverage", from the completeness ratio of 1.
  * Weights, thresholds and caps are unchanged; the cap of 70 for AI-read inputs still awaits approval.
  */
-export const HEALTH_CONFIG_VERSION = 'health.config.v3';
+/**
+ * health.config.v4 (audit H-3): the ADR-134 / ADR-035 cap looks at every figure a dimension's rules
+ * scored — earlier months a trend rule read included — not only at its required metrics. Banking
+ * health, which has no required metric, can now be capped (B1's closings, B2's flows), and cash
+ * flow's C3 sees earlier months' movement. Weights and thresholds unchanged; the cap of 70 still
+ * awaits approval (D-2).
+ */
+export const HEALTH_CONFIG_VERSION = 'health.config.v4';
 /**
  * alerts.rules.v2 (Step 0F, N-5): an expense spike on a trial-balance or P&L-report basis cites the
  * report lines its figure was read from (both year-to-date sides for a cumulative month), not ledger
  * entries the figure never read. Conditions and thresholds are unchanged.
  */
+// Also in v2 (unreleased): audit R-4 — the consecutive cash-decline trigger is worded as net outflow
+// for N months, not as a falling balance (a joining account can raise the balance meanwhile).
 export const ALERT_RULE_VERSION = 'alerts.rules.v2';
 
 /** At most this many consecutive months per chunk (§2.4). */

@@ -392,7 +392,7 @@ Propagation: the Health Score excludes a dimension when its required metrics are
 
 ## 7. Business Health Score (`src/modules/health`)
 
-Analytical indicator only; every screen carries the SOW §9 disclaimer text ("indicative, not a lending decision"). Config `health.config.v1`.
+Analytical indicator only; every screen carries the SOW §9 disclaimer text ("indicative, not a lending decision"). Config `health.config.v1`. *As built: `health.config.v4` — v2 (ADR-134) caps AI-read (`inferred`) inputs too; v3 (Step 0E, H-1) excludes banking health when no cash-like account is in scope; v4 (audit H-3) applies the cap to every input a dimension's rules scored, see §7.2. The cap value 70 awaits approval (D-2).*
 
 **All thresholds below require product-owner sign-off before Phase 6 (CD-19).**
 
@@ -415,9 +415,9 @@ When post-MVP dimensions arrive, MVP weights are scaled so the eight sum to 100;
 
 - No score is computed for a period with `is_complete = false` (ADR-030.4); Home shows the latest complete month's score and "{Month} so far" without a score.
 - Dimension **excluded** when any required metric is NULL or the min completeness of its required metrics < 0.6. Excluded dimensions are listed with reason.
-- Dimension **capped at 70** with note "based on bank data only" when any required metric has `assurance = estimated` or `data_quality.proxy = true` (ADR-035); a bank-only organization therefore receives a score on its first import.
+- Dimension **capped at 70** with note "based on bank data only" when any required metric has `assurance = estimated` or `data_quality.proxy = true` (ADR-035); a bank-only organization therefore receives a score on its first import. *As built (ADR-134, health.config.v2–v4): also when an input is `inferred` (read from a document by AI), noted "includes figures read from a PDF by AI"; and (v4, audit H-3) the test covers every figure a rule actually scored — earlier months a trend rule read (B1's closings, C3's movements) and inputs of a dimension with no required metric (banking health's B1/B2) — not only the required metrics. `capped` means the cap applies; where the dimension scored below 70 the note reads "Can score at most 70" (audit H-4).*
 - Rules that read a variance carrying `basis_differs` treat it as NULL (skip the rule).
-- `score = round(Σ dimension_score × weight / Σ weights of included dimensions)`; `dimensions_used`/`dimensions_total` stored; UI shows "based on 4 of 6 dimensions". Fewer than 3 included → `score = NULL`, state "Not enough data yet".
+- `score = round(Σ dimension_score × weight / Σ weights of included dimensions)` — *as built (audit H-5): the renormalised weights are rounded once to 0.1 and stored as `weight_applied`, and the total is `round(Σ dimension_score × weight_applied / Σ weight_applied)`, so it is re-derivable from the stored breakdown alone (§7.4). It differs from the unrounded formula only at an exact .5 boundary (0.32% of combinations) and never changes a band*; `dimensions_used`/`dimensions_total` stored; UI shows "based on 4 of 6 dimensions". Fewer than 3 included → `score = NULL`, state "Not enough data yet".
 - Bands: 0–39 **At risk**, 40–59 **Needs attention**, 60–79 **Stable**, 80–100 **Strong**.
 
 ### 7.3 Dimension rules (each dimension starts at 50; rules add/subtract; clamp 0–100)

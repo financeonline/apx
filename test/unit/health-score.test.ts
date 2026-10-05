@@ -277,3 +277,57 @@ describe('score boundaries (0 and 100)', () => {
     expect(dimensionScoreFromRules(dimension({ rules: rules([30, 10, 10, 5]), capped: true }))).toBe(PROXY_CAP);
   });
 });
+
+/**
+ * H-3 (independent audit of c5a8473): the ADR-134 cap looked only at a dimension's REQUIRED metrics.
+ * Banking health has none, so it could never be capped; cash flow's C3 reads earlier months' movement
+ * that the cap never saw. The cap now looks at every figure a rule actually scored.
+ */
+describe('H-3 · the cap reaches every input a rule scored', () => {
+  // Strong banking: closing cash rising 40k → 45k → 50k (B1 +), inflows 100k against outflows 80k (B2 +15).
+  const strongBanking = (assurance: 'verified' | 'inferred', which: 'p2' | 'inflows') => {
+    let s = withMetric(baselineSnapshots(), { key: 'closing_cash', value: '40000', unit: 'money', periodId: 'p-2026-01',
+      assurance: which === 'p2' ? assurance : 'verified' });
+    s = withMetric(s, { key: 'closing_cash', value: '45000', unit: 'money', periodId: 'p-2026-02' });
+    s = withMetric(s, { key: 'closing_cash', value: '50000', unit: 'money' });
+    s = withMetric(s, { key: 'cash_inflows', value: '100000', unit: 'money', assurance: which === 'inflows' ? assurance : 'verified' });
+    return s;
+  };
+  const banking = (snapshots: ReturnType<typeof baselineSnapshots>) =>
+    computeHealthScore(healthInput({ snapshots }))!.breakdown.find((d) => d.key === 'banking_health')!;
+
+  it('banking health scored on verified figures is not capped (control)', () => {
+    const b = banking(strongBanking('verified', 'p2'));
+    expect(b.capped).toBe(false);
+    expect(b.score).toBeGreaterThan(PROXY_CAP);
+  });
+
+  it('B1 reading an AI-read closing two months back caps banking health at 70', () => {
+    const b = banking(strongBanking('inferred', 'p2'));
+    expect(b.capped).toBe(true);
+    expect(b.score).toBe(PROXY_CAP);
+    expect(b.cap_reason).toBe(INFERRED_CAP_NOTE);
+  });
+
+  it('B2 reading AI-read inflows caps banking health at 70', () => {
+    const b = banking(strongBanking('inferred', 'inflows'));
+    expect(b.capped).toBe(true);
+    expect(b.score).toBe(PROXY_CAP);
+  });
+
+  it('cash flow: C3 reading an AI-read movement from an earlier month caps the dimension', () => {
+    const snapshots = withMetric(baselineSnapshots(), { key: 'net_cash_movement', value: '1000', unit: 'money',
+      periodId: 'p-2026-02', assurance: 'inferred' });
+    const cashFlow = computeHealthScore(healthInput({ snapshots }))!.breakdown.find((d) => d.key === 'cash_flow')!;
+    expect(cashFlow.capped).toBe(true);
+    expect(cashFlow.cap_reason).toBe(INFERRED_CAP_NOTE);
+    expect(cashFlow.score).toBeLessThanOrEqual(PROXY_CAP);
+  });
+
+  it('a weak figure no rule scored does not cap (an AI-read month outside every rule\'s window)', () => {
+    const snapshots = withMetric(baselineSnapshots(), { key: 'net_cash_movement', value: '1000', unit: 'money',
+      periodId: 'p-2025-10', assurance: 'inferred' });
+    const cashFlow = computeHealthScore(healthInput({ snapshots }))!.breakdown.find((d) => d.key === 'cash_flow')!;
+    expect(cashFlow.capped).toBe(false);
+  });
+});

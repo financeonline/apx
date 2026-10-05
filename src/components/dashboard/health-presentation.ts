@@ -189,7 +189,12 @@ export function orderedDimensions(
  * The sentence under a capped dimension (ADR-134): the cap and its stored reason — bank data only,
  * figures an AI read from a PDF, or both. Null for a dimension that is not capped.
  */
-export function capNote(dimension: Pick<DimensionBreakdown, 'capped' | 'cap_reason'>): string | null {
+export function capNote(dimension: Pick<DimensionBreakdown, 'capped' | 'cap_reason'> & { readonly score?: number | null }): string | null {
   if (!dimension.capped) return null;
+  // H-4: `capped` means the cap APPLIES; it bound only when the dimension would have scored more.
+  // "Capped at 70" beside a 65 told the reader the score had been cut when it had not.
+  if (typeof dimension.score === 'number' && dimension.score < 70) {
+    return `Can score at most 70 — ${dimension.cap_reason ?? PROXY_CAP_NOTE}.`;
+  }
   return `Capped at 70 — ${dimension.cap_reason ?? PROXY_CAP_NOTE}.`;
 }

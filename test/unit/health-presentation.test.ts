@@ -144,5 +144,8 @@ describe('ADR-134 · the cap sentence a reader sees', () => {
     expect(capNote({ capped: true, cap_reason: INFERRED_CAP_NOTE })).toBe('Capped at 70 — includes figures read from a PDF by AI.');
     // A breakdown stored before ADR-134 has no reason: it was the bank-only cap.
     expect(capNote({ capped: true, cap_reason: null })).toBe('Capped at 70 — based on bank data only.');
+    // H-4: the cap applied but did not bind — a 65 was not cut to 65.
+    expect(capNote({ capped: true, cap_reason: INFERRED_CAP_NOTE, score: 65 })).toBe('Can score at most 70 — includes figures read from a PDF by AI.');
+    expect(capNote({ capped: true, cap_reason: INFERRED_CAP_NOTE, score: 70 })).toBe('Capped at 70 — includes figures read from a PDF by AI.');
   });
 });

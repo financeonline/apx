@@ -33,7 +33,9 @@ with base as (
 )
 select b.*, pg_temp.name_key(b.name) as new_key,
        b.normalized_name like '% [held %]' as already_held,
-       count(*) over (partition by b.tbl, b.organization_id, pg_temp.name_key(b.name)) as group_size
+       count(*) over (partition by b.tbl, b.organization_id, pg_temp.name_key(b.name)) as group_size,
+       count(*) filter (where b.merged_into_id is null)
+         over (partition by b.tbl, b.organization_id, pg_temp.name_key(b.name)) as active_in_group
   from base b;
 
 \echo '1. Summary, per table: what the migration would do'
@@ -41,7 +43,8 @@ select tbl,
        count(*)                                                                   as records,
        count(*) filter (where normalized_name <> new_key and not already_held and group_size = 1) as rekeyed,
        count(*) filter (where normalized_name = '' and new_key <> '')             as gains_a_key,
-       count(*) filter (where group_size > 1)                                     as to_be_held,
+       -- U-2: the one active record of a group (a merge's survivor) keeps the plain key.
+       count(*) filter (where group_size > 1 and not (merged_into_id is null and active_in_group = 1)) as to_be_held,
        count(distinct (organization_id, new_key)) filter (where group_size > 1)   as collision_groups,
        count(*) filter (where new_key = '')                                       as empty_key
   from name_plan group by tbl order by tbl;
@@ -53,12 +56,17 @@ select tbl, organization_id, id, name, normalized_name as old_key, new_key
  order by tbl, organization_id, name;
 
 \echo '3. COLLISIONS: records the new key calls one name. Every record listed is HELD (kept, never merged)'
-\echo '   until a person renames or merges them; imports of the name are refused meanwhile.'
+\echo '   until a person renames or merges them; imports of the name are refused meanwhile. Exception (U-2):'
+\echo '   where every other record of the group was already MERGED into one survivor, the survivor keeps the'
+\echo '   plain key (marked "survivor, not held") — the merge was the decision.'
 select tbl, organization_id, new_key,
        count(*) as records,
-       string_agg(name || ' (' || id::text || case when merged_into_id is not null then ', merged away' else '' end || ')',
+       string_agg(name || ' (' || id::text
+                  || case when merged_into_id is not null then ', merged away'
+                          when active_in_group = 1 then ', survivor, not held' else '' end || ')',
                   ' | ' order by name) as records_held
-  from name_plan where group_size > 1
+  from name_plan
+ where group_size > 1
  group by tbl, organization_id, new_key
  order by tbl, organization_id, new_key;
 

@@ -86,12 +86,26 @@ declare
   v_held integer;
 begin
   foreach t in array array['accounts', 'counterparties', 'products', 'marketing_channels', 'campaigns'] loop
+    -- Audit U-2: a counterparty MERGED into another before the upgrade is already decided — the
+    -- merge was the decision. It still collides with its survivor (they share the new key) and so is
+    -- parked on a held key of its own, but it does not make the SURVIVOR undecided: a group whose
+    -- only active member is that survivor gives the survivor its plain key. Holding the survivor
+    -- refused every later import naming the customer the user had already de-duplicated.
     execute format(
       'create temporary table name_rekey on commit drop as
        select x.id, x.organization_id, x.name, x.normalized_name as old_key,
               app.normalize_name(x.name) as new_key,
-              count(*) over (partition by x.organization_id, app.normalize_name(x.name)) as group_size
-         from public.%I x', t);
+              count(*) over (partition by x.organization_id, app.normalize_name(x.name)) as group_size,
+              %s as is_active,
+              count(*) filter (where %s) over (partition by x.organization_id, app.normalize_name(x.name)) as active_size
+         from public.%I x',
+      case when t = 'counterparties' then 'x.merged_into_id is null' else 'true' end,
+      case when t = 'counterparties' then 'x.merged_into_id is null' else 'true' end,
+      t);
+    -- A record is held when it shares the new key with another, unless it is the one active record
+    -- of its group (the survivor of a merge made before the upgrade).
+    alter table name_rekey add column held boolean;
+    update name_rekey set held = group_size > 1 and not (is_active and active_size = 1);
 
     execute format(
       'update public.%I x set normalized_name = ''[rekey '' || x.id::text || '']''
@@ -100,7 +114,7 @@ begin
 
     execute format(
       'update public.%I x
-          set normalized_name = case when k.group_size > 1 then app.held_name_key(k.new_key, x.id) else k.new_key end
+          set normalized_name = case when k.held then app.held_name_key(k.new_key, x.id) else k.new_key end
          from name_rekey k
         where k.id = x.id and x.normalized_name = ''[rekey '' || x.id::text || '']''', t);
 
@@ -111,7 +125,7 @@ begin
              (select jsonb_agg(jsonb_build_object('id', o.id, 'name', o.name) order by o.name)
                 from name_rekey o
                where o.organization_id = k.organization_id and o.new_key = k.new_key and o.id <> k.id) as shares_with
-        from name_rekey k where k.group_size > 1
+        from name_rekey k where k.held
     loop
       perform app.audit(r.organization_id, 'name_identity.held', t, r.id,
                         jsonb_build_object('normalized_name', r.old_key),

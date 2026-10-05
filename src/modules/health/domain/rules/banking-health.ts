@@ -39,9 +39,10 @@ import type {
  * trend worth points either way.
  */
 export function balanceTrendRule(input: HealthInput): {
-  rule: RuleApplication; direction: 'rising' | 'falling' | 'flat';
+  rule: RuleApplication; direction: 'rising' | 'falling' | 'flat'; read?: readonly string[];
 } {
   const periods = trailingPeriodIds(input.periodIds, input.periodId, B1_PERIODS);
+  const read = periods;
   const series = seriesOf(input.snapshots, periods, 'closing_cash');
   const known = series.filter((v): v is Decimal => v !== null);
 
@@ -53,12 +54,12 @@ export function balanceTrendRule(input: HealthInput): {
   const falling = known.every((v, i) => i === 0 || v.lessThan(known[i - 1]!));
 
   if (rising) {
-    return { rule: flatRule('B1', 'rising for 3 months', B1_RISING_POINTS, null), direction: 'rising' };
+    return { rule: flatRule('B1', 'rising for 3 months', B1_RISING_POINTS, null), direction: 'rising', read };
   }
   if (falling) {
-    return { rule: flatRule('B1', 'falling for 3 months', B1_FALLING_POINTS, null), direction: 'falling' };
+    return { rule: flatRule('B1', 'falling for 3 months', B1_FALLING_POINTS, null), direction: 'falling', read };
   }
-  return { rule: flatRule('B1', 'no clear trend', 0, null), direction: 'flat' };
+  return { rule: flatRule('B1', 'no clear trend', 0, null), direction: 'flat', read };
 }
 
 /** The banking anomaly conditions for this period (§7.3 B3). */
@@ -162,6 +163,12 @@ export function evaluateBankingHealth(input: HealthInput): DimensionEvaluation {
     conditions,
     requirements: [],
     coverageSatisfied: coverage !== null && coverage > 0,
+    // H-3: B1 reads three months' closing cash, B2 P's inflows and outflows. Banking health has no
+    // required metric, so before this nothing it scored could reach the ADR-134 cap.
+    scoredInputs: [
+      ...(trend.read ?? []).map((p) => ({ periodId: p, metricKey: 'closing_cash' })),
+      ...(ratio !== null ? [{ periodId, metricKey: 'cash_inflows' }, { periodId, metricKey: 'cash_outflows' }] : []),
+    ],
     positives,
     negatives,
   };

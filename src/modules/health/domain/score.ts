@@ -91,7 +91,13 @@ function assess(input: HealthInput, evaluation: DimensionEvaluation): Assessed {
   }
 
   const scored = scoreFromRules(evaluation.rules, DIMENSION_BASELINE);
-  const capping = verdict.proxy || verdict.inferred;
+  // H-3: the inputs the rules scored, not only the required ones, decide the cap.
+  const read = (evaluation.scoredInputs ?? []).flatMap(({ periodId, metricKey }) =>
+    input.snapshots.filter((s) => s.periodId === periodId && s.metricKey === metricKey
+      && s.dimensionType === 'none' && s.value !== null));
+  const proxy = verdict.proxy || read.some((s) => s.assurance === 'estimated' || s.dataQuality.proxy);
+  const inferred = verdict.inferred || read.some((s) => s.assurance === 'inferred');
+  const capping = proxy || inferred;
   const capped = capping && scored > PROXY_CAP;
 
   return {
@@ -100,7 +106,7 @@ function assess(input: HealthInput, evaluation: DimensionEvaluation): Assessed {
     exclusionReason: null,
     rawScore: capped ? PROXY_CAP : scored,
     capped: capping,
-    capReason: capReasonFor(verdict.proxy, verdict.inferred),
+    capReason: capReasonFor(proxy, inferred),
     completeness: verdict.minCompleteness,
     warnings: verdict.warnings as readonly DataQualityWarning[],
   };

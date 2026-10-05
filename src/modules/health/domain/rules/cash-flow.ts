@@ -41,8 +41,9 @@ function runwayRule(input: HealthInput): RuleApplication {
 }
 
 /** C3: the direction of net cash movement over the last three periods (§7.3). */
-function movementTrendRule(input: HealthInput): { rule: RuleApplication; fallingMonths: number } {
+function movementTrendRule(input: HealthInput): { rule: RuleApplication; fallingMonths: number; read: readonly string[] } {
   const periods = trailingPeriodIds(input.periodIds, input.periodId, C3_PERIODS);
+  const scored = { read: periods };
   const series = seriesOf(input.snapshots, periods, 'net_cash_movement');
   const known = series.filter((v): v is Decimal => v !== null);
 
@@ -50,6 +51,7 @@ function movementTrendRule(input: HealthInput): { rule: RuleApplication; falling
     return {
       rule: skippedRule('C3', 'insufficient_history'),
       fallingMonths: 0,
+      read: [],
     };
   }
 
@@ -60,17 +62,20 @@ function movementTrendRule(input: HealthInput): { rule: RuleApplication; falling
     return {
       rule: flatRule('C3', `positive in ${positive} of ${C3_PERIODS}`, C3_POSITIVE_POINTS, String(positive)),
       fallingMonths: 0,
+      ...scored,
     };
   }
   if (nonPositive === C3_PERIODS) {
     return {
       rule: flatRule('C3', `negative in all ${C3_PERIODS}`, C3_NEGATIVE_POINTS, String(nonPositive)),
       fallingMonths: nonPositive,
+      ...scored,
     };
   }
   return {
     rule: flatRule('C3', `positive in ${positive} of ${C3_PERIODS}`, 0, String(positive)),
     fallingMonths: 0,
+    ...scored,
   };
 }
 
@@ -127,6 +132,13 @@ export function evaluateCashFlow(input: HealthInput): DimensionEvaluation {
     conditions: [],
     requirements: REQUIREMENTS,
     coverageSatisfied: null,
+    // H-3: C1/C4 read P's closing cash and outflows, C2 P's runway, C3 the trailing movements.
+    scoredInputs: [
+      ...(closingCash !== null ? [{ periodId, metricKey: 'closing_cash' }] : []),
+      ...(cover !== null ? [{ periodId, metricKey: 'cash_outflows' }] : []),
+      ...(runway !== null ? [{ periodId, metricKey: 'cash_runway_months' }] : []),
+      ...trend.read.map((p) => ({ periodId: p, metricKey: 'net_cash_movement' })),
+    ],
     positives,
     negatives,
   };

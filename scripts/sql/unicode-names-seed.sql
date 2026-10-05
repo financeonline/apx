@@ -33,7 +33,8 @@ with c(id, org, name, kind, key, held) as (values
   ('e9c00000-0000-4000-8000-000000000005', 'e9000000-0000-4000-8000-0000000000e1', 'Izmir Ltd',     'supplier', null, true),
   ('e9c00000-0000-4000-8000-000000000006', 'e9000000-0000-4000-8000-0000000000e1', 'Ａｃｍｅ Trading', 'customer', null, true),
   ('e9c00000-0000-4000-8000-000000000007', 'e9000000-0000-4000-8000-0000000000e1', 'Acme Trading',  'customer', null, true),
-  ('e9c00000-0000-4000-8000-000000000008', 'e9000000-0000-4000-8000-0000000000e1', 'Istanbul Co',   'customer', null, true),
+  -- The survivor of a merge made before the upgrade (below): decided, so NOT held (audit U-2).
+  ('e9c00000-0000-4000-8000-000000000008', 'e9000000-0000-4000-8000-0000000000e1', 'Istanbul Co',   'customer', 'istanbul co', false),
   ('e9c00000-0000-4000-8000-000000000009', 'e9000000-0000-4000-8000-0000000000e1', 'İstanbul Co',   'customer', null, true),
   -- Arabic, Greek, Cyrillic: each was '' under the old key.
   ('e9c00000-0000-4000-8000-000000000011', 'e9000000-0000-4000-8000-0000000000e2', 'شركة الأمل',    'customer', 'شركة الأمل', false),
@@ -49,8 +50,8 @@ with c(id, org, name, kind, key, held) as (values
 insert into unicode_seed.expected (tbl, id, name, key, held)
 select 'counterparties', id, name, key, held from c;
 
--- "İstanbul Co" was merged into "Istanbul Co" before the upgrade: both are still held (the merged one
--- keeps its key slot), but only the surviving record blocks the name afterwards.
+-- "İstanbul Co" was merged into "Istanbul Co" before the upgrade: the merged-away record is held (it
+-- keeps a key slot of its own); the survivor takes the plain key, since the merge was the decision (U-2).
 update public.counterparties set merged_into_id = 'e9c00000-0000-4000-8000-000000000008'
  where id = 'e9c00000-0000-4000-8000-000000000009';
 
