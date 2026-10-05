@@ -1,5 +1,5 @@
 import { expect, test } from '@playwright/test';
-import { cleanUpOwn, drainQueue, seedOrganization, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, drainQueue, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
 
 /**
  * Journey 16 — customers named in five scripts, through the upload form (ADR-136, Step 0D).
@@ -28,8 +28,8 @@ test.afterAll(() => cleanUpOwn([ORG_NAME], ['journey16-owner']));
 
 test('a sales list with customers in five scripts imports each under its own name', async ({ page }) => {
   const owner = seedUser('journey16-owner');
-  const { slug } = seedOrganization(ORG_NAME, owner.userId);
   await signIn(page, owner);
+  const slug = await onboard(page, ORG_NAME);
 
   await page.goto(`/app/${slug}/data/imports/new`);
   await expect(page.getByRole('heading', { name: /add data/i })).toBeVisible();
