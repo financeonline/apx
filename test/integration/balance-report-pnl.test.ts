@@ -185,8 +185,9 @@ describe('revenue, profit and margins', () => {
 
   it('ledger beside a July trial balance: July from the trial balance (§2.3), June and August from the ledger', () => {
     expect(metric(mixed, '2026-07', 'revenue')).toBe('5000.00|verified|period_balances|[]');
-    expect(metric(mixed, '2026-06', 'revenue').split('|').slice(0, 3)).toEqual(['1000.00', 'verified', 'ledger']);
-    expect(metric(mixed, '2026-08', 'revenue').split('|').slice(0, 3)).toEqual(['1210.00', 'verified', 'ledger']);
+    // Ledger-basis P&L is `calculated` (coverage.ts assuranceFor; FINANCIAL_ENGINE §2.3); a trial balance's is `verified`.
+    expect(metric(mixed, '2026-06', 'revenue').split('|').slice(0, 3)).toEqual(['1000.00', 'calculated', 'ledger']);
+    expect(metric(mixed, '2026-08', 'revenue').split('|').slice(0, 3)).toEqual(['1210.00', 'calculated', 'ledger']);
   });
 });
 
