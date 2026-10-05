@@ -29,10 +29,19 @@ let n = 0;
 
 interface Org { id: string; owner: string; admin: string; employee: string; client: string }
 
-function member(org: string, role: 'admin' | 'employee' | 'client'): string {
+function member(org: string, role: 'admin' | 'client'): string {
   const user = createAuthUser(`${role}-${n++}@${DOMAIN}`);
   adminSql(`set local app.bootstrap = 'on';
-    insert into public.organization_memberships (organization_id, user_id, role) values ('${org}', '${user}', '${role}');`);
+    insert into public.organization_memberships (organization_id, user_id, role, status) values ('${org}', '${user}', '${role}', 'active');`);
+  return user;
+}
+
+/** A platform employee ASSIGNED to the organisation: holds imports.review there, but is no owner or admin. */
+function employee(org: string): string {
+  const user = createAuthUser(`employee-${n++}@${DOMAIN}`);
+  adminSql(`insert into public.platform_users (user_id, platform_role, status) values ('${user}', 'employee', 'active');
+    update public.profiles set mfa_enrolled_at = now() where id = '${user}';
+    insert into public.organization_assignments (organization_id, employee_user_id, status) values ('${org}', '${user}', 'active');`);
   return user;
 }
 
@@ -41,11 +50,11 @@ async function org(label: string): Promise<Org> {
   const r = await clientFor(owner).schema('api').rpc('create_organization', { p_name: `ITest Attest ${label} ${RUN}` });
   if (r.error) throw new Error(r.error.message);
   const id = r.data as unknown as string;
-  return { id, owner, admin: member(id, 'admin'), employee: member(id, 'employee'), client: member(id, 'client') };
+  return { id, owner, admin: member(id, 'admin'), employee: employee(id), client: member(id, 'client') };
 }
 
 const attest = (user: string, batch: string, month: string, coverage: string, reason = 'Compared with the full trial balance in our accounts') =>
-  clientFor(user).schema('api').rpc('attest_report_completeness', { p_batch: batch, p_period_start: month, p_coverage: coverage, p_reason: reason });
+  clientFor(user, { aal: 'aal2' }).schema('api').rpc('attest_report_completeness', { p_batch: batch, p_period_start: month, p_coverage: coverage, p_reason: reason });
 
 /** Drains the recalculation the attestation itself queued (not a test-made one). */
 async function drainQueuedRecalculation(o: string, batch: string): Promise<void> {
@@ -188,7 +197,10 @@ describe('who may confirm, and what', () => {
     bank = one(`select id from public.import_batches where organization_id = '${o.id}' and target_table = 'ledger_entries' limit 1`);
   }, 300_000);
 
-  it('an employee (who may review imports) cannot: PERMISSION_DENIED', async () => {
+  it('an assigned employee, who may review imports there, cannot: PERMISSION_DENIED', async () => {
+    // The employee does reach the organisation's imports (so the refusal is about the role, not access).
+    const { data } = await clientFor(o.employee, { aal: 'aal2' }).from('import_batches').select('id').eq('id', tb);
+    expect(data ?? []).toHaveLength(1);
     expect((await attest(o.employee, tb, '2026-07-01', 'complete')).error?.message).toContain('PERMISSION_DENIED');
   });
 

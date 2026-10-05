@@ -54,7 +54,7 @@ grant all on public.report_completeness_attestations to service_role;
 create policy definer_all on public.report_completeness_attestations for all to motion_definer using (true) with check (true);
 -- Part of the import's review record: readable where the import itself is (ADR-038.4).
 create policy report_completeness_attestations_select on public.report_completeness_attestations
-  for select to authenticated using (app.has_permission(organization_id, 'imports.review'));
+  for select to authenticated using (organization_id in (select app.org_ids_with_permission('imports.review')));
 
 -- Append-only, like every other record of who decided what (ADR-046.1).
 -- The cascadable form: rows stand down only when their organisation is being deleted (purge).
