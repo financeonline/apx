@@ -56,7 +56,7 @@ test('a sales list with customers in five scripts imports each under its own nam
 
   // The database: six customers, display names exactly as the file had them.
   const stored = sql(`
-    select string_agg(c.name, ' | ' order by c.name) from public.counterparties c
+    select string_agg(c.name, ' | ' order by c.name collate "C") from public.counterparties c
       join public.organizations o on o.id = c.organization_id where o.slug = '${slug}'`);
   expect(stored).toBe('Möller GmbH | Müller GmbH | ΟΔΟΣ Α.Ε. | ООО «Ромашка» | شركة الأمل | 株式会社トヨタ');
 

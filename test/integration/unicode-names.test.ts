@@ -114,7 +114,7 @@ describe('customers in five scripts, through the wizard and commit', () => {
 
   const customers = () => adminSql(`
     select name || '=' || normalized_name from public.counterparties
-     where organization_id = '${orgId}' order by name`).split('\n').filter(Boolean);
+     where organization_id = '${orgId}' order by name collate "C"`).split('\n').filter(Boolean);
   const bookedTo = (batchId: string) => adminSql(`
     select i.invoice_number || '>' || c.name from public.invoices i join public.counterparties c on c.id = i.counterparty_id
      where i.organization_id = '${orgId}' and i.import_batch_id = '${batchId}' order by i.invoice_number`).split('\n');
