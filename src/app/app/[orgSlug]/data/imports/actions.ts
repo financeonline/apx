@@ -162,7 +162,9 @@ export async function commitBatchAction(
     );
   } catch (error) {
     // A commit-time duplicate collision comes back as a ConflictError with the rows already
-    // re-flagged (§9.3), so the reviewer lands back on a screen that shows them.
+    // re-flagged (§9.3), so the reviewer lands back on a screen that shows them. So does a report
+    // that would replace one already imported (IMP-COV-013, Step 0F): the page must re-render to ask.
+    revalidatePath(`/app/${orgSlug}/data/imports/${text(form, 'batch_id')}`);
     return fail(error, { requestId, action: 'imports.commit' });
   }
 }

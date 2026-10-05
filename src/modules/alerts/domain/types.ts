@@ -184,6 +184,11 @@ export interface MetricObservation {
   readonly assurance: AssuranceLevel;
   readonly components: Readonly<Record<string, unknown>>;
   readonly dataQuality: DataQuality;
+  /**
+   * N-5 (Step 0F): the snapshot's own `evidence_query` — which records the figure was read from — so
+   * a rule citing "what the figure was made of" cites the source that actually won, not a guess.
+   */
+  readonly evidenceQuery?: unknown;
 }
 
 /**

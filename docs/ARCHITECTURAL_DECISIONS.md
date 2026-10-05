@@ -2596,3 +2596,33 @@ On the import side, a Debit/Credit trial balance and a single-Amount P&L report 
 - **A4:** A movement-basis report's absent account contributes nothing to its month. That is inherent to any record source, and no zero is inferred, but it is stated here for completeness.
 
 **Not changed:** H-3, R-2, R-3, U-1, U-2 and every LOW finding of the audit remain open. The cap of 70 (D-2) and the VAT rule (D-1) are unapproved.
+
+### ADR-139 · Step 0F: completeness is attested, cumulative evidence reconciles per side, a corrected report replaces the old one
+
+**Status:** Proposed (Step 0F, remediation of the re-review of `39711f5`: N-1…N-7). Engine 11.0.0 (10.0.0 superseded before release); `alerts.rules.v2`; `health.config.v3` unchanged. Migrations `20261007000001` (edited before release: `report_complete`), `20261008000001`, `20261008000002`. **The completeness policy below is a product decision awaiting the owner's approval; it is implemented, not approved.** For separate re-review.
+
+**N-1 problem.** ADR-138 policy 2 treated a balancing trial balance as complete, and an absent P&L category was read as 0.00 whatever the report was. A cash-only trial balance therefore stated a verified zero revenue over a ledger that had sales, an expenses-only P&L report a zero revenue, and partial cumulative reports a zero — "absent" became "zero" without anything establishing it.
+
+**Evidence traced before deciding (no completeness metadata existed).** A balance import records only its period (IMP-RANGE-015), basis (IMP-TB-012) and, for one-column files, sign (IMP-TB-013). None of these, the row set, the declared range or a balancing total tells the engine whether the file lists every account: a partial extract can balance (cash against equity), and a full report can list only non-zero lines. Only the reviewer knows. So completeness needs a **user attestation at import**; existing imports have none and are **not** treated as complete (no backfill).
+
+**N-1 decision.**
+- **Attestation (IMP-TB-016).** Every trial balance and P&L report import asks: "Does this report list every account for the period, including accounts with nothing in them?" `complete` / `partial`, nothing pre-selected; the database refuses any other value. Stored with who and when (`import_batches.confirmations`), audited `import.confirmed`. A balance sheet is not asked (it states no P&L).
+- **Complete** = attested `complete` AND, for a trial balance, Σ closing within 0.01 of zero. A P&L report need not balance.
+- **A category with a line** takes the line (an explicit 0.00 line is a stated zero).
+- **A category with no line:** 0 when the report is complete; on a cumulative month 0 only when this AND the prior report are complete; no prior → NULL `no_prior_trial_balance`; otherwise NULL `category_not_in_report`. Only categories the organisation has an account for are filled. An account in one month's cumulative report and not the other's follows the same rule (`account_absent_unconfirmed`).
+- **Source selection (§2.3, unchanged order, one source per family).** A complete report always wins (a stated zero is never revived from older ledger or bank data). An incomplete report yields the WHOLE P&L family to a ledger or invoices source that covers P — never a mix, never a sum — with the warning `balance_report_incomplete` on every figure. The bank proxy never displaces a report: with only the bank beside it, the report is used with its NULLs. The selected source is the figure's `basis`; the insufficiency is the NULL's `missing` reason or the warning.
+
+**N-2 decision.** Each `difference` term states `expected`: the total the engine read for exactly the rows its descriptor selects, in reporting sign. The drawer reconciles (1) each side's records against that side's `expected`, (2) the formula Σ sign × records = the figure, and (3) the engine's arithmetic Σ sign × expected = the figure; a mismatch at any step is stated on the page, on that side and in the formula. Every year-to-date subtraction in a figure's evidence tree is shown, at any depth (net profit → operating profit → gross profit → revenue), each side linking to its own records block; no records block of a cumulative figure is reconciled against the figure. Figures written by 10.0.0 have no `expected`: the formula still reconciles from the records.
+
+**N-3 decision.** Commit inserts balance rows `pending`, supersedes the accepted report of the same kind for every month the new report states (account-matched where possible, ADR-029.2), then promotes — one transaction under the organisation lock (ADR-073's pattern). The first commit that would replace accepted balances writes nothing and returns `needs_confirmation`, adding IMP-COV-013 to the batch; the reviewer confirms and commits again. History, `record_status_events` and old evidence bundles are preserved (an old bundle still shows the figure as it was). A failed commit leaves the previous report current. Concurrent corrections are applied one after the other.
+
+**N-5 / N-6 / N-7.** A trial-balance-basis expense spike cites the report lines (both sides for a cumulative month), not ledger entries. Commit never applies the reporting-sign flip to a row carrying debit or credit totals. The alert list breaks severity/recency ties by rule, then `dedupe_key` (a total order); the recorded eval fixture's two tied alerts were reordered to that order (no value changed) and the shape test also compares every alert's shape by rule.
+
+**Open decisions (not decided here):**
+- **C1 (owner):** approve the attestation wording, its being required for every trial balance and P&L report, and the strict NULLs for unattested reports. Consequence: every existing trial-balance or P&L-report month in production states NULL for any category it has no line for (operating expenses, net profit, margins, Health dimensions resting on them) until re-imported with the attestation. Alternatives: a one-time attestation for existing batches by their owner (never automatic); or treating a balancing Debit/Credit trial balance as complete (rejected in review as insufficient evidence).
+- **C2:** whether a category for which the organisation has no account at all should be filled (currently not: it cannot be stated or absent).
+- **C3:** whether an incomplete report should yield to a ledger that covers P only partially (currently: the ledger must cover P by §2.2).
+- **C4:** IMP-COV-013 is raised at commit, not at validation, so a reviewer sees it after pressing Import once.
+- ADR-138 A1, A2, A4 remain open; A3 is resolved by N-3.
+
+**Not changed:** H-3, R-2, R-3, U-1, U-2, D-1…D-6 and every other outstanding finding remain open. Funding Readiness is not ready.

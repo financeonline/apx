@@ -119,7 +119,21 @@
  *   - A balance batch states a month only where it has rows (per batch, `row_months`); a batch whose
  *     rows are all in other months is unavailable there.
  */
-export const ENGINE_VERSION = '10.0.0';
+/**
+ * 11.0.0 (Step 0F, ADR-139): MAJOR. 10.0.0 was never released; its hash is kept.
+ *   - N-1: a trial balance's or P&L report's category with NO line is a zero only when the report is
+ *     COMPLETE: the reviewer attested at import that it lists every account (IMP-TB-016) and, for a
+ *     trial balance, it balances. Otherwise it is NULL `category_not_in_report` (10.0.0 read it as
+ *     0.00, so a cash-only trial balance stated a verified zero revenue). A cumulative month needs both
+ *     months complete. An account in one month's report and not the other's needs the same (10.0.0
+ *     took a balancing trial balance as complete). Existing imports carry no attestation: incomplete.
+ *   - N-1: an incomplete report yields the P&L family to a covering ledger or invoices source (the
+ *     whole family, never mixed; warning `balance_report_incomplete`); with only the bank beside it,
+ *     the report keeps it with its NULLs. A complete report always keeps it (a stated zero stands).
+ *   - N-2: each term of a `difference` evidence query states the total the engine read for it
+ *     (`expected`), so each side's records reconcile to their own value and then the formula.
+ */
+export const ENGINE_VERSION = '11.0.0';
 
 /** Bumped independently of the engine (§6). */
 /**
@@ -132,7 +146,12 @@ export const ENGINE_VERSION = '10.0.0';
  * Weights, thresholds and caps are unchanged; the cap of 70 for AI-read inputs still awaits approval.
  */
 export const HEALTH_CONFIG_VERSION = 'health.config.v3';
-export const ALERT_RULE_VERSION = 'alerts.rules.v1';
+/**
+ * alerts.rules.v2 (Step 0F, N-5): an expense spike on a trial-balance or P&L-report basis cites the
+ * report lines its figure was read from (both year-to-date sides for a cumulative month), not ledger
+ * entries the figure never read. Conditions and thresholds are unchanged.
+ */
+export const ALERT_RULE_VERSION = 'alerts.rules.v2';
 
 /** At most this many consecutive months per chunk (§2.4). */
 export const CHUNK_PERIODS = 12;

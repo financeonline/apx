@@ -25,9 +25,9 @@ import {
 import { computePnl, type AccountAmount, type PnlInput, type SnapshotIdResolver } from './pnl';
 import { choosePrecedence } from './coverage';
 import { isCashLikeBankAccount } from './categories';
-import type { InvoiceType, StandardCategory } from '@/modules/financials';
+import { PNL_CATEGORIES, type InvoiceType, type StandardCategory } from '@/modules/financials';
 import type {
-  AggregateCell, AssuranceLevel, BasisChoice, CounterpartyRef, EngineContext, MetricResult, PeriodCoverage,
+  AggregateCell, AssuranceLevel, BasisChoice, CounterpartyRef, DataQualityMissing, EngineContext, MetricResult, PeriodCoverage,
   PeriodRef,
 } from './types';
 
@@ -263,6 +263,29 @@ function balanceAccountAmounts(
       ...(result.warnings.length > 0 ? { warnings: result.warnings } : {}),
       ...(result.missing.length > 0 ? { missing: result.missing } : {}),
     });
+  }
+  /*
+   * N-1 (Step 0F): a P&L CATEGORY the report has no line for. It is a known zero only where the
+   * report(s) the month rests on are COMPLETE (attested, IMP-TB-016): on a movement report, P's; on a
+   * cumulative one, P's and the prior month's (a difference of two unknowns is unknown). Otherwise it
+   * is NULL — `category_not_in_report`, or `no_prior_trial_balance` where the prior report is absent —
+   * and so is every figure built on it. An explicit line of 0.00 is a line: a stated zero.
+   */
+  const stated = new Set(out.map((a) => a.category));
+  for (const category of PNL_CATEGORIES) {
+    if (stated.has(category)) continue;
+    let missing: DataQualityMissing | null;
+    if (basis === 'movement' || context.isFirstFiscalMonth) {
+      missing = context.currentComplete === true ? null : 'category_not_in_report';
+    } else if (!context.priorBatch) {
+      missing = 'no_prior_trial_balance';
+    } else {
+      missing = context.currentComplete === true && context.priorComplete === true ? null : 'category_not_in_report';
+    }
+    if (missing === null) continue;
+    const home = homeAccountFor(accounts, category);
+    if (home === null || home.category !== category) continue;
+    out.push({ accountId: home.accountId, category, amount: null, rowCount: 0, missing: [missing] });
   }
   return out.sort((a, b) => a.accountId.localeCompare(b.accountId));
 }
@@ -548,8 +571,10 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
       ? cells.filter((cell) => cell.source !== 'period_balances' || cell.balanceKind === pnlBasis.balanceKind)
       : cells;
   const balanceBasis = pnlBasis.balanceBasis ?? 'movement';
+  // Without the run's prior-month facts, completeness is what coverage established for P alone.
   const balanceContext: BalancePnlContext = input.balancePnl
-    ?? { priorPeriodId: null, priorBatch: false, isFirstFiscalMonth: false };
+    ?? { priorPeriodId: null, priorBatch: false, isFirstFiscalMonth: false,
+      currentComplete: coverage.bySource.period_balances.reportComplete === true };
 
   const pnlInput: PnlInput = {
     period,
@@ -577,7 +602,8 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
     // H-2: a cumulative month's figure is a DIFFERENCE of two months' rows; its evidence names both
     // selections and the subtraction (`kind: 'difference'`), never one row selection that cannot total.
     balanceDifference: pnlSource === 'period_balances' && balanceBasis === 'cumulative' && !balanceContext.isFirstFiscalMonth
-      ? { priorPeriodId: balanceContext.priorPeriodId, priorAvailable: balanceContext.priorBatch }
+      ? { priorPeriodId: balanceContext.priorPeriodId, priorAvailable: balanceContext.priorBatch,
+        cells: pnlCells.filter((c) => c.source === 'period_balances') }
       : undefined,
     uncategorised: pnlSource
       ? uncategorisedExposure(pnlCells, period.id, pnlSource, pnlCategoryOf)

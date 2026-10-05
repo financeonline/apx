@@ -120,12 +120,11 @@ export function buildCorpus(recording: Recording = loadRecording()): EvalCase[] 
   /*
    * Whichever expense-spike alert the recording retained.
    *
-   * `get_alerts` is capped and ties are broken by nothing, so a re-record keeps either
-   * `expense.spike_category` or `expense.spike_account` for this organisation — the two carry
-   * different key paths, which is the same nondeterminism `ai-eval-record` reports as a 26-against-25
-   * shape difference. The corpus uses this only as an evidence reference, and every use already
-   * tolerates its absence, so it must not insist on one of the two. This changes no assertion about
-   * behaviour and does not touch the alerts module or the shape test that reports the flake.
+   * `get_alerts` is capped, and until Step 0F (N-7) ties were broken by nothing, so a re-record kept
+   * either `expense.spike_category` or `expense.spike_account` for this organisation. Ties are now
+   * broken by rule and alert identity (`alerts/data/repository.ts`), but the corpus still uses this
+   * only as an evidence reference, located by rule rather than by position, and every use tolerates
+   * its absence.
    */
   const spikeIndex = alerts.findIndex((a) => a.rule_key.startsWith('expense.spike'));
   const spikeRef = spikeIndex < 0

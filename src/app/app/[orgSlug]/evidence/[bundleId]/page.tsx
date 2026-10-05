@@ -5,7 +5,7 @@ import { formatValue, missingReasonText, statusFor, BASIS_TEXT } from '@/modules
 import type { AssuranceLevel, DataQuality } from '@/modules/financial-engine';
 import {
   DEFAULT_DESCRIPTOR_LIMIT, RECORD_KINDS, getDocumentReference, loadEvidenceDrawer,
-  type DocumentReference, type RecordKind,
+  type DocumentReference, type DrawerDifference, type RecordKind,
 } from '@/modules/evidence';
 import { getAccessContext } from '@/modules/tenancy';
 import { StatusBadgeView } from '@/components/dashboard';
@@ -128,31 +128,9 @@ export default async function EvidenceBundlePage({
                 <p className="mt-2 text-sm text-ink-muted">{metric.description}</p>
               ) : null}
 
-              {/* Step 0E: a cumulative report's month is a subtraction of two periods' records. */}
+              {/* Step 0E / N-2: a cumulative report's month is a subtraction of two periods' records. */}
               {metric.difference === null ? null : (
-                <div className="mt-3 rounded-md border border-line px-3 py-2 text-sm text-ink">
-                  <p>
-                    This month is worked out from a year-to-date report: this report&apos;s year to date, less the
-                    previous month&apos;s.
-                  </p>
-                  <ul className="mt-1 space-y-1">
-                    {metric.difference.terms.map((term) => (
-                      <li key={term.name} className="[overflow-wrap:anywhere]">
-                        {term.sign === 1 ? 'Year to date' : 'Less: year to date'}
-                        {term.periodLabel ? ` to ${term.periodLabel}` : ''}
-                        {': '}
-                        {term.total === null
-                          ? `not available (${missingReasonText([term.unavailable ?? ''])})`
-                          : `${formatValue({ value: term.total, unit: metric.unit, currency: metric.currency }, { showMinorUnits: true })}${term.rowCount === null ? '' : ` from ${term.rowCount} ${term.rowCount === 1 ? 'row' : 'rows'}`}`}
-                      </li>
-                    ))}
-                  </ul>
-                  <p className="mt-1">
-                    {metric.difference.terms.some((t) => t.total === null)
-                      ? 'One side of the subtraction is missing, so this figure cannot be worked out.'
-                      : `= ${formatValue({ value: metric.value, unit: metric.unit, currency: metric.currency }, { showMinorUnits: true })}`}
-                  </p>
-                </div>
+                <DifferencePanel difference={metric.difference} currency={metric.currency} />
               )}
 
               {/* Step 0D: a balance carried through a month that is not verified says which. */}
@@ -312,9 +290,27 @@ export default async function EvidenceBundlePage({
           </Card>
         )}
 
+        {/*
+          * N-2: every year-to-date subtraction this figure rests on, at any depth (net profit's
+          * revenue, cost of sales, expenses…), each side reconciled and linked to its rows.
+          */}
+        {view.subtractions.length === 0 ? null : (
+          <Card>
+            <CardBody>
+              <h2 className="font-serif text-lg text-ink">Worked out from year-to-date reports</h2>
+              <p className="mt-1 text-sm text-ink-muted">
+                Each of these is this month&apos;s report total less the previous month&apos;s.
+              </p>
+              {view.subtractions.map((s) => (
+                <DifferencePanel key={s.snapshotId} difference={s.difference} currency={s.currency} label={s.label} />
+              ))}
+            </CardBody>
+          </Card>
+        )}
+
         {/* Level 3 — Records: the rows themselves, with the reconciliation that proves the figure. */}
         {view.records.map((block) => (
-          <Card key={block.itemId}>
+          <Card key={block.itemId} id={`records-${block.itemId}`}>
             <CardBody>
               <h2 className="font-serif text-lg text-ink">{block.label}</h2>
               <p className="mt-1 text-sm text-ink-muted">
@@ -434,6 +430,69 @@ export default async function EvidenceBundlePage({
 }
 
 /** The row a reader descended from, as `<table>:<id>`; absent until they pick one. */
+/**
+ * N-2: a figure that is the difference of two periods' records, reconciled in the order a reader
+ * checks it — each side's rows against what the calculation used for that side, with a link to those
+ * rows, then the subtraction against the figure. A mismatch anywhere is stated, never hidden.
+ */
+function DifferencePanel({ difference, currency, label }: {
+  difference: DrawerDifference; currency: string | null; label?: string;
+}) {
+  const money = (value: string | null) => formatValue({ value, unit: 'money', currency }, { showMinorUnits: true });
+  const missing = difference.terms.some((t) => t.total === null);
+  const [current, prior] = difference.terms;
+  return (
+    <div className="mt-3 rounded-md border border-line px-3 py-2 text-sm text-ink" data-testid="difference-panel">
+      <p>
+        {label ? `${label}: ` : ''}this month is worked out from a year-to-date report — this report&apos;s year to
+        date, less the previous month&apos;s.
+      </p>
+      <ul className="mt-1 space-y-1">
+        {difference.terms.map((term) => (
+          <li key={term.name} className="[overflow-wrap:anywhere]">
+            {term.sign === 1 ? 'Year to date' : 'Less: year to date'}
+            {term.periodLabel ? ` to ${term.periodLabel}` : ''}
+            {': '}
+            {term.total === null
+              ? `not available (${missingReasonText([term.unavailable ?? ''])})`
+              : (
+                <>
+                  {money(term.total)}
+                  {term.rowCount === null ? '' : ` from ${term.rowCount} ${term.rowCount === 1 ? 'row' : 'rows'}`}
+                  {term.reconciles === true ? ` — matches the ${money(term.expected)} the calculation used` : ''}
+                  {term.reconciles === false
+                    ? ` — does not match the ${money(term.expected)} the calculation used. Please tell us — a figure that does not reconcile is a fault.`
+                    : ''}
+                  {term.recordsItemId === null ? null : (
+                    <>
+                      {' '}
+                      <a href={`#records-${term.recordsItemId}`} className="text-accent underline underline-offset-2">
+                        See these rows
+                        <span className="sr-only">{` (year to date${term.periodLabel ? ` to ${term.periodLabel}` : ''})`}</span>
+                      </a>
+                    </>
+                  )}
+                </>
+              )}
+          </li>
+        ))}
+      </ul>
+      <p className="mt-1" data-testid="difference-formula">
+        {missing || current === undefined || prior === undefined
+          ? 'One side of the subtraction is missing, so this figure cannot be worked out.'
+          : difference.formulaReconciles === false
+            ? `${money(current.total)} − ${money(prior.total)} = ${money(difference.recordsResult)}, which does not match the figure of ${money(difference.figure)}. Please tell us — a figure that does not reconcile is a fault.`
+            : `${money(current.total)} − ${money(prior.total)} = ${money(difference.recordsResult)}, which is this month’s figure.`}
+      </p>
+      {difference.arithmeticReconciles === false ? (
+        <p className="mt-1 text-warn">
+          The amounts the calculation used do not produce this figure. Please tell us — a figure that does not reconcile is a fault.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 async function documentFor(
   ctx: Awaited<ReturnType<typeof getAccessContext>>,
   row: string | undefined,

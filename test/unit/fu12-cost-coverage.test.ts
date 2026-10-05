@@ -49,6 +49,7 @@ const CHART: AccountRef[] = [
   account('a-opex', 'operating_expense', 'expense'),
   account('a-mkt', 'marketing', 'expense'),
   account('a-unc', 'uncategorised', 'asset'),
+  account('a-eq', 'equity', 'equity'),
 ];
 const BANK: BankAccountRef = {
   id: 'ba-1', name: 'Current', accountType: 'current', openingBalance: '1000.00', openingBalanceDate: '2026-01-31', isActive: true,
@@ -100,14 +101,15 @@ const CELLS: AggregateCell[] = [
 ];
 const SALES_ONLY_CELLS = CELLS.slice(0, 1);
 
-const coverageFor = (period: PeriodRef, batches: CoverageBatch[], opts: { asOf?: string; bank?: boolean; rowCounts?: Record<string, number> } = {}) =>
-  computeCoverage({ period, batches, bankAccounts: opts.bank ? [BANK] : [], rowCounts: opts.rowCounts ?? {}, asOf: opts.asOf ?? AS_OF });
+const coverageFor = (period: PeriodRef, batches: CoverageBatch[], opts: { asOf?: string; bank?: boolean; rowCounts?: Record<string, number>; cells?: AggregateCell[] } = {}) =>
+  computeCoverage({ period, batches, bankAccounts: opts.bank ? [BANK] : [], rowCounts: opts.rowCounts ?? {}, asOf: opts.asOf ?? AS_OF,
+    ...(opts.cells ? { balanceCells: opts.cells } : {}) });
 
 const compose = (
   period: PeriodRef, batches: CoverageBatch[], cells: AggregateCell[],
   opts: { asOf?: string; bank?: boolean; rowCounts?: Record<string, number>; ctx?: Partial<EngineContext> } = {},
 ) => composePeriod({
-  period, coverage: coverageFor(period, batches, opts), cells, transferLegs: [],
+  period, coverage: coverageFor(period, batches, { ...opts, cells }), cells, transferLegs: [],
   context: context({ bankAccounts: opts.bank ? [BANK] : [], ...opts.ctx }),
 });
 
@@ -446,7 +448,7 @@ describe('C4 / C5 · what FU-12 does not change, and the days denominators', () 
     const tb: CoverageBatch = {
       id: 'b-tb', targetTable: 'period_balances', balanceKind: 'trial_balance', balanceBasis: 'movement', bankAccountId: null,
       invoiceListKind: null, importType: 'trial_balance', periodStart: '2026-07-01', periodEnd: '2026-07-31',
-      committedAt: '2026-08-05T00:00:00Z',
+      committedAt: '2026-08-05T00:00:00Z', reportComplete: true, // N-1: attested; it balances below
     };
     const balance = (accountId: string, debit: string, credit: string): AggregateCell => ({
       ...invoiceCell(JUL, 'sales', ACME.id, '0'), source: 'period_balances', invoiceType: null, counterpartyId: null, accountId,
@@ -454,8 +456,8 @@ describe('C4 / C5 · what FU-12 does not change, and the days denominators', () 
       standardCategory: CHART.find((a) => a.id === accountId)!.standardCategory, debit, credit,
       amount: (Number(debit) - Number(credit)).toFixed(2),
     });
-    const cells = [balance('a-rev', '0', '5000'), balance('a-cos', '700', '0')];
-    const results = compose(JUL, [tb, SALES], cells, { rowCounts: { period_balances: 2 } });
+    const cells = [balance('a-rev', '0', '5000'), balance('a-cos', '700', '0'), balance('a-eq', '4300', '0')];
+    const results = compose(JUL, [tb, SALES], cells, { rowCounts: { period_balances: 3 } });
     expect(headline(results, 'cost_of_sales').basis).toBe('period_balances');
     expect(value(results, 'cost_of_sales')).toBe('700.00');
     expect(value(results, 'net_profit')).toBe('4300.00');

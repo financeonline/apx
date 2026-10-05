@@ -197,6 +197,8 @@ export const EvidenceQuerySchema = z.discriminatedUnion('kind', [
       period_id: uuid.nullable(),
       descriptor: QueryDescriptorV1Schema.nullable(),
       unavailable: z.string().min(1).nullable(),
+      // N-2 (Step 0F): the term's own expected total. Absent on figures written by engine 10.0.0.
+      expected: z.string().regex(/^-?\d+(\.\d+)?$/).nullable().optional(),
     })).length(2),
   }),
 ]);

@@ -121,6 +121,8 @@ export async function loadCoverageBatches(
     // Step 0E: the months this balance batch has rows in (a batch states only those, or its whole range
     // when it has none). NULL for other targets.
     rowMonths: Array.isArray(r.row_months) ? (r.row_months as unknown[]).map(String) : null,
+    // N-1 (Step 0F): the reviewer's attestation that the report lists every account (IMP-TB-016).
+    reportComplete: r.report_complete === true,
     bankAccountId: r.bank_account_id as string | null,
     invoiceListKind: r.invoice_list_kind as CoverageBatch['invoiceListKind'],
     importType: (r.import_type as string | null) ?? null,

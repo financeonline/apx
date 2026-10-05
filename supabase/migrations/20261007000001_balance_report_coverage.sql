@@ -11,6 +11,11 @@
 -- whose declared range spans a month but holds no row for it states nothing about that month (a
 -- year-to-date report as at August, declared June–August, says nothing about June), so it must not
 -- cover it. NULL for every other target.
+--
+-- A fourth, `report_complete` (Step 0F, N-1): whether the reviewer ATTESTED at import that the report
+-- lists every account for its period (confirmation IMP-TB-016, stored in `confirmations` with who and
+-- when). Only that establishes that a category with no line is a zero. A batch imported before the
+-- question existed has no such answer and is never treated as complete. NULL for other targets.
 
 drop function api_server.batch_coverage(uuid, date, date);
 drop function app.batch_coverage(uuid, date, date);
@@ -28,7 +33,8 @@ returns table (
   batch_id        uuid,
   balance_basis   public.balance_basis_enum,
   fiscal_year_start_month_at_commit smallint,
-  row_months      date[]
+  row_months      date[],
+  report_complete boolean
 )
 language sql stable security definer set search_path = '' as $$
   select b.target_table,
@@ -51,6 +57,9 @@ language sql stable security definer set search_path = '' as $$
                        from public.period_balances pb
                       where pb.organization_id = b.organization_id and pb.import_batch_id = b.id
                         and pb.record_status = 'accepted' and pb.superseded_by is null), '{}'::date[])
+         end,
+         case when b.target_table = 'period_balances' then
+           coalesce(b.confirmations -> 'IMP-TB-016' -> 'value' ->> 'report_complete', '') = 'complete'
          end
     from public.import_batches b
    where b.organization_id = p_org
@@ -69,7 +78,8 @@ create function api_server.batch_coverage(
   balance_kind public.balance_kind_enum, bank_account_id uuid,
   invoice_list_kind public.invoice_list_kind_enum, period_start date, period_end date,
   committed_at timestamptz, batch_id uuid,
-  balance_basis public.balance_basis_enum, fiscal_year_start_month_at_commit smallint, row_months date[]
+  balance_basis public.balance_basis_enum, fiscal_year_start_month_at_commit smallint, row_months date[],
+  report_complete boolean
 )
 language plpgsql security definer set search_path = '' as $$
 begin

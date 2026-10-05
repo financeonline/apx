@@ -99,7 +99,7 @@ export function ConfirmationPrompt({
   /** Fields the confirmation SETS rather than acknowledges — the export range, for instance. */
   values?: Readonly<Record<string, string>>;
   /** A confirmation the reviewer must answer rather than agree to. */
-  choice?: { name: string; label: string; options: ReadonlyArray<{ value: string; label: string }> };
+  choice?: { name: string; label: string; options: ReadonlyArray<{ value: string; label: string }>; explicit?: boolean };
 }) {
   const [state, action] = useActionState(confirmBatchAction, null);
 
@@ -120,7 +120,10 @@ export function ConfirmationPrompt({
           <select
             name={`value_${choice.name}`}
             className="rounded-md border border-line bg-surface px-2 py-1 text-sm"
+            required={choice.explicit === true}
+            defaultValue={choice.explicit === true ? '' : undefined}
           >
+            {choice.explicit === true ? <option value="" disabled>Choose an answer</option> : null}
             {choice.options.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}

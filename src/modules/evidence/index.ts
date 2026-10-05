@@ -55,6 +55,12 @@ export {
 } from './domain/descriptor';
 
 export {
+  reconcileDifference,
+  type DifferenceReconciliation,
+  type DifferenceTermInput,
+} from './domain/difference';
+
+export {
   canonicalDescriptorJson,
   canonicaliseDescriptor,
   descriptorHash,
@@ -116,6 +122,8 @@ export {
   currentSnapshotId,
   loadEvidenceDrawer,
   type DrawerComponent,
+  type DrawerDifference,
+  type DrawerDifferenceTerm,
   type DrawerMetric,
   type DrawerPinned,
   type DrawerRecords,

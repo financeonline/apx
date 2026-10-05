@@ -160,6 +160,8 @@ For `period_balances`-based metrics the record item is the `period_balance` row;
 - The drawer shows the subtraction: "Year to date to Aug: £3,310 from 3 rows; less: year to date to Jul: £2,100; = £1,210".
 - Σ sign × total(term) reconciles to the figure.
 
+*Step 0F (ADR-139, N-2).* Each term also carries `expected`: the total the engine read for exactly its rows, in reporting sign (absent on figures from engine 10.0.0). The drawer reconciles in order: each side's records against that side's `expected` (never against the figure, which neither side can total); then the formula, Σ sign × records = the figure; then the engine's arithmetic, Σ sign × expected = the figure. A mismatch at any step is stated on that side and in the formula ("£3,310.00 − £2,000.00 = £1,310.00, which does not match the figure of £1,210.00"). Each side links to its own records block. A derived figure (net profit) shows every year-to-date subtraction in its evidence tree, at any depth, each reconciled the same way.
+
 ---
 
 ## 5.2 The chain read backwards (Phase 8, ADR-096)

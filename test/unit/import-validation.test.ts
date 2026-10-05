@@ -339,6 +339,13 @@ describe('confirmations block a commit until a human records them (§8.2)', () =
       .toContain('IMP-TB-012');
   });
 
+  it('asks whether a trial balance or P&L report lists every account (IMP-TB-016, N-1); never of a balance sheet', () => {
+    expect(requiredConfirmations({ targetTable: 'period_balances', importType: 'trial_balance' })).toContain('IMP-TB-016');
+    expect(requiredConfirmations({ targetTable: 'period_balances', importType: 'pnl_report' })).toContain('IMP-TB-016');
+    expect(requiredConfirmations({ targetTable: 'period_balances', importType: 'balance_sheet' })).not.toContain('IMP-TB-016');
+    expect(requiredConfirmations({ targetTable: 'ledger_entries', importType: 'general_ledger' })).not.toContain('IMP-TB-016');
+  });
+
   it('requires the balance sign only for a single signed column', () => {
     expect(requiredConfirmations({
       targetTable: 'period_balances', importType: 'pnl_report', singleSignedBalanceColumn: true,

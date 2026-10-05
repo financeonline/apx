@@ -2,9 +2,9 @@ import type { ReactNode } from 'react';
 import { ButtonLink } from './button';
 
 /** A white surface on paper with a single hairline. Elevation comes from the border, never a shadow. */
-export function Card({ children, className = '' }: { children: ReactNode; className?: string }) {
+export function Card({ children, className = '', id }: { children: ReactNode; className?: string; id?: string }) {
   return (
-    <section className={`rounded-card border border-line bg-surface ${className}`.trim()}>
+    <section id={id} className={`rounded-card border border-line bg-surface ${className}`.trim()}>
       {children}
     </section>
   );

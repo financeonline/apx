@@ -174,7 +174,7 @@ Notation: `[a, b)` includes a and excludes b. Money is in the organisation's bas
 |---|---|---|---|
 | **F2.1** Closing cash sign | `closing_cash`(P) | `(0, ∞)` +10 · `(−∞, 0]` −40 — EXISTING C1 | genuine 0 → −40; genuine negative → −40 |
 | **F2.2** Runway | `cash_runway_months`(P) | `[6, ∞)` +20 · `[3, 6)` +5 · `[1, 3)` −15 · `(−∞, 1)` −30 — EXISTING C2 | engine gives 0 when cash ≤ 0 → −30. NULL with `cash_positive` → +20 "cash generative". Other NULL → unavailable. |
-| **F2.3** Movement trend (A-5 CONFIRM) | `net_cash_movement`, P−2…P | > 0 in ≥ 2 of 3 → +15 · ≤ 0 in all 3 → −20 · else 0 — EXISTING C3 | genuine 0 counts as ≤ 0; a period whose bank coverage ratio is < 1 (its movement is a partial figure) or whose value is NULL counts as unavailable; fewer than 3 available → rule unavailable (a missing statement is never read as a fall) |
+| **F2.3** Movement trend (A-5 CONFIRM) | `net_cash_movement`, P−2…P | > 0 in ≥ 2 of 3 → +15 · ≤ 0 in all 3 → −20 · else 0 — EXISTING C3 | genuine 0 counts as ≤ 0; a period whose `bankEvidenceRatio` is < 1 or NULL (its movement is a partial figure, or there is no bank evidence) or whose value is NULL counts as unavailable; fewer than 3 available → rule unavailable (a missing statement is never read as a fall) |
 | **F2.4** Cash cover | `closing_cash / cash_outflows`(P) | `[2, ∞)` +5 · `[0.5, 2)` 0 · `(−∞, 0.5)` −10 — EXISTING C4 | outflows NULL or 0 → unavailable; negative cash → −10 |
 
 - **Range:** 0–100.
@@ -183,7 +183,7 @@ Notation: `[a, b)` includes a and excludes b. Money is in the organisation's bas
 
 | Item | Definition |
 |---|---|
-| Required | bank coverage ratio for P > 0 (EXISTING `bankCoverageRatio`) |
+| Required | bank **evidence** ratio for P > 0 (EXISTING `bankEvidenceRatio`; NULL — no cash-like account in scope — is **unavailable**, never "full"). **Not** `bankCoverageRatio`: that is the cash family's *completeness* and is `1` for a business with no bank account at all (Step 0E, H-1; Step 0F, N-4) |
 | Source | cash snapshots; the B3 anomaly functions (EXISTING); Phase 13 statement facts through the EXISTING `reconciliationFor`, reused unchanged. No new classification or reconciliation logic. |
 | Thin data | coverage 0 or no active cash-like account → unavailable `no_bank_coverage`; no proxy cap |
 | Evidence | inflow/outflow snapshots; condition `bank_transaction` ids; a `source_document` per statement (`import_batches.source_document_id`); the `closing_cash` snapshot carrying `unreconciled_statement`; `calculation_run` and `fiscal_period` items for F3.5 |
@@ -192,9 +192,9 @@ Notation: `[a, b)` includes a and excludes b. Money is in the organisation's bas
 |---|---|---|---|
 | **F3.1** Money in vs out | `cash_inflows / cash_outflows`(P) | `[1.1, ∞)` +15 · `[0.9, 1.1)` 0 · `(−∞, 0.9)` −15 — EXISTING B2 | outflows NULL/0 → unavailable; genuine inflows 0 → −15 |
 | **F3.2** Anomalies | count of anomaly conditions for P | `0` +10 · `1–2` −5 · `≥ 3` −15 — EXISTING B3 | scored only when all five anomaly rules could run; otherwise unavailable with the suppression reason |
-| **F3.3** Coverage of P | coverage ratio for P | `= 1` +10 · `(0, 1)` −5 — EXISTING B4 | — |
+| **F3.3** Coverage of P | `bankEvidenceRatio` for P | `= 1` +10 · `(0, 1)` −5 — EXISTING B4 | NULL (no cash-like account) → unavailable; `0` → F3's requirement fails. Never `bankCoverageRatio` (H-1) |
 | **F3.4** Reconciliation | status per active cash-like account **that has a statement for P** | any `unreconciled` → −10 · else all `reconciled` → +10 · else 0 | accounts with `no_statement` are excluded (F3.3 scores them) → none left → unavailable |
-| **F3.5** Statement history (A-1 CONFIRM) | number of periods **P−5…P−1** (the five before P) with coverage ratio = 1 | `5` +10 · `3–4` 0 · `0–2` −10 | P is excluded (F3.3 scores it); a period before the first fiscal period counts as not covered |
+| **F3.5** Statement history (A-1 CONFIRM) | number of periods **P−5…P−1** (the five before P) with `bankEvidenceRatio` = 1 (NULL counts as not covered) | `5` +10 · `3–4` 0 · `0–2` −10 | P is excluded (F3.3 scores it); a period before the first fiscal period counts as not covered |
 
 - **Range:** 0–100.
 - **Double-penalty design:**

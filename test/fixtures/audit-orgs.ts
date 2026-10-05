@@ -117,14 +117,19 @@ export function glBatch(org: string, o: { start: string; end: string; lines: rea
 export function balanceBatch(org: string, o: {
   importType: 'trial_balance' | 'balance_sheet'; basis: 'cumulative' | 'movement'; start: string; end: string;
   rows: ReadonlyArray<readonly [string, string]>; tag: string;
+  /** N-1: record the reviewer's IMP-TB-016 attestation that the report lists every account. */
+  complete?: boolean;
 }): string {
+  const confirmations = o.complete === true
+    ? `jsonb_build_object('IMP-TB-016', jsonb_build_object('by', null, 'at', now(), 'value', jsonb_build_object('report_complete', 'complete')))`
+    : `'{}'::jsonb`;
   const values = o.rows.map(([category, value]) => `('${acct(org, category)}'::uuid, ${value}::numeric)`).join(',');
   return adminSql(`do $$ declare v_doc uuid; v_b uuid; v_row uuid; v_id uuid; r record; n int := 0; begin
     insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
       values ('${org}', '${org}/audit/${q(o.tag)}-' || gen_random_uuid(), '${q(o.tag)}.csv', 'text/csv', 10, digest(gen_random_uuid()::text, 'sha256'), 'ready', '${o.importType}') returning id into v_doc;
     insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
-        period_start, period_end, committed_at, balance_basis)
-      values ('${org}', v_doc, '${o.importType}', 'period_balances', 'committed', 'csv', '${o.start}', '${o.end}', '${COMMITTED_AT}', '${o.basis}') returning id into v_b;
+        period_start, period_end, committed_at, balance_basis, confirmations)
+      values ('${org}', v_doc, '${o.importType}', 'period_balances', 'committed', 'csv', '${o.start}', '${o.end}', '${COMMITTED_AT}', '${o.basis}', ${confirmations}) returning id into v_b;
     for r in select * from (values ${values}) v(a, val) loop
       n := n + 1;
       insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)

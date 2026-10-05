@@ -44,6 +44,8 @@ export const DATA_QUALITY_WARNINGS = [
   'new_in_period', 'partial_working_capital', 'no_due_dates', 'payment_date_unknown',
   'fewer_than_5', 'high_unattributed_share', 'negative_revenue', 'unpaired_transfer_candidate',
   'partial_month', 'no_cost_of_sales', 'cash_positive', 'no_cost_allocation',
+  /** N-1 (Step 0F): P's balance report is incomplete (not attested), so a ledger or invoice source stated the P&L. */
+  'balance_report_incomplete',
 ] as const;
 export type DataQualityWarning = (typeof DATA_QUALITY_WARNINGS)[number];
 
@@ -61,6 +63,11 @@ export const DATA_QUALITY_MISSING = [
    * not known to mean zero.
    */
   'account_absent_unconfirmed',
+  /**
+   * N-1 (Step 0F): P's balance report has no line in this P&L category and does not establish its
+   * completeness (no attestation, IMP-TB-016), so the category is unknown — never an inferred zero.
+   */
+  'category_not_in_report',
   /** Cost of sales exists in a source the chosen P&L basis is not reading (ADR-104). */
   'cost_of_sales_in_other_source',
   /**
@@ -132,6 +139,12 @@ export interface DifferenceTerm {
   readonly period_id: string | null;
   readonly descriptor: LeafDescriptor | null;
   readonly unavailable: DataQualityMissing | null;
+  /**
+   * N-2 (Step 0F): what this term's records total, in reporting sign, as the engine read them — the
+   * value the drawer reconciles the term's own records against before it reconciles the formula.
+   * NULL when the term is unavailable.
+   */
+  readonly expected: string | null;
 }
 
 export type EvidenceQuery =
@@ -299,6 +312,8 @@ export interface SourceCoverage {
   readonly completeness: number;
   /** For balances: which kind won, and on what basis it is stated. */
   readonly balanceKind?: 'trial_balance' | 'pnl_report' | 'balance_sheet';
+  /** N-1: for balances, whether the winning report is complete (attested, IMP-TB-016; a TB balances). */
+  readonly reportComplete?: boolean;
   readonly balanceBasis?: 'cumulative' | 'movement';
 }
 
@@ -324,6 +339,12 @@ export interface PeriodCoverage {
    * or only credit-card / loan accounts). NULL is absence of evidence: neither good nor poor banking.
    */
   readonly bankEvidenceRatio: number | null;
+  /**
+   * N-1 (Step 0F): P has a balance report that was passed over for the P&L family because it is
+   * incomplete and a ledger or invoice source covers P. The chosen basis carries
+   * `balance_report_incomplete`.
+   */
+  readonly balanceReportPassedOver?: boolean;
   readonly latestDataDate: Readonly<Partial<Record<SourceKind, string>>>;
 }
 

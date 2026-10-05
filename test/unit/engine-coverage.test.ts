@@ -214,18 +214,53 @@ describe('invoice coverage distinguishes a full list from an aged-debtors list (
 });
 
 describe('precedence gives the whole family to one source (§2.3)', () => {
-  it('prefers a trial balance over the ledger for the P&L', () => {
+  // N-1 (Step 0F): a report outranks the ledger only when it is attested complete and, being a trial
+  // balance, balances. The two cells are May's trial balance lines, netting to zero.
+  const tbCell = (accountId: string, amount: string) => ({
+    periodId: may.id, source: 'period_balances' as const, standardCategory: 'cash' as const, accountId, counterpartyId: null,
+    bankAccountId: null, balanceKind: 'trial_balance' as const, balanceBasis: 'cumulative' as const, invoiceType: null,
+    transferKind: null, unpairedTransferCandidate: false, debit: '0', credit: '0', amount, rowCount: 1, fallbackRows: 0,
+    minDate: null, maxDate: null,
+  });
+  const balancedTb = [tbCell('a-cash', '500.00'), tbCell('a-eq', '-500.00')];
+
+  it('prefers an attested, balancing trial balance over the ledger for the P&L', () => {
     const coverage = coverageOf({
       batches: [
-        batch({ targetTable: 'period_balances', balanceKind: 'trial_balance', balanceBasis: 'cumulative' }),
+        batch({ targetTable: 'period_balances', balanceKind: 'trial_balance', balanceBasis: 'cumulative', reportComplete: true }),
         batch({ id: 'b-gl', targetTable: 'ledger_entries' }),
       ],
-      rowCounts: { ledger: 10 },
+      rowCounts: { ledger: 10 }, balanceCells: balancedTb,
     });
     const choice = choosePrecedence(coverage, 'pnl');
     expect(choice.basis).toBe('period_balances');
     expect(choice.assurance).toBe('verified');
     expect(choice.balanceBasis).toBe('cumulative');
+    expect(choice.warnings).not.toContain('balance_report_incomplete');
+  });
+
+  it('passes over an UNATTESTED trial balance to the covering ledger, saying so', () => {
+    const coverage = coverageOf({
+      batches: [
+        batch({ targetTable: 'period_balances', balanceKind: 'trial_balance', balanceBasis: 'cumulative' }),
+        batch({ id: 'b-gl', targetTable: 'ledger_entries' }),
+      ],
+      rowCounts: { ledger: 10 }, balanceCells: balancedTb,
+    });
+    const choice = choosePrecedence(coverage, 'pnl');
+    expect(choice.basis).toBe('ledger');
+    expect(choice.warnings).toContain('balance_report_incomplete');
+  });
+
+  it('passes over an attested trial balance that does NOT balance (it cannot list every account)', () => {
+    const coverage = coverageOf({
+      batches: [
+        batch({ targetTable: 'period_balances', balanceKind: 'trial_balance', balanceBasis: 'cumulative', reportComplete: true }),
+        batch({ id: 'b-gl', targetTable: 'ledger_entries' }),
+      ],
+      rowCounts: { ledger: 10 }, balanceCells: [tbCell('a-cash', '500.00')],
+    });
+    expect(choosePrecedence(coverage, 'pnl').basis).toBe('ledger');
   });
 
   it('prefers the bank for cash, and the ledger only as a fallback', () => {

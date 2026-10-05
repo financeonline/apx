@@ -32,6 +32,8 @@ const CONFIRMATION_QUESTIONS: Readonly<Record<string, string>> = {
   'IMP-RANGE-015': 'This file covers the whole period you entered, even where its rows stop earlier.',
   'IMP-TB-012': 'Are these balances year-to-date totals, or just this period’s movements?',
   'IMP-TB-013': 'How are costs shown in this file?',
+  'IMP-TB-016': 'Does this report list every account for the period, including accounts with nothing in them?',
+  'IMP-COV-013': 'This file replaces the report already imported for the same month. The earlier report is kept in its history but no longer counted.',
   'IMP-INV-012': 'This list is every open invoice, not only the ones raised in the period.',
   'IMP-ROW-005': 'We took the row we found as the column headings.',
   'IMP-DATE-003': 'Dates in this file are day-first (25/12 is December).',
@@ -43,7 +45,7 @@ function questionFor(code: string): string {
 }
 
 const CHOICES: Readonly<Record<string, {
-  name: string; label: string; options: ReadonlyArray<{ value: string; label: string }>;
+  name: string; label: string; options: ReadonlyArray<{ value: string; label: string }>; explicit?: boolean;
 }>> = {
   'IMP-TB-012': {
     name: 'balance_basis',
@@ -51,6 +53,17 @@ const CHOICES: Readonly<Record<string, {
     options: [
       { value: 'cumulative', label: 'Year-to-date totals' },
       { value: 'movement', label: 'This period only' },
+    ],
+  },
+  'IMP-TB-016': {
+    name: 'report_complete',
+    label: 'Every account listed',
+    // N-1: nothing is pre-selected. "Complete" turns every missing line into a zero, so it has to be
+    // the reviewer's answer, never the form's default.
+    explicit: true,
+    options: [
+      { value: 'complete', label: 'Yes — every account, including those with nothing in them' },
+      { value: 'partial', label: 'No — only some accounts or sections' },
     ],
   },
   'IMP-TB-013': {

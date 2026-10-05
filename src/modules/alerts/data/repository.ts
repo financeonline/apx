@@ -350,9 +350,18 @@ export async function loadAlerts(
   }
   if (query.periodId !== undefined) builder = builder.eq('period_id', query.periodId);
 
+  /*
+   * N-7 (Step 0F): one run evaluates every alert at the same instant, so severity and recency tie
+   * between, say, a cost spike and a concentration alert of the same severity — and the order (and,
+   * past the limit, the membership) of the list was whatever the plan returned. Ties are broken by
+   * the rule, then by the alert's identity (`dedupe_key`, unique per organisation): a total order, so
+   * the same alerts always come back in the same order.
+   */
   const { data, error } = await builder
     .order('severity', { ascending: false })
     .order('last_evaluated_at', { ascending: false })
+    .order('rule_key', { ascending: true })
+    .order('dedupe_key', { ascending: true })
     .limit(query.limit ?? 200);
 
   return unwrap(data as unknown as ListRow[] | null, error, requestId).map(toListRow);

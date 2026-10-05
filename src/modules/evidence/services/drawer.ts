@@ -6,6 +6,8 @@ import type { AccessContext } from '@/modules/tenancy';
 import { metricDefinition, isMetricKey, type MetricUnit } from '@/modules/financial-engine';
 import type { AssuranceLevel } from '../domain/assurance';
 import { parseQueryDescriptor } from '../domain/descriptor';
+import { descriptorHash } from '../domain/canonical';
+import { reconcileDifference } from '../domain/difference';
 import { compileDescriptor } from '../data/descriptor-compiler';
 import { fetchMetricSnapshot } from '../data/bundles';
 import type { Row } from '../data/rows';
@@ -36,6 +38,8 @@ export interface DrawerComponent {
   readonly unit: MetricUnit | null;
   readonly currency: string | null;
   readonly leaf: boolean;
+  /** N-2: a component that is itself a cumulative month (net profit's revenue, say) shows its subtraction. */
+  readonly difference: DrawerDifference | null;
 }
 
 export interface DrawerRecords {
@@ -119,39 +123,80 @@ export interface DrawerMetric {
   readonly difference: DrawerDifference | null;
 }
 
-export interface DrawerDifference {
-  readonly formula: string;
-  readonly terms: ReadonlyArray<{
-    readonly name: 'year_to_date' | 'prior_year_to_date';
-    readonly sign: 1 | -1;
-    readonly periodLabel: string | null;
-    /** Σ of the term's records in reporting sign; NULL when the term is unavailable. */
-    readonly total: string | null;
-    readonly rowCount: number | null;
-    /** The engine's reason the term cannot be read (e.g. `no_prior_trial_balance`). */
-    readonly unavailable: string | null;
-  }>;
+export interface DrawerDifferenceTerm {
+  readonly name: 'year_to_date' | 'prior_year_to_date';
+  readonly sign: 1 | -1;
+  readonly periodId: string | null;
+  readonly periodLabel: string | null;
+  /** Σ of the term's records in reporting sign, resolved now; NULL when the term is unavailable. */
+  readonly total: string | null;
+  readonly rowCount: number | null;
+  /** The engine's reason the term cannot be read (e.g. `no_prior_trial_balance`). */
+  readonly unavailable: string | null;
+  /** N-2: what the engine read for this term — the value its records must total. NULL: not stated. */
+  readonly expected: string | null;
+  /** N-2: the term's records total its expected value (`null`: nothing to compare). */
+  readonly reconciles: boolean | null;
+  /** N-2: the records block (`evidence_items.id`) holding this term's rows, so the page can link it. */
+  readonly recordsItemId: string | null;
+  /** The term's descriptor hash, to pair it with its records block. Internal. */
+  readonly descriptorHash: string | null;
 }
 
-/** Resolves each term of a `difference` evidence query (Step 0E), so the drawer can show the sum. */
+export interface DrawerDifference {
+  readonly formula: string;
+  /** The figure the subtraction must produce. */
+  readonly figure: string | null;
+  readonly terms: readonly DrawerDifferenceTerm[];
+  /** N-2: Σ sign × records total — what the two sides' records make the figure. */
+  readonly recordsResult: string | null;
+  /** N-2: Σ sign × records total = the figure, to the cent. */
+  readonly formulaReconciles: boolean | null;
+  /** N-2: Σ sign × expected = the figure (the engine's own arithmetic). */
+  readonly arithmeticReconciles: boolean | null;
+  /** N-2: every comparison that could be made held. */
+  readonly reconciles: boolean | null;
+}
+
+/**
+ * Resolves each term of a `difference` evidence query (Step 0E) and reconciles it (N-2): each term's
+ * records against its own expected value, then the formula against the figure.
+ */
 async function differenceOf(ctx: AccessContext, orgId: string, snapshot: Row): Promise<DrawerDifference | null> {
   const query = snapshot.evidence_query as {
     kind?: string;
     formula?: string;
-    terms?: Array<{ name: 'year_to_date' | 'prior_year_to_date'; sign: 1 | -1; period_id: string | null; descriptor: unknown; unavailable: string | null }>;
+    terms?: Array<{
+      name: 'year_to_date' | 'prior_year_to_date'; sign: 1 | -1; period_id: string | null; descriptor: unknown;
+      unavailable: string | null; expected?: string | null;
+    }>;
   } | null;
   if (query?.kind !== 'difference' || !Array.isArray(query.terms)) return null;
-  const terms = [];
+  const resolved: Array<Omit<DrawerDifferenceTerm, 'reconciles'> & { stated: boolean }> = [];
   for (const term of query.terms) {
     const periodLabel = term.period_id === null ? null : await periodLabelOf(ctx, orgId, term.period_id);
+    const base = { name: term.name, sign: term.sign, periodId: term.period_id, periodLabel, recordsItemId: null,
+      expected: term.expected ?? null, stated: term.expected !== undefined };
     if (term.descriptor === null || term.descriptor === undefined) {
-      terms.push({ name: term.name, sign: term.sign, periodLabel, total: null, rowCount: null, unavailable: term.unavailable ?? 'unavailable' });
+      resolved.push({ ...base, total: null, rowCount: null, unavailable: term.unavailable ?? 'unavailable', descriptorHash: null });
       continue;
     }
-    const selection = await resolveCompiled(ctx, compileDescriptor(parseQueryDescriptor(term.descriptor)));
-    terms.push({ name: term.name, sign: term.sign, periodLabel, total: selection.total, rowCount: selection.count, unavailable: null });
+    const descriptor = parseQueryDescriptor(term.descriptor);
+    const selection = await resolveCompiled(ctx, compileDescriptor(descriptor));
+    resolved.push({ ...base, total: selection.total, rowCount: selection.count, unavailable: null, descriptorHash: descriptorHash(descriptor) });
   }
-  return { formula: query.formula ?? 'year_to_date - prior_year_to_date', terms };
+  const figure = str(snapshot, 'value');
+  const check = reconcileDifference(
+    resolved.map((t) => ({ sign: t.sign, total: t.total, ...(t.stated ? { expected: t.expected } : {}) })), figure);
+  return {
+    formula: query.formula ?? 'year_to_date - prior_year_to_date',
+    figure,
+    terms: resolved.map(({ stated: _stated, ...t }, i) => ({ ...t, reconciles: check.terms[i] ?? null })),
+    recordsResult: check.recordsResult,
+    formulaReconciles: check.formula,
+    arithmeticReconciles: check.arithmetic,
+    reconciles: check.reconciles,
+  };
 }
 
 export interface RestsOnStatement {
@@ -200,6 +245,12 @@ export interface EvidenceDrawerView {
   readonly records: readonly DrawerRecords[];
   /** The specific rows and entities the bundle pins (§4), shown alongside the selections. */
   readonly pinned: readonly DrawerPinned[];
+  /**
+   * N-2: every figure in the bundle below the root that is a cumulative month — however deep (net
+   * profit → operating profit → gross profit → revenue) — with its subtraction reconciled, so a
+   * derived figure's evidence shows each year-to-date difference it rests on.
+   */
+  readonly subtractions: ReadonlyArray<{ readonly snapshotId: string; readonly label: string; readonly currency: string | null; readonly difference: DrawerDifference }>;
 }
 
 function str(row: Row, key: string): string | null {
@@ -284,6 +335,8 @@ function reconciliationSentence(input: {
   readonly figure: string | null;
   readonly reconciles: boolean | null;
   readonly currency: string | null;
+  /** What the total is compared with; "the figure" unless the block is one side of a subtraction. */
+  readonly against?: string;
 }): string {
   const rows = input.shown < input.count
     ? `${input.shown} of ${input.count} rows shown`
@@ -296,11 +349,12 @@ function reconciliationSentence(input: {
       : formatMoney(value, { currency: input.currency ?? 'GBP', showMinorUnits: true })
   );
 
+  const against = input.against ?? 'the figure';
   if (input.reconciles === true) {
-    return `${rows}; they total ${money(input.total)}, which is the figure.`;
+    return `${rows}; they total ${money(input.total)}, which is ${against}.`;
   }
   if (input.reconciles === false) {
-    return `${rows}; they total ${money(input.total)}, which does not match the figure of `
+    return `${rows}; they total ${money(input.total)}, which does not match ${against} of `
       + `${money(input.figure)}. Please tell us — a figure that does not reconcile is a fault.`;
   }
   return `${rows}; they total ${money(input.total)}.`;
@@ -390,10 +444,25 @@ export async function loadEvidenceDrawer(
       unit: str(row, 'unit') as MetricUnit | null,
       currency: str(row, 'currency'),
       leaf: (row.evidence_query as { kind?: string } | null)?.kind === 'leaf',
+      difference: declared.has(String(row.id)) ? await differenceOf(ctx, orgId, row) : null,
     };
     (declared.has(String(row.id)) ? components : relatedFigures).push(view);
   }
   if (rootSnapshot !== null) snapshotById.set(String(rootSnapshot.id), rootSnapshot);
+
+  // N-2: the subtraction each snapshot in the bundle is, if it is one — at any depth, so that no
+  // records block of a cumulative figure is ever reconciled against a total it cannot reach.
+  const differenceBySnapshot = new Map<string, DrawerDifference>();
+  if (metric?.difference) differenceBySnapshot.set(metric.snapshotId, metric.difference);
+  for (const component of components) {
+    if (component.snapshotId !== null && component.difference !== null) differenceBySnapshot.set(component.snapshotId, component.difference);
+  }
+  for (const [id, row] of snapshotById) {
+    if (differenceBySnapshot.has(id)) continue;
+    const difference = await differenceOf(ctx, orgId, row);
+    if (difference !== null) differenceBySnapshot.set(id, difference);
+  }
+  const termItem = new Map<DrawerDifferenceTerm, string>();
 
   /*
    * Level 3. The builder writes each `query` item immediately after the snapshot it belongs to, so
@@ -416,27 +485,48 @@ export async function loadEvidenceDrawer(
       page?.itemId === item.id ? page.cursor : undefined,
     );
     const forSnapshot = lastSnapshotId === null ? null : snapshotById.get(lastSnapshotId) ?? null;
-    const forValue = forSnapshot === null ? null : str(forSnapshot, 'value');
     const forUnit = forSnapshot === null ? null : String(forSnapshot.unit);
+    const forLabel = forSnapshot === null ? null : metricLabelOf(String(forSnapshot.metric_key)).label;
+
+    /*
+     * N-2: a block that is ONE SIDE of a subtraction reconciles against that side's own expected
+     * value, never against the figure (which it can never total). The formula is reconciled on the
+     * difference itself. A side written before engine 11 has no expected value: nothing to compare,
+     * so no false alarm — the formula still reconciles from the records.
+     */
+    const difference = lastSnapshotId === null ? undefined : differenceBySnapshot.get(lastSnapshotId);
+    const hash = descriptorHash(descriptor);
+    const term = difference?.terms.find((t) => t.descriptorHash === hash && !termItem.has(t));
+    if (term !== undefined) termItem.set(term, item.id);
+
+    const forValue = term !== undefined ? term.expected : forSnapshot === null ? null : str(forSnapshot, 'value');
+    // Only money reconciles by addition. A ratio, a count or a number of days is not the sum of
+    // the rows behind it, and printing "does not reconcile" against one would be a false alarm.
+    const reconciles = forUnit !== 'money' ? null
+      : term !== undefined ? term.reconciles
+        : sameMoney(selection.total, forValue);
+    const termWords = term === undefined ? undefined
+      : `the year-to-date amount the calculation used${term.periodLabel ? ` (to ${term.periodLabel})` : ''}`;
 
     records.push({
       itemId: item.id,
       label: item.label,
       forSnapshotId: lastSnapshotId,
-      forLabel: forSnapshot === null ? null : metricLabelOf(String(forSnapshot.metric_key)).label,
+      forLabel: term !== undefined && forLabel !== null
+        ? `${forLabel} — ${term.sign === 1 ? 'year to date' : 'less: year to date'}${term.periodLabel ? ` to ${term.periodLabel}` : ''}`
+        : forLabel,
       forValue,
       selection,
       offset: page?.itemId === item.id ? page.cursor.offset : 0,
-      // Only money reconciles by addition. A ratio, a count or a number of days is not the sum of
-      // the rows behind it, and printing "does not reconcile" against one would be a false alarm.
-      reconciles: forUnit === 'money' ? sameMoney(selection.total, forValue) : null,
+      reconciles,
       reconciliation: reconciliationSentence({
         shown: selection.rows.length,
         count: selection.count,
         total: selection.total,
         figure: forValue,
-        reconciles: forUnit === 'money' ? sameMoney(selection.total, forValue) : null,
+        reconciles,
         currency: forSnapshot === null ? null : str(forSnapshot, 'currency'),
+        ...(termWords === undefined ? {} : { against: termWords }),
       }),
     });
   }
@@ -458,7 +548,32 @@ export async function loadEvidenceDrawer(
       canReachDocument: itemCanReachDocument(item.itemType),
     }));
 
-  return { bundle, metric, components, relatedFigures, records, pinned };
+  // N-2: each side of a subtraction names the records block that holds its rows.
+  const linked = (d: DrawerDifference | null): DrawerDifference | null => d === null ? null
+    : { ...d, terms: d.terms.map((t) => ({ ...t, recordsItemId: termItem.get(t) ?? null })) };
+  // The root's whole evidence tree (its derived components, transitively), and nothing an alert
+  // merely compared against.
+  const tree = new Set<string>();
+  const queue = rootSnapshot === null ? [] : [String(rootSnapshot.id)];
+  while (queue.length > 0) {
+    const id = queue.shift()!;
+    if (tree.has(id)) continue;
+    tree.add(id);
+    const q = snapshotById.get(id)?.evidence_query as { kind?: string; components?: { snapshot_id?: string }[] } | null | undefined;
+    if (q?.kind === 'derived') for (const c of q.components ?? []) if (c.snapshot_id && snapshotById.has(c.snapshot_id)) queue.push(c.snapshot_id);
+  }
+  const subtractions = [...differenceBySnapshot.entries()]
+    .filter(([id]) => id !== metric?.snapshotId && tree.has(id))
+    .map(([id, difference]) => {
+      const row = snapshotById.get(id)!;
+      return { snapshotId: id, label: metricLabelOf(String(row.metric_key)).label, currency: str(row, 'currency'), difference: linked(difference)! };
+    });
+  return {
+    bundle,
+    metric: metric === null ? null : { ...metric, difference: linked(metric.difference) },
+    components: components.map((c) => ({ ...c, difference: linked(c.difference) })),
+    relatedFigures, records, pinned, subtractions,
+  };
 }
 
 /**

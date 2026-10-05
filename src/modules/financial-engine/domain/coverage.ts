@@ -54,6 +54,13 @@ export interface CoverageBatch {
    * August, declared June–August, says nothing about June). Undefined: not loaded, rows not checked.
    */
   readonly rowMonths?: readonly string[] | null;
+  /**
+   * N-1 (Step 0F): the reviewer ATTESTED at import that this balance report lists every account for
+   * its period, including accounts with nothing in them (confirmation IMP-TB-016, stored with who and
+   * when). Absent or false: not attested — an import made before the question existed is never
+   * assumed complete. Attestation is necessary, not sufficient: a trial balance must also balance.
+   */
+  readonly reportComplete?: boolean | null;
 }
 
 export interface CoverageInput {
@@ -68,6 +75,11 @@ export interface CoverageInput {
    * states nothing about the month cannot override a source that does. Omitted, rows are not checked.
    */
   readonly balanceRowsByKind?: Readonly<Partial<Record<'trial_balance' | 'pnl_report' | 'balance_sheet', number>>>;
+  /**
+   * N-1: the period's balance cells (the aggregate's `period_balances` rows), for the completeness
+   * test (an attested trial balance must balance). Omitted: no report can be shown complete.
+   */
+  readonly balanceCells?: readonly AggregateCell[];
   /**
    * Today, to tell the CURRENT period (the one containing it) for the invoices source's revenue-to-date
    * rule (FU-1). Explicit, never read from a clock (§1.1).
@@ -194,19 +206,30 @@ export function balancePnlContext(input: {
     priorPeriodId: input.prior?.id ?? null,
     priorBatch,
     isFirstFiscalMonth: month === fyStart,
-    currentComplete: reportComplete(input.cells, input.period.id, kind),
-    priorComplete: input.prior === undefined ? false : reportComplete(input.cells, input.prior.id, kind),
+    currentComplete: balanceReportComplete(input.batches, input.cells, input.period, kind),
+    priorComplete: input.prior === undefined ? false : balanceReportComplete(input.batches, input.cells, input.prior, kind),
   };
 }
 
 /**
- * Step 0E: a report establishes its own completeness only as a TRIAL BALANCE whose rows balance —
- * Σ natural-sign closing (debit − credit) within a penny of zero, so every account carrying a balance
- * is on it. A P&L report never does (it lists income and expense lines only).
+ * N-1 (Step 0F): whether P's winning report of `kind` is COMPLETE — it lists every account for P, so
+ * a category or account with no line in it is a known zero.
+ *
+ * Only an ATTESTATION establishes that: the reviewer's answer to IMP-TB-016 at import. Row presence,
+ * a declared date range and a trial balance that balances each prove nothing on their own (a cash-only
+ * trial balance can balance against equity and state nothing about trading). A trial balance must
+ * ALSO balance (Σ debit − credit within a penny), or the attestation is contradicted by the file.
  */
-function reportComplete(cells: readonly AggregateCell[], periodId: string, kind: BalanceKind): boolean {
-  if (kind !== 'trial_balance') return false;
-  const rows = cells.filter((c) => c.periodId === periodId && c.source === 'period_balances' && c.balanceKind === kind);
+export function balanceReportComplete(
+  batches: readonly CoverageBatch[],
+  cells: readonly AggregateCell[] | undefined,
+  period: PeriodRef,
+  kind: BalanceKind,
+): boolean {
+  const winning = winningBalanceBatch(batches, period, kind);
+  if (winning === null || winning.reportComplete !== true) return false;
+  if (kind !== 'trial_balance') return true;
+  const rows = (cells ?? []).filter((c) => c.periodId === period.id && c.source === 'period_balances' && c.balanceKind === kind);
   if (rows.length === 0) return false;
   const sum = rows.reduce((t, c) => t.plus(parseDecimalOrNull(c.amount) ?? new Decimal(0)), new Decimal(0));
   return sum.abs().lessThanOrEqualTo('0.01');
@@ -544,9 +567,25 @@ export function computeCoverage(input: CoverageInput): PeriodCoverage {
     if (latest) latestDataDate[source] = latest;
   }
 
+  /*
+   * N-1 (Step 0F): an INCOMPLETE balance report (not attested, IMP-TB-016) does not displace an
+   * accrual source that covers P — the ledger or the invoice lists state the whole month; a report
+   * missing lines cannot. The family is never mixed (§2.3): it is the ledger's or the invoices' whole
+   * P&L, and its figures say the report was passed over (`balance_report_incomplete`). The bank is a
+   * cash PROXY, weaker than any report, so it never displaces one. With no accrual source below, the
+   * incomplete report is still used, and the categories it has no line for are NULL (compose).
+   */
+  const reportIncomplete = pnlBalance !== null
+    && !balanceReportComplete(batches, input.balanceCells, period, pnlBalance.kind);
+  const passOver = reportIncomplete && (ledger.covers || invoices.covers);
+  const balancesFinal: SourceCoverage = passOver
+    ? NO_COVERAGE
+    : pnlBalance ? { ...balances, reportComplete: !reportIncomplete } : balances;
+
   return {
     periodId: period.id,
-    bySource: { period_balances: balances, ledger, invoices, bank },
+    bySource: { period_balances: balancesFinal, ledger, invoices, bank },
+    ...(passOver ? { balanceReportPassedOver: true } : {}),
     invoiceCosts,
     bankCoverageRatio: bankRatio,
     // H-1 (Step 0E): evidence, not completeness. NULL when no cash-like account is in scope for P, so
@@ -605,6 +644,8 @@ export function choosePrecedence(
     if (!sourceCoverage.covers) continue;
 
     const warnings = [...sourceCoverage.warnings];
+    // N-1: the P&L came from a lower source because P's balance report is incomplete; say so.
+    if (family === 'pnl' && coverage.balanceReportPassedOver === true) warnings.push('balance_report_incomplete');
     const proxy = family === 'pnl' && source === 'bank';
     if (proxy) {
       // §2.3: a bank-basis P&L is a cash proxy and says so on every figure it produces.

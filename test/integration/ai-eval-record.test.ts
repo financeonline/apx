@@ -197,6 +197,12 @@ export function keyPaths(value: unknown, prefix = ''): string[] {
   return [prefix];
 }
 
+/** `rule_key → key paths` of every alert in a `get_alerts` result, sorted: independent of list order. */
+export function shapesByRule(data: unknown): string[] {
+  const alerts = ((data ?? {}) as { alerts?: unknown[] }).alerts ?? [];
+  return [...new Set(alerts.map((a) => `${String((a as { rule_key?: unknown }).rule_key)}: ${keyPaths(a).join(' ')}`))].sort();
+}
+
 async function record(): Promise<Recording> {
   const ctx = contextFor(ownerId);
   const periodContext = resolvePeriodContext({ question: 'how did May 2026 go?', periods, fiscalYearStartMonth: 1 });
@@ -229,6 +235,13 @@ describe('the recorded tool outputs the eval corpus rests on', () => {
       const was = recorded.calls[i]!;
       expect(call.result.ok, `${call.name} ok`).toBe(was.result.ok);
       expect(keyPaths(call.result.data), `${call.name} #${call.seq} output shape`).toEqual(keyPaths(was.result.data));
+      // N-7: `keyPaths` reads an array's FIRST element, so for a list whose leading items tie it
+      // compared whichever alert happened to come first. Every alert's shape, per rule, is compared
+      // too — order-free, and stricter than the first element alone.
+      if (call.name === 'get_alerts') {
+        expect(shapesByRule(call.result.data), `${call.name} #${call.seq} shape of every alert, by rule`)
+          .toEqual(shapesByRule(was.result.data));
+      }
     }
   });
 });

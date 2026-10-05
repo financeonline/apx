@@ -1855,45 +1855,6 @@
         "data": {
           "alerts": [
             {
-              "id": "88570e87-e0e3-4ecc-81bb-77f85e60880c",
-              "revision_no": 0,
-              "rule_key": "expense.spike_category",
-              "severity": "high",
-              "status": "open",
-              "title": "<data name=\"title\">marketing spending jumped</data>",
-              "explanation": "<data name=\"explanation\">marketing spending was £3,400 this period, up £2,200 (183.3%) on the month before.</data>",
-              "threshold_summary": {
-                "value": {
-                  "value": "2200.00",
-                  "display": "£2,200",
-                  "unit": "money"
-                },
-                "current": "<data name=\"current\">3400.00</data>",
-                "revenue": {
-                  "value": "25000.00",
-                  "display": "£25,000",
-                  "unit": "money"
-                },
-                "category": "<data name=\"category\">marketing</data>",
-                "previous": "<data name=\"previous\">1200.00</data>",
-                "pct_change": {
-                  "value": "1.833333",
-                  "display": "183.3%",
-                  "unit": "ratio"
-                },
-                "threshold_pct": "<data name=\"threshold_pct\">0.250000</data>",
-                "threshold_value": "<data name=\"threshold_value\">500.00</data>"
-              },
-              "metric_key": "expense_by_category",
-              "period": {
-                "id": "d08e4319-4975-4f8a-8c8f-64232fa405c6",
-                "label": "May 2026"
-              },
-              "recommended_next_step": "<data name=\"next_step\">Review the largest marketing transactions and confirm they are expected.</data>",
-              "evidence_bundle_id": "59da8628-051d-47df-9277-22c2b178776a",
-              "subject": null
-            },
-            {
               "id": "1cb1cee5-72c0-45b1-89d9-87db14b3e2d5",
               "revision_no": 0,
               "rule_key": "concentration.customer",
@@ -1932,6 +1893,45 @@
                 "id": "1d5e61de-5124-4a9f-9b3c-24ce45b67536",
                 "name": "<data name=\"name\"></data>"
               }
+            },
+            {
+              "id": "88570e87-e0e3-4ecc-81bb-77f85e60880c",
+              "revision_no": 0,
+              "rule_key": "expense.spike_category",
+              "severity": "high",
+              "status": "open",
+              "title": "<data name=\"title\">marketing spending jumped</data>",
+              "explanation": "<data name=\"explanation\">marketing spending was £3,400 this period, up £2,200 (183.3%) on the month before.</data>",
+              "threshold_summary": {
+                "value": {
+                  "value": "2200.00",
+                  "display": "£2,200",
+                  "unit": "money"
+                },
+                "current": "<data name=\"current\">3400.00</data>",
+                "revenue": {
+                  "value": "25000.00",
+                  "display": "£25,000",
+                  "unit": "money"
+                },
+                "category": "<data name=\"category\">marketing</data>",
+                "previous": "<data name=\"previous\">1200.00</data>",
+                "pct_change": {
+                  "value": "1.833333",
+                  "display": "183.3%",
+                  "unit": "ratio"
+                },
+                "threshold_pct": "<data name=\"threshold_pct\">0.250000</data>",
+                "threshold_value": "<data name=\"threshold_value\">500.00</data>"
+              },
+              "metric_key": "expense_by_category",
+              "period": {
+                "id": "d08e4319-4975-4f8a-8c8f-64232fa405c6",
+                "label": "May 2026"
+              },
+              "recommended_next_step": "<data name=\"next_step\">Review the largest marketing transactions and confirm they are expected.</data>",
+              "evidence_bundle_id": "59da8628-051d-47df-9277-22c2b178776a",
+              "subject": null
             }
           ]
         },

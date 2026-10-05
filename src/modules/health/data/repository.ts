@@ -40,6 +40,7 @@ interface CurrentRow {
     basis: MetricObservation['basis'];
     assurance_level: MetricObservation['assurance'];
     data_quality: MetricObservation['dataQuality'];
+    evidence_query?: unknown;
     components: Record<string, unknown> | null;
   } | null;
 }
@@ -47,7 +48,7 @@ interface CurrentRow {
 const SNAPSHOT_SELECT = `
   metric_key, period_id, dimension_type, dimension_id, dimension_key,
   metric_snapshots!inner (
-    id, value, unit, basis, assurance_level, data_quality, components
+    id, value, unit, basis, assurance_level, data_quality, components, evidence_query
   )`;
 
 /**
@@ -102,6 +103,7 @@ export async function loadObservations(
         assurance: snapshot.assurance_level,
         components: snapshot.components ?? {},
         dataQuality: snapshot.data_quality,
+        evidenceQuery: snapshot.evidence_query ?? null,
       } satisfies MetricObservation];
     });
 }

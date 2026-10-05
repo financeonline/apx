@@ -463,6 +463,8 @@ export async function runCalculation(
         const coverage = computeCoverage({
           period, batches, bankAccounts, rowCounts, asOf: request.asOf, statements,
           balanceRowsByKind: balanceRowsByKind(aggregates, period.id),
+          // N-1: the completeness test (an attested trial balance must balance) reads P's balance cells.
+          balanceCells: aggregates,
         });
 
         const index = allPeriods.findIndex((p) => p.id === period.id);

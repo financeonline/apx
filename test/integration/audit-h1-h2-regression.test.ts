@@ -18,6 +18,14 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  * Every expected figure is the auditor's hand computation from FINANCIAL_ENGINE §3 / §7 and
  * `health/domain/config.ts` (AUDIT_REPORT.md §2), restated here — not read back from the engine.
  * Run-unique fixtures (ADR-052.12).
+ *
+ * Step 0F (N-1): the auditor's trial balances are three-line extracts — revenue, cost of sales,
+ * operating expense — that neither balance nor carry the reviewer's attestation (IMP-TB-016) that they
+ * list every account. Their stated lines still state revenue and cost of sales; the categories they
+ * have no line for (payroll, marketing, …) are NULL `category_not_in_report`, so operating expenses and
+ * net profit are NULL, and Health has only revenue growth (§7: fewer than 3 dimensions → no score).
+ * The figures the audit expected for a COMPLETE report are asserted on attested, balancing copies
+ * (TBMOV-C, TBCUM-C): the same lines plus an Equity line, attested complete.
  */
 
 const RUN = `t${Date.now().toString(36)}`;
@@ -91,7 +99,7 @@ function metric(o: string, ym: string, key: string): string {
 }
 const values = (o: string, key: string) => MONTHS.map((ym) => metric(o, ym, key).split('|')[0]);
 
-let csv: string; let nobank: string; let tbmov: string; let tbcum: string; let tbdc: string;
+let csv: string; let nobank: string; let tbmov: string; let tbcum: string; let tbdc: string; let tbmovC: string; let tbcumC: string;
 
 beforeAll(async () => {
   csv = await org('HTCSV'); htLedger(csv); htBank(csv);
@@ -107,10 +115,21 @@ beforeAll(async () => {
     balanceBatch(tbdc, { importType: 'trial_balance', basis: 'movement', start: `${ym}-01`, end: END[ym]!, tag: `rd-${ym}`,
       rows: [['revenue', `-${R[ym]!}`], ['cost_of_sales', C[ym]!], ['operating_expense', O[ym]!]] });
   }
+  // N-1: the same lines, balanced by an Equity line and attested complete.
+  tbmovC = await org('TBMOVC'); tbcumC = await org('TBCUMC');
+  for (const ym of MONTHS) {
+    const eqMov = `${Number(R[ym]!) - Number(C[ym]!) - Number(O[ym]!)}`;
+    balanceBatch(tbmovC, { importType: 'trial_balance', basis: 'movement', start: `${ym}-01`, end: END[ym]!, tag: `rmc-${ym}`, complete: true,
+      rows: [['revenue', `-${R[ym]!}`], ['cost_of_sales', C[ym]!], ['operating_expense', O[ym]!], ['equity', eqMov]] });
+    const [r, c, o] = cum[ym]!;
+    const eqCum = `${-(Number(r) + Number(c) + Number(o))}`;
+    balanceBatch(tbcumC, { importType: 'trial_balance', basis: 'cumulative', start: `${ym}-01`, end: END[ym]!, tag: `rcc-${ym}`, complete: true,
+      rows: [['revenue', r], ['cost_of_sales', c], ['operating_expense', o], ['equity', eqCum]] });
+  }
   // The auditor's control: debit/credit totals filled. They must no longer matter.
   adminSql(`update public.period_balances set debit_total = greatest(closing_balance, 0), credit_total = greatest(-closing_balance, 0)
     where organization_id = '${tbdc}'`);
-  for (const o of [csv, nobank, tbmov, tbcum, tbdc]) await calculateAndAlert(o);
+  for (const o of [csv, nobank, tbmov, tbcum, tbdc, tbmovC, tbcumC]) await calculateAndAlert(o);
 }, 900_000);
 
 afterAll(() => {
@@ -133,29 +152,49 @@ describe('H-1 · no bank data is not scored as banking', () => {
 });
 
 describe('H-2 · a trial balance states its P&L', () => {
-  it('movement trial balance: revenue 1,000 / 1,100 / 1,210, cost of sales and expenses likewise, verified', () => {
-    expect(values(tbmov, 'revenue')).toEqual(['1000.00', '1100.00', '1210.00']);
-    expect(values(tbmov, 'cost_of_sales')).toEqual(['400.00', '440.00', '484.00']);
-    expect(values(tbmov, 'operating_expenses')).toEqual(['300.00', '300.00', '300.00']);
-    expect(values(tbmov, 'net_profit')).toEqual(['300.00', '360.00', '426.00']);
-    expect(metric(tbmov, '2026-08', 'revenue')).toBe('1210.00|verified|period_balances|[]');
+  it('movement trial balance (attested, balancing): revenue 1,000 / 1,100 / 1,210, cost of sales and expenses likewise, verified', () => {
+    expect(values(tbmovC, 'revenue')).toEqual(['1000.00', '1100.00', '1210.00']);
+    expect(values(tbmovC, 'cost_of_sales')).toEqual(['400.00', '440.00', '484.00']);
+    expect(values(tbmovC, 'operating_expenses')).toEqual(['300.00', '300.00', '300.00']);
+    expect(values(tbmovC, 'net_profit')).toEqual(['300.00', '360.00', '426.00']);
+    expect(metric(tbmovC, '2026-08', 'revenue')).toBe('1210.00|verified|period_balances|[]');
   });
 
-  it('cumulative trial balance: NULL no_prior_trial_balance / 1,100 / 1,210 — never a zero', () => {
+  it('cumulative trial balance (attested, balancing): NULL no_prior_trial_balance / 1,100 / 1,210 — never a zero', () => {
+    expect(values(tbcumC, 'revenue')).toEqual(['NULL', '1100.00', '1210.00']);
+    expect(metric(tbcumC, '2026-06', 'revenue')).toContain('no_prior_trial_balance');
+    expect(values(tbcumC, 'operating_expenses')).toEqual(['NULL', '300.00', '300.00']);
+  });
+
+  it('the auditor\'s unattested extracts: stated lines still state revenue and cost of sales', () => {
+    expect(values(tbmov, 'revenue')).toEqual(['1000.00', '1100.00', '1210.00']);
+    expect(values(tbmov, 'cost_of_sales')).toEqual(['400.00', '440.00', '484.00']);
     expect(values(tbcum, 'revenue')).toEqual(['NULL', '1100.00', '1210.00']);
     expect(metric(tbcum, '2026-06', 'revenue')).toContain('no_prior_trial_balance');
-    expect(values(tbcum, 'operating_expenses')).toEqual(['NULL', '300.00', '300.00']);
+  });
+
+  it('…and what they have no line for is NULL category_not_in_report, so expenses and net profit are NULL, never inferred (N-1)', () => {
+    for (const o of [tbmov, tbdc]) {
+      expect(values(o, 'operating_expenses')).toEqual(['NULL', 'NULL', 'NULL']);
+      expect(values(o, 'net_profit')).toEqual(['NULL', 'NULL', 'NULL']);
+      expect(metric(o, '2026-08', 'operating_expenses')).toContain('category_not_in_report');
+    }
+    expect(values(tbcum, 'operating_expenses')).toEqual(['NULL', 'NULL', 'NULL']);
   });
 
   it('the debit/credit totals the auditor filled in are not what the figure reads', () => {
     expect(values(tbdc, 'revenue')).toEqual(['1000.00', '1100.00', '1210.00']);
   });
 
-  it('Health on a trial balance with no bank: NULL / 87 / 87 movement, NULL / NULL / 87 cumulative (by hand)', () => {
+  it('Health on an attested trial balance with no bank: NULL / 87 / 87 movement, NULL / NULL / 87 cumulative (by hand)', () => {
     // Same P&L as HT-NOBANK, so the same dimensions and totals.
-    expect(totals(tbmov)).toEqual([null, 87, 87]);
-    expect(totals(tbdc)).toEqual([null, 87, 87]);
+    expect(totals(tbmovC)).toEqual([null, 87, 87]);
     // Cumulative: June has no P&L; July's growth needs June's revenue → 2 dimensions; August as above.
-    expect(totals(tbcum)).toEqual([null, null, 87]);
+    expect(totals(tbcumC)).toEqual([null, null, 87]);
+  });
+
+  it('Health on the unattested extracts: no score any month — only revenue growth is computable (< 3 dimensions)', () => {
+    // Profitability needs net_margin and cost control needs operating_expenses (health/domain/rules); both NULL.
+    for (const o of [tbmov, tbdc, tbcum]) expect(totals(o)).toEqual([null, null, null]);
   });
 });

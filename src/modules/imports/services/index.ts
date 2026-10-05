@@ -118,10 +118,12 @@ export async function rejectImportBatch(
  */
 
 export interface CommitResult {
-  readonly status: 'committed' | 'conflict';
+  readonly status: 'committed' | 'conflict' | 'needs_confirmation';
   readonly committed: number;
   readonly superseded: number;
   readonly collisions?: number;
+  /** Step 0F (N-3): how many accepted balance lines this report would replace (IMP-COV-013). */
+  readonly replaces?: number;
   readonly job?: string | null;
 }
 
@@ -141,6 +143,14 @@ export async function commitImportBatch(
     throw new ConflictError(
       `${result.collisions ?? 0} row${result.collisions === 1 ? '' : 's'} now duplicate data committed since this file was checked. The rows have been re-flagged for review.`,
       { batchId, collisions: result.collisions },
+    );
+  }
+  // Step 0F (N-3): a corrected report replaces the one already imported for its month(s) only once
+  // the reviewer has said so. Nothing was written; the question is now on the review page.
+  if (result.status === 'needs_confirmation') {
+    throw new ConflictError(
+      'This file replaces a report already imported for the same month. Confirm the replacement on this page, then import it again.',
+      { batchId, replaces: result.replaces },
     );
   }
   return result;

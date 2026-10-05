@@ -33,6 +33,8 @@ env:
   BASELINE: ${{ github.event.inputs.baseline || '2783240' }}
   # Step 0E: the commit frozen for review (engine 8.0.0). A remediation's own effect is the frozen → branch record.
   FROZEN: c5a84735aff228603693aa0c51834769ad9333ed
+  # Step 0F: the Step 0E commit the re-review tested (engine 10.0.0). Step 0F's own effect is step0e → branch.
+  STEP0E: 39711f54243d4deedfd627f1e28dc24087a1a011
   # The Supabase CLI pinned by package.json (devDependency), not "latest": the same CLI as a developer's.
   SUPABASE: npx --no-install supabase
   CRON_SECRET: local-cron-secret
@@ -54,14 +56,19 @@ jobs:
       - run: npm ci
       - run: mkdir -p logs/static
       - name: typecheck
+        if: ${{ !cancelled() }}
         run: npm run typecheck 2>&1 | tee logs/static/typecheck.log
       - name: lint
+        if: ${{ !cancelled() }}
         run: npm run lint 2>&1 | tee logs/static/lint.log
       - name: unit with the coverage gate
+        if: ${{ !cancelled() }}
         run: npx vitest run --project unit --coverage --reporter=default --reporter=junit --outputFile.junit=logs/static/unit.junit.xml 2>&1 | tee logs/static/unit.log
       - name: AI eval (recorded)
+        if: ${{ !cancelled() }}
         run: npx vitest run --project eval --reporter=default --reporter=junit --outputFile.junit=logs/static/eval.junit.xml 2>&1 | tee logs/static/eval.log
       - name: production build
+        if: ${{ !cancelled() }}
         run: npm run build 2>&1 | tee logs/static/build.log
         env:
           NEXT_PUBLIC_SUPABASE_URL: http://127.0.0.1:54421
@@ -82,18 +89,30 @@ jobs:
       - name: start an isolated Supabase from every migration
         run: $SUPABASE start 2>&1 | tee logs/clean/supabase-start.log
       - name: pgTAP
+        if: ${{ !cancelled() }}
         run: $SUPABASE test db 2>&1 | tee logs/clean/pgtap.log
       - name: schema and documentation agree
+        if: ${{ !cancelled() }}
         run: npx tsx scripts/check-schema-drift.ts 2>&1 | tee logs/clean/schema-drift.log
       - name: local env (local stack only)
+        if: ${{ !cancelled() }}
         run: scripts/write-local-env.sh
       - name: integration
+        if: ${{ !cancelled() }}
         run: npx vitest run --project integration --reporter=default --reporter=junit --outputFile.junit=logs/clean/integration.junit.xml 2>&1 | tee logs/clean/integration.log
+      # Step 0F (N-7): the recorded-tools test flaked when two alerts of one run tied on severity and
+      # evaluation time. Every run of it recreates that tie; ten in a row must all pass.
+      - name: N-7 — the recorded-tools test, ten times under the tie that made it flaky
+        if: ${{ !cancelled() }}
+        run: for i in $(seq 1 10); do echo "== run $i"; npx vitest run --project integration test/integration/ai-eval-record.test.ts || exit 1; done 2>&1 | tee logs/clean/n7-repeat.log
       - name: Unicode-name dry-run report (read-only) on the test database
+        if: ${{ !cancelled() }}
         run: psql "$(npx --no-install supabase status -o json | jq -r .DB_URL)" -v ON_ERROR_STOP=1 -f scripts/sql/unicode-names-dry-run.sql 2>&1 | tee logs/clean/unicode-names-dry-run.log
       - name: build for the journeys
+        if: ${{ !cancelled() }}
         run: npm run build 2>&1 | tee logs/clean/build.log
       - name: Playwright journeys
+        if: ${{ !cancelled() }}
         run: |
           npx playwright install --with-deps chromium
           npx playwright test --reporter=list,html,junit 2>&1 | tee logs/clean/playwright.log
@@ -153,10 +172,13 @@ jobs:
           # The expectations table is test scaffolding: gone before pgTAP and the schema check run.
           psql "$DB" -v ON_ERROR_STOP=1 -c 'drop schema unicode_seed cascade'
       - name: pgTAP on the upgraded database
+        if: ${{ !cancelled() }}
         run: $SUPABASE test db 2>&1 | tee logs/upgrade/pgtap.log
       - name: schema drift on the upgraded database
+        if: ${{ !cancelled() }}
         run: npx tsx scripts/check-schema-drift.ts 2>&1 | tee logs/upgrade/schema-drift.log
       - name: integration on the upgraded database
+        if: ${{ !cancelled() }}
         run: npx vitest run --project integration --reporter=default --reporter=junit --outputFile.junit=logs/upgrade/integration.junit.xml 2>&1 | tee logs/upgrade/integration.log
       - name: container logs on failure
         if: failure()
@@ -205,6 +227,18 @@ jobs:
           done
           npx --no-install supabase stop --no-backup
         shell: bash -eo pipefail {0}
+      - name: Step 0E dump (39711f5, engine 10.0.0) — isolates Step 0F's own changes
+        run: |
+          git worktree add "$RUNNER_TEMP/step0e" "$STEP0E"
+          cd "$RUNNER_TEMP/step0e"
+          npm ci
+          npx --no-install supabase start
+          "$GITHUB_WORKSPACE/scripts/write-local-env.sh"
+          for f in test/regression/engine-comparison.test.ts test/regression/engine-comparison-step0d.test.ts; do
+            ENGINE_COMPARE_LABEL=step0e ENGINE_COMPARE_OUT="$GITHUB_WORKSPACE/compare" npx vitest run --project regression "$f"
+          done
+          npx --no-install supabase stop --no-backup
+        shell: bash -eo pipefail {0}
       - name: this branch's dump
         run: |
           $SUPABASE start
@@ -218,6 +252,8 @@ jobs:
           npx tsx scripts/engine-compare.ts compare/baseline-step0d.json compare/branch-step0d.json > compare/record-step0d.md
           npx tsx scripts/engine-compare.ts compare/frozen.json compare/branch.json > compare/record-frozen.md
           npx tsx scripts/engine-compare.ts compare/frozen-step0d.json compare/branch-step0d.json > compare/record-frozen-step0d.md
+          npx tsx scripts/engine-compare.ts compare/step0e.json compare/branch.json > compare/record-step0e.md
+          npx tsx scripts/engine-compare.ts compare/step0e-step0d.json compare/branch-step0d.json > compare/record-step0e-step0d.md
       - if: always()
         uses: actions/upload-artifact@v4
         with:

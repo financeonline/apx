@@ -35,8 +35,10 @@ import {
 } from './categories';
 import { weakestOf } from '@/core/assurance';
 import { withMergedCounterparties } from './merged';
+import { naturalToReporting } from './sign';
 import type {
   AccountRef,
+  AggregateCell,
   AssuranceLevel,
   BasisChoice,
   DataQuality,
@@ -117,7 +119,12 @@ export interface PnlInput {
    * (ADR-109); the evidence states both periods' records and the subtraction (`kind: 'difference'`).
    * `priorAvailable` false: the prior term is unavailable (`no_prior_trial_balance`).
    */
-  readonly balanceDifference?: { readonly priorPeriodId: string | null; readonly priorAvailable: boolean };
+  readonly balanceDifference?: {
+    readonly priorPeriodId: string | null;
+    readonly priorAvailable: boolean;
+    /** N-2: the winning report kind's cells for P and P−1, from which each term's expected total is read. */
+    readonly cells?: readonly AggregateCell[];
+  };
   /**
    * Cost of sales exists in a source the chosen basis is not reading (purchase invoices from a
    * cost-of-sales supplier, while the P&L comes from a ledger that states none). The figure is
@@ -354,17 +361,29 @@ function leafEvidence(
     // A cumulative month: this report's year to date, less the prior month's (§3). Both periods'
     // records are named, and the prior one's absence is stated rather than hidden.
     const priorReadable = difference.priorAvailable && difference.priorPeriodId !== null;
+    // N-2: each term's own expected total — Σ of exactly the rows its descriptor selects, read the
+    // way the drawer reads them (reporting sign by account type) — so each side reconciles alone.
+    const typeOf = new Map(input.accounts.map((a) => [a.id, a.accountType] as const));
+    const expectedFor = (periodId: string): string => toMoneyString((difference.cells ?? [])
+      .filter((c) => c.periodId === periodId && c.source === 'period_balances' && accountIds.includes(c.accountId ?? '')
+        && (input.basis.balanceKind ? c.balanceKind === input.basis.balanceKind : true))
+      .reduce((t, c) => {
+        const type = typeOf.get(c.accountId ?? '');
+        return type === undefined ? t : t.plus(naturalToReporting(type, c.amount));
+      }, ZERO));
     return {
       kind: 'difference',
       formula: 'year_to_date - prior_year_to_date',
       terms: [
-        { name: 'year_to_date', sign: 1, period_id: input.period.id, descriptor: balanceLeaf(period_ids), unavailable: null },
+        { name: 'year_to_date', sign: 1, period_id: input.period.id, descriptor: balanceLeaf(period_ids), unavailable: null,
+          expected: expectedFor(input.period.id) },
         {
           name: 'prior_year_to_date',
           sign: -1,
           period_id: difference.priorPeriodId,
           descriptor: priorReadable ? balanceLeaf([difference.priorPeriodId!]) : null,
           unavailable: priorReadable ? null : 'no_prior_trial_balance',
+          expected: priorReadable ? expectedFor(difference.priorPeriodId!) : null,
         },
       ],
     };
