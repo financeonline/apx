@@ -65,8 +65,8 @@ with a(id, org, name, type, key, held) as (values
   ('e9a00000-0000-4000-8000-000000000031', 'e9000000-0000-4000-8000-0000000000e4', 'Выручка', 'income', 'выручка', false),
   ('e9a00000-0000-4000-8000-000000000041', 'e9000000-0000-4000-8000-0000000000e1', '売上高', 'income', '売上高', false)
 ), ins as (
-  insert into public.accounts (id, organization_id, name, account_type, source)
-  select id, org, name, type::public.account_type_enum, 'imported' from a returning id
+  insert into public.accounts (id, organization_id, name, account_type, standard_category, source)
+  select id, org, name, type::public.account_type_enum, 'revenue', 'imported' from a returning id
 )
 insert into unicode_seed.expected (tbl, id, name, key, held)
 select 'accounts', id, name, key, held from a;

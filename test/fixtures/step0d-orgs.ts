@@ -150,9 +150,10 @@ function seedOne(key: Step0dKey, org: string): void {
 }
 
 export async function seedStep0dOrgs(tag: string): Promise<Record<Step0dKey, string>> {
-  const owner = createAuthUser(`s0d@${tag}.step0d.itest`);
   const out = {} as Record<Step0dKey, string>;
   for (const key of STEP0D_KEYS) {
+    // One owner per organisation: `create_organization` is throttled per user.
+    const owner = createAuthUser(`s0d-${key.toLowerCase()}@${tag}.step0d.itest`);
     const r = await clientFor(owner).schema('api').rpc('create_organization', { p_name: `STEP0D ${key} ${tag}` });
     if (r.error) throw new Error(r.error.message);
     out[key] = r.data as unknown as string;

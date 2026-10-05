@@ -131,21 +131,21 @@ select lives_ok($$
   'a merged-away held record does not block its name');
 
 -- Accounts follow the same rule (the trigger is shared).
-insert into public.accounts (id, organization_id, name, account_type) values
-  ('a2100000-0000-0000-0000-000000000001', 'f2100000-0000-0000-0000-0000000000a1', 'Ventes Café', 'income'),
-  ('a2100000-0000-0000-0000-000000000002', 'f2100000-0000-0000-0000-0000000000a1', 'Ventes Cafe', 'income');
+insert into public.accounts (id, organization_id, name, account_type, standard_category) values
+  ('a2100000-0000-0000-0000-000000000001', 'f2100000-0000-0000-0000-0000000000a1', 'Ventes Café', 'income', 'revenue'),
+  ('a2100000-0000-0000-0000-000000000002', 'f2100000-0000-0000-0000-0000000000a1', 'Ventes Cafe', 'income', 'revenue');
 select is((select count(*)::int from public.accounts where organization_id = 'f2100000-0000-0000-0000-0000000000a1'
              and id in ('a2100000-0000-0000-0000-000000000001', 'a2100000-0000-0000-0000-000000000002')),
           2, 'accounts "Ventes Café" and "Ventes Cafe" are two accounts');
-insert into public.accounts (id, organization_id, name, account_type) values
-  ('a2100000-0000-0000-0000-000000000003', 'f2100000-0000-0000-0000-0000000000a1', 'Выручка', 'income');
+insert into public.accounts (id, organization_id, name, account_type, standard_category) values
+  ('a2100000-0000-0000-0000-000000000003', 'f2100000-0000-0000-0000-0000000000a1', 'Выручка', 'income', 'revenue');
 update public.accounts set normalized_name = app.held_name_key('выручка', id)
  where id = 'a2100000-0000-0000-0000-000000000003';
 select throws_like($$
-  insert into public.accounts (organization_id, name, account_type) values ('f2100000-0000-0000-0000-0000000000a1', 'ВЫРУЧКА', 'income') $$,
+  insert into public.accounts (organization_id, name, account_type, standard_category) values ('f2100000-0000-0000-0000-0000000000a1', 'ВЫРУЧКА', 'income', 'revenue') $$,
   '%await a decision%', 'a held account name is refused for a new account too');
 select lives_ok($$
-  insert into public.accounts (organization_id, name, account_type) values ('f2100000-0000-0000-0000-0000000000a1', 'Выручка от продаж', 'income') $$,
+  insert into public.accounts (organization_id, name, account_type, standard_category) values ('f2100000-0000-0000-0000-0000000000a1', 'Выручка от продаж', 'income', 'revenue') $$,
   'a different Cyrillic account name is created');
 select is((select normalized_name from public.accounts where name = 'Выручка от продаж'),
           'выручка от продаж', 'with a Cyrillic key');

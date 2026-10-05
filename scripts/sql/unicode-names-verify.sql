@@ -69,7 +69,7 @@ begin
   exception when unique_violation then null;
   end;
   begin
-    insert into public.accounts (organization_id, name, account_type) values ('e9000000-0000-4000-8000-0000000000e1', 'UMSÄTZE', 'income');
+    insert into public.accounts (organization_id, name, account_type, standard_category) values ('e9000000-0000-4000-8000-0000000000e1', 'UMSÄTZE', 'income', 'revenue');
     raise exception 'a held account name was created again';
   exception when unique_violation then null;
   end;
