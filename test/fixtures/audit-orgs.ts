@@ -41,7 +41,7 @@ export function statement(org: string, bank: string, o: {
         values ('${org}', 'bank_transactions', v_id, 'accepted', v_b);
     end loop;`}
     perform set_config('audit.last', v_b::text, false);
-  end $$; select current_setting('audit.last');`).trim();
+  end $$; select current_setting('audit.last');`).split('\n').pop()!.trim(); // psql prints `DO` first
 }
 
 export function bankAccount(org: string, opening: string | null, openingDate: string | null, name = 'Main'): string {
@@ -87,7 +87,7 @@ export function invoiceBatch(org: string, o: {
         values ('${org}', 'invoices', v_id, 'accepted', v_b);
     end loop;
     perform set_config('audit.last', v_b::text, false);
-  end $$; select current_setting('audit.last');`).trim();
+  end $$; select current_setting('audit.last');`).split('\n').pop()!.trim(); // psql prints `DO` first
 }
 
 export interface GlLine { readonly date: string; readonly category: string; readonly direction: 'debit' | 'credit'; readonly amount: string; readonly opening?: boolean }
@@ -111,7 +111,7 @@ export function glBatch(org: string, o: { start: string; end: string; lines: rea
         values ('${org}', 'ledger_entries', v_id, 'accepted', v_b);
     end loop;
     perform set_config('audit.last', v_b::text, false);
-  end $$; select current_setting('audit.last');`).trim();
+  end $$; select current_setting('audit.last');`).split('\n').pop()!.trim(); // psql prints `DO` first
 }
 
 export function balanceBatch(org: string, o: {
@@ -144,7 +144,7 @@ export function balanceBatch(org: string, o: {
         values ('${org}', 'period_balances', v_id, 'accepted', v_b);
     end loop;
     perform set_config('audit.last', v_b::text, false);
-  end $$; select current_setting('audit.last');`).trim();
+  end $$; select current_setting('audit.last');`).split('\n').pop()!.trim(); // psql prints `DO` first
 }
 
 /** Months helper: YYYY-MM → { start, end }. */
