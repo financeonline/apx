@@ -261,7 +261,9 @@ function resolveSide(
     ...(ledger?.entryDateFrom ? { ledgerEntryDateFrom: ledger.entryDateFrom } : {}),
   };
 
-  const unavailableReason: DataQualityMissing | undefined = sideCoverage.anyBatch
+  const unavailableReason: DataQualityMissing | undefined = sideCoverage.openingUnconfirmed
+    ? 'opening_invoices_unconfirmed'
+    : sideCoverage.anyBatch
     ? 'stale_invoice_data'
     : ledgerRowsExist(ctx, cells, period, category) ? 'no_opening_balance' : 'no_source_covers_period';
 

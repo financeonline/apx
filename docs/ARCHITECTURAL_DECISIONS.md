@@ -2639,3 +2639,24 @@ On the import side, a Debit/Credit trial balance and a single-Amount P&L report 
 - **Completeness is not accuracy.** A report-basis P&L now takes the weakest of the report's own record assurance (and, on a cumulative month, the prior report's). Today no trial balance or P&L report can be AI-read (`document-extract` refuses all but bank statements), so no stored assurance changes; the rule guarantees an attestation can never raise one (tested with a simulated AI-read report: its figures and its implied zeros stay `inferred`).
 - **Source fallback (§2.3, as agreed in N-1, unchanged).** Unknown or partial: a ledger or invoices source covering the month states the whole P&L family (warning `balance_report_incomplete`); with only the bank, the report is used with NULLs; no zero is published. Confirmed complete: the report wins, and its stated zeros are never replaced by older ledger or bank figures. So a confirmation can switch a month's source from the ledger to the report (and a correction back) — integration-tested.
 - **Open:** C2, C3 as before; C4 (IMP-COV-013 at commit) as before; **C5** grouped P&L lines (the category split inside a group); **C6** whether a later re-import of the same month should carry an earlier month's attestation (it does not: an attestation belongs to one import).
+
+### ADR-140 · Owner decisions on the audit of c5a8473 (D-2, D-3, R-2, R-3) and the remaining implementation findings (H-3, H-4, H-5, H-6, R-4, U-2)
+
+**Status:** Accepted by the owner (decisions, 2026-10-06), implemented on `fix/step0-outstanding-findings`; for separate re-review. Engine 13.0.0, `health.config.v4`, `alerts.rules.v2`; migration `20261009000001`; migration `20261006000001` (unreleased) amended in place.
+
+**Owner decisions.**
+- **D-2 — approved:** the Health cap is 70, for bank-only (proxy/estimated) and AI-read (inferred) inputs alike, applied to every input a rule scores (H-3 below).
+- **D-3 — separate and warn:** names that differ only by a compatibility form (full-width "Ａｃｍｅ", the ﬁ ligature, half-width katakana) or by the dotted capital İ are DIFFERENT customers until a person merges them. The identity key is NFC (canonically equal text is still one name) and lower-cases İ by its full mapping (i + U+0307). An import matched to an existing record spelled differently beyond letter case raises a reviewable warning, IMP-CP-020. This supersedes ADR-136's NFKC and simple-İ rules; migration `20261006000001` is amended in place (unreleased), with its seed, verify and dry-run scripts.
+- **R-2 — ask at import:** a full invoice list states receivables or payables only once someone confirms it holds every invoice still unpaid at its start date, older ones included (IMP-INV-013, nothing pre-selected, validated in the database). Existing lists are unconfirmed until an owner or admin confirms one (the ADR-139 attestation, scope `open_invoices`, for the month the list starts in). Unconfirmed: the family falls through §2.3 to a balance sheet, trial balance or ledger, else NULL `opening_invoices_unconfirmed`. Open-items lists, revenue and costs are unaffected.
+- **R-3 — estimated with a bound:** a receivables or payables figure resting on payments with no date stays as §3.4 reads it (paid), but is `estimated` (never `verified`), and its components and evidence page state the range it could be in.
+
+**Implementation findings fixed.**
+- **H-3:** the cap tests every input a dimension's rules scored, earlier trend months included; banking health (B1, B2) and cash flow's C3 can now be capped.
+- **H-4:** "Capped at 70" only where the cap bound; "Can score at most 70" below it.
+- **H-5, H-6:** FINANCIAL_ENGINE §7 states the as-built config and the stored-weight rounding.
+- **R-4:** the consecutive cash-decline alert says "more money went out than came in", not that the balance fell.
+- **U-2:** the Unicode re-key no longer holds the survivor of a merge made before the upgrade; the merged-away record is held.
+
+**Consequences for existing data (until confirmed):** an invoice-only organisation's receivables, payables, overdue and days figures become NULL `opening_invoices_unconfirmed` for every month a full list would have stated, and Health dimensions resting on them are excluded, until an owner confirms the list or adds a balance sheet. Customers previously keyed together by İ/I or compatibility forms become separate records on the upgrade's re-key (it is unreleased; no production data was ever keyed by NFKC).
+
+**Still open (owner):** D-1 (VAT footing for days figures), D-4, D-5 (a review screen for held records), D-6 (FU-5 / R-1 anchors), the F5.2 net-versus-gross share, Phase 16 A-1…A-5, and sign-off of the 5.0.0→13.0.0 change set. ADR-139 C2–C6. U-3 (LOW, TS/DB key parity for post-Unicode-15.1 code points) is documented, not fixed.

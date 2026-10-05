@@ -316,6 +316,7 @@ Validation is pure (`imports/domain/validate-rows.ts`) over `mapped_data` and pr
 | `IMP-PERIOD-004` | error | Date outside the declared statement/report period |
 | `IMP-PERIOD-005` | error | A balance row with no period: no period column, and the declared range covers more than one month (Step 0D) |
 | `IMP-CP-019` | error | The customer or supplier named matches records held for an identity decision (ADR-136) |
+| `IMP-CP-020` | warning | The customer or supplier named was matched to an existing record spelled differently (beyond letter case) — D-3: matches are never silent |
 | `IMP-ACCT-019` | error | The account named matches accounts held for an identity decision (ADR-136) |
 | `IMP-ACCT-005` | warning | Account maps to `uncategorised` |
 | `IMP-ACCT-006` | error | Account value blank on a GL/TB row |

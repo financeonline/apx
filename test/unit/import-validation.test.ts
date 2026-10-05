@@ -346,6 +346,13 @@ describe('confirmations block a commit until a human records them (§8.2)', () =
     expect(requiredConfirmations({ targetTable: 'ledger_entries', importType: 'general_ledger' })).not.toContain('IMP-TB-016');
   });
 
+  it('R-2: asks of every invoice list whether it holds every invoice unpaid at its start (IMP-INV-013), of nothing else', () => {
+    expect(requiredConfirmations({ targetTable: 'invoices', importType: 'sales_invoices' })).toContain('IMP-INV-013');
+    expect(requiredConfirmations({ targetTable: 'invoices', importType: 'purchase_invoices' })).toContain('IMP-INV-013');
+    expect(requiredConfirmations({ targetTable: 'bank_transactions', importType: 'bank_statement' })).not.toContain('IMP-INV-013');
+    expect(requiredConfirmations({ targetTable: 'period_balances', importType: 'trial_balance' })).not.toContain('IMP-INV-013');
+  });
+
   it('requires the balance sign only for a single signed column', () => {
     expect(requiredConfirmations({
       targetTable: 'period_balances', importType: 'pnl_report', singleSignedBalanceColumn: true,

@@ -43,6 +43,8 @@ test('a sales list with customers in five scripts imports each under its own nam
   // No row is refused for its name.
   await expect(page.getByText(/cannot import/i)).toHaveCount(0);
 
+  // R-2: whether the list holds every invoice still unpaid at its start — asked, never pre-selected.
+  await page.getByLabel('Unpaid invoices included').selectOption('complete');
   const question = page.getByRole('button', { name: /yes, that is right|save this answer/i });
   for (let remaining = await question.count(); remaining > 0; remaining -= 1) {
     await question.first().click();

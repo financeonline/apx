@@ -90,8 +90,9 @@ function salesList(org: string, sales: ReadonlyArray<readonly [string, string]>)
       values ('${org}', '${org}/step0d/sales-' || gen_random_uuid(), 'sales.csv', 'text/csv', 10, digest(gen_random_uuid()::text, 'sha256'), 'ready', 'invoice')
       returning id into v_doc;
     insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
-        period_start, period_end, committed_at, invoice_list_kind)
-      values ('${org}', v_doc, 'sales_invoices', 'invoices', 'committed', 'csv', '2026-06-01', '2026-08-31', '${COMMITTED_AT}'::timestamptz, 'full')
+        period_start, period_end, committed_at, invoice_list_kind, confirmations)
+      values ('${org}', v_doc, 'sales_invoices', 'invoices', 'committed', 'csv', '2026-06-01', '2026-08-31', '${COMMITTED_AT}'::timestamptz, 'full',
+        jsonb_build_object('IMP-INV-013', jsonb_build_object('by', null, 'at', now(), 'value', jsonb_build_object('opening', 'complete'))))
       returning id into v_b;
     for r in select * from (values ${rows}) v(p, num, tot) loop
       n := n + 1;
@@ -243,8 +244,8 @@ function seedOne(key: Step0dKey, org: string): void {
     }
     case 'UNICODE': {
       // One July invoice per name. Under the baseline key the five non-Latin names are ONE customer
-      // (key '') and Möller is Müller; under the Unicode key there are nine customers — the Greek
-      // name in two cases is one, and so are "İzmir Ltd" and "Izmir Ltd" (İ lower-cases to i).
+      // (key '') and Möller is Müller; under the Unicode key there are ten customers — the Greek
+      // name in two cases is one; "İzmir Ltd" and "Izmir Ltd" are two (D-3: İ keeps its dot).
       salesList(org, [
         ['Müller GmbH', '5000'], ['Möller GmbH', '3000'], ['Muller GmbH', '1000'],
         ['株式会社トヨタ', '4000'], ['شركة الأمل', '3500'], ['ΟΔΟΣ Α.Ε.', '1500'], ['οδος α.ε.', '1500'],

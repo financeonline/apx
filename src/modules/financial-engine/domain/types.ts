@@ -65,6 +65,8 @@ export const DATA_QUALITY_MISSING = [
   'account_absent_unconfirmed',
   // Step 0F: a report category with no line, where nobody has yet said whether the report is complete.
   'report_completeness_unconfirmed',
+  // R-2: a full invoice list nobody has confirmed holds the invoices still unpaid at its start.
+  'opening_invoices_unconfirmed',
   /**
    * N-1 (Step 0F): P's balance report has no line in this P&L category and does not establish its
    * completeness (no attestation, IMP-TB-016), so the category is unknown — never an inferred zero.

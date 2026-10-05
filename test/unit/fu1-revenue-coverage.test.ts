@@ -72,6 +72,8 @@ let seq = 0;
 const list = (over: Partial<CoverageBatch>): CoverageBatch => ({
   id: `b-${(seq += 1)}`, targetTable: 'invoices', balanceKind: null, balanceBasis: null, bankAccountId: null,
   invoiceListKind: 'full', importType: 'sales_invoices',
+  // R-2: these lists stand for complete exports — confirmed to hold every invoice open at their start.
+  openingConfirmed: true,
   periodStart: '2026-06-01', periodEnd: '2026-08-31', committedAt: '2026-09-10T10:00:00Z', ...over,
 });
 const statement = (p: PeriodRef): CoverageBatch => ({

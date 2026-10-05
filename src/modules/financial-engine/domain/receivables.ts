@@ -29,6 +29,7 @@ import {
   toMoneyString,
 } from '@/core/money';
 import { monthsBetween, yearMonthOf } from '@/core/periods';
+import { weakestOf } from '@/core/assurance';
 import type { InvoiceStatus, InvoiceType, StandardCategory } from '@/modules/financials';
 import {
   combineBasis,
@@ -263,11 +264,29 @@ function fromInvoices(
   let overdue = new Decimal(0);
   let withoutDueDate = 0;
   let paymentDateUnknownCount = 0;
+  /*
+   * R-3 (owner decision): a payment with no date may or may not have happened by `asOf`. The figure
+   * keeps §3.4's reading (paid), but it is `estimated` and states the range it could be in: an unpaid
+   * sale would add what was paid back; an unrefunded credit note would take it off.
+   */
+  let couldBeHigher = new Decimal(0);
+  let couldBeLower = new Decimal(0);
+  let overdueCouldBeHigher = new Decimal(0);
+  let overdueCouldBeLower = new Decimal(0);
 
   for (const invoice of contributing) {
     const signed = signedOutstanding(invoice, asOf);
     total = total.plus(signed);
-    if (paymentDateUnknown(invoice)) paymentDateUnknownCount += 1;
+    if (paymentDateUnknown(invoice)) {
+      paymentDateUnknownCount += 1;
+      const unplaced = parseDecimal(invoice.totalAmount, 'total_amount').minus(parseDecimal(invoice.balanceDue, 'balance_due'));
+      const isCredit = CREDIT_NOTE_TYPES.includes(invoice.invoiceType);
+      if (isCredit) couldBeLower = couldBeLower.plus(unplaced); else couldBeHigher = couldBeHigher.plus(unplaced);
+      if (invoice.dueDate !== null && invoice.dueDate < asOf) {
+        if (isCredit) overdueCouldBeLower = overdueCouldBeLower.plus(unplaced);
+        else overdueCouldBeHigher = overdueCouldBeHigher.plus(unplaced);
+      }
+    }
     if (invoice.dueDate === null) {
       // §3.4: excluded from overdue and counted, never guessed at. An invoice with no due date is
       // not "not overdue" — it is unknown, and the count is what says so.
@@ -286,7 +305,8 @@ function fromInvoices(
     value: total,
     overdue,
     basis: 'invoices',
-    assurance: basis.assurance,
+    // R-3: an unplaced payment makes the figure an estimate, never `verified`.
+    assurance: paymentDateUnknownCount > 0 ? weakestOf(basis.assurance, 'estimated') : basis.assurance,
     warnings,
     missing: [],
     // §5, AR/AP (invoices): `1 − (invoices without due_date / invoices)`.
@@ -296,6 +316,13 @@ function fromInvoices(
       invoice_count: contributing.length,
       invoices_without_due_date: withoutDueDate,
       invoices_with_unknown_payment_date: paymentDateUnknownCount,
+      // R-3: the range the figure could be in, had the undated payments not happened by `asOf`.
+      ...(paymentDateUnknownCount > 0 ? {
+        range_low: toMoneyString(total.minus(couldBeLower)),
+        range_high: toMoneyString(total.plus(couldBeHigher)),
+        overdue_range_low: toMoneyString(overdue.minus(overdueCouldBeLower)),
+        overdue_range_high: toMoneyString(overdue.plus(overdueCouldBeHigher)),
+      } : {}),
     },
     evidence: leafEvidence(ctx, 'invoices', { invoice_types: invoiceTypes, open_as_of: asOf }),
     overdueEvidence: leafEvidence(ctx, 'invoices', {

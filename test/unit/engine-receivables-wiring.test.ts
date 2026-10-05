@@ -48,6 +48,8 @@ const context = (over: Partial<EngineContext> = {}): EngineContext => ({
 const batch = (over: Partial<CoverageBatch>): CoverageBatch => ({
   id: `b-${Math.random().toString(36).slice(2)}`, targetTable: 'invoices', balanceKind: null, balanceBasis: null,
   bankAccountId: null, invoiceListKind: 'full', importType: 'sales_invoices',
+  // R-2: these lists stand for complete exports — confirmed to hold every invoice open at their start.
+  openingConfirmed: true,
   periodStart: '2026-06-01', periodEnd: '2026-08-31', committedAt: '2026-09-01T00:00:00Z', ...over,
 });
 

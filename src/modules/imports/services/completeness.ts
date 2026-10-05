@@ -11,7 +11,7 @@ import { Decimal, parseDecimalOrNull } from '@/core/money';
  * report lists every account in its scope, not that the amounts are right.
  */
 
-export type ReportScope = 'all_accounts' | 'income_and_expense';
+export type ReportScope = 'all_accounts' | 'income_and_expense' | 'open_invoices';
 export type CompletenessAnswer = 'complete' | 'partial';
 
 export interface CompletenessMonth {
@@ -51,11 +51,19 @@ export async function loadReportCompleteness(
   db: SupabaseClient, orgId: string, batchId: string,
 ): Promise<ReportCompletenessView | null> {
   const { data: batch, error } = await db.from('import_batches')
-    .select('import_type, target_table, status, confirmations')
+    .select('import_type, target_table, status, confirmations, invoice_list_kind, period_start')
     .eq('organization_id', orgId).eq('id', batchId).maybeSingle();
   if (error) throw toMotionError(error);
-  const b = batch as { import_type: string; target_table: string; status: string; confirmations: Record<string, { at?: string; value?: { report_complete?: string } }> | null } | null;
-  if (b === null || b.status !== 'committed' || b.target_table !== 'period_balances'
+  const b = batch as {
+    import_type: string; target_table: string; status: string; invoice_list_kind: string | null; period_start: string | null;
+    confirmations: Record<string, { at?: string; value?: { report_complete?: string; opening?: string } }> | null;
+  } | null;
+  if (b === null || b.status !== 'committed') return null;
+  // R-2: a FULL invoice list has one answer — whether it holds every invoice unpaid at its start.
+  if (b.target_table === 'invoices' && (b.invoice_list_kind ?? 'full') === 'full' && b.period_start !== null) {
+    return loadInvoiceListOpening(db, orgId, batchId, b.period_start, b.confirmations?.['IMP-INV-013']);
+  }
+  if (b.target_table !== 'period_balances'
     || (b.import_type !== 'trial_balance' && b.import_type !== 'pnl_report')) return null;
 
   const [rows, attestations] = await Promise.all([
@@ -116,6 +124,51 @@ export async function loadReportCompleteness(
   });
 
   return { scope: b.import_type === 'trial_balance' ? 'all_accounts' : 'income_and_expense', importAnswer, months, history };
+}
+
+/** R-2: the opening answer of a full invoice list, as one "month" — the month the list starts in. */
+async function loadInvoiceListOpening(
+  db: SupabaseClient, orgId: string, batchId: string, periodStart: string,
+  imported: { at?: string; value?: { opening?: string } } | undefined,
+): Promise<ReportCompletenessView> {
+  const month = `${periodStart.slice(0, 7)}-01`;
+  const [count, attestations] = await Promise.all([
+    db.from('invoices').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('import_batch_id', batchId),
+    db.from('report_completeness_attestations')
+      .select('id, period_start, coverage, scope, reason, attested_by, attested_role, attested_at, supersedes_id')
+      .eq('organization_id', orgId).eq('import_batch_id', batchId)
+      .order('attested_at', { ascending: false }).order('id', { ascending: false }),
+  ]);
+  if (attestations.error) throw toMotionError(attestations.error);
+  const people = new Map<string, string>();
+  const ids = [...new Set((attestations.data ?? []).map((a) => String(a.attested_by)))];
+  if (ids.length > 0) {
+    const { data } = await db.from('profiles').select('id, full_name, email').in('id', ids);
+    for (const p of (data ?? []) as Array<{ id: string; full_name: string | null; email: string | null }>) {
+      people.set(p.id, p.full_name ?? p.email ?? 'A team member');
+    }
+  }
+  const history: CompletenessAttestationView[] = ((attestations.data ?? []) as Array<Record<string, unknown>>).map((a) => ({
+    id: String(a.id), month: String(a.period_start), coverage: a.coverage as CompletenessAnswer, scope: a.scope as ReportScope,
+    reason: String(a.reason), attestedBy: people.get(String(a.attested_by)) ?? 'A team member',
+    attestedRole: a.attested_role as 'owner' | 'admin', attestedAt: String(a.attested_at),
+    supersedesId: a.supersedes_id === null ? null : String(a.supersedes_id),
+  }));
+  const answer = imported?.value?.opening;
+  const importAnswer = answer === 'complete' || answer === 'partial' ? { value: answer, at: imported?.at ?? null } as const : null;
+  const latest = history.find((h) => h.month === month);
+  return {
+    scope: 'open_invoices',
+    importAnswer,
+    months: [{
+      month,
+      current: latest?.coverage ?? importAnswer?.value ?? 'unconfirmed',
+      source: latest ? 'owner_review' : importAnswer ? 'import_review' : null,
+      lines: count.count ?? 0,
+      balances: null,
+    }],
+    history,
+  };
 }
 
 /**

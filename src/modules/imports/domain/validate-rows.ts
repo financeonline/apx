@@ -580,6 +580,9 @@ export function requiredConfirmations(input: {
     if (input.replacesExistingBalances) codes.push('IMP-COV-013');
   }
   if (input.targetTable === 'invoices' && input.looksLikeOpenItems) codes.push('IMP-INV-012');
+  // R-2 (owner decision): only the reviewer knows whether a list holds every invoice still unpaid at
+  // its start — older ones included. Without that, it states nothing about what is owed.
+  if (input.targetTable === 'invoices') codes.push('IMP-INV-013');
   if (input.looksLikeReExport) codes.push('IMP-COV-014');
 
   return codes;

@@ -4,7 +4,7 @@ import { permissionsFor } from '@/core/permissions';
 import { buildBundleForMetric, loadEvidenceDrawer } from '@/modules/evidence';
 import type { AccessContext } from '@/modules/tenancy';
 import { calculateAndAlert } from '../fixtures/adr120-orgs';
-import { balanceBatch, glBatch } from '../fixtures/audit-orgs';
+import { balanceBatch, counterparty, glBatch, invoiceBatch } from '../fixtures/audit-orgs';
 import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
 
 /**
@@ -241,4 +241,35 @@ describe('who may confirm, and what', () => {
     const { data } = await clientFor(other.owner).from('report_completeness_attestations').select('id').eq('organization_id', o.id);
     expect(data ?? []).toEqual([]);
   });
+});
+
+/**
+ * R-2 (owner decision): a full invoice list states what is owed only once someone confirmed it holds
+ * every invoice still unpaid at its start. July sales list (declared 1 Jul–31 Aug, committed 10 Sep):
+ * one invoice of 2,000 issued 5 Jul, due 4 Aug, unpaid. By hand, once confirmed: receivables 31 Jul
+ * 2,000; 31 Aug 2,000, all overdue.
+ */
+describe('R-2 · confirming an invoice list\'s opening', () => {
+  it('unconfirmed: receivables NULL opening_invoices_unconfirmed, never 0 or a partial total; confirmed by the owner: 2,000', async () => {
+    const o = await org('OPENING');
+    const acme = counterparty(o.id, 'Acme Ltd', 'customer');
+    const list = invoiceBatch(o.id, { importType: 'sales_invoices', start: '2026-07-01', end: '2026-08-31', listKind: 'full',
+      committedAt: '2026-09-10T10:00:00Z', tag: `inv-${n++}`, openingConfirmed: false,
+      invoices: [{ type: 'sales', party: acme, number: 'A-1', issue: '2026-07-05', due: '2026-08-04', subtotal: '2000', tax: '0', total: '2000', paid: '0', paidDate: null, status: 'open' }] });
+    await calculateAndAlert(o.id);
+    const before = metric(o.id, '2026-07', 'receivables');
+    expect(before.startsWith('NULL|')).toBe(true);
+    expect(before).toContain('opening_invoices_unconfirmed');
+    // Revenue is unaffected: the list still states July's sales.
+    expect(head(o.id, '2026-07', 'revenue')[0]).toBe('2000.00');
+
+    // The opening is confirmed for the month the list STARTS in, and only that one.
+    expect((await attest(o.owner, list, '2026-08-01', 'complete', 'checked')).error?.message).toContain('VALIDATION');
+    const ok = await attest(o.owner, list, '2026-07-01', 'complete', 'Compared with the aged debtors report at 1 July');
+    expect(ok.error, ok.error?.message).toBeNull();
+    expect(one(`select scope from public.report_completeness_attestations where id = '${ok.data as string}'`)).toBe('open_invoices');
+    await drainQueuedRecalculation(o.id, list);
+    expect(head(o.id, '2026-07', 'receivables')).toEqual(['2000.00', 'verified', 'invoices']);
+    expect(head(o.id, '2026-08', 'receivables_overdue')[0]).toBe('2000.00');
+  }, 300_000);
 });

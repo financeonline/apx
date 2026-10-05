@@ -97,7 +97,10 @@ function seedOne(key: Audit2Key, org: string): void {
           rows: [['receivables', '3000'], ['payables', '-1000']] });
       }
       const c = counterparty(org, 'BsList Ltd', 'customer');
+      // R-2: an export of invoices ISSUED in its range, as real ones are — nobody confirmed it holds the
+      // invoices still unpaid on 1 June, so it states nothing about what is owed.
       invoiceBatch(org, { importType: 'sales_invoices', start: '2026-06-01', end: '2026-08-03', listKind: 'full', committedAt: '2026-08-03T12:00:00Z', tag: 'bl-s',
+        openingConfirmed: false,
         invoices: [{ type: 'sales', party: c, number: 'X-1', issue: '2026-07-10', due: '2026-08-09', subtotal: '5000', tax: '0', total: '5000', paid: '0', paidDate: null, status: 'open' }] });
       break;
     }

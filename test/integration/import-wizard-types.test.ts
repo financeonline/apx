@@ -60,6 +60,7 @@ async function confirmAndCommit(batchId: string) {
       : code === 'IMP-TB-012' ? { balance_basis: 'cumulative' }
       : code === 'IMP-TB-013' ? { balance_sign: 'natural' }
       : code === 'IMP-TB-016' ? { report_complete: 'partial' }
+      : code === 'IMP-INV-013' ? { opening: 'complete' }
       : { answer: 'yes' };
     const { error } = await rpc('record_batch_confirmation', { p_batch: batchId, p_code: code, p_value: value });
     expect(error, `${code}: ${error?.message}`).toBeNull();

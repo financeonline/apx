@@ -120,6 +120,13 @@ describe('N-4 · a list committed during a finished month does not outrank its b
     expect(v('BSLIST', '2026-08-01', 'receivables')).toBe('3000.00');
     expect(headline(o('BSLIST'), '2026-08-01', 'receivables')!.basis).toBe('period_balances');
   });
+
+  it('R-2: June and July too — the unconfirmed list (issued Jun–Aug) never states 0.00 over the balance sheet\'s 3,000', () => {
+    for (const m of ['2026-06-01', '2026-07-01']) {
+      expect(v('BSLIST', m, 'receivables'), m).toBe('3000.00');
+      expect(headline(o('BSLIST'), m, 'receivables')!.basis, m).toBe('period_balances');
+    }
+  });
 });
 
 describe('N-5 · a mid-month opening journal counts nothing twice (LEDGER3)', () => {

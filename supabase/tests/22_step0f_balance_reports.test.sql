@@ -4,7 +4,7 @@
 --           real upload path are in test/integration/step0f-reproductions.test.ts.
 begin;
 create extension if not exists pgtap;
-select plan(8);
+select plan(11);
 
 -- N-1: coverage returns the reviewer's attestation, and only `complete` counts.
 insert into public.organizations (id, slug, name) values ('e9000000-0000-0000-0000-0000000000e9', 'pgt-step0f', 'PGT Step0F');
@@ -46,6 +46,15 @@ select ok(position('needs_confirmation' in pg_get_functiondef('app.commit_import
 -- N-6: the reporting flip is only for a one-column layout.
 select ok(position('''debit_total'') is null' in pg_get_functiondef('app.commit_import_batch(uuid, uuid, uuid)'::regprocedure)) > 0,
           'commit never flips a row that carries debit or credit totals');
+
+-- R-2 (migration 20261009000001): a full invoice list's opening is an answer, and coverage returns it.
+select ok(position('IMP-INV-013' in pg_get_functiondef('api.record_batch_confirmation(uuid, text, jsonb)'::regprocedure)) > 0,
+          'record_batch_confirmation validates IMP-INV-013');
+select ok(exists (select 1 from information_schema.columns where table_schema = 'public'
+            and table_name = 'report_completeness_attestations' and column_name = 'scope'),
+          'attestations carry their scope');
+select ok(position('open_invoices' in pg_get_functiondef('api.attest_report_completeness(uuid, date, text, text)'::regprocedure)) > 0,
+          'an owner can confirm a full invoice list''s opening');
 
 select * from finish();
 rollback;

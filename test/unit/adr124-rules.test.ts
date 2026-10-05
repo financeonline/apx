@@ -24,6 +24,8 @@ let n = 0;
 const batch = (over: Partial<CoverageBatch>): CoverageBatch => ({
   id: `b-${(n += 1)}`, targetTable: 'invoices', balanceKind: null, balanceBasis: null, bankAccountId: null,
   invoiceListKind: 'full', importType: 'sales_invoices', periodStart: '2026-06-01', periodEnd: '2026-08-31',
+  // R-2: these lists stand for complete exports — confirmed to hold every invoice open at their start.
+  openingConfirmed: true,
   committedAt: '2026-09-10T10:00:00Z', ...over,
 });
 const covers = (b: CoverageBatch, p: PeriodRef, current = false): boolean => invoiceSideCoverage([b], p, 'sales', current).covers;
@@ -99,6 +101,63 @@ describe('D-3 · invoice-list freshness depends on whether the month is finished
       receivables: { invoices, batches: [bs, list], asOfIsPeriodEnd: true, priorDenominators: [], ledger: null } });
     const ar = results.find((r) => r.key === 'receivables' && r.dimensionType === 'none')!;
     expect([ar.value, ar.basis]).toEqual(['3000.00', 'period_balances']);
+  });
+});
+
+// ---------------------------------------------------------------------------------------------
+// R-2 (owner decision) — a full list states what is owed only once its opening is confirmed
+// ---------------------------------------------------------------------------------------------
+
+describe('R-2 · a full invoice list must be confirmed to hold the invoices open at its start', () => {
+  const unconfirmed = (over: Partial<CoverageBatch> = {}) => batch({ openingConfirmed: null, ...over });
+
+  it('an unconfirmed full list spanning the month does not cover it, and says why', () => {
+    const side = invoiceSideCoverage([unconfirmed({ periodStart: '2026-07-01', periodEnd: '2026-09-05', committedAt: '2026-09-06T00:00:00Z' })], aug, 'sales');
+    expect(side.covers).toBe(false);
+    expect(side.openingUnconfirmed).toBe(true);
+  });
+
+  it('answered partial (only invoices issued in the range) is not confirmed either', () => {
+    expect(covers(batch({ openingConfirmed: false, periodStart: '2026-07-01', periodEnd: '2026-09-05', committedAt: '2026-09-06T00:00:00Z' }), aug)).toBe(false);
+  });
+
+  it('confirmed: it covers, as before', () => {
+    expect(covers(batch({ periodStart: '2026-07-01', periodEnd: '2026-09-05', committedAt: '2026-09-06T00:00:00Z' }), aug)).toBe(true);
+  });
+
+  it('an open-items list needs no confirmation: it is every unpaid invoice by kind', () => {
+    expect(covers(unconfirmed({ invoiceListKind: 'open_items', periodStart: '2026-08-31', periodEnd: '2026-08-31', committedAt: '2026-09-03T00:00:00Z' }), aug)).toBe(true);
+  });
+
+  it('BSLIST: an unconfirmed list beside a balance sheet — the balance sheet\'s 3,000, never the list\'s 0.00', () => {
+    const accounts: AccountRef[] = [{ id: 'a-ar', code: null, name: 'AR', standardCategory: 'receivables', accountType: 'asset', isSystem: true }];
+    const ctx: EngineContext = {
+      organizationId: 'org', calculationRunId: 'run', aggregatedAt: '2026-09-15T00:00:00Z', asOf: '2026-09-15', engineVersion: ENGINE_VERSION,
+      settings: { baseCurrency: 'GBP', fiscalYearStartMonth: 1, timezone: 'Europe/London', vatRegistered: false, defaultVatRate: null, taxableCategories: [] },
+      costOfSalesEverUsed: true, costOfSalesInInvoices: false, accounts, counterparties: [], bankAccounts: [], periods: [jun, jul, aug],
+    };
+    const bs = batch({ targetTable: 'period_balances', importType: 'balance_sheet', invoiceListKind: null, balanceKind: 'balance_sheet', balanceBasis: 'cumulative', periodStart: '2026-06-01', periodEnd: '2026-06-30' });
+    // June: the list (declared 1 Jun–3 Aug) holds a single July invoice; the balance sheet says 3,000 owed.
+    const list = unconfirmed({ periodStart: '2026-06-01', periodEnd: '2026-08-03', committedAt: '2026-08-03T12:00:00Z' });
+    const cell: AggregateCell = {
+      periodId: jun.id, source: 'period_balances', standardCategory: 'receivables', accountId: 'a-ar', counterpartyId: null, bankAccountId: null,
+      balanceKind: 'balance_sheet', balanceBasis: 'cumulative', invoiceType: null, transferKind: null, unpairedTransferCandidate: false,
+      debit: '3000', credit: '0', amount: '3000', rowCount: 1, fallbackRows: 0, minDate: null, maxDate: null,
+    };
+    const invoices: AgingInvoice[] = [{ id: 'x-1', invoiceType: 'sales', counterpartyId: null, issueDate: '2026-07-10', dueDate: '2026-08-09',
+      totalAmount: '5000.00', amountPaid: '0.00', balanceDue: '5000.00', paidDate: null, status: 'open' }];
+    const run = (batches: CoverageBatch[], cells: AggregateCell[]) => {
+      const coverage = computeCoverage({ period: jun, batches, bankAccounts: [], rowCounts: { period_balances: cells.length }, asOf: ctx.asOf });
+      const results = composePeriod({ period: jun, coverage, cells, transferLegs: [], context: ctx,
+        receivables: { invoices, batches, asOfIsPeriodEnd: true, priorDenominators: [], ledger: null } });
+      return results.find((r) => r.key === 'receivables' && r.dimensionType === 'none')!;
+    };
+    const withSheet = run([bs, list], [cell]);
+    expect([withSheet.value, withSheet.basis]).toEqual(['3000.00', 'period_balances']);
+    // No balance sheet: NULL with the reason, never the list's 0.00.
+    const alone = run([list], []);
+    expect(alone.value).toBeNull();
+    expect(alone.dataQuality.missing).toContain('opening_invoices_unconfirmed');
   });
 });
 

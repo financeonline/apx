@@ -64,16 +64,19 @@ export interface Inv {
 export function invoiceBatch(org: string, o: {
   importType: 'sales_invoices' | 'purchase_invoices'; start: string; end: string; listKind: 'full' | 'open_items';
   committedAt?: string; invoices: readonly Inv[]; tag: string;
+  /** R-2: confirmed to hold every invoice unpaid at its start (default: a complete export). */
+  openingConfirmed?: boolean;
 }): string {
+  const opening = o.openingConfirmed === false ? `'{}'::jsonb` : `jsonb_build_object('IMP-INV-013', jsonb_build_object('by', null, 'at', now(), 'value', jsonb_build_object('opening', 'complete')))`;
   const values = o.invoices.map((r) => `('${r.type}', '${r.party}'::uuid, '${q(r.number)}', '${r.issue}'::date, ${r.due ? `'${r.due}'::date` : 'null::date'},
     ${r.subtotal}::numeric, ${r.tax}::numeric, ${r.total}::numeric, ${r.paid}::numeric, ${r.paidDate ? `'${r.paidDate}'::date` : 'null::date'}, '${r.status}')`).join(',');
   return adminSql(`do $$ declare v_doc uuid; v_b uuid; v_row uuid; v_id uuid; r record; n int := 0; begin
     insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
       values ('${org}', '${org}/audit/${q(o.tag)}-' || gen_random_uuid(), '${q(o.tag)}.csv', 'text/csv', 10, digest(gen_random_uuid()::text, 'sha256'), 'ready', 'invoice') returning id into v_doc;
     insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
-        period_start, period_end, committed_at, invoice_list_kind)
+        period_start, period_end, committed_at, invoice_list_kind, confirmations)
       values ('${org}', v_doc, '${o.importType}', 'invoices', 'committed', 'csv', '${o.start}', '${o.end}',
-        '${o.committedAt ?? COMMITTED_AT}'::timestamptz, '${o.listKind}') returning id into v_b;
+        '${o.committedAt ?? COMMITTED_AT}'::timestamptz, '${o.listKind}', ${opening}) returning id into v_b;
     for r in select * from (values ${values}) v(t, p, num, iss, due, sub, tax, tot, paid, pd, st) loop
       n := n + 1;
       insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
@@ -315,8 +318,8 @@ function seedOne(key: AuditKey, org: string): void {
         insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
           values ('${org}', '${org}/audit/big-' || gen_random_uuid(), 'big.csv', 'text/csv', 10, digest(gen_random_uuid()::text, 'sha256'), 'ready', 'invoice') returning id into v_doc;
         insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
-            period_start, period_end, committed_at, invoice_list_kind)
-          values ('${org}', v_doc, 'sales_invoices', 'invoices', 'committed', 'csv', '2026-06-01', '2026-08-31', '${COMMITTED_AT}', 'full') returning id into v_b;
+            period_start, period_end, committed_at, invoice_list_kind, confirmations)
+          values ('${org}', v_doc, 'sales_invoices', 'invoices', 'committed', 'csv', '2026-06-01', '2026-08-31', '${COMMITTED_AT}', 'full', jsonb_build_object('IMP-INV-013', jsonb_build_object('by', null, 'at', now(), 'value', jsonb_build_object('opening', 'complete')))) returning id into v_b;
         for i in 1..1050 loop
           insert into public.counterparties (organization_id, name, kind) values ('${org}', 'Cust ' || i, 'customer') returning id into v_c;
           insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)

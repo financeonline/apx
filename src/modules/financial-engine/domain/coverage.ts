@@ -68,6 +68,13 @@ export interface CoverageBatch {
   readonly completenessByMonth?: Readonly<Record<string, 'complete' | 'partial'>> | null;
   /** The weakest assurance of the batch's own records (extraction method). Never raised by completeness. */
   readonly recordAssurance?: AssuranceLevel | null;
+  /**
+   * R-2 (owner decision): a FULL invoice list states receivables or payables only when someone has
+   * confirmed it includes every invoice still unpaid at its start date — older ones included (IMP-
+   * INV-013 at import, or an owner's attestation). A list of "invoices issued Jun–Aug" otherwise omits
+   * exactly the oldest open invoices. Not needed of an open-items list, which is that list by kind.
+   */
+  readonly openingConfirmed?: boolean | null;
 }
 
 /** What is known about whether a report lists every account for a month (N-1). */
@@ -301,6 +308,8 @@ export interface InvoiceSideCoverage {
   readonly fullListSpans: boolean;
   /** An `open_items` list of this side spans P (ADR-047.10: it makes the DSO denominator meaningless). */
   readonly openItemsSpans: boolean;
+  /** R-2: a full list WOULD cover P but nobody has confirmed it holds the invoices open at its start. */
+  readonly openingUnconfirmed: boolean;
 }
 
 /**
@@ -373,8 +382,12 @@ export function invoiceSideCoverage(
       && daysBetween(period.periodEnd, committed) <= AR_AP_FRESHNESS_DAYS
       && statesMonthEnd(b);
   };
+  // R-2: only an open-items list, or a full list whose opening is confirmed, knows every open invoice.
+  const knowsOpening = (b: CoverageBatch): boolean => openItems(b) || b.openingConfirmed === true;
+  const wouldCover = (b: CoverageBatch): boolean => spanning(b) || fresh(b);
   return {
-    covers: ofSide.some((b) => spanning(b) || fresh(b)),
+    covers: ofSide.some((b) => wouldCover(b) && knowsOpening(b)),
+    openingUnconfirmed: !ofSide.some((b) => wouldCover(b) && knowsOpening(b)) && ofSide.some((b) => wouldCover(b) && !knowsOpening(b)),
     anyBatch: ofSide.length > 0,
     // The DSO denominator's sales history: the same effective range (FU-15), so a list committed
     // mid-month never supplies a month of sales it had not seen.

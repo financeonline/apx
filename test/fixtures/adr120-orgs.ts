@@ -51,11 +51,13 @@ function batch(org: string, doc: string, o: {
   importType: string; target: string; start: string; end: string;
   bankAccount?: string; listKind?: 'full' | 'open_items'; balanceBasis?: 'cumulative' | 'movement';
 }): string {
+  // R-2: the fixtures' invoice lists are complete exports, confirmed to hold every invoice unpaid at their start.
+  const confirmations = o.target === 'invoices' ? `jsonb_build_object('IMP-INV-013', jsonb_build_object('by', null, 'at', now(), 'value', jsonb_build_object('opening', 'complete')))` : `'{}'::jsonb`;
   return one(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
-      period_start, period_end, committed_at, bank_account_id, invoice_list_kind, balance_basis)
+      period_start, period_end, committed_at, bank_account_id, invoice_list_kind, balance_basis, confirmations)
     values ('${org}', '${doc}', '${o.importType}', '${o.target}', 'committed', 'csv', '${o.start}', '${o.end}', '${COMMITTED_AT}',
       ${o.bankAccount ? `'${o.bankAccount}'` : 'null'}, ${o.listKind ? `'${o.listKind}'` : 'null'},
-      ${o.balanceBasis ? `'${o.balanceBasis}'` : 'null'}) returning id`);
+      ${o.balanceBasis ? `'${o.balanceBasis}'` : 'null'}, ${confirmations}) returning id`);
 }
 
 let rowNumber = 0;

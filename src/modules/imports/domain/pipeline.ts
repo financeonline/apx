@@ -183,6 +183,8 @@ export function runPipeline(input: PipelineInput): PipelineResult {
   const matchedCounterparties = new Set<string>();
   /** Rows naming an account or counterparty whose records are held for a decision (ADR-136). */
   const nameIssues = new Map<number, RowIssue>();
+  /** D-3: rows matched to a customer or supplier whose stored spelling differs (beyond letter case). */
+  const spellingWarnings = new Map<number, RowIssue>();
 
   // ---- Pass A: map every line, resolve identities, collect what is missing ----
   interface Staged {
@@ -286,6 +288,15 @@ export function runPipeline(input: PipelineInput): PipelineResult {
       } else if (existing) {
         mapped.counterparty_id = existing.id;
         if (!nameCarriesFigure(counterpartyValue)) matchedCounterparties.add(counterpartyValue);
+        // D-3 (owner decision): a match is never silent when the spelling differs — "Acme, Ltd."
+        // booked to "Acme Ltd" is right only if they are the same business, so the reviewer sees it.
+        if (existing.name !== undefined && spellingDiffers(counterpartyValue, existing.name)) {
+          spellingWarnings.set(row.rowNumber, {
+            code: 'IMP-CP-020', severity: 'warning', field: 'customer',
+            message: `"${counterpartyValue}" was matched to the existing "${existing.name}", which is spelled differently.`,
+            suggestion: 'If they are different businesses, rename one of them under Customers before importing.',
+          });
+        }
       // ADR-045.3: a name carrying a figure is never created; the row says so (IMP-NAME-015).
       } else if (!nameCarriesFigure(counterpartyValue)) {
         newCounterparties.add(counterpartyValue);
@@ -396,10 +407,12 @@ export function runPipeline(input: PipelineInput): PipelineResult {
       requiredFields,
     );
     const nameIssueOfRow = nameIssues.get(s.rowNumber);
+    const spelling = spellingWarnings.get(s.rowNumber);
     // The specific reason replaces the generic "could not be matched" (IMP-CP-016) it would cause.
-    issuesByRow.set(s.rowNumber, nameIssueOfRow === undefined
-      ? issues
-      : [...issues.filter((i) => i.code !== 'IMP-CP-016'), nameIssueOfRow]);
+    issuesByRow.set(s.rowNumber, [
+      ...(nameIssueOfRow === undefined ? issues : [...issues.filter((i) => i.code !== 'IMP-CP-016'), nameIssueOfRow]),
+      ...(spelling === undefined ? [] : [spelling]),
+    ]);
   }
 
   // ---- Pass C: duplicates, over the rows that could actually commit ----
@@ -540,6 +553,16 @@ function heldNames(records: ReadonlyArray<{ normalizedName: string; name?: strin
     held.set(key, [...(held.get(key) ?? []), record.name ?? key]);
   }
   return held;
+}
+
+/**
+ * D-3: whether a matched name is spelled differently from the stored one, beyond letter case and
+ * surrounding or repeated spaces. Case alone is how exports differ ("ACME LTD"); punctuation, accents
+ * written another way and other characters are what a reviewer should look at.
+ */
+function spellingDiffers(fileName: string, storedName: string): boolean {
+  const plain = (s: string) => s.normalize('NFC').toLowerCase().replace(/\s+/gu, ' ').trim();
+  return plain(fileName) !== plain(storedName);
 }
 
 function heldIssue(kind: 'account' | 'counterparty', name: string, records: readonly string[]): RowIssue {

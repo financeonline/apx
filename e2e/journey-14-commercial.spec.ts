@@ -34,8 +34,9 @@ test('an owner records products, lines, a campaign and a won deal; marketing cre
        values ('${orgId}', 'sales', '${acme}', 'A-100', '2026-08-10', '2026-09-09', '00000000-0000-0000-0000-000000000000', 6000, 1200, 7200, 0, 'open', 'accepted', 'verified')`);
   const doc = first(sql(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
        values ('${orgId}', '${orgId}/j14/sales.csv', 'sales.csv', 'text/csv', 10, decode('14','hex'), 'ready', 'invoice') returning id`));
-  sql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind)
-       values ('${orgId}', '${doc}', 'sales_invoices', 'invoices', 'committed', 'csv', '2026-06-01', '2026-08-31', now(), 'full')`);
+  sql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind, confirmations)
+       values ('${orgId}', '${doc}', 'sales_invoices', 'invoices', 'committed', 'csv', '2026-06-01', '2026-08-31', now(), 'full',
+               '{"IMP-INV-013": {"by": null, "at": "2026-09-01T00:00:00Z", "value": {"opening": "complete"}}}'::jsonb)`);
   const firstPeriod = sql(`select id from public.fiscal_periods where organization_id = '${orgId}' order by period_start limit 1`).trim();
   sql(`insert into public.jobs (organization_id, job_type, payload, max_attempts) values ('${orgId}', 'calculation.run', '{"trigger":"banking_edit","period_ids":["${firstPeriod}"],"as_of":"2026-09-15"}'::jsonb, 3)`);
   await drainQueue(page, slug);

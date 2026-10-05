@@ -147,7 +147,17 @@
  *   - The run fingerprint includes the current attestation per (import, month), so confirming or
  *     correcting one recalculates instead of finishing `no_change`.
  */
-export const ENGINE_VERSION = '12.0.0';
+/**
+ * 13.0.0 (owner decisions R-2, R-3 after the audit of c5a8473): MAJOR. 12.0.0 was never released.
+ *   - R-2: a FULL invoice list states receivables or payables only once someone confirmed it holds
+ *     every invoice still unpaid at its start (IMP-INV-013, or an owner's attestation). Otherwise the
+ *     family falls through §2.3 (balance sheet, trial balance, ledger), else NULL
+ *     `opening_invoices_unconfirmed`. An open-items list is unaffected; revenue and costs too.
+ *   - R-3: a receivables or payables figure resting on payments with no date is `estimated`, never
+ *     `verified`, and its components state the range it could be in (`range_low`/`range_high`, and
+ *     the overdue range).
+ */
+export const ENGINE_VERSION = '13.0.0';
 
 /** Bumped independently of the engine (§6). */
 /**

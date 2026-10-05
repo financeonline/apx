@@ -103,7 +103,9 @@ describe('customers in five scripts, through the wizard and commit', () => {
       select coalesce(string_agg(c, ','), '') from public.import_batches b, unnest(b.required_confirmations) c
        where b.organization_id = '${orgId}' and b.id = '${batchId}'`).split(',').filter(Boolean);
     for (const code of required) {
-      const value = code === 'IMP-RANGE-015' ? { period_start: '2026-08-01', period_end: '2026-08-31' } : { answer: 'yes' };
+      const value = code === 'IMP-RANGE-015' ? { period_start: '2026-08-01', period_end: '2026-08-31' }
+        : code === 'IMP-INV-013' ? { opening: 'complete' } // R-2: the list holds every invoice unpaid at its start
+        : { answer: 'yes' };
       const { error } = await ownerDb().schema('api').rpc('record_batch_confirmation', { p_batch: batchId, p_code: code, p_value: value });
       expect(error, `${code}: ${error?.message}`).toBeNull();
     }

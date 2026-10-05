@@ -28,14 +28,18 @@ with c(id, org, name, kind, key, held) as (values
   ('e9c00000-0000-4000-8000-000000000001'::uuid, 'e9000000-0000-4000-8000-0000000000e1'::uuid, '株式会社トヨタ', 'customer', '株式会社トヨタ', false),
   ('e9c00000-0000-4000-8000-000000000002', 'e9000000-0000-4000-8000-0000000000e1', 'Müller GmbH',   'customer', 'müller gmbh', false),
   ('e9c00000-0000-4000-8000-000000000003', 'e9000000-0000-4000-8000-0000000000e1', 'Muller GmbH',   'customer', 'muller gmbh', false),
-  -- KNOWN COLLISIONS: the old key kept these apart only because it dropped the letter that differs.
-  ('e9c00000-0000-4000-8000-000000000004', 'e9000000-0000-4000-8000-0000000000e1', 'İzmir Ltd',     'supplier', null, true),
-  ('e9c00000-0000-4000-8000-000000000005', 'e9000000-0000-4000-8000-0000000000e1', 'Izmir Ltd',     'supplier', null, true),
-  ('e9c00000-0000-4000-8000-000000000006', 'e9000000-0000-4000-8000-0000000000e1', 'Ａｃｍｅ Trading', 'customer', null, true),
-  ('e9c00000-0000-4000-8000-000000000007', 'e9000000-0000-4000-8000-0000000000e1', 'Acme Trading',  'customer', null, true),
+  -- D-3 (owner decision): the dotted capital I and full-width forms are DIFFERENT names — two records,
+  -- each with its own key, nothing held.
+  ('e9c00000-0000-4000-8000-000000000004', 'e9000000-0000-4000-8000-0000000000e1', 'İzmir Ltd',     'supplier', 'i' || chr(775) || 'zmir ltd', false),
+  ('e9c00000-0000-4000-8000-000000000005', 'e9000000-0000-4000-8000-0000000000e1', 'Izmir Ltd',     'supplier', 'izmir ltd', false),
+  ('e9c00000-0000-4000-8000-000000000006', 'e9000000-0000-4000-8000-0000000000e1', 'Ａｃｍｅ Trading', 'customer', 'ａｃｍｅ trading', false),
+  ('e9c00000-0000-4000-8000-000000000007', 'e9000000-0000-4000-8000-0000000000e1', 'Acme Trading',  'customer', 'acme trading', false),
+  -- KNOWN COLLISION: the same word typed precomposed and with a combining accent — one name (NFC).
+  ('e9c00000-0000-4000-8000-000000000010', 'e9000000-0000-4000-8000-0000000000e1', 'Café Lumière',  'customer', null, true),
+  ('e9c00000-0000-4000-8000-000000000012', 'e9000000-0000-4000-8000-0000000000e1', 'Cafe' || chr(769) || ' Lumie' || chr(768) || 're', 'customer', null, true),
   -- The survivor of a merge made before the upgrade (below): decided, so NOT held (audit U-2).
-  ('e9c00000-0000-4000-8000-000000000008', 'e9000000-0000-4000-8000-0000000000e1', 'Istanbul Co',   'customer', 'istanbul co', false),
-  ('e9c00000-0000-4000-8000-000000000009', 'e9000000-0000-4000-8000-0000000000e1', 'İstanbul Co',   'customer', null, true),
+  ('e9c00000-0000-4000-8000-000000000008', 'e9000000-0000-4000-8000-0000000000e1', 'Café Nord',     'customer', 'café nord', false),
+  ('e9c00000-0000-4000-8000-000000000009', 'e9000000-0000-4000-8000-0000000000e1', 'Cafe' || chr(769) || ' Nord', 'customer', null, true),
   -- Arabic, Greek, Cyrillic: each was '' under the old key.
   ('e9c00000-0000-4000-8000-000000000011', 'e9000000-0000-4000-8000-0000000000e2', 'شركة الأمل',    'customer', 'شركة الأمل', false),
   ('e9c00000-0000-4000-8000-000000000021', 'e9000000-0000-4000-8000-0000000000e3', 'ΟΔΟΣ Α.Ε.',     'customer', 'οδοσ α ε', false),
@@ -50,7 +54,7 @@ with c(id, org, name, kind, key, held) as (values
 insert into unicode_seed.expected (tbl, id, name, key, held)
 select 'counterparties', id, name, key, held from c;
 
--- "İstanbul Co" was merged into "Istanbul Co" before the upgrade: the merged-away record is held (it
+-- The decomposed "Café Nord" was merged into the precomposed one before the upgrade: the merged-away record is held (it
 -- keeps a key slot of its own); the survivor takes the plain key, since the merge was the decision (U-2).
 update public.counterparties set merged_into_id = 'e9c00000-0000-4000-8000-000000000008'
  where id = 'e9c00000-0000-4000-8000-000000000009';

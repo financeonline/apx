@@ -212,6 +212,30 @@ describe('receivables and payables from invoices (§3.4, ADR-047.5)', () => {
     expect(receivables.components).toMatchObject({ invoices_with_unknown_payment_date: 1 });
   });
 
+  it('R-3: an undated payment makes the figure ESTIMATED and states its range — 600 paid as assumed, up to 1,000 had it not been', () => {
+    const results = computeReceivables(context(), [
+      periodInput(1, {
+        invoices: [
+          invoice({ id: uuid(1), totalAmount: '1000.00', amountPaid: '400.00', balanceDue: '600.00', paidDate: null, status: 'partially_paid' }),
+          invoice({ id: uuid(2), totalAmount: '500.00', amountPaid: '0.00', balanceDue: '500.00', paidDate: null }),
+        ],
+      }),
+    ]);
+    const receivables = metric(results, 0, 'receivables');
+    expect(receivables.value).toBe('1100.00');
+    expect(receivables.assurance).toBe('estimated');
+    expect(receivables.components).toMatchObject({ range_low: '1100.00', range_high: '1500.00' });
+  });
+
+  it('R-3: with every payment dated the figure keeps its assurance and states no range', () => {
+    const results = computeReceivables(context(), [
+      periodInput(1, { invoices: [invoice({ id: uuid(1), totalAmount: '1000.00', amountPaid: '400.00', balanceDue: '600.00', paidDate: '2026-01-10', status: 'partially_paid' })] }),
+    ]);
+    const receivables = metric(results, 0, 'receivables');
+    expect(receivables.assurance).not.toBe('estimated');
+    expect(receivables.components).not.toHaveProperty('range_high');
+  });
+
   it('uses the current invoice row, so a corrected total flows to every period (ADR-047.10)', () => {
     // The same corrected invoice is presented to two historical periods; both see the new total.
     const corrected = invoice({ id: uuid(1), totalAmount: '2500.00', balanceDue: '2500.00' });

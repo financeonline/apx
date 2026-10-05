@@ -142,6 +142,8 @@ const STATEMENTS: StatementRef[] = [
 const batch = (n: number, over: Partial<CoverageBatch>): CoverageBatch => ({
   id: id(60 + n), targetTable: 'invoices', balanceKind: null, balanceBasis: null, bankAccountId: null,
   invoiceListKind: 'full', importType: 'sales_invoices', periodStart: '2026-06-01', periodEnd: '2026-08-31',
+  // R-2: these lists stand for complete exports — confirmed to hold every invoice open at their start.
+  openingConfirmed: true,
   committedAt: '2026-09-10T10:00:00Z', ...over,
 });
 const BATCHES: CoverageBatch[] = [

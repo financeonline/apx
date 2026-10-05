@@ -12,13 +12,10 @@ const SAME: ReadonlyArray<readonly [string, string, string]> = [
   ['case, Latin', 'Acme Ltd', 'ACME LTD'],
   ['punctuation and spacing', 'Acme & Co.', 'acme  co'],
   ['case, accented', 'Müller GmbH', 'MÜLLER GMBH'],
-  ['precomposed = combining accent (NFKC)', 'Müller', 'Müller'],
-  ['full-width = ASCII (NFKC)', 'Ａｃｍｅ', 'Acme'],
-  ['ligature (NFKC)', 'ﬁnance', 'finance'],
-  ['half-width katakana = full-width (NFKC)', 'ｶﾌﾞｼｷｶﾞｲｼｬ', 'カブシキガイシャ'],
+  ['precomposed = combining accent (NFC)', 'Müller', 'Müller'],
   ['case, Greek, final sigma', 'ΟΔΟΣ Α.Ε.', 'οδος α.ε.'],
   ['case, Cyrillic, guillemets are punctuation', 'ООО «Ромашка»', 'ооо ромашка'],
-  ['dotted capital I (simple mapping)', 'İzmir', 'izmir'],
+  ['dotted capital I against its full lower case', 'İzmir', 'i\u0307zmir'],
   ['Japanese middle dot is punctuation', 'Tokyo・Trading', 'Tokyo Trading'],
 ];
 
@@ -35,6 +32,12 @@ const DIFFERENT: ReadonlyArray<readonly [string, string, string]> = [
   ['a combining mark no letter absorbs is kept', 'q̃x', 'qx'],
   ['ß is not ss (simple case mapping only)', 'Straße', 'Strasse'],
   ['words joined against apart', 'Acme Co', 'AcmeCo'],
+  // D-3 (owner decision): compatibility variants and the dotted capital I are different names until
+  // a person merges them; an import matching across them would merge two businesses silently.
+  ['full-width against ASCII', 'Ａｃｍｅ', 'Acme'],
+  ['ligature against letters', 'ﬁnance', 'finance'],
+  ['half-width against full-width katakana', 'ｶﾌﾞｼｷｶﾞｲｼｬ', 'カブシキガイシャ'],
+  ['dotted capital I against plain I', 'İzmir Ltd', 'Izmir Ltd'],
 ];
 
 describe('the identity key (ADR-136)', () => {

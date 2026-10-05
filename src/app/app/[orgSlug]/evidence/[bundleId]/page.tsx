@@ -128,6 +128,17 @@ export default async function EvidenceBundlePage({
                 <p className="mt-2 text-sm text-ink-muted">{metric.description}</p>
               ) : null}
 
+              {/* R-3: an estimate whose range is known says so, with the range. */}
+              {metric.range === null ? null : (
+                <p className="mt-3 rounded-md bg-warn-soft px-3 py-2 text-sm text-ink" data-testid="estimate-range">
+                  This is an estimate: {metric.range.undated} {metric.range.undated === 1 ? 'invoice was' : 'invoices were'} paid
+                  on a date that was not recorded, so it counts as paid. If {metric.range.undated === 1 ? 'that payment' : 'those payments'} came
+                  later, the figure could be anywhere from{' '}
+                  {formatValue({ value: metric.range.low, unit: 'money', currency: metric.currency }, { showMinorUnits: true })} to{' '}
+                  {formatValue({ value: metric.range.high, unit: 'money', currency: metric.currency }, { showMinorUnits: true })}.
+                </p>
+              )}
+
               {/* Step 0E / N-2: a cumulative report's month is a subtraction of two periods' records. */}
               {metric.difference === null ? null : (
                 <DifferencePanel difference={metric.difference} currency={metric.currency} />

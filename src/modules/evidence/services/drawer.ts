@@ -121,6 +121,21 @@ export interface DrawerMetric {
    * NULL for every other figure.
    */
   readonly difference: DrawerDifference | null;
+  /**
+   * R-3: the range an estimated receivables or payables figure could be in, when invoices were paid
+   * on dates nobody recorded (`payment_date_unknown`). NULL otherwise.
+   */
+  readonly range: { readonly low: string; readonly high: string; readonly undated: number } | null;
+}
+
+/** R-3: the receivables/payables range from a snapshot's components (the overdue figure has its own). */
+function rangeOf(snapshot: Row): { low: string; high: string; undated: number } | null {
+  const c = (snapshot.components ?? {}) as Record<string, unknown>;
+  const overdue = String(snapshot.metric_key).endsWith('_overdue');
+  const low = c[overdue ? 'overdue_range_low' : 'range_low'];
+  const high = c[overdue ? 'overdue_range_high' : 'range_high'];
+  if (typeof low !== 'string' || typeof high !== 'string') return null;
+  return { low, high, undated: Number(c.invoices_with_unknown_payment_date ?? 0) };
 }
 
 export interface DrawerDifferenceTerm {
@@ -404,6 +419,7 @@ export async function loadEvidenceDrawer(
       ...state,
       restsOn: await restsOnStatements(ctx, orgId, rootSnapshot),
       difference: await differenceOf(ctx, orgId, rootSnapshot),
+      range: rangeOf(rootSnapshot),
     };
   }
 

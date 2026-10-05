@@ -521,6 +521,29 @@ describe('names outside ASCII (ADR-136)', () => {
     expect(state.tables.counterparties!.find((c) => c.id === 'cp-muller')!.name).toBe('Müller GmbH');
   });
 
+  it('D-3: "Izmir Ltd" is not booked to an existing "İzmir Ltd", nor full-width "Ａｃｍｅ" to "Acme" — two businesses until merged', async () => {
+    customer('cp-izmir-dotted', 'İzmir Ltd');
+    customer('cp-acme', 'Acme');
+    await upload(['Z-1,Izmir Ltd,2026-08-05,10.00', 'Z-2,Ａｃｍｅ,2026-08-05,20.00']);
+    const [izmir, acme] = dataRows();
+    expect(izmir!.mapped_data.counterparty_id).not.toBe('cp-izmir-dotted');
+    expect(acme!.mapped_data.counterparty_id).not.toBe('cp-acme');
+    expect(state.counterpartyCalls.flat()).toEqual(['Izmir Ltd', 'Ａｃｍｅ']);
+  });
+
+  it('D-3: a match spelled differently beyond case is never silent (IMP-CP-020, a warning); case alone is not flagged', async () => {
+    customer('cp-acme-ltd', 'Acme Ltd');
+    await upload(['S-1,"Acme, Ltd.",2026-08-05,10.00', 'S-2,ACME LTD,2026-08-05,20.00', 'S-3,Acme  Ltd,2026-08-05,30.00']);
+    const [punctuated, capitals, spaced] = dataRows();
+    expect(punctuated!.mapped_data.counterparty_id).toBe('cp-acme-ltd');
+    expect(punctuated!.issues.map((i) => i.code)).toContain('IMP-CP-020');
+    expect(punctuated!.status).not.toBe('error');
+    expect((punctuated!.issues.find((i) => i.code === 'IMP-CP-020') as { message?: string }).message)
+      .toBe('"Acme, Ltd." was matched to the existing "Acme Ltd", which is spelled differently.');
+    expect(capitals!.issues.map((i) => i.code)).not.toContain('IMP-CP-020');
+    expect(spaced!.issues.map((i) => i.code)).not.toContain('IMP-CP-020');
+  });
+
   it('names in Japanese, Arabic, Greek and Cyrillic are created with their own keys, display names kept', async () => {
     await upload([
       'J-1,株式会社トヨタ,2026-08-07,400.00', 'A-1,شركة الأمل,2026-08-08,500.00',

@@ -60,21 +60,27 @@ begin
   -- 5. Behaviour afterwards.
   begin
     insert into public.counterparties (organization_id, name) values ('e9000000-0000-4000-8000-0000000000e1', 'IZMIR LTD');
-    raise exception 'a held name was created again';
+    raise exception 'Izmir Ltd in capitals became a second customer';
   exception when unique_violation then null;
   end;
   begin
-    insert into public.counterparties (organization_id, name) values ('e9000000-0000-4000-8000-0000000000e1', 'ISTANBUL CO');
+    insert into public.counterparties (organization_id, name) values ('e9000000-0000-4000-8000-0000000000e1', 'CAFÉ NORD');
     raise exception 'the survivor of a merge was duplicated by its own name in capitals';
   exception when unique_violation then null;
   end;
   -- U-2: the survivor of a pre-upgrade merge is not held, so imports naming it are not refused.
-  if (select normalized_name from public.counterparties where id = 'e9c00000-0000-4000-8000-000000000008') <> 'istanbul co' then
+  if (select normalized_name from public.counterparties where id = 'e9c00000-0000-4000-8000-000000000008') <> 'café nord' then
     raise exception 'the survivor of a merge made before the upgrade is held';
   end if;
   begin
     insert into public.accounts (organization_id, name, account_type, standard_category) values ('e9000000-0000-4000-8000-0000000000e1', 'UMSÄTZE', 'income', 'revenue');
     raise exception 'a held account name was created again';
+  exception when unique_violation then null;
+  end;
+  -- D-3: "İzmir Ltd" and "Izmir Ltd" are two customers; a third spelling of the dotted one is not new.
+  begin
+    insert into public.counterparties (organization_id, name) values ('e9000000-0000-4000-8000-0000000000e1', 'İZMIR LTD');
+    raise exception 'the dotted-I name in capitals became a third customer';
   exception when unique_violation then null;
   end;
   begin

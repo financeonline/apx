@@ -34,6 +34,7 @@ const CONFIRMATION_QUESTIONS: Readonly<Record<string, string>> = {
   'IMP-TB-012': 'Are these balances year-to-date totals, or just this period’s movements?',
   'IMP-TB-013': 'How are costs shown in this file?',
   'IMP-COV-013': 'This file replaces the report already imported for the same month. The earlier report is kept in its history but no longer counted.',
+  'IMP-INV-013': 'Does this list include every invoice that was still unpaid on its start date — including invoices issued before it?',
   'IMP-INV-012': 'This list is every open invoice, not only the ones raised in the period.',
   'IMP-ROW-005': 'We took the row we found as the column headings.',
   'IMP-DATE-003': 'Dates in this file are day-first (25/12 is December).',
@@ -93,6 +94,16 @@ const CHOICES: Readonly<Record<string, {
     options: [
       { value: 'complete', label: 'Yes — the full report' },
       { value: 'partial', label: 'No — only part of it' },
+    ],
+  },
+  // R-2: nothing pre-selected — "complete" lets the list state what is owed at every month end.
+  'IMP-INV-013': {
+    name: 'opening',
+    label: 'Unpaid invoices included',
+    explicit: true,
+    options: [
+      { value: 'complete', label: 'Yes — every unpaid invoice, however old' },
+      { value: 'partial', label: 'No — only invoices issued in this period' },
     ],
   },
   'IMP-TB-013': {
@@ -177,12 +188,13 @@ export default async function ReviewBatchPage({
             <CardBody className="p-4">
               <h2 className="font-serif text-lg text-ink">What this report covers</h2>
               <p className="mt-1 text-sm text-ink-muted">
-                {completeness.scope === 'all_accounts'
-                  ? 'A full trial balance lists every account with a balance — income, expenses, assets, liabilities and equity.'
-                  : 'A full P&L report lists every income and expense line with an amount.'}{' '}
-                Only for a full report do we count a category with no line as zero; otherwise it shows as
-                unknown. This says nothing about whether the amounts are right, and does not change how
-                firm the figures are.{' '}
+                {completeness.scope === 'open_invoices'
+                  ? 'Only a list that includes every invoice still unpaid on its start date — older ones too — can show what you are owed or owe. Otherwise we show it from a balance sheet, or not at all, never a total that misses old debts.'
+                  : completeness.scope === 'all_accounts'
+                    ? 'A full trial balance lists every account with a balance — income, expenses, assets, liabilities and equity. Only for a full report do we count a category with no line as zero; otherwise it shows as unknown.'
+                    : 'A full P&L report lists every income and expense line with an amount. Only for a full report do we count a category with no line as zero; otherwise it shows as unknown.'}{' '}
+                This says nothing about whether the amounts are right, and does not change how firm the
+                figures are.{' '}
                 <Link href={`/app/${orgSlug}/data/documents/${review.batch.sourceDocumentId}`} className="text-accent underline underline-offset-2">
                   Open the stored file
                 </Link>
@@ -191,7 +203,9 @@ export default async function ReviewBatchPage({
               <ul className="mt-3 space-y-4">
                 {completeness.months.map((m) => {
                   const label = new Date(`${m.month}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
-                  const status = m.current === 'complete' ? 'Full report' : m.current === 'partial' ? 'Part of the accounts' : 'Not yet confirmed';
+                  const invoices = completeness.scope === 'open_invoices';
+                  const status = m.current === 'complete' ? (invoices ? 'Includes every unpaid invoice' : 'Full report')
+                    : m.current === 'partial' ? (invoices ? 'Only invoices issued in the period' : 'Part of the accounts') : 'Not yet confirmed';
                   return (
                     <li key={m.month} className="border-b border-line pb-3 last:border-0" data-testid={`completeness-${m.month}`}>
                       <p className="text-sm text-ink">
@@ -205,8 +219,10 @@ export default async function ReviewBatchPage({
                       {canAttest ? (
                         <CompletenessAttestationForm
                           orgSlug={orgSlug} batchId={batchId} month={m.month} monthLabel={label}
-                          completeLabel={completeness.scope === 'all_accounts' ? 'The full trial balance (accounts left out had nothing in them)' : 'The full P&L (lines left out had nothing in them)'}
-                          partialLabel={completeness.scope === 'all_accounts' ? 'An extract — some accounts or sections are missing' : 'Only part of the P&L'}
+                          completeLabel={invoices ? 'Every invoice unpaid at the start, however old'
+                            : completeness.scope === 'all_accounts' ? 'The full trial balance (accounts left out had nothing in them)' : 'The full P&L (lines left out had nothing in them)'}
+                          partialLabel={invoices ? 'Only invoices issued in the period'
+                            : completeness.scope === 'all_accounts' ? 'An extract — some accounts or sections are missing' : 'Only part of the P&L'}
                         />
                       ) : null}
                     </li>
@@ -356,7 +372,9 @@ export default async function ReviewBatchPage({
                     question={questionFor(code, review.batch.importType)}
                     help={code === 'IMP-TB-016'
                       ? COMPLETENESS[review.batch.importType === 'pnl_report' ? 'pnl_report' : 'trial_balance'].help
-                      : undefined}
+                      : code === 'IMP-INV-013'
+                        ? 'An export of "invoices issued in this period" leaves out older invoices still unpaid — usually the most overdue ones. Answer yes only if the list includes every invoice unpaid at its start date, whenever it was issued. If not, answer no: we will show what is owed from a balance sheet if you add one, and never a total that misses old debts. (An aged-debtors or open-items list includes them by definition.)'
+                        : undefined}
                     values={code === 'IMP-RANGE-015' && review.batch.periodStart && review.batch.periodEnd
                       ? { period_start: review.batch.periodStart, period_end: review.batch.periodEnd }
                       : undefined}

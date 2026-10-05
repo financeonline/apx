@@ -126,6 +126,8 @@ export async function loadCoverageBatches(
     completenessByMonth: r.completeness_by_month && typeof r.completeness_by_month === 'object'
       ? r.completeness_by_month as Record<string, 'complete' | 'partial'> : null,
     recordAssurance: (r.record_assurance as AssuranceLevel | null | undefined) ?? null,
+    // R-2: whether a full invoice list holds the invoices still unpaid at its start (NULL: unanswered).
+    openingConfirmed: typeof r.opening_confirmed === 'boolean' ? r.opening_confirmed : null,
     bankAccountId: r.bank_account_id as string | null,
     invoiceListKind: r.invoice_list_kind as CoverageBatch['invoiceListKind'],
     importType: (r.import_type as string | null) ?? null,

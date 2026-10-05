@@ -46,7 +46,8 @@ const NAME_SEPARATORS = /(?:(?!\p{Alphabetic})[\p{White_Space}\p{P}\p{S}\p{Cc}])
 
 /** Unicode's SIMPLE lower-case mapping of one code point, which is what Postgres' pg_c_utf8 applies. */
 function simpleLower(ch: string): string {
-  if (ch === '\u0130') return 'i'; // İ: the full mapping is "i̇" (two code points), the simple one "i"
+  // D-3: İ is lower-cased by its FULL mapping, i + U+0307, so "İzmir" and "Izmir" are two names.
+  if (ch === '\u0130') return 'i\u0307';
   const lower = ch.toLowerCase(); // one code point at a time, so final-sigma context never applies
   return [...lower].length === 1 ? lower : ch;
 }
@@ -55,8 +56,10 @@ function simpleLower(ch: string): string {
  * `app.normalize_name`, exactly (migration 20261006000001): the uniqueness key of accounts and
  * counterparties and the key every import matches on.
  *
- * 1. NFKC — "Ａｃｍｅ" is "Acme"; a decomposed accent equals the precomposed one.
- * 2. Simple lower case per code point, final sigma ς read as σ.
+ * 1. NFC — a decomposed accent equals the precomposed one. NOT NFKC (D-3): a compatibility variant
+ *    such as full-width "Ａｃｍｅ" is a different name from "Acme" until a person merges them.
+ * 2. Simple lower case per code point, final sigma ς read as σ; İ by its full mapping (i + U+0307),
+ *    so "İzmir" ≠ "Izmir" (D-3).
  * 3. Each run of whitespace, punctuation, symbols and controls → one space; trimmed.
  *
  * Every letter, accent, mark and digit in every script is kept, so "Müller" ≠ "Möller" ≠ "Muller"
@@ -67,7 +70,7 @@ function simpleLower(ch: string): string {
  * version (15.1 for Postgres 17) can differ; the database's key is the one stored and enforced.
  */
 export function storedNameKey(name: string): string {
-  return [...name.normalize('NFKC')].map(simpleLower).join('')
+  return [...name.normalize('NFC')].map(simpleLower).join('')
     .replace(/ς/gu, 'σ')
     .replace(NAME_SEPARATORS, ' ')
     .trim();
