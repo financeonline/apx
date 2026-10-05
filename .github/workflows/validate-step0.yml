@@ -35,6 +35,12 @@ env:
   SUPABASE: npx --no-install supabase
   CRON_SECRET: local-cron-secret
 
+# `bash` here means `bash --noprofile --norc -eo pipefail {0}`. Without it a step's default shell has
+# no pipefail, and `suite | tee log` reports tee's success: run 37265661253 went green over 3 failures.
+defaults:
+  run:
+    shell: bash
+
 jobs:
   static-unit-build:
     name: typecheck · lint · unit (coverage gate) · AI eval · build

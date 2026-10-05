@@ -102,6 +102,11 @@ export interface PipelineResult {
   readonly unmappedAccounts: readonly string[];
   /** New counterparty names the commit will create (§6.6). */
   readonly newCounterparties: readonly string[];
+  /**
+   * Names that matched an existing counterparty (letter for letter). Sent with the new ones so the
+   * database can make a customer met on a purchase list `both` (§6.6) — the kind is its decision.
+   */
+  readonly matchedCounterparties: readonly string[];
 }
 
 const DATE_FIELD_BY_TARGET: Readonly<Record<ImportTarget, string>> = {
@@ -157,6 +162,7 @@ export function runPipeline(input: PipelineInput): PipelineResult {
 
   const unmappedAccounts = new Set<string>();
   const newCounterparties = new Set<string>();
+  const matchedCounterparties = new Set<string>();
   /** Rows whose counterparty name the stored key cannot tell apart, or cannot hold (Step 0C). */
   const nameIssues = new Map<number, RowIssue>();
 
@@ -266,6 +272,7 @@ export function runPipeline(input: PipelineInput): PipelineResult {
         nameIssues.set(row.rowNumber, nameIssue('IMP-CP-017', counterpartyValue, existing.name));
       } else if (existing) {
         mapped.counterparty_id = existing.id;
+        if (!nameCarriesFigure(counterpartyValue)) matchedCounterparties.add(counterpartyValue);
       // ADR-045.3: a name carrying a figure is never created; the row says so (IMP-NAME-015).
       } else if (!nameCarriesFigure(counterpartyValue)) {
         newCounterparties.add(counterpartyValue);
@@ -485,6 +492,7 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     counts,
     unmappedAccounts: [...unmappedAccounts],
     newCounterparties: [...newCounterparties],
+    matchedCounterparties: [...matchedCounterparties],
   };
 }
 

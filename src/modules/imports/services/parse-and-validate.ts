@@ -125,9 +125,14 @@ async function loadExistingRecords(
   const amountColumn = target === 'period_balances' ? 'closing_balance'
     : target === 'invoices' ? 'total_amount' : 'amount';
 
+  // `period_balances` has no row hash: balances supersede at batch scope (§11), so there is no row
+  // duplicate to find, and selecting the column failed every trial balance, P&L and balance sheet.
+  const columns: string = target === 'period_balances'
+    ? `id, ${dateColumn}, ${amountColumn}`
+    : `id, dedupe_hash, ${dateColumn}, ${amountColumn}`;
   const { data, error } = await db
     .from(target)
-    .select(`id, dedupe_hash, ${dateColumn}, ${amountColumn}`)
+    .select(columns)
     .eq('organization_id', orgId)
     .eq('record_status', 'accepted')
     .is('superseded_by', null)
@@ -135,7 +140,7 @@ async function loadExistingRecords(
   if (error) throw toMotionError(error, requestId);
 
   return (data ?? []).map((r) => {
-    const row = r as Record<string, unknown>;
+    const row = r as unknown as Record<string, unknown>;
     return {
       id: row.id as string,
       // Postgres returns bytea as `\xabcd`; the pipeline works in lower-case hex.

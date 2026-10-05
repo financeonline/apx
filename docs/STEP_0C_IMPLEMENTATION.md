@@ -162,3 +162,13 @@ Reproductions (`test/unit/import-wizard-path.test.ts`, "names outside ASCII"), r
 3. Switch the import path and `app.derive_normalized_name` to v2. Keep v1 read-only for one release.
 4. Never auto-merge. Rows that report 4 lists go to a review queue (`customers.edit`); a person decides to split or keep.
 5. Drop v1 after a release with zero report-4 rows.
+
+## 10. Defects found by the first GitHub Actions run (37265661253, `bb116d7`)
+
+That run reported success, but it **hid three failures**: a step's default shell has no `pipefail`, so `suite | tee log` returned tee's exit code. The workflow now sets `defaults.run.shell: bash` (`-eo pipefail`). The failures, read from the saved logs:
+
+| # | Where | Failure | Cause | Fix |
+|---|---|---|---|---|
+| 1 | Integration, clean and upgraded (`import-wizard-types`) | "balance sheets › commit into period balances": InternalError | Pre-existing (not from Step 0–0C): `loadExistingRecords` and `app.rerun_dedupe` read `dedupe_hash`, which `period_balances` does not have. Every trial balance, P&L and balance-sheet wizard import failed. | Not selected for `period_balances`; migration `20261005000005` returns 0 from `app.rerun_dedupe` for that target (balances supersede at batch scope) |
+| 2 | Integration, clean and upgraded | "a purchase list … makes a known customer both": got `customer` | A name matched to an existing counterparty was not sent to `create_import_counterparties`, so its kind was never widened | The wizard sends matched names too (deduplicated by stored key, 5,000 per call) |
+| 3 | Playwright, `accessibility.spec.ts` 320×568 | "Health score explained overflows at 320px" (18 px) | "The figures this used" shows a composed variance key (`operating_expenses.variance.prev_period`) as one unbreakable word. The Health rules and this list are unchanged since `2783240`, so this depends on the seeded data; not shown to be caused by Step 0–0C | The link wraps (`overflow-wrap: anywhere`); the assertion is unchanged |

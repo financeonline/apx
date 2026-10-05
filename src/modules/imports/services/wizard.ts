@@ -7,7 +7,7 @@ import { ValidationError } from '@/core/errors';
 import {
   decodeCsvBytes, sniffDelimiter, uploadDocument, validateFile,
 } from '@/modules/documents';
-import { isKnownHeader, suggestCategory, suggestColumns } from '../domain/mapping';
+import { isKnownHeader, storedNameKey, suggestCategory, suggestColumns } from '../domain/mapping';
 import { resolveBankSign, type BankAccountType } from '../domain/transforms/signs';
 import { runPipeline } from '../domain/pipeline';
 import { parseCsv } from '../domain/parsers/csv';
@@ -73,6 +73,9 @@ export interface StartImportResult {
 export function targetFor(importType: ImportType): ImportTarget {
   return IMPORT_TYPE_SPECS[importType].target;
 }
+
+/** `api.create_import_counterparties` accepts at most 5,000 names a call. */
+const COUNTERPARTY_SLICE = 5000;
 
 /** What the reader calls each type, for the refusals below. */
 const TYPE_NOUN: Readonly<Record<ImportType, string>> = {
@@ -527,15 +530,24 @@ async function createMissingReferences(
     existingRecords: [],
   });
 
-  // One name per normalised key: "Acme Ltd" and "ACME LTD" are one customer (`app.normalize_name`).
-  const newNames = new Map<string, string>();
-  for (const name of dryRun.newCounterparties) {
-    const key = name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
-    if (key !== '' && !newNames.has(key)) newNames.set(key, name.trim());
+  /*
+   * One name per stored key ("Acme Ltd" and "ACME LTD" are one customer). NEW names are created;
+   * MATCHED names are sent too, so a customer met on a purchase list becomes `both` (§6.6) — in SQL,
+   * audited, never decided here. In slices the database accepts (5,000 a call).
+   */
+  const names = new Map<string, string>();
+  for (const name of [...dryRun.newCounterparties, ...dryRun.matchedCounterparties]) {
+    const key = storedNameKey(name);
+    if (key !== '' && !names.has(key)) names.set(key, name.trim());
   }
-  const counterpartiesCreated = createsCounterparties
-    ? await createImportCounterparties(db, batchId, [...newNames.values()], input.actor.requestId)
-    : 0;
+  let counterpartiesCreated = 0;
+  if (createsCounterparties) {
+    const all = [...names.values()];
+    for (let from = 0; from < all.length; from += COUNTERPARTY_SLICE) {
+      counterpartiesCreated += await createImportCounterparties(
+        db, batchId, all.slice(from, from + COUNTERPARTY_SLICE), input.actor.requestId);
+    }
+  }
 
   const missing: string[] = [...new Set(dryRun.unmappedAccounts)];
   if (missing.length === 0) return { accounts: 0, counterparties: counterpartiesCreated };

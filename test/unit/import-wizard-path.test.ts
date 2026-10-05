@@ -313,9 +313,12 @@ describe('purchase invoices and both reports', () => {
 
     expect(state.documents[0]!.document_kind).toBe('invoice');
     expect(state.batches[0]!.target).toBe('invoices');
-    // Acme already exists: it is resolved, not re-created.
-    expect(state.counterpartyCalls).toEqual([['Office Supplies Co']]);
+    // Acme already exists: it is resolved, not re-created — and it is SENT, so the database makes it
+    // `both` (§6.6). Found by the first real-database run: only new names were sent, so the upgrade
+    // in SQL never ran for a matched customer.
+    expect(state.counterpartyCalls).toEqual([['Office Supplies Co', 'Acme Ltd']]);
     expect(result.counterpartiesCreated).toBe(1);
+    expect(state.tables.counterparties!.find((c) => c.id === 'cp-acme')!.kind).toBe('both');
     const rows = dataRows();
     for (const row of rows) expectCommittable(row, 'invoices');
     expect(rows.map((r) => r.mapped_data.invoice_type)).toEqual(['purchase', 'purchase']);

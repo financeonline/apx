@@ -185,10 +185,12 @@ function MetricLinks({
       <p className="text-xs text-ink-faint">The figures this used</p>
       <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
         {pinned.map((metric) => (
-          <li key={metric.snapshot_id}>
+          // A composed variance key ("operating_expenses.variance.prev_period") is one unbroken
+          // word; it must wrap inside the card, never widen the page on a phone (§11).
+          <li key={metric.snapshot_id} className="min-w-0 max-w-full">
             <Link
               href={`/app/${orgSlug}/evidence?snapshot=${metric.snapshot_id}`}
-              className="text-accent underline underline-offset-2"
+              className="text-accent underline underline-offset-2 [overflow-wrap:anywhere]"
             >
               {METRIC_LABELS[metric.metric_key]?.technical ?? metric.metric_key}
             </Link>
