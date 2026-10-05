@@ -128,6 +128,23 @@ export default async function EvidenceBundlePage({
                 <p className="mt-2 text-sm text-ink-muted">{metric.description}</p>
               ) : null}
 
+              {/* Step 0D: a balance carried through a month that is not verified says which. */}
+              {metric.restsOn.length === 0 ? null : (
+                <div className="mt-3 rounded-md bg-warn-soft px-3 py-2 text-sm text-ink">
+                  <p>This balance is carried through {metric.restsOn.length === 1 ? 'a statement' : 'statements'} not yet confirmed:</p>
+                  <ul className="mt-1 list-disc space-y-1 pl-5">
+                    {metric.restsOn.map((statement) => (
+                      <li key={statement.batchId} className="[overflow-wrap:anywhere]">
+                        {statement.fileName ?? 'A bank statement'}
+                        {statement.periodStart && statement.periodEnd ? ` (${statement.periodStart} to ${statement.periodEnd})` : ''}
+                        {statement.extractionMethod === 'pdf_claude' ? ' — read by AI' : ' — did not add up to its printed balances'}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1">Check those figures, or replace the statement with your bank&apos;s file, to confirm it.</p>
+                </div>
+              )}
+
               {/* §8.2: an old bundle keeps its own numbers, and says so rather than looking wrong. */}
               {metric.isCurrent ? null : (
                 <p className="mt-3 rounded-md bg-warn-soft px-3 py-2 text-sm text-ink">

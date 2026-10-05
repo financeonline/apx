@@ -286,6 +286,8 @@ For purchase invoices, each supplier's `counterparties.default_expense_category`
 - a name matching a merged-away counterparty resolves to the counterparty it was merged into;
 - an invoice row whose name could not be resolved is an `IMP-CP-016` error, and an unrecognised status word an `IMP-INV-013` error, so neither can fail the commit.
 
+*Unicode identity (Step 0D, ADR-136, migration `20261006000001`):* `app.normalize_name` — the key accounts and counterparties are unique on and every import matches on — is NFKC, simple lower case (`pg_c_utf8`, final sigma folded), every run of whitespace, punctuation, symbols and controls to one space. Every letter, accent, mark and digit in every script is significant: "Müller" ≠ "Möller" ≠ "Muller", "株式会社トヨタ" and "شركة الأمل" are names, not the empty key. For ASCII it is the old key exactly. TypeScript mirrors it (`storedNameKey`), tested against the database over every code point Postgres assigns. Existing records were re-keyed; records the new key would make one name were HELD (key `<key> [held <id>]`), never merged: an import naming one is refused (`IMP-CP-019`, `IMP-ACCT-019`), a new record of the name is refused, and renaming or merging the records resolves it. The Step 0C stop-gaps `IMP-CP-017` / `IMP-CP-018` are withdrawn. Read-only report before migrating: `scripts/sql/unicode-names-dry-run.sql`.
+
 *Import type table (Step 0):* the target table, `document_kind`, invoice side, bank-account rule and PDF support of every import type live in one place, `IMPORT_TYPE_SPECS` (`imports/domain/types.ts`), checked against `api.start_import_batch` and `document_kind_enum` by `test/unit/import-type-spec.test.ts`. A PDF of any type is **stored** as a source document under its kind (listed, access-controlled, linkable as evidence); only a `bank_statement` PDF is **read**. Any other PDF starts no batch and imports no rows, and the uploader is told to export the figures as CSV or Excel — the deterministic reader and the AI path are bank-statement-shaped (§5.3–§5.4), and `document.extract` refuses a non-statement batch. No OCR is introduced. The upload form offers every import type, balance sheets included, and accepts PDFs.
 
 ---
@@ -312,6 +314,9 @@ Validation is pure (`imports/domain/validate-rows.ts`) over `mapped_data` and pr
 | `IMP-AMT-003` | warning | Amount is zero |
 | `IMP-AMT-004` | warning | Absolute amount > 100 × the column median (possible unit/decimal error) |
 | `IMP-PERIOD-004` | error | Date outside the declared statement/report period |
+| `IMP-PERIOD-005` | error | A balance row with no period: no period column, and the declared range covers more than one month (Step 0D) |
+| `IMP-CP-019` | error | The customer or supplier named matches records held for an identity decision (ADR-136) |
+| `IMP-ACCT-019` | error | The account named matches accounts held for an identity decision (ADR-136) |
 | `IMP-ACCT-005` | warning | Account maps to `uncategorised` |
 | `IMP-ACCT-006` | error | Account value blank on a GL/TB row |
 | `IMP-CUR-007` | error | Currency ≠ `organizations.base_currency` (CD-10) |

@@ -477,7 +477,12 @@ export function computeCash(
       source: a.opening?.source ?? 'none',
       as_at: a.opening?.anchorDate ?? null,
       value: a.opening?.value ?? null,
+      // Step 0D: how firm this account's opening is, and the AI-read or unreconciled statements it
+      // was carried through — the evidence for a "please check" on a month with no such statement.
+      assurance: a.opening?.assurance ?? null,
+      rests_on_statements: a.opening?.weakenedBy ?? [],
     }));
+    const openingRestsOn = [...new Set(inScope.flatMap((a) => a.opening?.weakenedBy ?? []))].sort();
 
     const openingResult: MetricResult = {
       key: 'opening_cash',
@@ -492,6 +497,7 @@ export function computeCash(
         accounts: perAccount,
         accounts_without_opening_balance: missingAccounts.map((a) => a.account_id),
         missing_bank_accounts: missingAccounts,
+        ...(openingRestsOn.length > 0 ? { rests_on_statements: openingRestsOn } : {}),
       },
       dataQuality: metricQuality(openingKnown ? 1 : 0, warnings, openingMissing),
       evidenceQuery: null,
@@ -502,7 +508,12 @@ export function computeCash(
     const closingValue = closingKnown ? sum(inScope.map((a) => a.closing!.value)) : null;
     const closingMissing: DataQualityMissing[] = [...openingMissing];
     if (!movementKnown) closingMissing.push('no_source_covers_period');
-    const closingAssurance = closingKnown ? weakerAssurance(openingAssurance, 'verified') : UNKNOWN_ASSURANCE;
+    // Each account's closing is as firm as its chain at the period's end (Step 0D): the opening's
+    // weakness carries unless a verified printed balance that agrees attests the end.
+    const closingAssurance = closingKnown
+      ? inScope.reduce<AssuranceLevel>((acc, a) => weakerAssurance(acc, a.closing!.assurance), 'verified')
+      : UNKNOWN_ASSURANCE;
+    const closingRestsOn = [...new Set(inScope.flatMap((a) => a.closing?.weakenedBy ?? []))].sort();
 
     // Cross-checks (§3.3): a printed balance inside P that disagrees with an account's chain, or the
     // printed closings of statements ending on P's last day that disagree with the computed sum. The
@@ -538,8 +549,12 @@ export function computeCash(
         opening_cash: openingValue === null ? null : toMoneyString(openingValue),
         net_cash_movement: movementKnown ? toMoneyString(netMovement) : null,
         // Read by the next run as the carry-free record of each account's balance (ADR-124).
-        per_account: inScope.map((a) => ({ account_id: a.bankAccountId, value: a.closing?.value ?? null })),
+        per_account: inScope.map((a) => ({
+          account_id: a.bankAccountId, value: a.closing?.value ?? null,
+          assurance: a.closing?.assurance ?? null, rests_on_statements: a.closing?.weakenedBy ?? [],
+        })),
         missing_bank_accounts: missingAccounts,
+        ...(closingRestsOn.length > 0 ? { rests_on_statements: closingRestsOn } : {}),
         ...statementComponents,
       },
       dataQuality: metricQuality(closingKnown ? 1 : 0, [...warnings, ...statementWarnings], closingKnown ? [] : closingMissing),

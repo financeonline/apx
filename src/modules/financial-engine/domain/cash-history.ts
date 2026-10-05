@@ -90,6 +90,10 @@ const RECORD_STRENGTH: Readonly<Record<AssuranceLevel, number>> = {
   verified: 3, calculated: 2, estimated: 1, inferred: 0,
 };
 
+function weakerOf(a: AssuranceLevel, b: AssuranceLevel): AssuranceLevel {
+  return RECORD_STRENGTH[b] < RECORD_STRENGTH[a] ? b : a;
+}
+
 /**
  * ADR-130: the weakest assurance of the bank rows that can feed P — those of every statement whose
  * declared range overlaps P. Bank figures used to be badged by their SOURCE alone, so a month read
@@ -138,6 +142,12 @@ interface Anchor {
   readonly source: AnchorSource;
   readonly committedAt: string;
   readonly batchId: string | null;
+  /**
+   * How firm the stated balance is: the source's level, no firmer than the statement it is printed
+   * on (Step 0D). A balance on an AI-read statement is a reviewer's typing or a copy of the model's
+   * reading; it is `inferred` like the statement's rows.
+   */
+  readonly assurance: AssuranceLevel;
 }
 
 /** A known balance at the close of a day, and where it came from. */
@@ -145,8 +155,17 @@ export interface BalanceFact {
   readonly value: string;
   /** The anchor the chain started from. */
   readonly source: AnchorSource;
+  /**
+   * The balance is no firmer than what it rests on (Step 0D): the anchor that attests it and the
+   * rows of every statement the chain crossed since. An AI-read month therefore marks every later
+   * balance carried from it, until a verified printed balance that agrees with the chain attests it
+   * again. Before, it was the anchor's SOURCE alone, so cash carried out of an AI-read month was
+   * badged verified.
+   */
   readonly assurance: AssuranceLevel;
   readonly anchorDate: string;
+  /** The statements (batch ids) weaker than verified whose balance or rows this figure rests on. */
+  readonly weakenedBy: readonly string[];
 }
 
 /** One account in one period. */
@@ -310,18 +329,22 @@ export function currentStatements(statements: readonly StatementRef[]): readonly
 function anchorsOf(account: BankAccountRef, statements: readonly StatementRef[]): Anchor[] {
   const anchors: Anchor[] = [];
   for (const st of statements) {
+    const printed = (source: AnchorSource) => weakerOf(ANCHOR_ASSURANCE[source], st.assurance ?? 'verified');
     if (st.openingBalance !== null) {
       anchors.push({ date: addDays(st.periodStart, -1), value: parseDecimal(st.openingBalance, 'statement_opening_balance'),
-        source: 'statement_opening_balance', committedAt: st.committedAt, batchId: st.batchId });
+        source: 'statement_opening_balance', committedAt: st.committedAt, batchId: st.batchId,
+        assurance: printed('statement_opening_balance') });
     }
     if (st.closingBalance !== null) {
       anchors.push({ date: st.periodEnd, value: parseDecimal(st.closingBalance, 'statement_closing_balance'),
-        source: 'statement_closing_balance', committedAt: st.committedAt, batchId: st.batchId });
+        source: 'statement_closing_balance', committedAt: st.committedAt, batchId: st.batchId,
+        assurance: printed('statement_closing_balance') });
     }
   }
   if (account.openingBalance !== null && account.openingBalanceDate !== null) {
     anchors.push({ date: account.openingBalanceDate, value: parseDecimal(account.openingBalance, 'opening_balance'),
-      source: 'bank_account_opening_balance', committedAt: '', batchId: null });
+      source: 'bank_account_opening_balance', committedAt: '', batchId: null,
+      assurance: ANCHOR_ASSURANCE.bank_account_opening_balance });
   }
   // Earliest first; on one day printed before typed, then the latest committed (a re-upload wins).
   return anchors.sort((a, b) => a.date.localeCompare(b.date)
@@ -382,13 +405,66 @@ function chainsOf(runs: ReadonlyArray<{ start: string; end: string }>, anchors: 
   return chains;
 }
 
-function balanceAt(date: string, chains: readonly Chain[], anchors: readonly Anchor[], ledger: Ledger): BalanceFact | null {
+/**
+ * The rows the chain adds between the close of `after` and the close of `upTo` come from the
+ * statements covering those days. Every statement of the account counts, superseded or not: a
+ * containing re-upload whose rows were skipped as duplicates leaves the earlier statement's rows in
+ * place, and only a rollback (or a Replace, which rolls back) removes them.
+ */
+function rowsAssurance(
+  statements: readonly StatementRef[], after: string, upTo: string,
+): { readonly level: AssuranceLevel; readonly batches: readonly string[] } {
+  let level: AssuranceLevel = 'verified';
+  const batches: string[] = [];
+  if (upTo <= after) return { level, batches };
+  for (const st of statements) {
+    if (st.periodEnd <= after || st.periodStart > upTo) continue;
+    const own = st.assurance ?? 'verified';
+    if (own === 'verified') continue;
+    level = weakerOf(level, own);
+    batches.push(st.batchId);
+  }
+  return { level, batches };
+}
+
+/**
+ * How firm the chain's balance at the close of `date` is (Step 0D). Every anchor of the chain dated
+ * on or before `date` that AGREES with the chain (to the penny) attests the value from its day on;
+ * the balance is as firm as the best of them, each no firmer than the rows crossed since it. An
+ * anchor that disagrees attests nothing (§3.3: the computed value stands, and the mismatch is shown).
+ */
+function chainAssurance(
+  date: string, chain: Chain, anchors: readonly Anchor[], ledger: Ledger, statements: readonly StatementRef[],
+): { readonly assurance: AssuranceLevel; readonly weakenedBy: readonly string[] } {
+  let best: { assurance: AssuranceLevel; weakenedBy: readonly string[] } | null = null;
+  for (const anchor of anchors) {
+    if (anchor.date < chain.from || anchor.date > date) continue;
+    if (anchor !== chain.anchor) {
+      const computed = chain.anchor.value.plus(ledger.between(chain.from, anchor.date));
+      if (computed.minus(anchor.value).abs().greaterThan(ONE_PENNY)) continue;
+    }
+    const rows = rowsAssurance(statements, anchor.date, date);
+    const assurance = weakerOf(anchor.assurance, rows.level);
+    const weakenedBy = [
+      ...(anchor.assurance !== 'verified' && anchor.batchId !== null ? [anchor.batchId] : []),
+      ...rows.batches,
+    ];
+    if (best === null || RECORD_STRENGTH[assurance] >= RECORD_STRENGTH[best.assurance]) {
+      best = { assurance, weakenedBy: [...new Set(weakenedBy)].sort() };
+    }
+  }
+  return best ?? { assurance: chain.anchor.assurance, weakenedBy: [] };
+}
+
+function balanceAt(
+  date: string, chains: readonly Chain[], anchors: readonly Anchor[], ledger: Ledger, statements: readonly StatementRef[],
+): BalanceFact | null {
   const chain = chains.find((c) => c.from <= date && c.to >= date);
   if (chain !== undefined) {
     return {
       value: toMoneyString(chain.anchor.value.plus(ledger.between(chain.from, date))),
       source: chain.anchor.source,
-      assurance: ANCHOR_ASSURANCE[chain.anchor.source],
+      ...chainAssurance(date, chain, anchors, ledger, statements),
       anchorDate: chain.anchor.date,
     };
   }
@@ -396,8 +472,9 @@ function balanceAt(date: string, chains: readonly Chain[], anchors: readonly Anc
   return exact === undefined ? null : {
     value: toMoneyString(exact.value),
     source: exact.source,
-    assurance: ANCHOR_ASSURANCE[exact.source],
+    assurance: exact.assurance,
     anchorDate: exact.date,
+    weakenedBy: exact.assurance !== 'verified' && exact.batchId !== null ? [exact.batchId] : [],
   };
 }
 
@@ -433,9 +510,22 @@ export function buildCashHistory(input: CashHistoryInput): CashHistory {
       const movementKnown = runsCover(runs, days.from, days.to);
       const anyDayCovered = runs.some((r) => r.start <= days.to && r.end >= days.from);
       const movement = ledger.between(addDays(days.from, -1), days.to);
-      const opening = balanceAt(addDays(days.from, -1), chains, anchors, ledger);
-      const closing = opening !== null && movementKnown
-        ? { ...opening, value: toMoneyString(parseDecimal(opening.value).plus(movement)) }
+      const opening = balanceAt(addDays(days.from, -1), chains, anchors, ledger, own);
+      // The closing is the opening plus the period's rows; it is as firm as the chain at the period's
+      // last day — which counts this period's rows, and any printed balance that attests the end.
+      const closingChain = chains.find((c) => c.from <= days.to && c.to >= days.to);
+      const closing: BalanceFact | null = opening !== null && movementKnown
+        ? {
+            ...opening,
+            value: toMoneyString(parseDecimal(opening.value).plus(movement)),
+            ...(closingChain === undefined
+              ? (() => {
+                  const rows = rowsAssurance(own, addDays(days.from, -1), days.to);
+                  return { assurance: weakerOf(opening.assurance, rows.level),
+                    weakenedBy: [...new Set([...opening.weakenedBy, ...rows.batches])].sort() };
+                })()
+              : chainAssurance(days.to, closingChain, anchors, ledger, own)),
+          }
         : null;
 
       // Every anchor dated inside P, other than a chain's own start, checks the chain it falls in.

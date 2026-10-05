@@ -38,31 +38,49 @@ export function normalizedName(name: string): string {
 }
 
 // -----------------------------------------------------------------------------------------------
-// The stored key, and the letters it loses (Unicode-name release blocker, Step 0C)
+// The identity key (ADR-136)
 // -----------------------------------------------------------------------------------------------
 
+/** Whitespace, punctuation, symbols and controls: what separates words of a name. Not a letter. */
+const NAME_SEPARATORS = /(?:(?!\p{Alphabetic})[\p{White_Space}\p{P}\p{S}\p{Cc}])+/gu;
+
+/** Unicode's SIMPLE lower-case mapping of one code point, which is what Postgres' pg_c_utf8 applies. */
+function simpleLower(ch: string): string {
+  if (ch === '\u0130') return 'i'; // İ: the full mapping is "i̇" (two code points), the simple one "i"
+  const lower = ch.toLowerCase(); // one code point at a time, so final-sigma context never applies
+  return [...lower].length === 1 ? lower : ch;
+}
+
 /**
- * `app.normalize_name`, exactly: lower-case, every run of characters outside [a-z0-9] to one space.
- * It is the uniqueness key of `counterparties` and `accounts`, and it DISCARDS every letter outside
- * A–Z — "Müller GmbH" and "Möller GmbH" are both "m ller gmbh", and "株式会社トヨタ" is "".
+ * `app.normalize_name`, exactly (migration 20261006000001): the uniqueness key of accounts and
+ * counterparties and the key every import matches on.
+ *
+ * 1. NFKC — "Ａｃｍｅ" is "Acme"; a decomposed accent equals the precomposed one.
+ * 2. Simple lower case per code point, final sigma ς read as σ.
+ * 3. Each run of whitespace, punctuation, symbols and controls → one space; trimmed.
+ *
+ * Every letter, accent, mark and digit in every script is kept, so "Müller" ≠ "Möller" ≠ "Muller"
+ * and "株式会社トヨタ" is a key of its own. For ASCII it is the old `[a-z0-9]` key exactly.
+ *
+ * Parity with the database is tested over every code point Postgres knows
+ * (test/integration/unicode-names.test.ts). Characters added to Unicode after the database's
+ * version (15.1 for Postgres 17) can differ; the database's key is the one stored and enforced.
  */
 export function storedNameKey(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+  return [...name.normalize('NFKC')].map(simpleLower).join('')
+    .replace(/ς/gu, 'σ')
+    .replace(NAME_SEPARATORS, ' ')
+    .trim();
 }
 
-/** The same comparison over EVERY letter and digit, in any script: what a person means by "same name". */
-export function letterNameKey(name: string): string {
-  return name.normalize('NFKC').toLowerCase().replace(/[^\p{L}\p{N}]+/gu, ' ').trim();
-}
-
-/** Two names the stored key calls one, that differ in letters it cannot see. */
-export function storedKeyCollides(a: string, b: string): boolean {
-  return storedNameKey(a) === storedNameKey(b) && letterNameKey(a) !== letterNameKey(b);
-}
-
-/** A real name the stored key cannot hold at all (it reduces to ""). */
-export function storedKeyEmpty(name: string): boolean {
-  return storedNameKey(name) === '' && letterNameKey(name) !== '';
+/**
+ * The key a HELD record carries (`<key> [held <id>]`), or null for an ordinary key. A held record's
+ * name collided with another's when keys became Unicode-aware; until a person decides, no import
+ * may book to that name (IMP-CP-019 / IMP-ACCT-019).
+ */
+export function heldNameKey(normalizedName: string): string | null {
+  const match = /^(.*) \[held [0-9a-f-]{36}\]$/u.exec(normalizedName);
+  return match ? (match[1] as string) : null;
 }
 
 // -----------------------------------------------------------------------------------------------

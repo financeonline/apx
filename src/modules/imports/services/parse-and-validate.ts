@@ -5,6 +5,7 @@ import { log } from '@/core/logging';
 import { runPipeline, type PipelineInput, type AccountRef, type CounterpartyRef } from '../domain/pipeline';
 import type { ParsedTable, TargetField, Transforms } from '../domain/pipeline-types';
 import type { ImportTarget, ImportType } from '../domain/types';
+import { heldNameKey } from '../domain/mapping';
 
 /**
  * Parse → map → validate → detect duplicates → persist (IMPORT_ENGINE.md §5–§9).
@@ -59,13 +60,14 @@ async function loadAccounts(
 ): Promise<AccountRef[]> {
   const { data, error } = await db
     .from('accounts')
-    .select('id, code, normalized_name')
+    .select('id, code, name, normalized_name')
     .eq('organization_id', orgId);
   if (error) throw toMotionError(error, requestId);
   return (data ?? []).map((a) => ({
     id: a.id as string,
     code: a.code as string | null,
     normalizedName: a.normalized_name as string,
+    name: a.name as string,
   }));
 }
 
@@ -106,9 +108,11 @@ export async function loadCounterparties(
     }
     return current;
   };
-  // The name of the row the stored key matched — not the survivor's — is what a file's spelling is
-  // compared with letter by letter (Step 0C).
-  return rows.map((c) => ({ id: survivor(c.id), normalizedName: c.normalized_name, name: c.name }));
+  // A merged-away record that was HELD (ADR-136) no longer stands for anyone: the merge was the
+  // decision, so it neither blocks the name nor resolves it.
+  return rows
+    .filter((c) => !(c.merged_into_id !== null && heldNameKey(c.normalized_name) !== null))
+    .map((c) => ({ id: survivor(c.id), normalizedName: c.normalized_name, name: c.name }));
 }
 
 /**

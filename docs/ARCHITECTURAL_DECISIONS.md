@@ -2406,7 +2406,7 @@ A late upload of a valid month-end snapshot stays valid: a full list committed m
 
 **Decision.** Only bank statements can be read from PDF, so only bank rows can be weaker than verified. Each statement batch carries the level commit stamped on its rows (`statementRecordAssurance`, the commit CASE by name); a period's bank figures — cash, and P&L / customer figures whose basis is the bank — are weakened to the weakest statement overlapping the period (`bankRecordAssuranceFor`, conservative across accounts). `app.batch_record_assurance` is the same CASE in SQL; `app.promote_dependants` uses it for the DEPENDANT's batch and re-inserts the same columns commit does (migration `20261005000001`). `scripts/engine-compare.ts` now reports assurance-only changes and the days figures.
 
-**Not changed (decision):** Health treats only `estimated`/proxy as capped (`dimension.ts`), so an `inferred` cash figure still scores uncapped; opening cash carried from an earlier AI-read month is not downgraded (its anchor is a printed, verified balance).
+**Not changed (decision):** Health treats only `estimated`/proxy as capped (`dimension.ts`), so an `inferred` cash figure still scores uncapped; opening cash carried from an earlier AI-read month is not downgraded (its anchor is a printed, verified balance). *Superseded: Health by ADR-134; carried opening cash by ADR-137 (Step 0D).*
 
 ### ADR-131 · FU-6: a daily scheduled recalculation over the periods the date changes
 
@@ -2497,3 +2497,48 @@ At 02:00 UTC an organisation in Los Angeles was still on yesterday (19:00 local)
 - The nightly route goes back to the sweep and the engine upgrade only.
 
 "Due" is defined by the latest SUCCEEDED run's `as_of`, so a failed or dead day is retried. The range rule (ADR-131) recomputes from the month that run last saw as current, so a closed month missed by any number of days is recomputed by the next run of any trigger.
+
+### ADR-136 · Unicode identity for names; collisions are held for a person, never merged
+
+**Status:** Accepted (Step 0D, 2026-10-06). Migration `20261006000001`. Resolves the Step 0C release blocker (review finding 7).
+
+**Problem.** `app.normalize_name` kept only `[a-z0-9]`. It is the uniqueness key of accounts, counterparties, products, marketing channels and campaigns, and the key every import matches on. "Müller GmbH" and "Möller GmbH" were one key, so a file's Möller was booked to Müller. Every name with no letter A–Z had the key `''`, so an organisation could hold only one customer named in Arabic, Japanese, Greek or Cyrillic. Step 0C stopped the import path from acting on either (IMP-CP-017/018) but could not import those names at all, and account names were unguarded.
+
+**Decision: the matching rule.**
+1. NFKC. Compatibility forms are one name: "Ａｃｍｅ" = "Acme", "ﬁ" = "fi", half-width = full-width katakana, precomposed = combining accent.
+2. Unicode SIMPLE lower case through the built-in `pg_c_utf8` collation (Postgres 17), the same everywhere with no ICU and no OS locale; final sigma `ς` read as `σ`.
+3. Every run of whitespace, punctuation, symbols and control characters becomes one space; the ends are trimmed.
+
+Everything else is significant: every letter in every script, every accent and combining mark, every digit. "Müller" ≠ "Muller", Cyrillic "Асме" ≠ Latin "Acme", "٣" ≠ "3". "Straße" ≠ "Strasse" (no full case folding: the conservative direction is two records, never one). For ASCII the key is byte-for-byte the old one, so only names with other characters move.
+
+The TypeScript mirror (`storedNameKey`) is compared with the database over every code point Postgres assigns (integration test; zero differences). Characters added after Unicode 15.1 can differ; the database's key is the one stored and enforced.
+
+**Decision: existing records.**
+- Re-keyed in place; display names never change.
+- Where the new key makes two or more existing records one name (a collision the old key hid, e.g. "İzmir Ltd" and "Izmir Ltd", or a full-width and an ASCII spelling), EVERY record of the group is held. It keeps its name and history; its key becomes `<key> [held <id>]`, which no import key can equal; it is audited `name_identity.held`.
+- While an unmerged held record of a name exists:
+  - an import naming it is refused (`IMP-CP-019`, `IMP-ACCT-019`);
+  - a new or renamed record of it is refused (the derive trigger).
+- A person resolves it by renaming or merging records; re-saving the last one re-derives its key.
+- Invoice rows the old key already booked to a different name (past silent merges) are reported, not changed.
+
+**Evidence before migrating:** `scripts/sql/unicode-names-dry-run.sql` (read-only; its key is the migration's function body, pinned by a test). The upgrade job seeds the baseline schema with names in five scripts and known collisions, runs the report, migrates, and verifies every record (`scripts/sql/unicode-names-verify.sql`).
+
+**Not changed:**
+- The duplicate-detection scope key (`scopeKey`) still uses the old account-name key. Changing it would change stored row hashes and stop re-imports matching earlier imports.
+- Look-alike characters across scripts are two names; no confusable warning is shown.
+
+### ADR-137 · A cash balance is no firmer than what it rests on, in every later month
+
+**Status:** Accepted (Step 0D). Engine 8.0.0 (assurance only; no value changes). Amends ADR-130.
+
+**Problem.** A month's opening cash is the balance at the close of the day before it, carried along the statement chain from an anchor (ADR-124). Its assurance was the anchor's SOURCE alone. So cash carried through a month an AI read — or opened by a balance typed onto an AI-read statement, possibly copied from the model's reading — was `verified` in every later month, on Home and in Health. ADR-130 weakened only the figures of the month whose statement was AI-read.
+
+**Decision.**
+- An anchor printed on a statement is no firmer than that statement (`statementRecordAssurance`): `inferred` on an AI-read statement, `calculated` on an unreconciled text PDF.
+- A balance at the close of day D is as firm as the best anchor of its chain dated on or before D that AGREES with the chain (to the penny), weakened by the rows of every statement the chain crossed since that anchor. A verified printed balance that agrees therefore attests the chain again from its day; one that disagrees attests nothing (§3.3: the computed value stands, and the mismatch is shown).
+- Crossed statements include superseded ones: a re-upload whose rows were skipped as duplicates leaves the earlier rows in place. Only a rollback, or a Replace (which rolls back), removes them.
+- `opening_cash` and `closing_cash` take this per-account assurance (the total is its weakest account). The period's statements (ADR-130) no longer weaken them: an opening does not rest on its own month's rows, and a closing counts them in its own chain. Movement figures keep ADR-130.
+- Evidence: both figures carry `rests_on_statements` (per account and in total). The evidence drawer names those statements. The "Please check" tooltip says the figure may be carried from a month read by AI.
+- Health needs no new rule: ADR-134's cap of 70 (still awaiting product approval) applies to the carried figure.
+

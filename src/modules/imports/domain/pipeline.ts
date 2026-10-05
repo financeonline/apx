@@ -25,19 +25,21 @@ import type {
 } from './pipeline-types';
 import { IMPORT_TYPE_SPECS, type ImportTarget, type ImportType } from './types';
 import { classifyInvoice } from './invoices';
-import { nameCarriesFigure, storedKeyCollides, storedKeyEmpty, storedNameKey } from './mapping/counterparty';
+import { heldNameKey, nameCarriesFigure, storedNameKey } from './mapping/counterparty';
 import type { FinancialRecordTable } from '@/modules/financials';
 
 export interface AccountRef {
   readonly id: string;
   readonly code: string | null;
   readonly normalizedName: string;
+  /** The name as stored, for the reviewer's message when the name is held (ADR-136). */
+  readonly name?: string;
 }
 
 export interface CounterpartyRef {
   readonly id: string;
   readonly normalizedName: string;
-  /** The name as stored, so a match on the stored key can be checked letter by letter (Step 0C). */
+  /** The name as stored, for the reviewer's message when the name is held (ADR-136). */
   readonly name?: string;
 }
 
@@ -166,13 +168,20 @@ export function runPipeline(input: PipelineInput): PipelineResult {
   );
   const accountsByName = new Map(input.accounts.map((a) => [a.normalizedName, a]));
   const counterpartiesByName = new Map(input.counterparties.map((c) => [c.normalizedName, c]));
+  /*
+   * Names HELD for an identity decision (ADR-136): records that became one name when keys became
+   * Unicode-aware, kept apart until a person decides. A row naming one is refused, never booked to
+   * either record and never the cause of a third.
+   */
+  const heldAccounts = heldNames(input.accounts);
+  const heldCounterparties = heldNames(input.counterparties);
 
   const requiredFields = satisfiedFieldSet(input.importType, new Set(Object.values(columnMap))) ?? [];
 
   const unmappedAccounts = new Set<string>();
   const newCounterparties = new Set<string>();
   const matchedCounterparties = new Set<string>();
-  /** Rows whose counterparty name the stored key cannot tell apart, or cannot hold (Step 0C). */
+  /** Rows naming an account or counterparty whose records are held for a decision (ADR-136). */
   const nameIssues = new Map<number, RowIssue>();
 
   // ---- Pass A: map every line, resolve identities, collect what is missing ----
@@ -259,9 +268,11 @@ export function runPipeline(input: PipelineInput): PipelineResult {
 
     if (!nonTabular && accountValue) {
       const byCode = mapped.code ? accountsByCode.get(mapped.code.toLowerCase()) : undefined;
-      const byName = accountsByName.get(accountValue.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim());
+      const accountKey = storedNameKey(accountValue);
+      const byName = accountsByName.get(accountKey);
       const account = byCode ?? byName;
       if (account) mapped.account_id = account.id;
+      else if (heldAccounts.has(accountKey)) nameIssues.set(row.rowNumber, heldIssue('account', accountValue, heldAccounts.get(accountKey)!));
       else unmappedAccounts.add(accountValue);
     }
 
@@ -269,16 +280,9 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     if (!nonTabular && counterpartyValue) {
       const key = storedNameKey(counterpartyValue);
       const existing = counterpartiesByName.get(key);
-      /*
-       * The stored key (`app.normalize_name`) drops every letter outside A–Z, so a match on it is not
-       * yet a match: "Möller GmbH" would land on "Müller GmbH". Such a row is stopped (IMP-CP-017),
-       * and a name the key cannot hold at all is refused with its own reason (IMP-CP-018), until the
-       * key is Unicode-aware. Never a silent merge, never a silent drop.
-       */
-      if (storedKeyEmpty(counterpartyValue)) {
-        nameIssues.set(row.rowNumber, nameIssue('IMP-CP-018', counterpartyValue, null));
-      } else if (existing && existing.name !== undefined && storedKeyCollides(existing.name, counterpartyValue)) {
-        nameIssues.set(row.rowNumber, nameIssue('IMP-CP-017', counterpartyValue, existing.name));
+      // The key keeps every letter in every script (ADR-136): a match is the same name.
+      if (heldCounterparties.has(key)) {
+        nameIssues.set(row.rowNumber, heldIssue('counterparty', counterpartyValue, heldCounterparties.get(key)!));
       } else if (existing) {
         mapped.counterparty_id = existing.id;
         if (!nameCarriesFigure(counterpartyValue)) matchedCounterparties.add(counterpartyValue);
@@ -527,17 +531,29 @@ export function runPipeline(input: PipelineInput): PipelineResult {
 }
 
 /** The two Unicode-name refusals, worded for the person who has to fix the file. */
-function nameIssue(code: 'IMP-CP-017' | 'IMP-CP-018', name: string, existing: string | null): RowIssue {
-  return code === 'IMP-CP-017'
+/** The held keys among existing records, each with the names of its records (ADR-136). */
+function heldNames(records: ReadonlyArray<{ normalizedName: string; name?: string }>): Map<string, string[]> {
+  const held = new Map<string, string[]>();
+  for (const record of records) {
+    const key = heldNameKey(record.normalizedName);
+    if (key === null) continue;
+    held.set(key, [...(held.get(key) ?? []), record.name ?? key]);
+  }
+  return held;
+}
+
+function heldIssue(kind: 'account' | 'counterparty', name: string, records: readonly string[]): RowIssue {
+  const listed = records.map((r) => `"${r}"`).join(' and ');
+  return kind === 'counterparty'
     ? {
-        code, severity: 'error', field: 'customer',
-        message: `"${name}" differs from "${existing}" only in letters MOTION cannot yet tell apart, so it has not been matched or added.`,
-        suggestion: 'Skip the row for now; it will import once names outside A–Z are supported.',
+        code: 'IMP-CP-019', severity: 'error', field: 'customer',
+        message: `"${name}" matches ${listed}, which MOTION holds apart until someone decides whether they are the same customer or supplier.`,
+        suggestion: 'Rename or merge those records under Customers, then upload the file again.',
       }
     : {
-        code, severity: 'error', field: 'customer',
-        message: `"${name}" uses letters MOTION cannot yet store as a customer name.`,
-        suggestion: 'Skip the row for now; it will import once names outside A–Z are supported.',
+        code: 'IMP-ACCT-019', severity: 'error', field: 'account',
+        message: `"${name}" matches the accounts ${listed}, which MOTION holds apart until someone decides whether they are the same account.`,
+        suggestion: 'Rename one of those accounts under Accounts, then upload the file again.',
       };
 }
 

@@ -23,6 +23,8 @@ interface Dump {
       }> | null;
     }>;
     readonly alerts: readonly string[];
+    /** Step 0D: who the organisation's invoices are booked to, `name|invoices|total` (step0d dumps only). */
+    readonly identities?: readonly string[];
   }>;
 }
 
@@ -97,9 +99,23 @@ for (const key of Object.keys(after.organisations)) {
   const [aa, ba] = [alerts(a), alerts(b)];
   const added = [...ba].filter((x) => !aa.has(x)).sort();
   const removed = [...aa].filter((x) => !ba.has(x)).sort();
+  // Step 0D: identity is not an engine output, but the engine's customer figures rest on it.
+  const [ai, bi] = [new Set(a.identities ?? []), new Set(b.identities ?? [])];
+  const identityGone = [...ai].filter((x) => !bi.has(x)).sort();
+  const identityNew = [...bi].filter((x) => !ai.has(x)).sort();
   summary.push(`| ${key} | ${figureDiff.length} | ${healthDiff.length} | ${added.length} | ${removed.length} |`);
   lines.push(`## ${key}`, '');
-  if (figureDiff.length + healthDiff.length + added.length + removed.length === 0) { lines.push('No change.', ''); continue; }
+  if (figureDiff.length + healthDiff.length + added.length + removed.length + identityGone.length + identityNew.length === 0) {
+    lines.push('No change.', '');
+    continue;
+  }
+  if (identityGone.length + identityNew.length > 0) {
+    lines.push('| Customers before (name · invoices · total) | Customers after |', '|---|---|');
+    for (let i = 0; i < Math.max(identityGone.length, identityNew.length); i += 1) {
+      lines.push(`| ${identityGone[i]?.replace(/\|/g, ' · ') ?? ''} | ${identityNew[i]?.replace(/\|/g, ' · ') ?? ''} |`);
+    }
+    lines.push('');
+  }
   if (figureDiff.length > 0) lines.push('| Month | Figure | Before | After |', '|---|---|---|---|', ...figureDiff, '');
   if (healthDiff.length > 0) lines.push('| Month | Health | Before | After |', '|---|---|---|---|', ...healthDiff, '');
   for (const x of added) lines.push(`- alert added: ${x}`);

@@ -158,7 +158,7 @@ function accountState(
   const opening = o.opening ?? null;
   const own = movements.filter((m) => m.bankAccountId === id)
     .reduce((acc, m) => acc.plus(parseDecimal(m.debit)).minus(parseDecimal(m.credit)), new Decimal(0));
-  const fact = (value: string) => ({ value, source: 'statement_opening_balance' as const, assurance: 'verified' as const, anchorDate: '2025-01-01' });
+  const fact = (value: string) => ({ value, source: 'statement_opening_balance' as const, assurance: 'verified' as const, anchorDate: '2025-01-01', weakenedBy: [] });
   return {
     bankAccountId: id, name: id === CURRENT ? 'current' : id === SAVINGS ? 'savings' : id, inScope: true,
     movementKnown: covered, anyDayCovered: covered,

@@ -139,7 +139,8 @@ select is(
       -- `invoice_net` and `invoice_net_is_vat_fallback`, which are arithmetic on three columns
       -- their callers already hold (ADR-103).
       -- `merged_calculation_payload` (ADR-132) is jsonb arithmetic on two payloads its callers hold.
-      and p.proname not in ('ceiling_allows', 'fiscal_position', 'invoice_net',
+      -- `held_name_key` (ADR-136) is string concatenation of a key and an id.
+      and p.proname not in ('ceiling_allows', 'fiscal_position', 'held_name_key', 'invoice_net',
                             'invoice_net_is_vat_fallback', 'job_max_runtime', 'jwt',
                             'merged_calculation_payload',
                             'normalize_name', 'role_claim', 'role_rank', 'slugify',

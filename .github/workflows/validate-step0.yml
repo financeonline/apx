@@ -134,10 +134,22 @@ jobs:
           ln -s "$GITHUB_WORKSPACE/node_modules" "$RUNNER_TEMP/baseline/node_modules"
           cp .env.local "$RUNNER_TEMP/baseline/"
           (cd "$RUNNER_TEMP/baseline" && npx vitest run --project integration test/integration/engine-end-to-end.test.ts) 2>&1 | tee logs/upgrade/baseline-data.log
+      - name: seed names in five scripts with known collisions, on the BASELINE schema (test data)
+        run: psql "$(npx --no-install supabase status -o json | jq -r .DB_URL)" -v ON_ERROR_STOP=1 -f scripts/sql/unicode-names-seed.sql 2>&1 | tee logs/upgrade/unicode-names-seed.log
+      - name: read-only collision report BEFORE migrating (ADR-136)
+        run: psql "$(npx --no-install supabase status -o json | jq -r .DB_URL)" -v ON_ERROR_STOP=1 -f scripts/sql/unicode-names-dry-run.sql 2>&1 | tee logs/upgrade/unicode-names-report-before.log
       - name: apply the new migrations as an UPGRADE
         run: |
           mv "$RUNNER_TEMP"/new-migrations/*.sql supabase/migrations/
           $SUPABASE migration up 2>&1 | tee logs/upgrade/migration-up.log
+      - name: verify the Unicode re-keying of the seeded records (fails on any deviation)
+        run: |
+          DB="$(npx --no-install supabase status -o json | jq -r .DB_URL)"
+          psql "$DB" -v ON_ERROR_STOP=1 -f scripts/sql/unicode-names-verify.sql 2>&1 | tee logs/upgrade/unicode-names-verify.log
+          grep -q 'unicode-names-verify: all checks passed' logs/upgrade/unicode-names-verify.log
+          psql "$DB" -v ON_ERROR_STOP=1 -f scripts/sql/unicode-names-dry-run.sql 2>&1 | tee logs/upgrade/unicode-names-report-after.log
+          # The expectations table is test scaffolding: gone before pgTAP and the schema check run.
+          psql "$DB" -v ON_ERROR_STOP=1 -c 'drop schema unicode_seed cascade'
       - name: pgTAP on the upgraded database
         run: $SUPABASE test db 2>&1 | tee logs/upgrade/pgtap.log
       - name: schema drift on the upgraded database
@@ -164,20 +176,30 @@ jobs:
       - name: baseline dump (its own migrations and engine)
         run: |
           git worktree add "$RUNNER_TEMP/baseline" "$BASELINE"
+          # Step 0D's extra organisations, seeded identically on both sides: the fixture is self-contained.
+          cp test/fixtures/step0d-orgs.ts "$RUNNER_TEMP/baseline/test/fixtures/"
+          cp test/regression/engine-comparison-step0d.test.ts "$RUNNER_TEMP/baseline/test/regression/"
           cd "$RUNNER_TEMP/baseline"
           npm ci
           npx --no-install supabase start
           "$GITHUB_WORKSPACE/scripts/write-local-env.sh"
-          ENGINE_COMPARE_LABEL=baseline ENGINE_COMPARE_OUT="$GITHUB_WORKSPACE/compare" npm run engine:compare
+          # One file at a time: both drain the same job queue.
+          for f in test/regression/engine-comparison.test.ts test/regression/engine-comparison-step0d.test.ts; do
+            ENGINE_COMPARE_LABEL=baseline ENGINE_COMPARE_OUT="$GITHUB_WORKSPACE/compare" npx vitest run --project regression "$f"
+          done
           npx --no-install supabase stop --no-backup
-        shell: bash -o pipefail {0}
+        shell: bash -eo pipefail {0}
       - name: this branch's dump
         run: |
           $SUPABASE start
           scripts/write-local-env.sh
-          ENGINE_COMPARE_LABEL=branch ENGINE_COMPARE_OUT="$GITHUB_WORKSPACE/compare" npm run engine:compare 2>&1 | tee logs/compare/branch.log
+          for f in test/regression/engine-comparison.test.ts test/regression/engine-comparison-step0d.test.ts; do
+            ENGINE_COMPARE_LABEL=branch ENGINE_COMPARE_OUT="$GITHUB_WORKSPACE/compare" npx vitest run --project regression "$f"
+          done 2>&1 | tee logs/compare/branch.log
       - name: compare
-        run: npx tsx scripts/engine-compare.ts compare/baseline.json compare/branch.json > compare/record.md
+        run: |
+          npx tsx scripts/engine-compare.ts compare/baseline.json compare/branch.json > compare/record.md
+          npx tsx scripts/engine-compare.ts compare/baseline-step0d.json compare/branch-step0d.json > compare/record-step0d.md
       - if: always()
         uses: actions/upload-artifact@v4
         with:

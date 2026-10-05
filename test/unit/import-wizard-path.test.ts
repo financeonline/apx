@@ -51,7 +51,9 @@ const INVOICE_STATUSES = enumValues('invoice_status_enum');
 const ENTRY_DIRECTIONS = enumValues('entry_direction_enum');
 
 /** `app.normalize_name`: lower, every run of non-alphanumerics to one space, trimmed. */
-const normalize = (name: string) => name.toLowerCase().trim().replace(/[^a-z0-9]+/g, ' ').trim();
+// The database's key (app.normalize_name); its parity with Postgres is tested in
+// test/integration/unicode-names.test.ts.
+const normalize = (name: string) => storedNameKey(name);
 
 // -----------------------------------------------------------------------------------------------
 // The fake database
@@ -214,7 +216,7 @@ vi.mock('@/core/storage/signer', async (importOriginal) => {
   };
 });
 
-const { startImport, IMPORT_TYPE_SPECS } = await import('@/modules/imports');
+const { startImport, IMPORT_TYPE_SPECS, storedNameKey } = await import('@/modules/imports');
 
 function fixture(name: string, mime = 'text/csv'): File {
   return new File([new Uint8Array(readFileSync(path.resolve(process.cwd(), 'fixtures/imports', name)))], name, { type: mime });
@@ -485,46 +487,71 @@ describe('unsupported combinations leave nothing behind', () => {
 });
 
 /**
- * The Unicode-name defect (Step 0C review finding 7). `app.normalize_name` keeps only [a-z0-9]:
- * "Müller GmbH" and "Möller GmbH" both become "m ller gmbh", and a name in a non-Latin script becomes
- * "" — so the import path, which matches and creates counterparties by that key, would book two
- * customers as one, or refuse a valid name. These reproductions run the real wizard.
+ * Unicode identity (ADR-136; the Step 0C release blocker). The key keeps every letter in every
+ * script: distinct names stay distinct, the same name in another case is one, and records the
+ * migration HELD for a decision are never booked to. These run the real wizard.
  */
-describe('names outside ASCII (release blocker until the normaliser is Unicode-aware)', () => {
+describe('names outside ASCII (ADR-136)', () => {
   const upload = (rows: string[]) => startImport({
     organizationId: ORG, userId: '0a000000-0000-4000-8000-000000000001', requestId: 'unit', db: fakeDb as never,
     file: new File([['Invoice Number,Customer,Invoice Date,Total', ...rows].join('\n')], 'names.csv', { type: 'text/csv' }),
     importType: 'sales_invoices', periodStart: '2026-08-01', periodEnd: '2026-08-31', bankAccountId: null,
   });
+  const customer = (id: string, name: string, normalized = normalize(name), merged: string | null = null) =>
+    state.tables.counterparties!.push({ id, organization_id: ORG, name, normalized_name: normalized, kind: 'customer', merged_into_id: merged });
 
-  it('two customers who differ only by an accented letter are never booked to one', async () => {
+  it('two customers who differ only by an accented letter become two customers', async () => {
     await upload(['M-1,Müller GmbH,2026-08-03,100.00', 'M-2,Möller GmbH,2026-08-04,200.00']);
+    expect(state.counterpartyCalls.flat()).toEqual(['Müller GmbH', 'Möller GmbH']);
+    expect(state.tables.counterparties!.map((c) => [c.name, c.normalized_name]))
+      .toEqual([['Müller GmbH', 'müller gmbh'], ['Möller GmbH', 'möller gmbh']]);
     const [muller, moller] = dataRows();
-    // Not silently resolved to one id: the second is stopped with a reason a person can act on.
-    const ids = [muller!.mapped_data.counterparty_id, moller!.mapped_data.counterparty_id];
-    expect(ids[0] !== undefined && ids[0] === ids[1], 'two names booked to one customer').toBe(false);
-    expect(moller!.status).toBe('error');
-    expect(moller!.issues.map((i) => i.code)).toContain('IMP-CP-017');
+    expect(muller!.status).not.toBe('error');
+    expect(moller!.status).not.toBe('error');
+    expect(muller!.mapped_data.counterparty_id).not.toBe(moller!.mapped_data.counterparty_id);
   });
 
-  it('an existing customer is not matched by a different accented name', async () => {
-    state.tables.counterparties!.push({
-      id: 'cp-muller', organization_id: ORG, name: 'Müller GmbH', normalized_name: 'm ller gmbh', kind: 'customer', merged_into_id: null,
-    });
-    await upload(['M-3,Möller GmbH,2026-08-05,300.00', 'M-4,MÜLLER GMBH,2026-08-06,50.00']);
-    const [moller, mullerUpper] = dataRows();
-    expect(moller!.mapped_data.counterparty_id ?? null).not.toBe('cp-muller');
-    expect(moller!.issues.map((i) => i.code)).toContain('IMP-CP-017');
-    // The same customer in capitals still matches — the guard is about letters, not case.
+  it('an existing customer matches in any case, and never by a different accented name', async () => {
+    customer('cp-muller', 'Müller GmbH');
+    await upload(['M-3,Möller GmbH,2026-08-05,300.00', 'M-4,MÜLLER GMBH,2026-08-06,50.00', 'M-5,Muller GmbH,2026-08-07,60.00']);
+    const [moller, mullerUpper, unaccented] = dataRows();
     expect(mullerUpper!.mapped_data.counterparty_id).toBe('cp-muller');
+    expect(moller!.mapped_data.counterparty_id).not.toBe('cp-muller');
+    expect(unaccented!.mapped_data.counterparty_id).not.toBe('cp-muller');
+    expect(state.tables.counterparties!.find((c) => c.id === 'cp-muller')!.name).toBe('Müller GmbH');
   });
 
-  it('a name in a non-Latin script is refused with a reason, not silently dropped', async () => {
-    await upload(['J-1,株式会社トヨタ,2026-08-07,400.00', 'A-1,شركة الأمل,2026-08-08,500.00']);
-    for (const row of dataRows()) {
-      expect(row.status).toBe('error');
-      expect(row.issues.map((i) => i.code)).toContain('IMP-CP-018');
-    }
-    expect(state.counterpartyCalls.flat()).not.toContain('株式会社トヨタ');
+  it('names in Japanese, Arabic, Greek and Cyrillic are created with their own keys, display names kept', async () => {
+    await upload([
+      'J-1,株式会社トヨタ,2026-08-07,400.00', 'A-1,شركة الأمل,2026-08-08,500.00',
+      'G-1,ΟΔΟΣ Α.Ε.,2026-08-09,600.00', 'G-2,οδος α.ε.,2026-08-10,700.00', 'C-1,ООО «Ромашка»,2026-08-11,800.00',
+    ]);
+    for (const row of dataRows()) expect(row.status, JSON.stringify(row.issues)).not.toBe('error');
+    expect(state.tables.counterparties!.map((c) => [c.name, c.normalized_name])).toEqual([
+      ['株式会社トヨタ', '株式会社トヨタ'], ['شركة الأمل', 'شركة الأمل'], ['ΟΔΟΣ Α.Ε.', 'οδοσ α ε'], ['ООО «Ромашка»', 'ооо ромашка'],
+    ]);
+    // The Greek name in capitals and in lower case (with its final sigma) is one customer.
+    const [, , upper, lower] = dataRows();
+    expect(upper!.mapped_data.counterparty_id).toBe(lower!.mapped_data.counterparty_id);
+  });
+
+  it('a name whose records are HELD for a decision is refused (IMP-CP-019), booked to neither, never created again', async () => {
+    customer('cp-izmir-dotted', 'İzmir Ltd', 'izmir ltd [held 0b000000-0000-4000-8000-000000000001]');
+    customer('cp-izmir', 'Izmir Ltd', 'izmir ltd [held 0b000000-0000-4000-8000-000000000002]');
+    await upload(['I-1,IZMIR LTD,2026-08-12,90.00', 'O-1,Other Ltd,2026-08-12,10.00']);
+    const [izmir, other] = dataRows();
+    expect(izmir!.status).toBe('error');
+    expect(izmir!.issues.map((i) => i.code)).toContain('IMP-CP-019');
+    expect((izmir!.issues.find((i) => i.code === 'IMP-CP-019') as { message?: string }).message).toContain('"İzmir Ltd" and "Izmir Ltd"');
+    expect(izmir!.mapped_data.counterparty_id ?? null).toBeNull();
+    expect(other!.status).not.toBe('error');
+    expect(state.counterpartyCalls.flat()).toEqual(['Other Ltd']);
+  });
+
+  it('a held record that was since merged away no longer blocks the name', async () => {
+    customer('cp-izmir', 'Izmir Ltd');
+    customer('cp-izmir-dotted', 'İzmir Ltd', 'izmir ltd [held 0b000000-0000-4000-8000-000000000001]', 'cp-izmir');
+    await upload(['I-2,Izmir Ltd,2026-08-13,90.00']);
+    expect(dataRows()[0]!.mapped_data.counterparty_id).toBe('cp-izmir');
   });
 });

@@ -29,9 +29,7 @@ export {
 
 export {
   counterpartyKindFor,
-  letterNameKey,
-  storedKeyCollides,
-  storedKeyEmpty,
+  heldNameKey,
   storedNameKey,
   findFigureInName,
   nameCarriesFigure,

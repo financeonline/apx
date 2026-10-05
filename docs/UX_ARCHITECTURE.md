@@ -329,7 +329,7 @@ UK English throughout ("organisation", "categorise", "cheque"). Internal enum va
 | `calculated`, completeness ≥ 0.9 | Calculated | "Worked out from your records" |
 | any level, completeness < 0.9 or warnings | Partial data | "Some data is missing or uncategorised — tap for details" |
 | `estimated` (incl. cash-basis proxy) | Estimate | "Estimated from bank activity; may include VAT and timing differences" |
-| `inferred` (AI-read PDF rows) | Please check | "Read from a document by AI and awaiting confirmation" |
+| `inferred` (AI-read PDF rows, or a cash balance carried through an AI-read month — Step 0D) | Please check | "Read from a document by AI, or carried from a month that was, and awaiting confirmation" |
 | not computable (`value = NULL`) | — | reason from `data_quality.missing` |
 
 | Statement kind | Badge label |

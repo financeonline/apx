@@ -256,7 +256,9 @@ describe('D-1 · per-account balance history', () => {
     // August: A 7,500 + B 2,000 = 9,500 open; −500 + 100; A 7,000 + B 2,100 = 9,100 — the audit's truth.
     expect(row(r, '2026-08')).toEqual(['9500.00', '-400.00', '9100.00']);
     expect(figure(r, '2026-08', 'closing_cash').components.per_account).toEqual([
-      { account_id: A, value: '7000.00' }, { account_id: B, value: '2100.00' },
+      // Both balances rest on typed opening balances (`calculated`) and CSV rows only.
+      { account_id: A, value: '7000.00', assurance: 'calculated', rests_on_statements: [] },
+      { account_id: B, value: '2100.00', assurance: 'calculated', rests_on_statements: [] },
     ]);
   });
 

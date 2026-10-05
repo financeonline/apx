@@ -472,7 +472,9 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
   for (const periodMetrics of cashSeries) {
     if (periodMetrics.periodId !== period.id) continue;
     // Cash is stated from the bank alone (ADR-124): its figures are as firm as those rows (ADR-130).
-    results.push(...periodMetrics.metrics.map((m) => (m.basis === 'bank'
+    // The two balances already carry exactly the records they rest on, per account (Step 0D): the
+    // opening does not rest on this month's rows, and the closing counts them in its own chain.
+    results.push(...periodMetrics.metrics.map((m) => (m.basis === 'bank' && m.key !== 'opening_cash' && m.key !== 'closing_cash'
       ? { ...m, assurance: weakerAssurance(m.assurance, bankRecords) }
       : m)));
   }

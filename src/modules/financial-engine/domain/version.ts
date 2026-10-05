@@ -85,7 +85,19 @@
  *   - Bank-proxy flows the proxy netted by a default rate are `unknown`, not gross, for both days
  *     figures (6.0.0 treated bank costs as always gross).
  */
-export const ENGINE_VERSION = '7.0.0';
+/**
+ * 8.0.0 (Step 0D, ADR-137): MAJOR (assurance only — no value changes). 7.0.0 was never released; its
+ * hash is kept.
+ *   - A cash balance is no firmer than the anchor that attests it and the rows of every statement the
+ *     chain crossed since (`cash-history.ts`). Cash carried out of an AI-read or unreconciled month is
+ *     `inferred` / `calculated` in every later month until a verified printed balance that agrees with
+ *     the chain attests it again; a balance printed on an AI-read statement anchors as `inferred`.
+ *   - `opening_cash` and `closing_cash` take that per-account assurance instead of the period's
+ *     statements: an opening no longer takes the weakness of its own month's rows (it does not rest
+ *     on them), and a closing attested by a verified printed balance is verified.
+ *   - Both carry `rests_on_statements` (the weaker batches) in their components, per account and total.
+ */
+export const ENGINE_VERSION = '8.0.0';
 
 /** Bumped independently of the engine (§6). */
 /**

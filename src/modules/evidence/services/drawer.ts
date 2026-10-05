@@ -106,6 +106,39 @@ export interface DrawerMetric {
   readonly isCurrent: boolean;
   /** The value the current snapshot holds, when this one is no longer it (§8.2). */
   readonly currentValue: string | null;
+  /**
+   * Step 0D: the statements weaker than verified that a cash balance rests on — an AI-read or
+   * unreconciled month it was carried through (`components.rests_on_statements`). Empty otherwise.
+   */
+  readonly restsOn: readonly RestsOnStatement[];
+}
+
+export interface RestsOnStatement {
+  readonly batchId: string;
+  readonly fileName: string | null;
+  readonly periodStart: string | null;
+  readonly periodEnd: string | null;
+  /** `pdf_claude` (read by AI) or `pdf_text` (a text PDF that did not reconcile). */
+  readonly extractionMethod: string | null;
+}
+
+/** The statements a cash snapshot says it rests on, read under the caller's own access. */
+async function restsOnStatements(ctx: AccessContext, orgId: string, snapshot: Row): Promise<RestsOnStatement[]> {
+  const ids = ((snapshot.components ?? {}) as { rests_on_statements?: unknown }).rests_on_statements;
+  if (!Array.isArray(ids) || ids.length === 0) return [];
+  const { data, error } = await ctx.db
+    .from('import_batches')
+    .select('id, period_start, period_end, extraction_method, source_documents(original_filename)')
+    .eq('organization_id', orgId)
+    .in('id', ids.map(String));
+  if (error) throw toMotionError(error);
+  return ((data ?? []) as Array<Record<string, unknown>>).map((b) => ({
+    batchId: String(b.id),
+    fileName: ((b.source_documents ?? null) as { original_filename?: string } | null)?.original_filename ?? null,
+    periodStart: b.period_start === null ? null : String(b.period_start),
+    periodEnd: b.period_end === null ? null : String(b.period_end),
+    extractionMethod: b.extraction_method === null ? null : String(b.extraction_method),
+  })).sort((a, b) => (a.periodStart ?? '').localeCompare(b.periodStart ?? ''));
 }
 
 export interface EvidenceDrawerView {
@@ -274,6 +307,7 @@ export async function loadEvidenceDrawer(
       assurance: rootItem.assurance,
       dataQuality: (rootSnapshot.data_quality ?? {}) as Record<string, unknown>,
       ...state,
+      restsOn: await restsOnStatements(ctx, orgId, rootSnapshot),
     };
   }
 

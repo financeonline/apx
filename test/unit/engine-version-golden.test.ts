@@ -250,7 +250,7 @@ function corpus(): unknown {
   return {
     periods: out, freshness, history: [...history.entries()], tolerance, lastDayJournal,
     fu1: fu1Corpus(ctx), fu12: fu12Corpus(ctx), fu12Variance: fu12VarianceCorpus(ctx),
-    fu9: fu9Corpus(ctx), adr130: adr130Corpus(ctx), adr133: adr133Corpus(ctx),
+    fu9: fu9Corpus(ctx), adr130: adr130Corpus(ctx), adr133: adr133Corpus(ctx), step0d: step0dCorpus(),
   };
 }
 
@@ -332,6 +332,29 @@ function adr130Corpus(ctx: EngineContext): unknown {
     }).map((r) => [r.key, r.dimensionId, r.value, r.basis, r.assurance]);
     return [period.label, { level, results }];
   }));
+}
+
+/**
+ * Step 0D: a balance carried out of an AI-read month. Account A's July–August statement is read by
+ * AI; September's CSV statement has no printed balances, so September's opening and closing are
+ * carried through it (inferred, resting on that batch). A variant prints September's opening, which
+ * agrees with the chain and attests it (verified again).
+ */
+function step0dCorpus(): unknown {
+  const SEP_ROW: DailyMovement = { bankAccountId: BANK_A, date: '2026-09-09', amount: '-300' };
+  const sep = (open: string | null): StatementRef => ({
+    batchId: id(45), bankAccountId: BANK_A, periodStart: '2026-09-01', periodEnd: '2026-09-30',
+    committedAt: '2026-10-01T00:00:00Z', openingBalance: open, closingBalance: null, unreconciled: false,
+  });
+  const ai = STATEMENTS.map((st) => (st.batchId === id(43) ? { ...st, assurance: statementRecordAssurance('pdf_claude', false) } : st));
+  const run = (open: string | null) => {
+    const history = buildCashHistory({
+      bankAccounts: BANKS, statements: [...ai, sep(open)], movements: [...MOVEMENTS, SEP_ROW], periods: PERIODS,
+    });
+    return [JUL, AUG, SEP].map((p) => [p.label, history.get(p.id)]);
+  };
+  // The chain reaches 12,700 at 31 August (May's printed 10,000 plus every row since).
+  return { carried: run(null), attested: run('12700') };
 }
 
 /**
@@ -515,6 +538,14 @@ describe('engine version golden (ADR-124 D-6)', () => {
     ] as const) {
       expect(known(ym, key), `${ym} ${key}`).toBe(true);
     }
+  });
+
+  it('the Step 0D cases carry an AI read into a later month, and a verified printed balance ends it', () => {
+    const out = corpus() as { step0d: Record<'carried' | 'attested', Array<[string, Array<{ bankAccountId: string; opening: { assurance: string } | null }>]>> };
+    const septemberA = (variant: 'carried' | 'attested') =>
+      out.step0d[variant].find(([label]) => label === '2026-09')![1].find((a) => a.bankAccountId === BANK_A)!.opening!.assurance;
+    expect(septemberA('carried')).toBe('inferred');
+    expect(septemberA('attested')).toBe('verified');
   });
 
   it('the FU-1 cases state revenue exactly where a full sales list establishes it', () => {

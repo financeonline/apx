@@ -54,7 +54,9 @@ export function statusFor(input: {
     return {
       kind: 'check',
       label: 'Please check',
-      tooltip: 'Read from a document by AI and awaiting confirmation',
+      // A balance can be `inferred` because an EARLIER month was AI-read and it was carried from it
+      // (Step 0D); the evidence drawer names the statement (`rests_on_statements`).
+      tooltip: 'Read from a document by AI, or carried from a month that was, and awaiting confirmation',
     };
   }
 
