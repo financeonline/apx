@@ -183,6 +183,22 @@ export const EvidenceQuerySchema = z.discriminatedUnion('kind', [
     kind: z.literal('derived'),
     components: z.array(z.strictObject({ name: z.string().min(1), snapshot_id: uuid })).min(1),
   }),
+  /*
+   * Step 0E: a figure that is the DIFFERENCE of two periods' records (a cumulative trial balance's or
+   * P&L report's month, §3). Both selections are leaves of the figure's tree; a term that cannot be
+   * read carries no descriptor and says why.
+   */
+  z.strictObject({
+    kind: z.literal('difference'),
+    formula: z.literal('year_to_date - prior_year_to_date'),
+    terms: z.array(z.strictObject({
+      name: z.enum(['year_to_date', 'prior_year_to_date']),
+      sign: z.union([z.literal(1), z.literal(-1)]),
+      period_id: uuid.nullable(),
+      descriptor: QueryDescriptorV1Schema.nullable(),
+      unavailable: z.string().min(1).nullable(),
+    })).length(2),
+  }),
 ]);
 export type EvidenceQuery = z.infer<typeof EvidenceQuerySchema>;
 

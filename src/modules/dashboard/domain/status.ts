@@ -92,6 +92,7 @@ const MISSING_REASONS: Readonly<Record<string, string>> = {
   no_bank_accounts: 'Add a bank account and upload its statements to see your cash.',
   no_opening_balance: 'We need an opening balance for this account first.',
   no_prior_trial_balance: 'The previous month’s figures are missing, so this cannot be worked out.',
+  account_absent_unconfirmed: 'An account appears in one month’s report but not the other’s, and the report does not show it is complete, so this month cannot be worked out.',
   stale_invoice_data: 'Your invoice list does not show the position at the end of this month.',
   vat_basis_unknown: 'What you owe includes VAT but your costs do not, so the days cannot be compared fairly.',
   // The cost-of-sales reasons are the shared ones (ADR-106): Home, the report and the analyst all

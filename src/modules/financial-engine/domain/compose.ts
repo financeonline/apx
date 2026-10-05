@@ -54,6 +54,13 @@ export interface BalancePnlContext {
   readonly priorBatch: boolean;
   /** P is the first month of the fiscal year FROZEN ON P's winning batch (`fiscal_year_start_month_at_commit`). */
   readonly isFirstFiscalMonth: boolean;
+  /**
+   * Whether P's report, and the prior month's, ESTABLISH their own completeness: a trial balance whose
+   * rows balance (Σ debit − credit = 0) lists every account carrying a balance, so an account it omits
+   * stands at zero. A P&L report establishes nothing of the kind. Absent means not established.
+   */
+  readonly currentComplete?: boolean;
+  readonly priorComplete?: boolean;
 }
 
 export interface ComposeInput {
@@ -218,14 +225,14 @@ function balanceAccountAmounts(
   const prior = basis === 'cumulative' && context.priorBatch ? closingBy(ofKind(context.priorPeriodId)) : new Map();
 
   /*
-   * A cumulative report is year to date: an account the prior month stated and this month does not
-   * now stands at zero for the year, so its month is −prior (the same inference §3 makes for an
-   * account absent from the PRIOR batch). Not on the fiscal year's first month, which resets.
+   * An account in one month's cumulative report and not the other's (not on the fiscal year's first
+   * month, which resets) is a zero ONLY where that report establishes its completeness — a trial
+   * balance that balances lists every account carrying a balance. Otherwise its month is unknown:
+   * NULL `account_absent_unconfirmed`, never an inferred zero.
    */
+  const differencing = basis === 'cumulative' && context.priorBatch && !context.isFirstFiscalMonth;
   const ids = new Set(current.keys());
-  if (basis === 'cumulative' && context.priorBatch && !context.isFirstFiscalMonth) {
-    for (const id of prior.keys()) ids.add(id);
-  }
+  if (differencing) for (const id of prior.keys()) ids.add(id);
 
   const out: AccountAmount[] = [];
   for (const accountId of ids) {
@@ -233,9 +240,16 @@ function balanceAccountAmounts(
     if (!account) continue;
     const here = current.get(accountId);
     const before = prior.get(accountId);
+    if (differencing && ((before === undefined && context.priorComplete !== true)
+      || (here === undefined && context.currentComplete !== true))) {
+      out.push({ accountId, category: account.standardCategory, amount: null, rowCount: here?.rowCount ?? 0,
+        missing: ['account_absent_unconfirmed'] });
+      continue;
+    }
     const result = periodBalancePnlAmount({
       accountType: account.accountType,
       balanceBasis: basis,
+      // Absent from a complete report: its year to date is a known zero.
       closing: here?.closing ?? new Decimal(0),
       isFirstFiscalMonth: context.isFirstFiscalMonth,
       priorState: !context.priorBatch ? 'no_batch' : before === undefined ? 'account_absent' : 'same_kind_and_basis',
@@ -560,10 +574,11 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
         : pnlSource
           ? accountAmounts(cells, period.id, pnlSource, context.accounts)
           : [],
-    // H-2: a cumulative month's figure is a DIFFERENCE of two months' rows, which no leaf selection of
-    // records can total to (ADR-109); the descriptor is omitted rather than one that does not reconcile.
-    balanceDifferenced: pnlSource === 'period_balances' && balanceBasis === 'cumulative'
-      && !balanceContext.isFirstFiscalMonth,
+    // H-2: a cumulative month's figure is a DIFFERENCE of two months' rows; its evidence names both
+    // selections and the subtraction (`kind: 'difference'`), never one row selection that cannot total.
+    balanceDifference: pnlSource === 'period_balances' && balanceBasis === 'cumulative' && !balanceContext.isFirstFiscalMonth
+      ? { priorPeriodId: balanceContext.priorPeriodId, priorAvailable: balanceContext.priorBatch }
+      : undefined,
     uncategorised: pnlSource
       ? uncategorisedExposure(pnlCells, period.id, pnlSource, pnlCategoryOf)
       : { absoluteAmount: '0', totalAbsoluteAmount: '0' },

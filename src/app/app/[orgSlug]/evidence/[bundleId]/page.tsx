@@ -128,6 +128,33 @@ export default async function EvidenceBundlePage({
                 <p className="mt-2 text-sm text-ink-muted">{metric.description}</p>
               ) : null}
 
+              {/* Step 0E: a cumulative report's month is a subtraction of two periods' records. */}
+              {metric.difference === null ? null : (
+                <div className="mt-3 rounded-md border border-line px-3 py-2 text-sm text-ink">
+                  <p>
+                    This month is worked out from a year-to-date report: this report&apos;s year to date, less the
+                    previous month&apos;s.
+                  </p>
+                  <ul className="mt-1 space-y-1">
+                    {metric.difference.terms.map((term) => (
+                      <li key={term.name} className="[overflow-wrap:anywhere]">
+                        {term.sign === 1 ? 'Year to date' : 'Less: year to date'}
+                        {term.periodLabel ? ` to ${term.periodLabel}` : ''}
+                        {': '}
+                        {term.total === null
+                          ? `not available (${missingReasonText([term.unavailable ?? ''])})`
+                          : `${formatValue({ value: term.total, unit: metric.unit, currency: metric.currency }, { showMinorUnits: true })}${term.rowCount === null ? '' : ` from ${term.rowCount} ${term.rowCount === 1 ? 'row' : 'rows'}`}`}
+                      </li>
+                    ))}
+                  </ul>
+                  <p className="mt-1">
+                    {metric.difference.terms.some((t) => t.total === null)
+                      ? 'One side of the subtraction is missing, so this figure cannot be worked out.'
+                      : `= ${formatValue({ value: metric.value, unit: metric.unit, currency: metric.currency }, { showMinorUnits: true })}`}
+                  </p>
+                </div>
+              )}
+
               {/* Step 0D: a balance carried through a month that is not verified says which. */}
               {metric.restsOn.length === 0 ? null : (
                 <div className="mt-3 rounded-md bg-warn-soft px-3 py-2 text-sm text-ink">

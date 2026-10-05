@@ -29,8 +29,9 @@ const [, JUN, JUL, AUG] = PERIODS as [PeriodRef, PeriodRef, PeriodRef, PeriodRef
 
 const acct = (id: string, category: AccountRef['standardCategory'], type: AccountRef['accountType']): AccountRef =>
   ({ id, code: id, name: id, standardCategory: category, accountType: type, isSystem: false });
-const REV = 'a-rev'; const COS = 'a-cos'; const OPEX = 'a-opex'; const MKT = 'a-mkt';
-const ACCOUNTS = [acct(REV, 'revenue', 'income'), acct(COS, 'cost_of_sales', 'expense'), acct(OPEX, 'operating_expense', 'expense'), acct(MKT, 'marketing', 'expense')];
+const REV = 'a-rev'; const COS = 'a-cos'; const OPEX = 'a-opex'; const MKT = 'a-mkt'; const CASH = 'a-cash'; const EQ = 'a-eq';
+const ACCOUNTS = [acct(REV, 'revenue', 'income'), acct(COS, 'cost_of_sales', 'expense'), acct(OPEX, 'operating_expense', 'expense'),
+  acct(MKT, 'marketing', 'expense'), acct(CASH, 'cash', 'asset'), acct(EQ, 'equity', 'equity')];
 
 const context = (fiscalYearStartMonth = 1): EngineContext => ({
   organizationId: 'org', calculationRunId: 'run', aggregatedAt: '2026-09-15T00:00:00.000Z', asOf: '2026-09-15', engineVersion: 'test',
@@ -49,10 +50,11 @@ const gl = (p: PeriodRef, accountId: string, debit: string, credit: string): Agg
   ...bal(p, 'trial_balance', 'movement', accountId, '0'), source: 'ledger', balanceKind: null, balanceBasis: null,
   debit, credit, amount: new Decimal(debit).minus(credit).toFixed(2),
 });
-const batch = (id: string, kind: Kind | 'general_ledger', basis: 'movement' | 'cumulative' | null, start: string, end: string, fy: number | null = null): CoverageBatch => ({
+const batch = (id: string, kind: Kind | 'general_ledger', basis: 'movement' | 'cumulative' | null, start: string, end: string,
+  fy: number | null = null, rowMonths?: string[]): CoverageBatch => ({
   id, targetTable: kind === 'general_ledger' ? 'ledger_entries' : 'period_balances', balanceKind: kind === 'general_ledger' ? null : kind,
   balanceBasis: basis, bankAccountId: null, invoiceListKind: null, importType: kind, periodStart: start, periodEnd: end,
-  committedAt: '2026-09-10T10:00:00Z', fiscalYearStartMonthAtCommit: fy,
+  committedAt: '2026-09-10T10:00:00Z', fiscalYearStartMonthAtCommit: fy, ...(rowMonths === undefined ? {} : { rowMonths }),
 });
 const monthly = (prefix: string, kind: Kind, basis: 'movement' | 'cumulative', fy: number | null = null) =>
   [JUN, JUL, AUG].map((p) => batch(`${prefix}-${p.label}`, kind, basis, p.periodStart, p.periodEnd, fy));
@@ -128,8 +130,24 @@ describe('H-2 · P&L from a CUMULATIVE trial balance is §3\'s difference', () =
     expect([v(aug, 'revenue'), v(aug, 'cost_of_sales'), v(aug, 'operating_expenses')]).toEqual(['1210.00', '484.00', '300.00']);
   });
 
-  it('no leaf evidence for a difference (no row selection totals to it, ADR-109)', () => {
-    expect(fig(run(JUL, CUMULATIVE, batches), 'revenue').evidenceQuery).toBeNull();
+  it('evidence names BOTH periods\' records and the subtraction, never one row selection', () => {
+    const q = fig(run(JUL, CUMULATIVE, batches), 'revenue').evidenceQuery as unknown as {
+      kind: string; formula: string;
+      terms: Array<{ name: string; sign: number; period_id: string | null; descriptor: { filters: Record<string, unknown> } | null; unavailable: string | null }>;
+    };
+    expect(q.kind).toBe('difference');
+    expect(q.formula).toBe('year_to_date - prior_year_to_date');
+    expect(q.terms.map((t) => [t.name, t.sign, t.period_id, t.unavailable])).toEqual([
+      ['year_to_date', 1, JUL.id, null], ['prior_year_to_date', -1, JUN.id, null],
+    ]);
+    expect(q.terms[0]!.descriptor!.filters).toMatchObject({ period_ids: [JUL.id], account_ids: [REV], balance_kind: 'trial_balance' });
+    expect(q.terms[1]!.descriptor!.filters).toMatchObject({ period_ids: [JUN.id], account_ids: [REV], balance_kind: 'trial_balance' });
+  });
+
+  it('with no prior report, the prior term says why it is unavailable', () => {
+    const q = fig(run(JUN, CUMULATIVE, batches), 'revenue').evidenceQuery as unknown as { kind: string; terms: Array<{ descriptor: unknown; unavailable: string | null }> } | null;
+    expect(q?.kind).toBe('difference');
+    expect(q!.terms[1]).toMatchObject({ descriptor: null, unavailable: 'no_prior_trial_balance' });
   });
 
   it('the fiscal year resets where the BATCH froze it: with a June year start, June is its own closing', () => {
@@ -138,12 +156,41 @@ describe('H-2 · P&L from a CUMULATIVE trial balance is §3\'s difference', () =
     expect(fig(r, 'revenue').evidenceQuery).not.toBeNull();
   });
 
-  it('an account the prior report lacks starts from a known zero, noted account_absent_prior', () => {
-    const cells = [...CUMULATIVE, bal(AUG, 'trial_balance', 'cumulative', MKT, '75')];
-    const r = run(AUG, cells, batches);
-    const mkt = r.find((m) => m.key === 'expense_by_category' && m.dimensionId === 'marketing') ?? fig(r, 'operating_expenses');
-    expect(v(r, 'operating_expenses')).toBe('375.00');
-    expect(mkt).toBeDefined();
+  /** Adds the balancing line that makes a month's trial balance balance (Σ debit − credit = 0). */
+  const balanced = (cells: AggregateCell[], p: PeriodRef): AggregateCell[] => {
+    const net = cells.filter((c) => c.periodId === p.id).reduce((t, c) => t.plus(c.amount), new Decimal(0));
+    return [...cells, bal(p, 'trial_balance', 'cumulative', EQ, net.negated().toFixed(2))];
+  };
+
+  it('an account the prior report lacks is a zero ONLY when that report balances (it lists every account)', () => {
+    const july = balanced(CUMULATIVE.filter((c) => c.periodId === JUL.id), JUL);
+    const aug = balanced([...CUMULATIVE.filter((c) => c.periodId === AUG.id), bal(AUG, 'trial_balance', 'cumulative', MKT, '75')], AUG);
+    expect(v(run(AUG, [...july, ...aug], batches), 'operating_expenses')).toBe('375.00');
+  });
+
+  it('…and is NULL account_absent_unconfirmed when the prior report does not establish completeness', () => {
+    const r = run(AUG, [...CUMULATIVE, bal(AUG, 'trial_balance', 'cumulative', MKT, '75')], batches);
+    expect(v(r, 'operating_expenses')).toBeNull();
+    expect(fig(r, 'operating_expenses').dataQuality.missing).toContain('account_absent_unconfirmed');
+  });
+
+  it('an account this month\'s report lacks (but last month stated) is −prior only when this report balances', () => {
+    const july = [...CUMULATIVE.filter((c) => c.periodId === JUL.id), bal(JUL, 'trial_balance', 'cumulative', MKT, '50')];
+    const augComplete = balanced(CUMULATIVE.filter((c) => c.periodId === AUG.id), AUG);
+    expect(v(run(AUG, [...july, ...augComplete], batches), 'operating_expenses')).toBe('250.00');
+    const r = run(AUG, [...july, ...CUMULATIVE.filter((c) => c.periodId === AUG.id)], batches);
+    expect(v(r, 'operating_expenses')).toBeNull();
+    expect(fig(r, 'operating_expenses').dataQuality.missing).toContain('account_absent_unconfirmed');
+  });
+
+  it('a P&L report never establishes completeness: an account it adds is NULL, not an inferred zero', () => {
+    const cells = [bal(JUL, 'pnl_report', 'cumulative', REV, '-2100'), bal(AUG, 'pnl_report', 'cumulative', REV, '-3310'),
+      bal(AUG, 'pnl_report', 'cumulative', MKT, '75')];
+    const prBatches = [JUL, AUG].map((p) => batch(`pr-${p.label}`, 'pnl_report', 'cumulative', p.periodStart, p.periodEnd));
+    const r = run(AUG, cells, prBatches);
+    expect(v(r, 'revenue')).toBe('1210.00');
+    expect(v(r, 'operating_expenses')).toBeNull();
+    expect(fig(r, 'operating_expenses').dataQuality.missing).toContain('account_absent_unconfirmed');
   });
 
   it('a prior month on another BASIS is not a prior: NULL, never a cross-basis difference', () => {
@@ -169,12 +216,31 @@ describe('H-2 · which source and which report states the P&L', () => {
     expect((fig(r, 'revenue').evidenceQuery as { descriptor: { filters: Record<string, unknown> } }).descriptor.filters.balance_kind).toBe('pnl_report');
   });
 
-  it('a report whose range spans the month but holds no row for it does not override the ledger', () => {
+  it('a report whose range spans the month but whose rows are all in another month is unavailable there: the ledger states it', () => {
     const cells = [bal(AUG, 'trial_balance', 'movement', REV, '-1210'), gl(JUN, REV, '0', '700'), gl(JUN, OPEX, '200', '0')];
-    const batches = [batch('tb-q', 'trial_balance', 'movement', '2026-06-01', '2026-08-31'), batch('gl', 'general_ledger', null, '2026-06-01', '2026-06-30')];
+    const batches = [batch('tb-q', 'trial_balance', 'movement', '2026-06-01', '2026-08-31', null, ['2026-08-01']),
+      batch('gl', 'general_ledger', null, '2026-06-01', '2026-06-30')];
     const r = run(JUN, cells, batches);
     expect(fig(r, 'revenue').basis).toBe('ledger');
     expect(v(r, 'revenue')).toBe('700.00');
+  });
+
+  it('a complete report stating a genuine ZERO P&L for the month keeps it: never revives the ledger', () => {
+    // July's trial balance has rows — only balance-sheet lines, so no income or expense that month.
+    const cells = [bal(JUL, 'trial_balance', 'movement', CASH, '500'), bal(JUL, 'trial_balance', 'movement', EQ, '-500'),
+      gl(JUL, REV, '0', '700')];
+    const batches = [batch('tb-jul', 'trial_balance', 'movement', JUL.periodStart, JUL.periodEnd, null, ['2026-07-01']),
+      batch('gl', 'general_ledger', null, '2026-07-01', '2026-07-31')];
+    const r = run(JUL, cells, batches);
+    expect(fig(r, 'revenue').basis).toBe('period_balances');
+    expect(v(r, 'revenue')).toBe('0.00');
+  });
+
+  it('a report line of 0.00 is a row: the month is stated as zero', () => {
+    const cells = [bal(JUL, 'trial_balance', 'movement', REV, '0'), gl(JUL, REV, '0', '700')];
+    const batches = [batch('tb-jul', 'trial_balance', 'movement', JUL.periodStart, JUL.periodEnd, null, ['2026-07-01']),
+      batch('gl', 'general_ledger', null, '2026-07-01', '2026-07-31')];
+    expect(v(run(JUL, cells, batches), 'revenue')).toBe('0.00');
   });
 
   it('with rows, the trial balance outranks the ledger (§2.3), unchanged', () => {

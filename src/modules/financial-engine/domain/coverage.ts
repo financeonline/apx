@@ -18,6 +18,7 @@
 import { bankCoverageFromRatio, completenessHolds } from '@/core/periods';
 import { bankCoverageFor, coveredRuns, runsCover } from './cash-history';
 
+import { Decimal, parseDecimalOrNull } from '@/core/money';
 import type {
   AggregateCell, BankAccountRef, BasisChoice, DataQualityWarning, PeriodCoverage, PeriodRef, SourceCoverage,
   SourceKind,
@@ -47,6 +48,12 @@ export interface CoverageBatch {
    * (`import_batches.fiscal_year_start_month_at_commit`, §3) — where a cumulative report resets.
    */
   readonly fiscalYearStartMonthAtCommit?: number | null;
+  /**
+   * Step 0E: the months (`period_start`) in which THIS balance batch has accepted rows. A batch whose
+   * declared range spans P but holds no row for P states nothing about P (a year-to-date report as at
+   * August, declared June–August, says nothing about June). Undefined: not loaded, rows not checked.
+   */
+  readonly rowMonths?: readonly string[] | null;
 }
 
 export interface CoverageInput {
@@ -96,9 +103,22 @@ export function winningBalanceBatch(
   kind: 'trial_balance' | 'pnl_report' | 'balance_sheet',
 ): CoverageBatch | null {
   const candidates = batches
-    .filter((b) => b.targetTable === 'period_balances' && b.balanceKind === kind && spans(b, period))
+    .filter((b) => b.targetTable === 'period_balances' && b.balanceKind === kind && spans(b, period)
+      && statesPeriod(b, period))
     .sort((a, b) => b.committedAt.localeCompare(a.committedAt) || b.id.localeCompare(a.id));
   return candidates[0] ?? null;
+}
+
+/**
+ * Step 0E: a balance batch STATES P only when it has rows dated in P. Rows include zero-value lines and
+ * balance-sheet lines, so a report that establishes a genuine zero P&L still states P and is never
+ * passed over for older ledger or bank figures. A batch whose rows all fall in other months — or that
+ * has none — says nothing about P: there it is genuinely unavailable, never a zero. Unknown rows (not
+ * loaded): assumed to state P.
+ */
+function statesPeriod(batch: CoverageBatch, period: PeriodRef): boolean {
+  if (batch.rowMonths === undefined || batch.rowMonths === null) return true;
+  return batch.rowMonths.includes(period.periodStart);
 }
 
 /**
@@ -154,10 +174,12 @@ export function balancePnlContext(input: {
   readonly batches: readonly CoverageBatch[];
   readonly cells: readonly AggregateCell[];
   readonly organisationFiscalYearStartMonth: number;
-}): { priorPeriodId: string | null; priorBatch: boolean; isFirstFiscalMonth: boolean } {
+}): { priorPeriodId: string | null; priorBatch: boolean; isFirstFiscalMonth: boolean; currentComplete: boolean; priorComplete: boolean } {
   const balances = input.coverage.bySource.period_balances;
   const kind = balances.covers ? balances.balanceKind : null;
-  if (!kind) return { priorPeriodId: input.prior?.id ?? null, priorBatch: false, isFirstFiscalMonth: false };
+  if (!kind) {
+    return { priorPeriodId: input.prior?.id ?? null, priorBatch: false, isFirstFiscalMonth: false, currentComplete: false, priorComplete: false };
+  }
   const basis = balances.balanceBasis ?? 'movement';
   const winning = winningBalanceBatch(input.batches, input.period, kind);
   const fyStart = winning?.fiscalYearStartMonthAtCommit ?? input.organisationFiscalYearStartMonth;
@@ -168,7 +190,26 @@ export function balancePnlContext(input: {
     const priorRows = balanceRowsByKind(input.cells, input.prior.id)[kind];
     priorBatch = priorWinning !== null && (priorWinning.balanceBasis ?? 'movement') === basis && priorRows > 0;
   }
-  return { priorPeriodId: input.prior?.id ?? null, priorBatch, isFirstFiscalMonth: month === fyStart };
+  return {
+    priorPeriodId: input.prior?.id ?? null,
+    priorBatch,
+    isFirstFiscalMonth: month === fyStart,
+    currentComplete: reportComplete(input.cells, input.period.id, kind),
+    priorComplete: input.prior === undefined ? false : reportComplete(input.cells, input.prior.id, kind),
+  };
+}
+
+/**
+ * Step 0E: a report establishes its own completeness only as a TRIAL BALANCE whose rows balance —
+ * Σ natural-sign closing (debit − credit) within a penny of zero, so every account carrying a balance
+ * is on it. A P&L report never does (it lists income and expense lines only).
+ */
+function reportComplete(cells: readonly AggregateCell[], periodId: string, kind: BalanceKind): boolean {
+  if (kind !== 'trial_balance') return false;
+  const rows = cells.filter((c) => c.periodId === periodId && c.source === 'period_balances' && c.balanceKind === kind);
+  if (rows.length === 0) return false;
+  const sum = rows.reduce((t, c) => t.plus(parseDecimalOrNull(c.amount) ?? new Decimal(0)), new Decimal(0));
+  return sum.abs().lessThanOrEqualTo('0.01');
 }
 
 // ---------------------------------------------------------------------------------------------

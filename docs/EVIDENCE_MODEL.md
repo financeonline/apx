@@ -154,6 +154,12 @@ A bundle usually mixes both: alerts pin drivers and carry the aggregate descript
 ### 5.1 Summary-level data
 For `period_balances`-based metrics the record item is the `period_balance` row; its `import_row_id → import_rows.source_ref` gives the sheet/row or page/line, and `source_document_id` the file. The drawer shows: metric → "Trial balance, Mar 2026, account 4000 Sales: movement £120,000" → document page. There is no transaction level for summary data; the records table shows the TB rows instead and says so ("This figure comes from a trial balance, so individual transactions are not available").
 
+*Cumulative reports (Step 0E, ADR-138).* On a cumulative (year-to-date) trial balance or P&L report, a month's figure is year-to-date(P) − year-to-date(P−1) (FINANCIAL_ENGINE §3), so no single selection of rows totals to it.
+- Its `evidence_query` is `{kind: 'difference', formula: 'year_to_date - prior_year_to_date', terms: [{name, sign, period_id, descriptor, unavailable}]}`. Each term has a leaf descriptor over its own period's rows (same accounts, same report kind), or `descriptor: null` with the reason it cannot be read.
+- The bundle cites both selections as query items.
+- The drawer shows the subtraction: "Year to date to Aug: £3,310 from 3 rows; less: year to date to Jul: £2,100; = £1,210".
+- Σ sign × total(term) reconciles to the figure.
+
 ---
 
 ## 5.2 The chain read backwards (Phase 8, ADR-096)

@@ -178,6 +178,27 @@ async function walk(state: WalkState, snapshot: Row): Promise<void> {
     return;
   }
 
+  if (evidenceQuery.kind === 'difference') {
+    /*
+     * Step 0E: a cumulative report's month = year to date (P) − year to date (P−1). Each readable
+     * term is its own record selection, labelled with its period and its role in the subtraction; an
+     * unreadable term has no records to cite (the drawer states why, from the snapshot).
+     */
+    for (const term of evidenceQuery.terms) {
+      if (term.descriptor === null) continue;
+      const termPeriod = term.period_id === null ? null : await periodLabel(ctx.db, orgId, term.period_id);
+      const role = term.sign === 1 ? 'year to date' : 'less: year to date';
+      state.items.push({
+        item_type: 'query',
+        query_descriptor: term.descriptor,
+        descriptor_hash: descriptorHash(term.descriptor),
+        label: `${queryLabel({ table: term.descriptor.table, ofMetricLabel: label })} — ${role}${termPeriod ? ` to ${termPeriod}` : ''}`,
+        assurance_level: await queryItemAssurance(ctx, term.descriptor, assurance),
+      });
+    }
+    return;
+  }
+
   for (const component of evidenceQuery.components) {
     const row = await fetchMetricSnapshot(ctx.db, orgId, component.snapshot_id);
     // §8.2: a snapshot an evidence item references is never archived, so a missing component is an

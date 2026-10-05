@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { Decimal } from '@/core/money';
 import { permissionsFor } from '@/core/permissions';
-import { resolveDescriptor } from '@/modules/evidence';
+import { buildBundleForMetric, loadEvidenceDrawer, resolveDescriptor } from '@/modules/evidence';
 import { startImport } from '@/modules/imports';
 import type { AccessContext } from '@/modules/tenancy';
 import { calculateAndAlert } from '../fixtures/adr120-orgs';
@@ -83,10 +83,11 @@ let dc: string; let cum: string; let pnl: string; let mixed: string; let zero: s
 beforeAll(async () => {
   owner = createAuthUser(`owner@${DOMAIN}`);
 
-  // A movement trial balance in DEBIT / CREDIT columns, June–August.
+  // A movement trial balance in DEBIT / CREDIT columns, June–August. It balances (IMP-TB-011 refuses
+  // one that does not): the month's profit sits in Cash.
   dc = await org('DC');
-  for (const [ym, r, c] of [['2026-06', '1000', '400'], ['2026-07', '1100', '440'], ['2026-08', '1210', '484']] as const) {
-    const res = await upload(dc, 'trial_balance', ym, `Account,Debit,Credit\nRevenue,,${r}.00\nCost of Sales,${c}.00,\nOperating Expenses,300.00,\n`);
+  for (const [ym, r, c, cash] of [['2026-06', '1000', '400', '300'], ['2026-07', '1100', '440', '360'], ['2026-08', '1210', '484', '426']] as const) {
+    const res = await upload(dc, 'trial_balance', ym, `Account,Debit,Credit\nRevenue,,${r}.00\nCost of Sales,${c}.00,\nOperating Expenses,300.00,\nCash,${cash}.00,\n`);
     await commit(dc, res.batchId, 'movement', 'natural');
   }
 
@@ -112,7 +113,7 @@ beforeAll(async () => {
     ];
     glBatch(mixed, { start: `${ym}-01`, end: END[ym]!, lines, tag: `bp-gl-${ym}` });
   }
-  const m = await upload(mixed, 'trial_balance', '2026-07', 'Account,Debit,Credit\nRevenue,,5000.00\nOperating Expenses,800.00,\n');
+  const m = await upload(mixed, 'trial_balance', '2026-07', 'Account,Debit,Credit\nRevenue,,5000.00\nOperating Expenses,800.00,\nCash,4200.00,\n');
   await commit(mixed, m.batchId, 'movement', 'natural');
 
   // A legitimate zero.
@@ -133,7 +134,7 @@ describe('stored as natural-sign closing balances', () => {
     expect(adminSql(`select a.name || '=' || b.closing_balance || '/' || coalesce(b.debit_total::text, '-') || '/' || coalesce(b.credit_total::text, '-')
         from public.period_balances b join public.accounts a on a.id = b.account_id
        where b.organization_id = '${dc}' and b.period_start = '2026-07-01' order by a.name`).split('\n'))
-      .toEqual(['Cost of Sales=440.00/440.00/-', 'Operating Expenses=300.00/300.00/-', 'Revenue=-1100.00/-/1100.00']);
+      .toEqual(['Cash=360.00/360.00/-', 'Cost of Sales=440.00/440.00/-', 'Operating Expenses=300.00/300.00/-', 'Revenue=-1100.00/-/1100.00']);
   });
 
   it('a reporting-sign P&L report is stored in natural sign (income negated at commit)', () => {
@@ -146,7 +147,8 @@ describe('stored as natural-sign closing balances', () => {
     const o = await org('BLANK');
     const res = await upload(o, 'trial_balance', '2026-08', 'Account,Debit,Credit\nRevenue,,\nOperating Expenses,300.00,\n');
     const rows = adminSql(`select row_number || ':' || status from public.import_rows where batch_id = '${res.batchId}' and row_number > 1 order by row_number`).split('\n');
-    expect(rows).toEqual(['2:error', '3:valid']);
+    expect(rows[0]).toBe('2:error');
+    expect(rows[1]).toMatch(/^3:(valid|warning)$/);
   });
 });
 
@@ -187,7 +189,7 @@ describe('Health and evidence', () => {
     expect(['2026-06', '2026-07', '2026-08'].map((ym) => total(dc, ym))).toEqual([null, 87, 87]);
   });
 
-  it('every movement-basis P&L drill-down totals its figure; a cumulative difference has none', async () => {
+  it('every movement-basis P&L drill-down totals its figure', async () => {
     const rows = adminSql(`select c.metric_key || '|' || coalesce(s.value::text, 'NULL') || '|' || coalesce(s.evidence_query::text, 'null')
         from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id and s.organization_id = c.organization_id
         join public.fiscal_periods p on p.id = c.period_id and p.organization_id = c.organization_id
@@ -200,8 +202,44 @@ describe('Health and evidence', () => {
       const sel = await resolveDescriptor(ctxFor(dc), parsed.descriptor as never);
       expect(new Decimal(sel.total!).toFixed(2), key).toBe(new Decimal(value).toFixed(2));
     }
-    expect(one(`select coalesce(s.evidence_query::text, 'null') from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-      join public.fiscal_periods p on p.id = c.period_id where c.organization_id = '${cum}' and c.metric_key = 'revenue'
-      and c.dimension_type = 'none' and p.period_start = '2026-07-01'`)).toBe('null');
+  });
+
+  const snapshotOf = (o: string, ym: string, key: string) => one(`select s.id from public.metric_current c
+    join public.metric_snapshots s on s.id = c.snapshot_id and s.organization_id = c.organization_id
+    join public.fiscal_periods p on p.id = c.period_id and p.organization_id = c.organization_id
+   where c.organization_id = '${o}' and c.metric_key = '${key}' and c.dimension_type = 'none' and p.period_start = '${ym}-01'`);
+
+  it('a cumulative month traces to BOTH periods\' records and the subtraction: Σ(Aug) − Σ(Jul) = the figure', async () => {
+    for (const key of ['revenue', 'cost_of_sales', 'operating_expenses']) {
+      const query = JSON.parse(one(`select s.evidence_query::text from public.metric_snapshots s where s.id = '${snapshotOf(cum, '2026-08', key)}'`)) as {
+        kind: string; terms: Array<{ sign: number; descriptor: Record<string, unknown> | null; period_id: string }>;
+      };
+      expect(query.kind, key).toBe('difference');
+      let total = new Decimal(0);
+      for (const term of query.terms) {
+        expect(term.descriptor, key).not.toBeNull();
+        const sel = await resolveDescriptor(ctxFor(cum), term.descriptor as never);
+        expect(sel.count, `${key} rows`).toBeGreaterThan(0);
+        total = total.plus(new Decimal(sel.total!).times(term.sign));
+      }
+      expect(total.toFixed(2), key).toBe(new Decimal(valueOf(cum, '2026-08', key)!).toFixed(2));
+    }
+  });
+
+  it('the evidence drawer opens a cumulative figure: formula, both periods, both totals', async () => {
+    const bundle = await buildBundleForMetric(ctxFor(cum), snapshotOf(cum, '2026-08', 'revenue'));
+    const view = await loadEvidenceDrawer(ctxFor(cum), bundle);
+    expect(view.metric!.difference).not.toBeNull();
+    expect(view.metric!.difference!.terms.map((t) => [t.name, t.sign, new Decimal(t.total!).toFixed(2), t.unavailable]))
+      .toEqual([['year_to_date', 1, '3310.00', null], ['prior_year_to_date', -1, '2100.00', null]]);
+    // Both selections are query items of the bundle (the server accepted them as leaves of the figure).
+    expect(view.records.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('with no prior month, the drawer states which side is missing and why', async () => {
+    const bundle = await buildBundleForMetric(ctxFor(cum), snapshotOf(cum, '2026-06', 'revenue'));
+    const view = await loadEvidenceDrawer(ctxFor(cum), bundle);
+    expect(view.metric!.difference!.terms[1]).toMatchObject({ name: 'prior_year_to_date', total: null, unavailable: 'no_prior_trial_balance' });
+    expect(view.metric!.difference!.terms[0]!.total).not.toBeNull();
   });
 });

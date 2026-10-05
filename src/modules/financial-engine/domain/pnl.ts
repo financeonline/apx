@@ -113,10 +113,11 @@ export interface PnlInput {
   readonly invoiceCounterparties?: ReadonlyMap<StandardCategory, readonly string[]>;
   /**
    * H-2 (Step 0E): the balance basis is a CUMULATIVE report outside the fiscal year's first month, so
-   * each figure is closing(P) − closing(P_prev). No leaf selection of rows totals to a difference
-   * (ADR-109), so no leaf descriptor is written for these figures.
+   * each figure is closing(P) − closing(P_prev). No single selection of rows totals to a difference
+   * (ADR-109); the evidence states both periods' records and the subtraction (`kind: 'difference'`).
+   * `priorAvailable` false: the prior term is unavailable (`no_prior_trial_balance`).
    */
-  readonly balanceDifferenced?: boolean;
+  readonly balanceDifference?: { readonly priorPeriodId: string | null; readonly priorAvailable: boolean };
   /**
    * Cost of sales exists in a source the chosen basis is not reading (purchase invoices from a
    * cost-of-sales supplier, while the P&L comes from a ledger that states none). The figure is
@@ -336,21 +337,36 @@ function leafEvidence(
     };
   }
   if (table === 'period_balances') {
-    if (input.balanceDifferenced === true) return null;
     // H-2: only the winning report kind's rows are the figure (a balance sheet's or a P&L report's
     // rows for the same account would otherwise be totalled too).
-    return {
-      kind: 'leaf',
-      descriptor: {
-        v: 1,
-        table,
-        filters: {
-          period_ids,
-          account_ids: accountIds,
-          ...(input.basis.balanceKind ? { balance_kind: input.basis.balanceKind } : {}),
-        },
-        as_of: asOf,
+    const balanceLeaf = (periodIds: readonly string[]): LeafDescriptor => ({
+      v: 1,
+      table,
+      filters: {
+        period_ids: [...periodIds],
+        account_ids: accountIds,
+        ...(input.basis.balanceKind ? { balance_kind: input.basis.balanceKind } : {}),
       },
+      as_of: asOf,
+    });
+    const difference = input.balanceDifference;
+    if (difference === undefined) return { kind: 'leaf', descriptor: balanceLeaf(period_ids) };
+    // A cumulative month: this report's year to date, less the prior month's (§3). Both periods'
+    // records are named, and the prior one's absence is stated rather than hidden.
+    const priorReadable = difference.priorAvailable && difference.priorPeriodId !== null;
+    return {
+      kind: 'difference',
+      formula: 'year_to_date - prior_year_to_date',
+      terms: [
+        { name: 'year_to_date', sign: 1, period_id: input.period.id, descriptor: balanceLeaf(period_ids), unavailable: null },
+        {
+          name: 'prior_year_to_date',
+          sign: -1,
+          period_id: difference.priorPeriodId,
+          descriptor: priorReadable ? balanceLeaf([difference.priorPeriodId!]) : null,
+          unavailable: priorReadable ? null : 'no_prior_trial_balance',
+        },
+      ],
     };
   }
   return {

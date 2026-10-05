@@ -2545,7 +2545,7 @@ The TypeScript mirror (`storedNameKey`) is compared with the database over every
 
 ### ADR-138 · H-1: no bank data is not banking evidence. H-2: a balance report's P&L is its closing balances by §3
 
-**Status:** Accepted (Step 0E, remediation of the independent audit of `step0d-review-frozen`). Engine 9.0.0; `health.config.v3`; migration `20261007000001`. For re-review.
+**Status:** Accepted (Step 0E, remediation of the independent audit of `step0d-review-frozen`). Engine 10.0.0 (9.0.0 superseded before release); `health.config.v3`; migrations `20261007000001`, `20261007000002`. For re-review.
 
 **H-1 problem.** `computeCoverage` returns `bankCoverageRatio = 1` when no cash-like account is in scope. That is right for `is_complete` (nothing to wait for). The run handed the same number to Health as a fact about banking, so an organisation with no bank account got Banking Health 60 with B4 "full coverage +10", and totals that should be NULL were published.
 
@@ -2576,12 +2576,23 @@ On the import side, a Debit/Credit trial balance and a single-Amount P&L report 
   - Cumulative basis: closing(P) − closing(P−1), with P−1 the same kind AND basis. The fiscal year's first month, as frozen on the batch, is its own closing. A prior report lacking the account gives a known zero with `account_absent_prior`. No prior report gives NULL `no_prior_trial_balance`.
   - `app.batch_coverage` now returns `balance_basis` and `fiscal_year_start_month_at_commit`.
 - **Coverage:** a report kind whose batch spans P but holds no row for P does not cover P, as §2.2 already requires of the ledger. A report that states nothing about the month cannot override a source that does.
-- **Evidence:** balance drill-downs filter by report kind. A cumulative month's figure is a difference, which no leaf selection totals to (ADR-109), so it carries no leaf descriptor.
+- **Evidence:** balance drill-downs filter by report kind. A cumulative month's figure is a difference, so no single row selection can total to it (ADR-109). Its `evidence_query` is `kind: 'difference'`: the formula `year_to_date - prior_year_to_date` and two terms. Each term has its period and its own leaf descriptor (the same accounts and report kind), or `unavailable` with the reason (`no_prior_trial_balance`).
+  - Migration `20261007000002`: `api_server.build_metric_bundle_as` accepts both term descriptors as leaves of the figure, so a bundle cites both periods' records.
+  - The drawer shows the subtraction: each term's period, its records' total, and the result. An unavailable term shows its reason.
+  - Σ sign × total(term) equals the figure (integration-tested). *(In 9.0.0, before review, no evidence was written for these figures; that was rejected as a resolution.)*
 
-**Policy questions flagged, not decided here:**
-1. A cumulative report with no prior month keeps covering P and states NULL (`no_prior_trial_balance`), per §2.2's existing text. It does not fall back to a ledger or bank source that could state P. Should it fall back?
-2. In a cumulative report, an account stated last month and absent this month is read as a year-to-date zero (month = −prior). §3 states this inference only for the prior side.
-3. Evidence for cumulative-basis figures: none is shown (above). A two-row "difference" evidence form would need a descriptor extension.
-4. A report kind with no rows for P now falls through §2.3. This is a precedence change by analogy with the ledger rule.
+**Policies applied after review (product owner, Step 0E):**
+1. **No prior cumulative period → NULL.** The month stays covered and states NULL `no_prior_trial_balance`, per §2.2. It does not fall back to a ledger or bank source.
+2. **A missing account is not assumed zero** unless the report establishes completeness. A trial balance whose rows balance (Σ debit − credit within 0.01) lists every account carrying a balance, so an account it omits stands at zero.
+   - This applies on both sides: an account the prior report lacks, and an account this month's report lacks.
+   - A P&L report, or a trial balance that does not balance, establishes nothing. The account's month is NULL `account_absent_unconfirmed`, and so is every figure built on it.
+   - *This narrows §3's text, which made the prior-side zero unconditional.* (9.0.0 inferred zero on both sides.)
+3. **"No rows" fallback is per batch and per month.** A balance batch states a month only where it has accepted rows dated in it (`row_months` from `app.batch_coverage`). A batch whose rows all lie in other months is genuinely unavailable there, so the next source in §2.3 states the month. Rows include zero-value and balance-sheet lines. A report that establishes a genuine zero P&L (for example, balance-sheet lines only) still covers the month and never revives older ledger or bank figures (unit-tested).
+
+**Ambiguities that remain open (not decided here):**
+- **A1:** A batch with NO rows at all, an empty report, covers nothing. If a product rule wants an empty P&L report to state "no trading" for its range, that needs a decision and an explicit confirmation at import.
+- **A2:** Completeness is established only by a balancing trial balance. A single-column trial balance is not balance-checked at import (IMP-TB-011 runs for Debit/Credit layouts only), so the engine checks the balance itself. Should a non-balancing single-column trial balance be refused at import instead?
+- **A3:** Two batches of the same kind with rows for the same month are both summed when the later one did not supersede the earlier. This relies on commit superseding at batch scope (IMP-COV-013) and was not re-audited here.
+- **A4:** A movement-basis report's absent account contributes nothing to its month. That is inherent to any record source, and no zero is inferred, but it is stated here for completeness.
 
 **Not changed:** H-3, R-2, R-3, U-1, U-2 and every LOW finding of the audit remain open. The cap of 70 (D-2) and the VAT rule (D-1) are unapproved.

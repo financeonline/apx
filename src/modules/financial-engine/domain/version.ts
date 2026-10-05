@@ -109,7 +109,17 @@
  *   - H-1: coverage also states `bankEvidenceRatio` (NULL = no cash-like account in scope), which
  *     Health reads instead of the completeness ratio (see HEALTH_CONFIG_VERSION).
  */
-export const ENGINE_VERSION = '9.0.0';
+/**
+ * 10.0.0 (Step 0E corrections after review, ADR-138): MAJOR. 9.0.0 was never released; its hash is kept.
+ *   - A cumulative report's month carries `kind: 'difference'` evidence: both periods' records and the
+ *     subtraction, or the reason a term is unavailable (9.0.0 wrote no evidence for it).
+ *   - An account in one month's cumulative report and not the other's is a zero only when that report
+ *     establishes completeness (a trial balance that balances); otherwise NULL `account_absent_unconfirmed`
+ *     (9.0.0 inferred zero on both sides).
+ *   - A balance batch states a month only where it has rows (per batch, `row_months`); a batch whose
+ *     rows are all in other months is unavailable there.
+ */
+export const ENGINE_VERSION = '10.0.0';
 
 /** Bumped independently of the engine (§6). */
 /**

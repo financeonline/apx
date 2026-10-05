@@ -6,6 +6,11 @@
 -- return either fact, and the engine hard-coded the basis to NULL ("movement"), so a cumulative trial
 -- balance's year to date would have been read as the month. The two columns are appended; nothing
 -- else about the function changes. Its only caller is `financial-engine/data/repository.ts`.
+--
+-- A third column, `row_months`, lists the months in which a balance batch has accepted rows: a batch
+-- whose declared range spans a month but holds no row for it states nothing about that month (a
+-- year-to-date report as at August, declared June–August, says nothing about June), so it must not
+-- cover it. NULL for every other target.
 
 drop function api_server.batch_coverage(uuid, date, date);
 drop function app.batch_coverage(uuid, date, date);
@@ -22,7 +27,8 @@ returns table (
   committed_at    timestamptz,
   batch_id        uuid,
   balance_basis   public.balance_basis_enum,
-  fiscal_year_start_month_at_commit smallint
+  fiscal_year_start_month_at_commit smallint,
+  row_months      date[]
 )
 language sql stable security definer set search_path = '' as $$
   select b.target_table,
@@ -39,7 +45,13 @@ language sql stable security definer set search_path = '' as $$
          b.committed_at,
          b.id,
          b.balance_basis,
-         b.fiscal_year_start_month_at_commit
+         b.fiscal_year_start_month_at_commit,
+         case when b.target_table = 'period_balances' then
+           coalesce((select array_agg(distinct pb.period_start order by pb.period_start)
+                       from public.period_balances pb
+                      where pb.organization_id = b.organization_id and pb.import_batch_id = b.id
+                        and pb.record_status = 'accepted' and pb.superseded_by is null), '{}'::date[])
+         end
     from public.import_batches b
    where b.organization_id = p_org
      and b.status = 'committed'
@@ -57,7 +69,7 @@ create function api_server.batch_coverage(
   balance_kind public.balance_kind_enum, bank_account_id uuid,
   invoice_list_kind public.invoice_list_kind_enum, period_start date, period_end date,
   committed_at timestamptz, batch_id uuid,
-  balance_basis public.balance_basis_enum, fiscal_year_start_month_at_commit smallint
+  balance_basis public.balance_basis_enum, fiscal_year_start_month_at_commit smallint, row_months date[]
 )
 language plpgsql security definer set search_path = '' as $$
 begin

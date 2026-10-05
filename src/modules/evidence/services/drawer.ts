@@ -111,6 +111,47 @@ export interface DrawerMetric {
    * unreconciled month it was carried through (`components.rests_on_statements`). Empty otherwise.
    */
   readonly restsOn: readonly RestsOnStatement[];
+  /**
+   * Step 0E: a figure that is the DIFFERENCE of two periods' records (a cumulative report's month):
+   * the formula and each term — its period, the total of its records, or why it cannot be read.
+   * NULL for every other figure.
+   */
+  readonly difference: DrawerDifference | null;
+}
+
+export interface DrawerDifference {
+  readonly formula: string;
+  readonly terms: ReadonlyArray<{
+    readonly name: 'year_to_date' | 'prior_year_to_date';
+    readonly sign: 1 | -1;
+    readonly periodLabel: string | null;
+    /** Σ of the term's records in reporting sign; NULL when the term is unavailable. */
+    readonly total: string | null;
+    readonly rowCount: number | null;
+    /** The engine's reason the term cannot be read (e.g. `no_prior_trial_balance`). */
+    readonly unavailable: string | null;
+  }>;
+}
+
+/** Resolves each term of a `difference` evidence query (Step 0E), so the drawer can show the sum. */
+async function differenceOf(ctx: AccessContext, orgId: string, snapshot: Row): Promise<DrawerDifference | null> {
+  const query = snapshot.evidence_query as {
+    kind?: string;
+    formula?: string;
+    terms?: Array<{ name: 'year_to_date' | 'prior_year_to_date'; sign: 1 | -1; period_id: string | null; descriptor: unknown; unavailable: string | null }>;
+  } | null;
+  if (query?.kind !== 'difference' || !Array.isArray(query.terms)) return null;
+  const terms = [];
+  for (const term of query.terms) {
+    const periodLabel = term.period_id === null ? null : await periodLabelOf(ctx, orgId, term.period_id);
+    if (term.descriptor === null || term.descriptor === undefined) {
+      terms.push({ name: term.name, sign: term.sign, periodLabel, total: null, rowCount: null, unavailable: term.unavailable ?? 'unavailable' });
+      continue;
+    }
+    const selection = await resolveCompiled(ctx, compileDescriptor(parseQueryDescriptor(term.descriptor)));
+    terms.push({ name: term.name, sign: term.sign, periodLabel, total: selection.total, rowCount: selection.count, unavailable: null });
+  }
+  return { formula: query.formula ?? 'year_to_date - prior_year_to_date', terms };
 }
 
 export interface RestsOnStatement {
@@ -308,6 +349,7 @@ export async function loadEvidenceDrawer(
       dataQuality: (rootSnapshot.data_quality ?? {}) as Record<string, unknown>,
       ...state,
       restsOn: await restsOnStatements(ctx, orgId, rootSnapshot),
+      difference: await differenceOf(ctx, orgId, rootSnapshot),
     };
   }
 

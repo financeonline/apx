@@ -118,6 +118,9 @@ export async function loadCoverageBatches(
     balanceBasis: (r.balance_basis as CoverageBatch['balanceBasis'] | undefined) ?? null,
     fiscalYearStartMonthAtCommit: r.fiscal_year_start_month_at_commit === null || r.fiscal_year_start_month_at_commit === undefined
       ? null : Number(r.fiscal_year_start_month_at_commit),
+    // Step 0E: the months this balance batch has rows in (a batch states only those, or its whole range
+    // when it has none). NULL for other targets.
+    rowMonths: Array.isArray(r.row_months) ? (r.row_months as unknown[]).map(String) : null,
     bankAccountId: r.bank_account_id as string | null,
     invoiceListKind: r.invoice_list_kind as CoverageBatch['invoiceListKind'],
     importType: (r.import_type as string | null) ?? null,

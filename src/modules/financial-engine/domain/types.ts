@@ -55,6 +55,12 @@ export const DATA_QUALITY_MISSING = [
   'partial_month',
   /** No cash-like bank account exists, so nothing can establish cash (ADR-104). */
   'no_bank_accounts',
+  /**
+   * Step 0E: an account appears in one month's cumulative report and not in the other's, and that
+   * report does not establish its own completeness (a trial balance that balances), so its absence is
+   * not known to mean zero.
+   */
+  'account_absent_unconfirmed',
   /** Cost of sales exists in a source the chosen P&L basis is not reading (ADR-104). */
   'cost_of_sales_in_other_source',
   /**
@@ -114,10 +120,33 @@ export interface LeafDescriptor {
   readonly limit?: number;
 }
 
+/**
+ * One side of a figure that is a DIFFERENCE of two months' records (Step 0E): a cumulative trial
+ * balance's or P&L report's month is year-to-date(P) − year-to-date(P−1) (§3). Each term names its own
+ * records; a term that cannot be read names why instead (`descriptor` NULL, `unavailable` set).
+ */
+export interface DifferenceTerm {
+  readonly name: 'year_to_date' | 'prior_year_to_date';
+  /** +1 for the minuend, −1 for the subtrahend: figure = Σ sign × total(term). */
+  readonly sign: 1 | -1;
+  readonly period_id: string | null;
+  readonly descriptor: LeafDescriptor | null;
+  readonly unavailable: DataQualityMissing | null;
+}
+
 export type EvidenceQuery =
   | { readonly kind: 'leaf'; readonly descriptor: LeafDescriptor }
   /** A derived metric points at the snapshots it was computed from, so a reader can descend. */
-  | { readonly kind: 'derived'; readonly components: ReadonlyArray<{ name: string; snapshot_id: string | null }> };
+  | { readonly kind: 'derived'; readonly components: ReadonlyArray<{ name: string; snapshot_id: string | null }> }
+  /**
+   * Step 0E: a figure that is the difference of two periods' records (§3 cumulative differencing).
+   * No single row selection totals to it (ADR-109), so both selections and the formula are stated.
+   */
+  | {
+      readonly kind: 'difference';
+      readonly formula: 'year_to_date - prior_year_to_date';
+      readonly terms: readonly DifferenceTerm[];
+    };
 
 // ---------------------------------------------------------------------------------------------
 // The unit of engine output
