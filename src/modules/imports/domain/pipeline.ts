@@ -67,6 +67,7 @@ function primaryDateFieldOf(target: ImportTarget): string {
     case 'bank_transactions': return 'transaction_date';
     case 'invoices': return 'issue_date';
     case 'period_balances': return 'period_start';
+    case 'budget_lines': return 'period_start';
   }
 }
 
@@ -125,6 +126,7 @@ const DATE_FIELD_BY_TARGET: Readonly<Record<ImportTarget, string>> = {
   bank_transactions: 'transaction_date',
   invoices: 'issue_date',
   period_balances: 'period_start',
+  budget_lines: 'period_start',
 };
 
 /** Applies the column map to one parsed line, producing target-field values. */
@@ -332,6 +334,18 @@ export function runPipeline(input: PipelineInput): PipelineResult {
    */
   const ambiguousDateRows = new Set<number>(input.ambiguousDateRows ?? []);
   const dateFields = DATE_FIELDS.filter((field) => staged.some((s) => !s.nonTabular && s.mapped[field] !== undefined));
+  /*
+   * A budget names months, and a month is often written "2026-11" or "Nov 2026" rather than as a day
+   * (ADR-142). A year-and-month is read as the first of that month before the date column is read.
+   */
+  if (input.targetTable === 'budget_lines') {
+    for (const s of staged) {
+      const cell = s.mapped.period_start;
+      if (s.nonTabular || cell === null || cell === undefined) continue;
+      const ym = /^\s*(\d{4})[-/.](\d{1,2})\s*$/.exec(cell);
+      if (ym) s.mapped.period_start = `${ym[1]}-${ym[2]!.padStart(2, '0')}-01`;
+    }
+  }
   for (const field of dateFields) {
     const detection = detectDateColumn(
       staged.filter((s) => !s.nonTabular).map((s) => s.mapped[field] ?? null),
@@ -346,6 +360,13 @@ export function runPipeline(input: PipelineInput): PipelineResult {
       // An unreadable cell is left as written, so `IMP-DATE-001` names it rather than a blank.
       if (iso !== null) s.mapped[field] = iso;
       if (field === primaryDateFieldOf(input.targetTable) && readsDifferentlyUnderAlternate(cell, order)) ambiguousDateRows.add(s.rowNumber);
+    }
+  }
+  // A budget line belongs to a month: any day in it names the month (ADR-142).
+  if (input.targetTable === 'budget_lines') {
+    for (const s of staged) {
+      const iso = s.mapped.period_start;
+      if (!s.nonTabular && iso && /^\d{4}-\d{2}-\d{2}$/.test(iso)) s.mapped.period_start = `${iso.slice(0, 7)}-01`;
     }
   }
 
@@ -372,7 +393,7 @@ export function runPipeline(input: PipelineInput): PipelineResult {
    * Only a declared range inside ONE calendar month names the period; any wider range leaves the row
    * without one, and IMP-PERIOD-005 asks the reviewer instead of guessing a month.
    */
-  if (input.targetTable === 'period_balances') {
+  if (input.targetTable === 'period_balances' || input.targetTable === 'budget_lines') {
     const month = singleMonthOf(input.declaredPeriodStart, input.declaredPeriodEnd);
     if (month !== null) {
       for (const s of staged) {
@@ -413,6 +434,23 @@ export function runPipeline(input: PipelineInput): PipelineResult {
       ...(nameIssueOfRow === undefined ? issues : [...issues.filter((i) => i.code !== 'IMP-CP-016'), nameIssueOfRow]),
       ...(spelling === undefined ? [] : [spelling]),
     ]);
+  }
+
+  // ADR-142: one budget line per account and month. A second one is an error on that row, never a
+  // silent sum — two figures for one month's rent is a question for the person, not for MOTION.
+  if (input.targetTable === 'budget_lines') {
+    const seen = new Map<string, number>();
+    for (const s of staged) {
+      if (s.nonTabular || !s.accountValue || !s.mapped.period_start) continue;
+      const key = `${s.mapped.period_start.slice(0, 7)}|${storedNameKey(s.accountValue)}`;
+      const first = seen.get(key);
+      if (first === undefined) { seen.set(key, s.rowNumber); continue; }
+      issuesByRow.set(s.rowNumber, [...(issuesByRow.get(s.rowNumber) ?? []), {
+        code: 'IMP-BUD-001', severity: 'error', field: 'account',
+        message: `"${s.accountValue}" already has a budget for ${s.mapped.period_start.slice(0, 7)} on row ${first}.`,
+        suggestion: 'Keep one line per account and month, or skip this row.',
+      }]);
+    }
   }
 
   // ---- Pass C: duplicates, over the rows that could actually commit ----

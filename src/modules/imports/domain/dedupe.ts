@@ -49,7 +49,8 @@ export function normalizeBankName(name: string | null | undefined): string {
 export function scopeKey(input: ScopeKeyInput): string {
   switch (input.targetTable) {
     case 'ledger_entries':
-    case 'period_balances': {
+    case 'period_balances':
+    case 'budget_lines': {
       const code = (input.accountCode ?? '').trim();
       return code !== '' ? `code:${code.toLowerCase()}` : `name:${input.accountNormalizedName ?? ''}`;
     }

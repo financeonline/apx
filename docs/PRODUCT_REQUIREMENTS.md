@@ -171,7 +171,7 @@ MVP column values:
 | REQ-CA-11 | Customer/product/service contribution where data supports it. | SOW §7 | SOW requirement | **Built (P14)**: product/service contribution from sales and purchase lines, "unavailable" without a cost line; customer contribution remains the engine's (revenue less recorded customer costs) | `customer_revenue`, `customer_contribution`, `api.product_period_summary` | CD-08, ADR-102 |
 | REQ-CA-12 | Revenue, cost and customer concentration. | SOW §7 | SOW requirement | MVP | `customer_concentration_top1/top5`, `revenue_concentration_hhi`, `supplier_concentration_top1/top5` | — |
 | REQ-CA-13 | Period-over-period variance. | SOW §7 | SOW requirement | MVP | `{base}.variance.{prev_period\|same_period_last_year\|trailing_3m_avg}` | — |
-| REQ-CA-14 | Budget/forecast variance where applicable. | SOW §7 | SOW requirement | Post-MVP (P11) | `budget_variance.*`, `forecast.*` reserved | CD-27 |
+| REQ-CA-14 | Budget/forecast variance where applicable. | SOW §7 | SOW requirement | Built locally (ADR-142): budget against actual beside the engine (`budget_variance.v1`); forecast variance via Phase 11 | ADR-142 | CD-27 |
 | REQ-CA-15 | Financial metrics are calculated deterministically; dashboard figures originate from application data/calculation services. | SOW §23 | SOW requirement | MVP | `metric_snapshots`, `calculation_runs` | — |
 | REQ-CA-16 | Each metric records its basis (period_balances / ledger / invoices / bank), assurance level and data quality; sources are never summed across for one metric-period. | SOW §7, §11 | Architectural | MVP | ADR-005 | CD-03 |
 
@@ -279,8 +279,8 @@ MVP column values:
 |---|---|---|---|---|---|---|
 | REQ-FC-01 | Forecasting shall support revenue, expenses, operating profit, cash, receivables and payables where sufficient data exists. | SOW §3, §14 | SOW requirement | Post-MVP (P11) | `forecast.*` | — |
 | REQ-FC-02 | Forecast engine and actual-vs-forecast views. | SOW §21 | SOW requirement | Post-MVP (P11) | REQ-FC-01 | — |
-| REQ-FC-03 | Budget import (period, account/category, amount). | SOW §7 | Architectural | Post-MVP (P11) | CD-27 | CD-27 |
-| REQ-FC-04 | Budget/forecast variance metrics. | SOW §7 | SOW requirement | Post-MVP (P11) | REQ-CA-14 | — |
+| REQ-FC-03 | Budget import (period, account/category, amount). | SOW §7 | Architectural | Built locally (ADR-142): import type `budget` through the wizard into `budget_lines` | ADR-142 | CD-27 |
+| REQ-FC-04 | Budget/forecast variance metrics. | SOW §7 | SOW requirement | Built locally (ADR-142): `/money/budget` and analyst tool 27; not engine metrics (owner decision) | REQ-CA-14, ADR-142 | — |
 | REQ-FC-05 | Forecast outputs carry assurance level `estimated` and are never shown as verified. | SOW §11 | Architectural | Post-MVP (P11) | ADR-016 | — |
 
 ## 15. Scenarios

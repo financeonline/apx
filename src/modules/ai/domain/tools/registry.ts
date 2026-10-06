@@ -7,9 +7,10 @@ import {
 } from './intelligence';
 import { getBankAccounts, getBankCategories, getRecurringPayments, getUnusualTransactions } from './banking';
 import { getCampaignPerformance, getProductContribution, getSalesPipeline } from './commercial';
+import { getBudgetVariance } from './budget';
 
 /**
- * The closed registry (AI_ARCHITECTURE.md §3): the twenty-six tools, and no way to add another
+ * The closed registry (AI_ARCHITECTURE.md §3): the twenty-seven tools, and no way to add another
  * without a code change here, a permission, a Zod schema with branded numbers, and a test.
  *
  * The last two were added in Phase 9 (ADR-097). They give the analyst the two ends of the evidence
@@ -27,6 +28,9 @@ import { getCampaignPerformance, getProductContribution, getSalesPipeline } from
  * Tools 24–26 (Phase 14, ADR-102) read commercial intelligence through the Customers pages' own
  * services: product contribution only from attributed lines, campaign revenue only through won
  * opportunities, conversion with its cohort named. Each gap is returned as a gap, never filled.
+ *
+ * Tool 27 (ADR-142) reads budget against actual through the Budget page's own service; the actual
+ * figures carry their snapshot ids, the plan is labelled as imported.
  *
  * Order is the order the model is shown them, broadest first. `submit_answer` is not a tool in this
  * sense — it is the response contract (§5) and is added by the loop as the forced final call.
@@ -61,6 +65,7 @@ export const TOOLS: readonly AnyTool[] = [
   getProductContribution,
   getCampaignPerformance,
   getSalesPipeline,
+  getBudgetVariance,
 ];
 
 export const TOOL_NAMES: readonly string[] = TOOLS.map((t) => t.name);

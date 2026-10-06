@@ -49,6 +49,8 @@ export const REQUIRED_FIELDS: Readonly<Record<ImportType, readonly string[][]>> 
   sales_report: [['invoice_number', 'customer', 'issue_date', 'total_amount']],
   purchase_invoices: [['invoice_number', 'supplier', 'issue_date', 'total_amount']],
   purchase_report: [['invoice_number', 'supplier', 'issue_date', 'total_amount']],
+  // ADR-142: a month column, or a one-month declared range (filled in by the pipeline).
+  budget: [['period_start', 'account', 'amount'], ['account', 'amount']],
 };
 
 /** Which alternative set the mapping satisfies, or null when none is satisfied (§15 row 1). */
@@ -104,6 +106,7 @@ function primaryDateField(target: ImportTarget): string {
     case 'bank_transactions': return 'transaction_date';
     case 'invoices': return 'issue_date';
     case 'period_balances': return 'period_start';
+    case 'budget_lines': return 'period_start';
   }
 }
 
@@ -197,6 +200,13 @@ export function validateRow(
   const dateValue = value(dateField);
   // A balance row's period comes from the file or from a one-month declared range (pipeline); with
   // neither, the database cannot assign a fiscal period, so the reviewer is asked here.
+  if (dateValue === null && ctx.targetTable === 'budget_lines' && populated.length > 0) {
+    issues.push({
+      code: 'IMP-PERIOD-005', severity: 'error', field: dateField,
+      message: 'This budget line has no month: the file has no month column and the declared range covers more than one month.',
+      suggestion: 'Add a month column, or upload one month per file.',
+    });
+  }
   if (dateValue === null && ctx.targetTable === 'period_balances' && populated.length > 0) {
     issues.push({
       code: 'IMP-PERIOD-005', severity: 'error', field: dateField,
@@ -219,7 +229,8 @@ export function validateRow(
           code: 'IMP-DATE-002', severity: 'warning', field: dateField,
           message: 'This date is more than five years old.',
         });
-      } else if (ageDays < -90) {
+      } else if (ageDays < -90 && ctx.targetTable !== 'budget_lines') {
+        // A budget is about the future; only records of what happened are odd when dated ahead.
         issues.push({
           code: 'IMP-DATE-002', severity: 'warning', field: dateField,
           message: 'This date is more than 90 days in the future.',
@@ -307,7 +318,7 @@ export function validateRow(
 
   // ---- Accounts ----
   const account = value('account');
-  if (ctx.targetTable === 'ledger_entries' || ctx.targetTable === 'period_balances') {
+  if (ctx.targetTable === 'ledger_entries' || ctx.targetTable === 'period_balances' || ctx.targetTable === 'budget_lines') {
     if (account === null) {
       issues.push({
         code: 'IMP-ACCT-006', severity: 'error', field: 'account',
@@ -317,6 +328,18 @@ export function validateRow(
       issues.push({
         code: 'IMP-ACCT-005', severity: 'warning', field: 'account',
         message: `"${account}" is not mapped to a category yet, so figures that use it will be marked incomplete.`,
+      });
+    }
+  }
+
+  // ---- Budgets (ADR-142) ----
+  if (ctx.targetTable === 'budget_lines') {
+    const amount = readAmount(value('amount') ?? '');
+    if (amount !== null && amount.isNegative()) {
+      issues.push({
+        code: 'IMP-BUD-002', severity: 'warning', field: 'amount',
+        message: 'This budget is negative. Budgets are entered as positive amounts — income as income, costs as costs.',
+        suggestion: 'Check the sign; a negative budget reduces what is planned for this account.',
       });
     }
   }

@@ -2689,3 +2689,15 @@ Decision:
 6. **The Funding Readiness Report** is not built: Phase 16 has not started. The Reports page shows the slot as not available yet.
 
 Consequences: a new table, two `api_server` writers, `report.compose`, `report.render` by `reportId`, `report_files.report_id` (with `period_id` nullable), and a scheduled sweep beside the scheduled recalculation. While adding `reports` to the purge order, eleven earlier tables were found missing from it (purges of organisations using them always failed). That is fixed separately (migration `20261010000001`). The monthly PDF list now excludes the PDFs of other kinds that also name a month.
+
+### ADR-142 · Budgets are imported plans, compared with actuals beside the engine
+Status: **owner decision 2026-10-06 ("separate budget module"); built locally; not reviewed, merged or deployed.**
+
+Context: Agreement §9 requires "budget/forecast variance where applicable"; REQ-FC-03/04 and REQ-CA-14 were post-MVP. Forecast variance exists (Phase 11). There was no budget.
+
+Decision:
+1. **Import.** A budget is imported through the ordinary wizard as import type `budget` → target `budget_lines`: month, account, amount, mapped to the chart like a trial balance (unknown accounts created with a keyword-suggested category, as for any import). A year-month cell is read as the first of the month. One line per account and month (`IMP-BUD-001`). A negative amount warns (`IMP-BUD-002`). Future months raise no "dated in the future" warning. Same traceability, review, commit and rollback as every import: `budget_lines` follows the financial-record contract.
+2. **Replacement.** A month's budget replaces the last one for that month, at batch scope, like a balance report: superseded, never deleted. Rolling the revision back restores the earlier budget.
+3. **Not a financial record.** The engine never reads `budget_lines`. No metric snapshot is written, and the engine version is unchanged.
+4. **Variance** (`modules/budgets`, `budget_variance.v1`) is pure. It reads the month's current lines summed by standard category, sets them beside the engine's actual snapshots in the engine's own P&L order, and subtracts. Budgeted profits are derived as the engine derives actual ones, and a category with no budget line counts as nil in a derived profit, which the row states. A missing actual is absent, never zero. Balance-sheet categories are listed as not compared.
+5. **Surfaces:** `/money/budget` (`financials.view`), and analyst tool 27 `get_budget_variance` (`financials.view`; budget figures labelled as an imported plan; actuals carry snapshot ids). The tool was recorded for the eval corpus with two adversarial cases (no budget imported; a budget the user invents), and the prompt is unchanged.

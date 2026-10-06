@@ -31,13 +31,19 @@ function latestDefinition(fn: string): string {
   return found.slice(0, found.indexOf('$$;') + 3);
 }
 
+/** The enum's values as the database ends up with them: its CREATE, plus every later ADD VALUE. */
 function enumValues(name: string): string[] {
+  let values: string[] | null = null;
   for (const file of migrationFiles) {
     const sql = readFileSync(path.join(MIGRATIONS, file), 'utf8');
     const match = new RegExp(`create type public\\.${name} as enum\\s*\\(([^)]*)\\)`).exec(sql);
-    if (match) return [...match[1]!.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!);
+    if (match) values = [...match[1]!.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!);
+    for (const added of sql.matchAll(new RegExp(`alter type public\\.${name} add value (?:if not exists )?'([a-z_]+)'`, 'g'))) {
+      if (values !== null && !values.includes(added[1]!)) values.push(added[1]!);
+    }
   }
-  throw new Error(`${name} is not defined`);
+  if (values === null) throw new Error(`${name} is not defined`);
+  return values;
 }
 
 /** `api.start_import_batch`'s CASE, read as the database will execute it. */

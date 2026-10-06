@@ -187,6 +187,7 @@ Available only when `has_text_layer = true`, the deterministic parser (§5.3) fa
 | `sales_invoices` / `sales_report` → `invoices (sales)` | `invoice_number`, `customer`, `issue_date`, `total_amount`; batch-level `invoice_list_kind ∈ {full, open_items}` (`IMP-INV-012`) | `due_date`, `subtotal`, `tax_amount`, `amount_paid`, `status`, `paid_date`, `description`, `currency` |
 | `purchase_invoices` / `purchase_report` → `invoices (purchase)` | `invoice_number`, `supplier`, `issue_date`, `total_amount`; per-supplier `default_expense_category` confirmation (§6.5) | as above |
 | `receipts` → `ledger_entries` (one row per receipt, account = user-chosen expense account) | `entry_date`, `amount`, `account` | `description`, `counterparty`, `reference` |
+| `budget` → `budget_lines` (ADR-142; a plan, never read by the engine) | `period_start` (a month column; `2026-11`, `Nov 2026` or any day in the month read as the month) **or** a one-month declared range, `account`, `amount` | `code`, `currency` |
 
 Rules attached to these schemas:
 
@@ -354,6 +355,8 @@ Validation is pure (`imports/domain/validate-rows.ts`) over `mapped_data` and pr
 | `IMP-PER-012` | warning | Rows span more than one calendar month for a single-period report type (not applied to fan-out batches) |
 | `IMP-COV-013` | confirmation | Period already has committed balances of the same kind; commit replaces **all** accounts of that kind for the period (ADR-029.2) — the reviewer confirms the list of accounts that will be retired. *As built (Step 0F, ADR-139, N-3): raised by `app.commit_import_batch` under the organisation lock — the first commit that would replace accepted balances writes nothing and returns `needs_confirmation`; once confirmed, the new rows are inserted `pending`, the old report superseded and the new one promoted in one transaction. The confirmation text names the replacement; it does not yet list the accounts.* |
 | `IMP-COV-014` | warning / confirmation | GL or bank batch overlaps a committed batch of the same type by ≥ 1 full month with fewer than 50% of overlapping rows matched as duplicates (probable re-export with renamed accounts or a second bank-account record); Replace, or confirm with a reason. For bank batches the comparison strips `scope_key` from the hash and runs across all of the organization's accounts, so a statement re-imported under a renamed bank is caught and a second account's ordinary statement is not (ADR-047.12) |
+| `IMP-BUD-001` | error | Budget: a second line for the same account and month in the file (ADR-142). Never summed — two figures for one month's rent are a question for the person |
+| `IMP-BUD-002` | warning | Budget: a negative amount. Budgets are positive in the reporting sense; a negative one reduces what is planned |
 
 Errors block commit of the affected rows (field-level) or of the batch (batch-level). Confirmations block commit until recorded. Warnings never block; they are shown and inherited into `data_quality` where relevant.
 

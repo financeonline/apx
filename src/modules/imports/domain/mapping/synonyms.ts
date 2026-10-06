@@ -108,7 +108,7 @@ export const SYNONYM_TABLE: readonly SynonymEntry[] = [
     targets: ['paid_date'],
   },
   {
-    headers: ['period start', 'period from', 'from date', 'date from', 'start date'],
+    headers: ['period start', 'period from', 'from date', 'date from', 'start date', 'month', 'budget month'],
     targets: ['period_start'],
   },
   {
@@ -191,7 +191,7 @@ export const SYNONYM_TABLE: readonly SynonymEntry[] = [
   // Amounts (§6.2 rows 3–6)
   // ------------------------------------------------------------------------------------------
   {
-    headers: ['amount', 'value', 'net', 'total', 'transaction amount', 'amt', 'net amount'],
+    headers: ['amount', 'value', 'net', 'total', 'transaction amount', 'amt', 'net amount', 'budget', 'budget amount', 'planned', 'plan'],
     targets: ['amount', 'total_amount'],
   },
   { headers: ['debit', 'dr', 'debit amount', 'dr amount'], targets: ['debit', 'money_out'] },
@@ -357,6 +357,8 @@ const TYPE_RETARGET: Readonly<Partial<Record<ImportType, Readonly<Partial<Record
   sales_report: { transaction_date: 'issue_date', entry_date: 'issue_date', counterparty: 'customer', supplier: 'customer', amount: 'total_amount' },
   purchase_invoices: { transaction_date: 'issue_date', entry_date: 'issue_date', counterparty: 'supplier', customer: 'supplier', amount: 'total_amount' },
   purchase_report: { transaction_date: 'issue_date', entry_date: 'issue_date', counterparty: 'supplier', customer: 'supplier', amount: 'total_amount' },
+  // ADR-142: a budget is month, account and amount.
+  budget: { transaction_date: 'period_start', entry_date: 'period_start', issue_date: 'period_start', period_end: 'period_start', total_amount: 'amount', closing_balance: 'amount', debit: 'amount' },
 };
 
 function retarget(targets: readonly TargetField[], importType?: ImportType): readonly TargetField[] {

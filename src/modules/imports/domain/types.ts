@@ -9,9 +9,11 @@
 
 export type ImportType =
   | 'general_ledger' | 'trial_balance' | 'pnl_report' | 'balance_sheet' | 'bank_statement'
-  | 'sales_invoices' | 'purchase_invoices' | 'sales_report' | 'purchase_report' | 'receipts';
+  | 'sales_invoices' | 'purchase_invoices' | 'sales_report' | 'purchase_report' | 'receipts'
+  | 'budget';
 
-export type ImportTarget = 'ledger_entries' | 'period_balances' | 'bank_transactions' | 'invoices';
+/** `budget_lines` (ADR-142) is the one target that is not a record of what happened: a plan. */
+export type ImportTarget = 'ledger_entries' | 'period_balances' | 'bank_transactions' | 'invoices' | 'budget_lines';
 
 export type ImportBatchStatus =
   | 'created' | 'parsing' | 'mapping' | 'validating' | 'awaiting_review' | 'committing'
@@ -28,7 +30,7 @@ export type DocumentStatus =
 /** `document_kind_enum`, value for value (`test/unit/import-type-spec` reads the migration). */
 export const DOCUMENT_KINDS = [
   'bank_statement', 'general_ledger', 'trial_balance', 'pnl_report', 'balance_sheet',
-  'sales_report', 'purchase_report', 'invoice', 'receipt', 'other', 'unknown',
+  'sales_report', 'purchase_report', 'invoice', 'receipt', 'other', 'unknown', 'budget',
 ] as const;
 export type DocumentKind = (typeof DOCUMENT_KINDS)[number];
 
@@ -106,6 +108,12 @@ export const IMPORT_TYPE_SPECS: Readonly<Record<ImportType, ImportTypeSpec>> = {
   },
   purchase_report: {
     target: 'invoices', documentKind: 'purchase_report', invoiceSide: 'purchase',
+    bankAccount: 'not_allowed', pdfSupported: false,
+  },
+  // ADR-142: month, account and amount, mapped to the chart like a trial balance. A plan, not a
+  // record — the engine never reads it; budget-versus-actual is computed beside it.
+  budget: {
+    target: 'budget_lines', documentKind: 'budget', invoiceSide: null,
     bankAccount: 'not_allowed', pdfSupported: false,
   },
 };

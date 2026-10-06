@@ -131,7 +131,8 @@ async function loadExistingRecords(
 
   // `period_balances` has no row hash: balances supersede at batch scope (§11), so there is no row
   // duplicate to find, and selecting the column failed every trial balance, P&L and balance sheet.
-  const columns: string = target === 'period_balances'
+  // Budget lines likewise (ADR-142): a month's budget replaces the last one at batch scope.
+  const columns: string = target === 'period_balances' || target === 'budget_lines'
     ? `id, ${dateColumn}, ${amountColumn}`
     : `id, dedupe_hash, ${dateColumn}, ${amountColumn}`;
   const { data, error } = await db

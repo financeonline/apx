@@ -168,6 +168,6 @@ export interface Invoice {
   readonly supersededBy: string | null;
 }
 
-/** The four tables whose lifecycle `record_status_events` logs. */
+/** The tables whose lifecycle `record_status_events` logs (budget lines since ADR-142). */
 export type FinancialRecordTable =
-  'ledger_entries' | 'bank_transactions' | 'invoices' | 'period_balances';
+  'ledger_entries' | 'bank_transactions' | 'invoices' | 'period_balances' | 'budget_lines';

@@ -27,6 +27,7 @@ export const IMPORT_TYPES: ReadonlyArray<{ value: string; label: string; hint: s
   { value: 'sales_report', label: 'Sales report', hint: 'A sales report with one line per invoice' },
   { value: 'purchase_report', label: 'Purchase report', hint: 'A purchase report with one line per invoice' },
   { value: 'receipts', label: 'Receipts', hint: 'A list of receipts, each against an expense account' },
+  { value: 'budget', label: 'Budget', hint: 'What you plan to earn and spend, by month and account' },
 ];
 
 export function UploadForm({

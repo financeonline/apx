@@ -9,7 +9,7 @@ export const DOCUMENT_STATUS_TONES: Readonly<Record<string, BadgeTone>> = {
 export const DOCUMENT_KIND_LABELS: Readonly<Record<string, string>> = {
   bank_statement: 'Bank statement', general_ledger: 'Ledger', trial_balance: 'Trial balance', pnl_report: 'P&L report',
   balance_sheet: 'Balance sheet', sales_report: 'Sales report', purchase_report: 'Purchase report', invoice: 'Invoice',
-  receipt: 'Receipt', other: 'Other', unknown: 'Not yet known',
+  receipt: 'Receipt', other: 'Other', unknown: 'Not yet known', budget: 'Budget',
 };
 
 export function formatBytes(bytes: number): string {

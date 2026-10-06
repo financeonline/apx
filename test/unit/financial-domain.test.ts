@@ -79,7 +79,9 @@ describe('transfer kinds (ADR-028, ADR-047.12)', () => {
 describe('import targets', () => {
   it('routes every import type to a record table', () => {
     const types = Object.keys(IMPORT_TARGET);
-    expect(types).toHaveLength(10);
+    // Ten record types, and the budget (ADR-142), which lands in its own table.
+    expect(types).toHaveLength(11);
+    expect(IMPORT_TARGET.budget).toBe('budget_lines');
     expect(IMPORT_TARGET.bank_statement).toBe('bank_transactions');
     expect(IMPORT_TARGET.trial_balance).toBe('period_balances');
     expect(IMPORT_TARGET.general_ledger).toBe('ledger_entries');

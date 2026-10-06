@@ -156,6 +156,7 @@ const INPUTS: Record<string, () => unknown> = {
   get_product_contribution: () => ({ period: MAY() }),
   get_campaign_performance: () => ({ period: MAY() }),
   get_sales_pipeline: () => ({ period: MAY() }),
+  get_budget_variance: () => ({ period: MAY() }),
 };
 
 function snapshotOf(metricKey: string): string {
@@ -166,13 +167,13 @@ function snapshotOf(metricKey: string): string {
 }
 
 describe('the registry is closed and complete', () => {
-  it('has exactly the twenty-six tools §3 names, each with a permission and a schema', () => {
+  it('has exactly the twenty-seven tools §3 names, each with a permission and a schema', () => {
     // Fifteen through Phase 8; the two evidence tools in Phase 9 (ADR-097); `get_forecast` in
     // Phase 11 (ADR-099); `get_scenario` in Phase 12 (ADR-100); the four banking tools in Phase 13
-    // (ADR-101); the three commercial tools in Phase 14 (ADR-102). The count is asserted so a tool
-    // cannot be added without editing this test.
-    expect(TOOL_NAMES).toHaveLength(26);
-    expect(new Set(TOOL_NAMES).size).toBe(26);
+    // (ADR-101); the three commercial tools in Phase 14 (ADR-102); budget against actual (ADR-142).
+    // The count is asserted so a tool cannot be added without editing this test.
+    expect(TOOL_NAMES).toHaveLength(27);
+    expect(new Set(TOOL_NAMES).size).toBe(27);
     for (const tool of TOOLS) {
       expect(tool.permission, `${tool.name} has a permission`).toBeTruthy();
       expect(tool.description.length, `${tool.name} tells the model when to use it`).toBeGreaterThan(40);

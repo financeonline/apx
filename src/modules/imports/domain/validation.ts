@@ -10,7 +10,7 @@ export const StartImportBatchInput = z
     documentId: z.string().uuid(),
     importType: z.enum([
       'general_ledger', 'trial_balance', 'pnl_report', 'balance_sheet', 'bank_statement',
-      'sales_invoices', 'purchase_invoices', 'sales_report', 'purchase_report', 'receipts',
+      'sales_invoices', 'purchase_invoices', 'sales_report', 'purchase_report', 'receipts', 'budget',
     ]),
     bankAccountId: z.string().uuid().optional(),
     periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),

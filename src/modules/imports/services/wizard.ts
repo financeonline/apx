@@ -89,6 +89,7 @@ const TYPE_NOUN: Readonly<Record<ImportType, string>> = {
   sales_report: 'sales report',
   purchase_report: 'purchase report',
   receipts: 'receipts list',
+  budget: 'budget',
 };
 
 /**

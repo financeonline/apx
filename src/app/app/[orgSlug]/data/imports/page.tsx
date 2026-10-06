@@ -121,6 +121,10 @@ const TYPE_LABELS: Readonly<Record<string, string>> = {
   balance_sheet: 'Balance sheet',
   sales_invoices: 'Sales invoices',
   purchase_invoices: 'Purchase invoices',
+  sales_report: 'Sales report',
+  purchase_report: 'Purchase report',
+  receipts: 'Receipts',
+  budget: 'Budget',
 };
 
 const STATUS_LABELS: Readonly<Record<string, string>> = {

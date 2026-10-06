@@ -86,6 +86,9 @@ const CALLS: ReadonlyArray<{ name: string; input: Record<string, unknown> }> = [
   { name: 'get_product_contribution', input: { period: 'May 2026' } },
   { name: 'get_campaign_performance', input: { period: 'May 2026' } },
   { name: 'get_sales_pipeline', input: { period: 'May 2026' } },
+  // ADR-142: budget against actual, against an organisation with no budget imported — the honest
+  // NO_DATA the corpus's budget cases are built on. Appended, so earlier seqs stand.
+  { name: 'get_budget_variance', input: { period: 'May 2026' } },
 ];
 
 export interface Recording {
