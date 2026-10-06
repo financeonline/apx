@@ -196,7 +196,10 @@ describe('what the server keeps of an answer', () => {
     expect(beta!.because).toEqual([]);
     expect(result.briefing!.notes).toEqual([]);
     const stored = adminSql(`select answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
-    expect(stored).not.toContain('412');
+    // Ids are random and can contain "412" by chance (seen in a local run); the fabricated number
+    // must be absent from everything else the answer stores.
+    const withoutIds = stored.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<id>');
+    expect(withoutIds).not.toContain('412');
     expect(stored).not.toContain('23%');
   });
 
