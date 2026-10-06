@@ -51,7 +51,7 @@ ai           → financial-engine, health, alerts, evidence, banking, actions, d
                scenarios, audit    -- read-only in both of the last two (ADR-099, ADR-100)
 actions      → evidence, tenancy, audit
 forecast     → financial-engine (read), tenancy, evidence (read), audit
-scenarios    → forecast, tenancy, evidence (read), audit    -- the forecast IS the baseline (ADR-100)
+scenarios    → forecast, tenancy, evidence (read), audit    -- the forecast IS the baseline (ADR-100); also the affordability check, nothing stored (ADR-146)
 commercial   → financials (counterparties, invoices — read), tenancy, audit    -- no engine write; figures are read from metric_current by dashboard (ADR-102)
 reporting    → financial-engine, health, alerts, actions, evidence
 portfolio    → tenancy, health, alerts, imports (read-only aggregate projections, ADR-038.13)

@@ -38,6 +38,15 @@ export {
 export { applyScenario, sufficiency, type ApplyInput } from './domain/apply';
 
 export {
+  AFFORDABILITY_BUFFER_MONTHS, AFFORDABILITY_METHOD, AFFORDABILITY_RULE_TEXT, AFFORDABILITY_UNAVAILABLE,
+  AFFORDABILITY_UNAVAILABLE_TEXT, AFFORDABILITY_VERDICT_LABEL, AFFORDABILITY_VERDICT_TEXT, RECURRENCES,
+  assessAffordability, parseWrittenAmount, writtenInQuestion,
+  type AffordabilityInput, type AffordabilityMonth, type AffordabilityResult, type AffordabilityUnavailable,
+  type AffordabilityVerdict, type Recurrence,
+} from './domain/affordability';
+export { checkAffordability, type AffordabilityCheck } from './services/affordability';
+
+export {
   ASSUMPTION_LABEL, ASSUMPTION_NOTE, ASSUMPTION_QUESTION, CASH_EFFECT_LABEL,
   SCENARIO_DISCLAIMER, UNAVAILABLE_HEADLINE, UNAVAILABLE_TEXT,
   assumptionSentence, unavailableText,

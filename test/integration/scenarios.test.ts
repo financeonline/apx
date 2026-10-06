@@ -832,3 +832,94 @@ describe('who may read a scenario, and who may work one out (§19, §20)', () =>
        order by created_at desc limit 1`)).toContain('revenue_change');
   });
 });
+
+/*
+ * "Can we afford it?" (SOW §12; ADR-146). The steady fixture opens on 20,000.00 with 9,000.00 in and
+ * 7,000.00 out a month, so the forecast expects 22,000.00, 24,000.00 and 26,000.00 and the buffer is
+ * one month of money out, 7,000.00. Every figure below is worked from those.
+ */
+describe('the analyst checks affordability through MOTION, for an amount the person wrote (ADR-146)', () => {
+  const ask = async (ctx: AccessContext, question: string | undefined, input: Record<string, unknown>) => {
+    const periods = adminSql(`
+      select id || '|' || label || '|' || period_start || '|' || is_complete
+        from public.fiscal_periods where organization_id = '${ctx.orgId}' order by period_start`)
+      .split('\n').filter(Boolean).map((line) => {
+        const [id, label, periodStart, complete] = line.trim().split('|') as [string, string, string, string];
+        return { id, label, periodStart, isComplete: complete === 'true' || complete === 't', hasData: true };
+      }) as PeriodRow[];
+    const periodContext = resolvePeriodContext({ question: question ?? '', periods, fiscalYearStartMonth: 1 });
+    return runTool({
+      seq: 1, name: 'check_affordability', rawInput: input,
+      resolveAccess: async () => ctx, started: snapshotAccess(ctx),
+      call: { periodContext, knownPeriods: periods, now: new Date('2026-09-15T00:00:00Z'), question },
+    });
+  };
+  type Data = {
+    verdict: string; verdict_without_the_spend: string;
+    months: Array<{ expected_closing_cash: { value: string }; closing_cash_after_spend: { value: string } }>;
+    buffer_one_month_money_out: { value: string }; headroom_over_buffer: { value: string };
+    amount: { value: string; display: string; unit: string }; total_spent_over_forecast: { value: string };
+  };
+
+  it('a one-off £15,000 leaves exactly the buffer at its lowest: affordable', async () => {
+    const { result, persisted } = await ask(contextFor(ownerA, 'owner'), 'Can we afford a £15,000 van?',
+      { amount_as_written: '£15,000', recurrence: 'one_off' });
+    expect(persisted.authorized).toBe(true);
+    expect(result.ok, JSON.stringify(result.data)).toBe(true);
+    const data = result.data as Data;
+    expect(data.months.map((m) => [m.expected_closing_cash.value, m.closing_cash_after_spend.value])).toEqual([
+      ['22000.00', '7000.00'], ['24000.00', '9000.00'], ['26000.00', '11000.00'],
+    ]);
+    expect(data).toMatchObject({ verdict: 'affordable', verdict_without_the_spend: 'affordable' });
+    expect(data.buffer_one_month_money_out.value).toBe('7000.00');
+    expect(data.headroom_over_buffer.value).toBe('0.00');
+    expect(data.amount).toMatchObject({ value: '15000.00', unit: 'money' });
+  });
+
+  it('a monthly 3k from the second month: 24,000.00 becomes 23,000.00, then 22,000.00', async () => {
+    const { result } = await ask(contextFor(ownerA, 'owner'), 'could we take on 3k a month of rent from next month?',
+      { amount_as_written: '3k', recurrence: 'monthly', starts_in_month: 2 });
+    const data = result.data as Data;
+    expect(data.months.map((m) => m.closing_cash_after_spend.value)).toEqual(['22000.00', '21000.00', '20000.00']);
+    expect(data.total_spent_over_forecast.value).toBe('6000.00');
+    expect(data.verdict).toBe('affordable');
+  });
+
+  it('£30,000 in one go takes October below zero: not affordable', async () => {
+    const { result } = await ask(contextFor(ownerA, 'owner'), 'Can we afford £30,000 for a new machine?',
+      { amount_as_written: '£30,000', recurrence: 'one_off' });
+    expect((result.data as Data).verdict).toBe('not_affordable');
+  });
+
+  it('refuses an amount the person did not write, and a turn with no question', async () => {
+    const owner = contextFor(ownerA, 'owner');
+    const invented = await ask(owner, 'Can we afford a new van?', { amount_as_written: '£15,000', recurrence: 'one_off' });
+    expect(invented.result.ok).toBe(false);
+    expect((invented.result.data as { code: string }).code).toBe('NOT_FOUND');
+    const rounded = await ask(owner, 'Can we afford a £14,950 van?', { amount_as_written: '£15,000', recurrence: 'one_off' });
+    expect(rounded.result.ok).toBe(false);
+    const noQuestion = await ask(owner, undefined, { amount_as_written: '£15,000', recurrence: 'one_off' });
+    expect(noQuestion.result.ok).toBe(false);
+  });
+
+  it('refuses words it would have to guess at, rather than reading a number into them', async () => {
+    const { result } = await ask(contextFor(ownerA, 'owner'), 'Can we afford fifteen thousand?',
+      { amount_as_written: 'fifteen thousand', recurrence: 'one_off' });
+    expect(result.ok).toBe(false);
+    expect((result.data as { code: string }).code).toBe('NOT_FOUND');
+  });
+
+  it('speaks in the organisation’s own currency', async () => {
+    const { result } = await ask(ownerCtx(orgINR), 'Can we afford ₹15,000 of new laptops?',
+      { amount_as_written: '₹15,000', recurrence: 'one_off' });
+    expect(result.ok, JSON.stringify(result.data)).toBe(true);
+    expect((result.data as Data).amount.display).toContain('₹');
+  });
+
+  it('a client, who may read the forecast, may ask', async () => {
+    const { persisted, result } = await ask(contextFor(clientA, 'client'), 'Can we afford £1,000?',
+      { amount_as_written: '£1,000', recurrence: 'one_off' });
+    expect(persisted.authorized).toBe(true);
+    expect(result.ok).toBe(true);
+  });
+});

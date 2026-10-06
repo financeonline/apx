@@ -2759,3 +2759,25 @@ Departures, each to the owner's attention:
 Still deferred, as designed: the Funding Readiness Health dimension (ADR-119), lender matching, and the analyst explaining an assessment.
 
 - **Addendum (2026-10-06): the Funding Readiness Report (REQ-RP-05).** Built in Phase 17 on the same flag. It freezes the latest month's current assessment (`funding.v1`) into `reports`; it recalculates nothing and carries the disclaimer verbatim. Produced on request only (not scheduled). While the flag is off: the Reports page says it is switched off, `api.enqueue_job` refuses (NOT FOUND), and the `reports_select` policy hides earlier Funding Readiness Reports; the rows are kept, as assessments are. It inherits everything above: unreviewed, ahead of its prerequisite, and off by default.
+
+### ADR-146 · "Can the business afford a proposed expenditure?" — MOTION checks it, the analyst reports it
+Status: **built locally on 2026-10-06 on the owner's instruction to build the pending SOW items ("start building one by one, which is pending"). Not reviewed, merged or deployed.** SOW §12 lists the question; until now the analyst refused it (`affordability` template, AI_ARCHITECTURE.md §9.4).
+
+Context:
+- ADR-100 kept the analyst from working a what-if out: a model that applied an assumption would become the source of a financial figure. Affordability was refused for the same reason.
+- The question has one input the system cannot know — the amount — and otherwise needs only the stored cash forecast.
+
+Decision:
+1. **A deterministic check, `affordability.v1`** (`scenarios/domain/affordability.ts`). The spend is a delta on the forecast's `cash_outflows` leaf, once or every month from a chosen forecast month. Both columns — cash as expected, cash after the spend — are composed by the forecast's own `composeFromLevels` from the same real opening balance. Rule:
+   - **affordable** — the lowest closing cash over the horizon, after the spend, is at least one month of the forecast's money out (the buffer);
+   - **tight** — it stays at or above zero but below the buffer;
+   - **not affordable** — it goes below zero.
+   The same rule is applied to cash without the spend, so "cash is already tight" is said. Cash only; profit, accounting treatment and anything past the last forecast month are not assessed. No forecast, or one that cannot state closing cash, is a refusal with its reason — never a zero.
+2. **One service for page and analyst** (`checkAffordability`, `dashboard.view`, nothing stored). The What-if page has a "Can we afford it?" GET form; the analyst has tool 28, `check_affordability`.
+3. **The amount is the person's, verbatim.** The tool takes `amount_as_written`, refuses it unless it appears in this turn's question (case and spacing aside), and parses it itself: digits with comma thousands, optional two decimals, optional currency mark, optional `k`/`m`. `1,50`, `1.234,56`, Indian grouping and words are refused, not guessed. One-off/monthly and the start month are echoed back so the answer states them. This is the one, narrow departure from ADR-100's "no tool takes an assumption": the assumption is a single number the person typed, and the arithmetic stays MOTION's.
+4. **Without an amount** the analyst refuses with the revised `affordability` template ("I can check that once I know the amount…") and gives the nearest supported facts.
+5. `PROMPT_VERSION` → `analyst-v3.6`. This bump also covers tool 27 (`get_budget_variance`, ADR-142), which was added without one.
+
+Consequences:
+- The registry is closed at 28 tools; the eval recording gains a `check_affordability` call (NO_DATA: the recorded organisation has no forecast) and two adversarial cases in which no verdict or worked-out balance may appear.
+- The buffer of one month is a product rule, not advice; the owner may change it (a config bump to `affordability.v2`).

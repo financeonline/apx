@@ -44,7 +44,7 @@ function contextFor(userId: string): AccessContext {
 }
 
 /** The calls the corpus rests on: every tool, the SOW §10 metrics, and both months for a trend. */
-const CALLS: ReadonlyArray<{ name: string; input: Record<string, unknown> }> = [
+const CALLS: ReadonlyArray<{ name: string; input: Record<string, unknown>; question?: string }> = [
   { name: 'get_business_summary', input: { period: 'May 2026' } },
   { name: 'get_metric', input: { metric_key: 'revenue', period: 'May 2026' } },
   { name: 'get_metric', input: { metric_key: 'revenue', period: 'Apr 2026' } },
@@ -89,6 +89,12 @@ const CALLS: ReadonlyArray<{ name: string; input: Record<string, unknown> }> = [
   // ADR-142: budget against actual, against an organisation with no budget imported — the honest
   // NO_DATA the corpus's budget cases are built on. Appended, so earlier seqs stand.
   { name: 'get_budget_variance', input: { period: 'May 2026' } },
+  /*
+   * ADR-146: the affordability check, against an organisation with two complete months and so no
+   * forecast — the honest NO_DATA the corpus's affordability cases are built on. The amount must be
+   * in the question, so this call carries the question it was asked under. Appended.
+   */
+  { name: 'check_affordability', input: { amount_as_written: '£5,000', recurrence: 'one_off' }, question: 'Can we afford a £5,000 laptop refresh?' },
 ];
 
 export interface Recording {
@@ -216,7 +222,7 @@ async function record(): Promise<Recording> {
     const { result } = await runTool({
       seq, name: call.name, rawInput: call.input,
       resolveAccess: async () => ctx, started: snapshotAccess(ctx),
-      call: { periodContext, knownPeriods: periods.filter((p) => p.hasData).map((p) => ({ id: p.id, label: p.label })), now: new Date('2026-06-15T00:00:00Z') },
+      call: { periodContext, knownPeriods: periods.filter((p) => p.hasData).map((p) => ({ id: p.id, label: p.label })), now: new Date('2026-06-15T00:00:00Z'), question: call.question },
     });
     calls.push({ seq, name: call.name, input: call.input, result });
   }

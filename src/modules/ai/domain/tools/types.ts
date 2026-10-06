@@ -53,6 +53,11 @@ export interface ToolCallContext {
   readonly knownPeriods: readonly PeriodRef[];
   /** ISO instant the turn started; every tool's `computed_at` and "today" derive from it. */
   readonly now: Date;
+  /**
+   * This turn's question as the person typed it. Only `check_affordability` reads it, to prove an
+   * amount came from the person and not the model (ADR-146). Absent outside a live turn.
+   */
+  readonly question?: string;
 }
 
 export interface ToolDefinition<I, O> {

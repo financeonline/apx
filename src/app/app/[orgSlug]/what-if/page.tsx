@@ -4,13 +4,15 @@ import { can } from '@/core/permissions';
 import { hasForecast, loadForecast } from '@/modules/forecast';
 import {
   ASSUMPTION_NOTE, ASSUMPTION_QUESTION, CASH_EFFECT_LABEL, CASH_ONLY_KINDS,
-  DEFAULT_CASH_EFFECT, hasScenario, listScenarios, loadScenario,
+  DEFAULT_CASH_EFFECT, checkAffordability, hasScenario, listScenarios, loadScenario, parseWrittenAmount,
+  type AffordabilityCheck,
 } from '@/modules/scenarios';
 import { Card, CardBody, CardHeader, EmptyState, PageHeader } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
 import { ScenarioComparison } from './comparison';
 import { ScenarioForm } from './scenario-form';
 import { ArchiveControl } from './archive-control';
+import { AffordabilityCard } from './affordability';
 
 export const dynamic = 'force-dynamic';
 
@@ -28,11 +30,13 @@ export const dynamic = 'force-dynamic';
  * from the deterministic forecast, and every assumption beside it is one somebody typed.
  */
 export default async function WhatIfPage({
-  params,
+  params, searchParams,
 }: {
   params: Promise<{ orgSlug: string }>;
+  searchParams: Promise<{ afford_amount?: string; afford_recurrence?: string; afford_start?: string }>;
 }) {
   const { orgSlug } = await params;
+  const query = await searchParams;
   const ctx = await getAccessContext(orgSlug);
   requirePermission(ctx, 'dashboard.view');
 
@@ -64,6 +68,19 @@ export default async function WhatIfPage({
     label: period.periodLabel,
   }));
 
+  // "Can we afford it?" (ADR-146): worked out when asked, from the address, and never saved.
+  const asked = typeof query.afford_amount === 'string' && query.afford_amount.trim() !== ''
+    ? {
+      amount: query.afford_amount.slice(0, 40),
+      recurrence: query.afford_recurrence === 'monthly' ? 'monthly' as const : 'one_off' as const,
+      start: Math.max(1, Number.parseInt(query.afford_start ?? '1', 10) || 1),
+    }
+    : null;
+  const amount = asked === null ? null : parseWrittenAmount(asked.amount);
+  const affordability: AffordabilityCheck | 'unreadable' | null = asked === null ? null
+    : amount === null ? 'unreadable'
+      : await checkAffordability(ctx, { amount, recurrence: asked.recurrence, startsInMonth: asked.start });
+
   /*
    * The order the questions are asked in: the two that move sales first, because that is what a
    * business owner asks about first, then costs, then borrowing. Every word the form renders is
@@ -88,6 +105,8 @@ export default async function WhatIfPage({
         title="What if things change?"
         description={`Against what MOTION expects for ${months.map((m) => m.label).join(', ')}.`}
       />
+
+      <AffordabilityCard orgSlug={orgSlug} months={months} asked={asked} check={affordability} />
 
       {mayRun ? (
         <Card className="mt-6">

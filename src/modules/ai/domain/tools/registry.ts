@@ -8,6 +8,7 @@ import {
 import { getBankAccounts, getBankCategories, getRecurringPayments, getUnusualTransactions } from './banking';
 import { getCampaignPerformance, getProductContribution, getSalesPipeline } from './commercial';
 import { getBudgetVariance } from './budget';
+import { checkAffordabilityTool } from './affordability';
 
 /**
  * The closed registry (AI_ARCHITECTURE.md §3): the twenty-seven tools, and no way to add another
@@ -31,6 +32,9 @@ import { getBudgetVariance } from './budget';
  *
  * Tool 27 (ADR-142) reads budget against actual through the Budget page's own service; the actual
  * figures carry their snapshot ids, the plan is labelled as imported.
+ *
+ * Tool 28 (ADR-146) checks affordability through the What-if page's own service. It is the only
+ * tool that takes a money amount, and it accepts only one written verbatim in the question.
  *
  * Order is the order the model is shown them, broadest first. `submit_answer` is not a tool in this
  * sense — it is the response contract (§5) and is added by the loop as the forced final call.
@@ -66,6 +70,7 @@ export const TOOLS: readonly AnyTool[] = [
   getCampaignPerformance,
   getSalesPipeline,
   getBudgetVariance,
+  checkAffordabilityTool,
 ];
 
 export const TOOL_NAMES: readonly string[] = TOOLS.map((t) => t.name);

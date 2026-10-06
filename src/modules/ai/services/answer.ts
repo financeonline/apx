@@ -65,6 +65,7 @@ const TURN_BUDGET_MS = 45_000;
 
 const STATUS_LABELS: Readonly<Record<string, string>> = {
   get_business_summary: 'looking at the overall picture',
+  check_affordability: 'checking it against the cash forecast',
   get_metric: 'looking up a figure',
   get_metric_trend: 'following a figure over time',
   get_expense_changes: 'comparing spending',
@@ -275,7 +276,7 @@ async function runLoop(
         ran = await runTool({
           seq, name: use.name, rawInput: use.input,
           resolveAccess: input.resolveAccess, started,
-          call: { periodContext, knownPeriods: state.results.flatMap((r) => r.meta?.periods ?? []), now: input.now ?? new Date() },
+          call: { periodContext, knownPeriods: state.results.flatMap((r) => r.meta?.periods ?? []), now: input.now ?? new Date(), question: input.message },
         });
       } catch (cause) {
         if (cause instanceof ContextChanged) return { kind: 'context_changed' };

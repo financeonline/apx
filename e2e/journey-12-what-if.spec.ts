@@ -225,6 +225,28 @@ test('a person asks what would happen, and is answered — or told exactly why n
   await expect(page.getByRole('heading', { name: 'Wages pct' })).toHaveCount(0);
   expect(saved(), 'still exactly the one that succeeded').toBe('1');
 
+  // ---------------------------------------------------------------------------------------------
+  // 5. "Can we afford it?" (SOW §12; ADR-146). Cash opens on ₹20,000 and rises by ₹2,000 a month;
+  //    one month of money out is ₹7,000. A one-off ₹15,000 leaves exactly ₹7,000 at the lowest.
+  //    Worked out when asked, and nothing is saved.
+  // ---------------------------------------------------------------------------------------------
+  await page.getByRole('textbox', { name: 'Amount', exact: true }).fill('15,000');
+  await page.getByRole('button', { name: 'Check' }).click();
+  const result = page.getByRole('region', { name: 'Affordability result' });
+  await expect(result.getByText('Affordable', { exact: true })).toBeVisible({ timeout: 30_000 });
+  await expect(result).toContainText('Lowest cash after it: ₹7,000.00');
+  await expect(result).toContainText('One month of normal money out: ₹7,000.00');
+  await expect(result.getByRole('row')).toHaveCount(4);
+
+  await page.getByRole('textbox', { name: 'Amount', exact: true }).fill('16,000');
+  await page.getByRole('button', { name: 'Check' }).click();
+  await expect(page.getByRole('region', { name: 'Affordability result' }).getByText('Tight', { exact: true })).toBeVisible({ timeout: 30_000 });
+
+  await page.getByRole('textbox', { name: 'Amount', exact: true }).fill('1,50');
+  await page.getByRole('button', { name: 'Check' }).click();
+  await expect(page.getByText(/enter an amount more than zero/i)).toBeVisible({ timeout: 30_000 });
+  expect(saved(), 'a check saves nothing').toBe('1');
+
   // §15: no database terminology reaches the reader.
   const body = (await page.locator('main').innerText()).toLowerCase();
   for (const term of ['scenario_values', 'forecast_values', 'metric_snapshots', 'operating_expenses', 'cost_of_sales', 'cash_basis_proxy', 'select ']) {
