@@ -7,6 +7,7 @@ import { isMotionError } from '@/core/errors';
 import { recordAccessEvent } from '@/core/db/server-rpc';
 import { Banner, Badge } from '@/components/ui/surfaces';
 import { ROLE_LABELS } from '@/components/labels';
+import { unreadCount } from '@/modules/engagement';
 
 export const dynamic = 'force-dynamic';
 
@@ -52,6 +53,8 @@ export default async function OrgLayout({
   const suspended = ctx.organizationStatus === 'suspended';
   const pendingDeletion = ctx.organizationStatus === 'pending_deletion';
   const showSettings = can(ctx, 'settings.manage');
+  // ADR-144: the inbox. Not for a suspended member, who keeps only the frozen Home (ADR-044.4).
+  const unread = can(ctx, 'financials.view') ? await unreadCount(ctx) : null;
 
   return (
     <div className="min-h-dvh">
@@ -63,6 +66,12 @@ export default async function OrgLayout({
           <PrimaryNav ctx={ctx} orgSlug={orgSlug} />
           <div className="ml-auto flex flex-wrap items-center justify-end gap-3 text-sm">
             <DataMenu ctx={ctx} orgSlug={orgSlug} />
+            {unread === null ? null : (
+              <Link href={`/app/${orgSlug}/notifications`} className="text-ink-muted hover:text-ink">
+                Notifications{unread > 0 ? <span className="ml-1 rounded-full bg-accent px-1.5 text-xs text-white">{unread}</span> : null}
+                {unread > 0 ? <span className="sr-only"> ({unread} unread)</span> : null}
+              </Link>
+            )}
             {showSettings && (
               <Link href={`/app/${orgSlug}/settings`} className="text-ink-muted hover:text-ink">
                 Settings

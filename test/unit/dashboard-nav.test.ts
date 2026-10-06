@@ -33,11 +33,11 @@ describe('the §4 section contract, as a permission question', () => {
   it('permits an owner every section', () => {
     // Departments joined after Home with the Departmental Dashboard (ADR-143).
     expect(permittedNavItems(contextFor('owner')))
-      .toEqual(['Home', 'Departments', 'Insights', 'Money', 'Customers', 'Actions', 'Reports', 'Analyst']);
+      .toEqual(['Home', 'Departments', 'Insights', 'Money', 'Customers', 'Actions', 'Requests', 'Reports', 'Analyst']);
   });
 
   it('permits an admin every section too', () => {
-    expect(permittedNavItems(contextFor('admin'))).toHaveLength(8);
+    expect(permittedNavItems(contextFor('admin'))).toHaveLength(9);
   });
 });
 
@@ -50,7 +50,7 @@ describe('what each role sees in the navigation', () => {
     // Actions and Reports joined the list as their phases landed (plan Phases 12 and 13); Analyst
     // joined with its page (Phase 11 Slice 4, ADR-079). Every role holds `ai.use`, so it is for all.
     expect(visibleNavItems(contextFor('owner')))
-      .toEqual(['Home', 'Departments', 'Insights', 'Money', 'Customers', 'Actions', 'Reports', 'Analyst']);
+      .toEqual(['Home', 'Departments', 'Insights', 'Money', 'Customers', 'Actions', 'Requests', 'Reports', 'Analyst']);
   });
 
   it('never links a section that is not built', () => {

@@ -2712,3 +2712,23 @@ Decision (the developer's reading, confirmed by the owner's choice, still to be 
 2. **Business department overview:** one tile per department (Finance, Banking, Customers, Actions, Alerts, Reports, AI Analyst, Planning), each with its headline, a status (in order / needs attention / nothing yet) by fixed rules, and a link into the section. A tile appears only for someone who may open the section (`banking.view`, `customers.view`, `actions.view`, `reports.view`, `ai.use`).
 3. **System functional overview:** when data was last added, the last calculation (status, time, engine version), imports waiting or failed (`imports.review` only), the team size (`users.view` only), what runs on a schedule, and the organisation switches that actually gate something. ADR-025's other four flags shipped ungated and are not shown as "off".
 4. Nothing is computed: every figure is a snapshot, count or row its own page reads.
+
+### ADR-144 · Team/Client Management is in the product: comments, requests and deliverables, and an inbox
+Status: **owner decision 2026-10-06 ("In-app"); built locally; not reviewed, merged or deployed.**
+
+Context: Agreement §4 / Annexure A put a "Team/Client management System — management and engagement platform between teams and clients … tracking and deliverable notifications to clients about their data" in Phase 1 (MVP_SCOPE had it post-17, CD-26). There is no email provider, and adding one is outside Phase 1.
+
+Decision:
+1. **Comments on actions** (`action_comments`, append-only). Anyone who can see the action may comment.
+2. **Requests and deliverables** (`engagement_items` with an append-only `engagement_events` history):
+   - a client raises requests of the team;
+   - the team adds deliverables for the client and moves either along (open → in progress → delivered / closed);
+   - a requester may withdraw their own request.
+3. **Inbox** (`notifications`), written only by the server (`app.notify`), when:
+   - data is added (an import is committed): the client is told and linked to Home, and a reviewer is linked to the import;
+   - a weekly or adviser report is ready (daily briefs are not notified, to avoid daily noise);
+   - a request or deliverable is created or moves;
+   - someone comments on an action or item you are part of.
+   A notification goes only to someone who may open what it points at, never to the person who caused it. The header shows the unread count, and `/notifications` lists them.
+4. **No new permission.** Comments and requests follow `actions.view`. Deliverables and status changes follow `actions.assign`, which the team holds and a client does not. RBAC_MATRIX is unchanged. A colleague's name is shown only with `users.view`; otherwise "You" or "A colleague".
+5. **Not built:** email, digests, notification preferences, and file attachments on requests. Each would be a change request.

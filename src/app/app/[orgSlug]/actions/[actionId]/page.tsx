@@ -10,6 +10,9 @@ import { Badge, Card, CardBody, DetailList, PageHeader } from '@/components/ui/s
 import { StatusControls } from '../status-controls';
 import { AssignControl } from './assign-control';
 import { requirePermission } from '@/app/_lib/authz';
+import { listActionComments } from '@/modules/engagement';
+import { CommentForm } from '@/components/engagement/forms';
+import { addActionCommentAction } from '../../engagement/actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,6 +37,7 @@ export default async function ActionPage({
   const action = await getAction(ctx, actionId);
   if (action === null) notFound();
 
+  const comments = await listActionComments(ctx, action.id);
   const today = todayInTimeZone(systemClock, 'UTC');
   const overdue = action.dueDate !== null
     && (action.status === 'open' || action.status === 'in_progress')
@@ -153,6 +157,26 @@ export default async function ActionPage({
             owners={await assignableOwners(ctx)}
           />
         ) : null}
+
+        {/* ADR-144: the conversation about this action, between the team and the client. */}
+        <Card>
+          <CardBody>
+            <h2 className="font-serif text-lg text-ink">Comments</h2>
+            {comments.length === 0 ? <p className="mt-2 text-sm text-ink-muted">No comments yet.</p> : (
+              <ol className="mt-3 flex flex-col gap-3 text-sm">
+                {comments.map((c) => (
+                  <li key={c.id} className="border-b border-line pb-2 last:border-0">
+                    <p className="text-ink">{c.author}<span className="text-ink-muted"> · {c.createdAt.slice(0, 16).replace('T', ' ')} UTC</span></p>
+                    <p className="mt-1 whitespace-pre-line text-ink-muted">{c.body}</p>
+                  </li>
+                ))}
+              </ol>
+            )}
+            <div className="mt-4">
+              <CommentForm action={addActionCommentAction} hidden={{ org_slug: orgSlug, action_id: action.id }} />
+            </div>
+          </CardBody>
+        </Card>
       </div>
     </>
   );

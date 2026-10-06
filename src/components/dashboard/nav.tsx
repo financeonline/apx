@@ -6,7 +6,7 @@ import type { Permission } from '@/core/permissions';
 /**
  * Tenant navigation (UX_ARCHITECTURE.md §3.1, ADR-019).
  *
- * Eight items plus Settings, in a fixed order (Departments since ADR-143). Two rules make this a component rather than a list
+ * Nine items plus Settings, in a fixed order (Departments since ADR-143, Requests since ADR-144). Two rules make this a component rather than a list
  * in the layout:
  *
  *   - **An item the role lacks is hidden entirely, never shown disabled** (RBAC §5, §7.4). A
@@ -63,6 +63,12 @@ const PRIMARY: readonly NavItem[] = [
   {
     label: 'Actions', path: 'actions', permission: 'actions.view',
     hint: 'Tasks assigned to people, with due dates and outcomes',
+    built: true,
+  },
+  {
+    // ADR-144: Team/Client Management — requests and deliverables.
+    label: 'Requests', path: 'engagement', permission: 'actions.view',
+    hint: 'What has been asked of the team, and what it is delivering',
     built: true,
   },
   {

@@ -211,6 +211,16 @@ async function seedTenantData(organizationId: string, period: string): Promise<v
     values ('${organizationId}', '${reportId}', '2026-05-01', 'complete', 'all_accounts',
             'fixture', '${ownerId}', 'owner');
 
+    -- ADR-144: an action comment, a request with its event, and a notification.
+    insert into public.action_comments (organization_id, action_id, author_id, body)
+    select '${organizationId}', a.id, '${ownerId}', 'fixture' from public.actions a where a.organization_id = '${organizationId}' limit 1;
+    insert into public.engagement_items (id, organization_id, kind, title, created_by)
+    values ('${reportId}', '${organizationId}', 'request', 'Fixture request', '${ownerId}');
+    insert into public.engagement_events (organization_id, item_id, actor_id, event, to_status)
+    values ('${organizationId}', '${reportId}', '${ownerId}', 'created', 'open');
+    insert into public.notifications (organization_id, user_id, kind, title)
+    values ('${organizationId}', '${ownerId}', 'data_added', 'Fixture');
+
     -- Phase 17: a stored report and its PDF row (the PDF references the report).
     insert into public.reports
            (id, organization_id, report_kind, window_start, window_end, origin, content, content_version)
