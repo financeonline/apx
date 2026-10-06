@@ -1,0 +1,13 @@
+Date,Account,Description,Debit,Credit
+2026-07-10,Revenue,Sales,,24300.00
+2026-07-12,Cost of Sales,Stock,15066.00,
+2026-07-28,Payroll,Salaries,7290.00,
+2026-07-31,Operating Expenses,Rent and bills,1900.00,
+2026-08-10,Revenue,Sales,,25200.00
+2026-08-12,Cost of Sales,Stock,15624.00,
+2026-08-28,Payroll,Salaries,7560.00,
+2026-08-31,Operating Expenses,Rent and bills,1900.00,
+2026-09-10,Revenue,Sales,,26100.00
+2026-09-12,Cost of Sales,Stock,16182.00,
+2026-09-28,Payroll,Salaries,7830.00,
+2026-09-30,Operating Expenses,Rent and bills,1900.00,

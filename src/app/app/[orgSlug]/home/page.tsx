@@ -340,11 +340,11 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
                       {point.label}
                     </TableHead>
                     {trend.map((series) => {
-                      const value = series.points[index]?.value ?? null;
+                      const display = series.points[index]?.display ?? '—';
                       return (
                         <TableCell key={series.key} className="py-2 pl-0 pr-4 font-mono tabular-nums text-ink">
                           {/* A month with no figure is a gap, never a zero (§4). */}
-                          {value === null ? '—' : value}
+                          {display}
                         </TableCell>
                       );
                     })}

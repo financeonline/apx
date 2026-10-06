@@ -177,7 +177,8 @@ describe('every figure Home shows is the snapshot for that month', () => {
   it('names the basis and the freshness in one line', async () => {
     const state = await loadHome(clientFor(ownerId), orgId, orgSlug);
     if (state.kind !== 'ready') throw new Error('expected ready');
-    expect(state.view.basisLine).toContain('from your accounts');
+    // One "Based on", the sources listed ("Based on your accounts"), never "Based on from your accounts".
+    expect(state.view.basisLine).toContain('Based on your accounts');
     expect(state.view.basisLine).toContain('Mar 2026 (latest complete month)');
   });
 });

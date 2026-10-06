@@ -355,7 +355,11 @@ export function runPipeline(input: PipelineInput): PipelineResult {
     for (const s of staged) {
       if (s.nonTabular) continue;
       const cell = s.mapped[field];
-      if (cell === null || cell === undefined || cell.trim() === '') continue;
+      if (cell === null || cell === undefined) continue;
+      // A blank date cell is no date — an unpaid invoice's "Paid Date" — never the text "", which the
+      // database cannot read as a date and refused the whole commit with (found loading sample data).
+      // A REQUIRED date left blank is still reported missing: the required check reads null as absent.
+      if (cell.trim() === '') { s.mapped[field] = null; continue; }
       const iso = parseDateValue(cell, order);
       // An unreadable cell is left as written, so `IMP-DATE-001` names it rather than a blank.
       if (iso !== null) s.mapped[field] = iso;

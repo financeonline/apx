@@ -319,7 +319,9 @@ describe('advisory opportunities follow the same boundary (ADR-148)', () => {
   it('the super admin sees A\'s and C\'s; the database function gives a stranger nothing', async () => {
     const admin = await ctxFor(superAdmin, 'aal2');
     const view = await loadPortfolio(admin);
-    expect((await loadOpportunities(admin, view)).map((e) => e.organizationId).sort()).toEqual([A, C].sort());
+    // A super admin sees every organisation in the database; this file's own are A, C (and B, without one).
+    const ours = new Set([A, B, C, D, E]);
+    expect((await loadOpportunities(admin, view)).map((e) => e.organizationId).filter((id) => ours.has(id)).sort()).toEqual([A, C].sort());
     const { data, error } = await clientFor(stranger, { email: `stranger@${DOMAIN}` }).schema('api')
       .rpc('portfolio_health_breakdowns', { p_orgs: [A, B, C] });
     expect(error).toBeNull();

@@ -229,3 +229,22 @@ describe('refusals and fences', () => {
     expect(countOf(`select count(*) from public.counterparties where organization_id in ('${orgId}', '${otherOrgId}') and name = 'Intruder'`)).toBe(0);
   });
 });
+
+describe('a blank optional date is no date', () => {
+  it('an unpaid invoice with an empty Paid Date imports, with no paid date (found loading sample data)', async () => {
+    const csv = [
+      'Invoice Number,Customer,Invoice Date,Due Date,Total,Amount Paid,Paid Date,Status',
+      'BL-1,Blank Date Ltd,2026-08-05,2026-09-04,500.00,500.00,2026-08-20,Paid',
+      'BL-2,Blank Date Ltd,2026-08-12,2026-09-11,300.00,0.00,,Unpaid',
+    ].join('\n');
+    const result = await startImport({
+      organizationId: orgId, userId: ownerId, requestId: `itest-${RUN}`, db: ownerDb(),
+      file: new File([csv], 'blank_paid_date.csv', { type: 'text/csv' }), importType: 'sales_invoices',
+      periodStart: '2026-08-01', periodEnd: '2026-08-31', bankAccountId: null,
+    });
+    const committed = await confirmAndCommit(result.batchId);
+    expect(committed.committed).toBe(2);
+    expect(one(`select coalesce(paid_date::text, 'NULL') from public.invoices where organization_id = '${orgId}' and invoice_number = 'BL-2'`)).toBe('NULL');
+    expect(one(`select paid_date::text from public.invoices where organization_id = '${orgId}' and invoice_number = 'BL-1'`)).toBe('2026-08-20');
+  });
+});

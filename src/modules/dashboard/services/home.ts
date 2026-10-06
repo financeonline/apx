@@ -6,6 +6,7 @@ import {
   loadHealthCard, loadHealthHistory, summarySentence,
   type HealthCardView, type HealthHistoryPoint, type SummarySentence,
 } from '@/modules/health';
+import { formatMoney } from '@/core/money';
 import * as repo from '../data/repository';
 import {
   changeFrom, formatValue, labelFor, toMetricCard,
@@ -219,7 +220,13 @@ export function buildHeadlineCards(input: {
 export function basisLine(cards: readonly MetricCardView[], lastData: string | null, period: PeriodLabel): string {
   const sources = [...new Set(cards.map((c) => c.basisText).filter(Boolean))];
   const parts: string[] = [];
-  if (sources.length > 0) parts.push(`Based on ${sources.join(' and ').toLowerCase()}`);
+  if (sources.length > 0) {
+    // Each basis reads "From bank statements"; joined, the "From" goes once: "Based on your accounts,
+    // bank statements and invoices" — not "Based on from … and from …" (found with the sample data).
+    const named = sources.map((s) => s.replace(/^from\s+/i, '').toLowerCase());
+    const list = named.length === 1 ? named[0]! : `${named.slice(0, -1).join(', ')} and ${named.at(-1)!}`;
+    parts.push(`Based on ${list}`);
+  }
   const added = formatDate(lastData);
   if (added) parts.push(`Last data added ${added}`);
   parts.push(`${period.label} (latest complete month)`);
@@ -386,7 +393,7 @@ function trailingWindow(
 export interface TrendSeries {
   readonly key: string;
   readonly label: string;
-  readonly points: ReadonlyArray<{ period: string; label: string; value: string | null }>;
+  readonly points: ReadonlyArray<{ period: string; label: string; value: string | null; display: string }>;
 }
 
 export async function loadTrend(
@@ -401,6 +408,7 @@ export async function loadTrend(
   const rows = await repo.loadMetricSeries(db, orgId, keys, window.map((p) => p.id), requestId);
 
   const byKeyPeriod = new Map(rows.map((r) => [`${r.metricKey}|${r.periodId}`, r]));
+  const currency = currencyOf(rows);
 
   return keys.map((key) => ({
     key,
@@ -410,6 +418,11 @@ export async function loadTrend(
       label: p.label,
       // A month with no figure is a gap in the line, not a zero (§4).
       value: byKeyPeriod.get(`${key}|${p.id}`)?.value ?? null,
+      // The table shows money as the cards do ("£42,351"), never the raw "42351.35" (found with sample data).
+      display: (() => {
+        const v = byKeyPeriod.get(`${key}|${p.id}`)?.value ?? null;
+        return v === null ? '—' : formatMoney(v, { currency });
+      })(),
     })),
   }));
 }

@@ -8,7 +8,10 @@ import { cn } from '@/lib/utils';
  */
 function Table({ className, ...props }: React.ComponentProps<'table'>) {
   return (
-    <div data-slot="table-container" className="relative min-w-0 overflow-x-auto">
+    // tabIndex: a table wider than the screen scrolls inside this box, and a keyboard user must be
+    // able to reach it to scroll it (WCAG 2.1.1; axe `scrollable-region-focusable`, found with the
+    // sample data's sales pipeline).
+    <div data-slot="table-container" tabIndex={0} className="relative min-w-0 overflow-x-auto rounded-sm outline-none focus-visible:ring-2 focus-visible:ring-accent/40">
       <table data-slot="table" className={cn('w-full min-w-[36rem] border-collapse text-sm', className)} {...props} />
     </div>
   );
