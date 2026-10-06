@@ -353,12 +353,12 @@ MVP column values:
 | ID | Requirement | SOW § | Type | MVP | Dependencies | Open question |
 |---|---|---|---|---|---|---|
 | REQ-RP-01 | Monthly Management Report: financial, cash, commercial and management analysis. | SOW §20 | SOW requirement | MVP-limited: financial, cash and management sections; commercial section Post-MVP (P14) | ADR-024 | — |
-| REQ-RP-02 | Daily Executive Brief: key movements, risks, opportunities and actions. | SOW §20 | SOW requirement | Post-MVP (P17) | — | — |
-| REQ-RP-03 | Weekly Intelligence Report: financial changes, causes and unresolved issues. | SOW §20 | SOW requirement | Post-MVP (P17) | — | — |
-| REQ-RP-04 | Accountant/CFO Report: adviser-ready client intelligence. | SOW §20 | SOW requirement | Post-MVP (P17) | REQ-AD-* | — |
-| REQ-RP-05 | Funding Readiness Report: indicative readiness assessment and evidence. | SOW §20 | SOW requirement | Post-MVP (P17) | REQ-FR-* | — |
-| REQ-RP-06 | Custom AI Report: user-selected period, questions and analytical dimensions. | SOW §20 | SOW requirement | Post-MVP (P17) | — | — |
-| REQ-RP-07 | Intelligent Reporting module: daily, weekly, monthly, adviser and funding-readiness reports. | SOW §3, §21 | SOW requirement | Post-MVP (P17) except REQ-RP-01 | — | — |
+| REQ-RP-02 | Daily Executive Brief: key movements, risks, opportunities and actions. | SOW §20 | SOW requirement | Phase 17 — built locally (ADR-141); Daily Challenges is its attention section (R17-2) | ADR-141 | — |
+| REQ-RP-03 | Weekly Intelligence Report: financial changes, causes and unresolved issues. | SOW §20 | SOW requirement | Phase 17 — built locally (ADR-141); week-on-week comparison (R17-2) | ADR-141 | — |
+| REQ-RP-04 | Accountant/CFO Report: adviser-ready client intelligence. | SOW §20 | SOW requirement | Phase 17 — built locally, per client (ADR-141) | REQ-AD-*, ADR-141 | — |
+| REQ-RP-05 | Funding Readiness Report: indicative readiness assessment and evidence. | SOW §20 | SOW requirement | Phase 17 — BLOCKED until Phase 16 (ADR-141) | REQ-FR-* | — |
+| REQ-RP-06 | Custom AI Report: user-selected period, questions and analytical dimensions. | SOW §20 | SOW requirement | Phase 17 — built locally (ADR-141, R17-4) | ADR-141 | — |
+| REQ-RP-07 | Intelligent Reporting module: daily, weekly, monthly, adviser and funding-readiness reports. | SOW §3, §21 | SOW requirement | Phase 17 — built locally except REQ-RP-05 (blocked) | ADR-141 | — |
 
 ## 20. Platform Administration
 

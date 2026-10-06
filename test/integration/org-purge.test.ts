@@ -209,7 +209,17 @@ async function seedTenantData(organizationId: string, period: string): Promise<v
            (organization_id, import_batch_id, period_start, coverage, scope, reason, attested_by,
             attested_role)
     values ('${organizationId}', '${reportId}', '2026-05-01', 'complete', 'all_accounts',
-            'fixture', '${ownerId}', 'owner');`);
+            'fixture', '${ownerId}', 'owner');
+
+    -- Phase 17: a stored report and its PDF row (the PDF references the report).
+    insert into public.reports
+           (id, organization_id, report_kind, window_start, window_end, origin, content, content_version)
+    values ('${reportId}', '${organizationId}', 'daily_brief', '2026-05-10', '2026-05-10', 'scheduled',
+            '{}'::jsonb, 'brief.v1');
+    insert into public.report_files
+           (organization_id, report_id, report_kind, storage_bucket, storage_path, byte_size)
+    values ('${organizationId}', '${reportId}', 'daily_brief', '${REPORTS}',
+            '${organizationId}/r/${reportId}/fixture.pdf', 7);`);
 }
 
 beforeAll(async () => {

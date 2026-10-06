@@ -1,68 +1,164 @@
 import Link from 'next/link';
-import { listAvailable } from '@/modules/reporting';
+import { can } from '@/core/permissions';
+import { addDays } from '@/core/periods';
+import {
+  KIND_LABELS, latestCompletedWindows, listAvailable, listStoredReports, windowLabel,
+  type StoredKind, type StoredReportSummary,
+} from '@/modules/reporting';
 import { getAccessContext } from '@/modules/tenancy';
 import { ReportsBeforeFirstMonthEmpty } from '@/components/dashboard';
-import { Card, CardBody, PageHeader } from '@/components/ui/surfaces';
+import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
+import { ComposeForm } from './_components/report-controls';
 
 export const dynamic = 'force-dynamic';
 
 /**
- * The report list (ROUTE_ARCHITECTURE.md §118; ADR-024).
+ * Reports (ROUTE_ARCHITECTURE.md §118; ADR-024; Phase 17, ADR-141).
  *
- * Complete months only. A management report for a month still in progress is a set of figures that
- * will change after somebody has acted on them — so the list does not offer one, rather than
- * offering it with a caveat nobody reads (ADR-030.4).
+ * Every report the agreement lists for Phase 1, each in its own section. The daily and weekly
+ * reports are produced on a schedule and kept; a day or week still in progress has a live preview
+ * instead, because a stored report says the period was reported on. The Funding Readiness Report
+ * waits for the Funding Readiness assessment (Phase 16), and the page says so rather than hiding it.
  */
-export default async function ReportsPage({
-  params,
-}: {
-  params: Promise<{ orgSlug: string }>;
-}) {
+
+const DAYS_OFFERED = 14;
+const WEEKS_OFFERED = 8;
+
+function StoredList({ orgSlug, reports, empty }: { orgSlug: string; reports: readonly StoredReportSummary[]; empty: string }) {
+  if (reports.length === 0) return <p className="text-sm text-ink-muted">{empty}</p>;
+  return (
+    <ul className="flex flex-col divide-y divide-line">
+      {reports.map((report) => (
+        <li key={report.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+          <Link href={`/app/${orgSlug}/reports/r/${report.id}`} className="text-ink underline-offset-2 hover:underline">
+            {windowLabel(report.windowStart, report.windowEnd)}
+          </Link>
+          <span className="flex items-center gap-2 text-ink-muted">
+            {report.origin === 'scheduled' ? 'Produced on schedule' : 'Produced on request'}
+            {report.versions > 1 ? <Badge>{report.versions} versions</Badge> : null}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function Section({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+  return (
+    <Card>
+      <CardBody>
+        <h2 className="font-serif text-lg text-ink">{title}</h2>
+        <p className="mt-1 text-sm text-ink-muted">{description}</p>
+        <div className="mt-4 flex flex-col gap-4">{children}</div>
+      </CardBody>
+    </Card>
+  );
+}
+
+export default async function ReportsPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
   requirePermission(ctx, 'reports.view');
 
-  const reports = await listAvailable(ctx);
+  const canGenerate = can(ctx, 'reports.generate');
+  const canAsk = can(ctx, 'ai.use');
+  const [monthly, stored, windows] = await Promise.all([
+    listAvailable(ctx),
+    listStoredReports(ctx, ['daily_brief', 'weekly_intelligence', 'adviser', 'custom_ai']),
+    latestCompletedWindows(ctx),
+  ]);
+  const of = (kind: StoredKind, limit: number) => stored.filter((r) => r.kind === kind).slice(0, limit);
+
+  const days = Array.from({ length: DAYS_OFFERED }, (_, i) => addDays(windows.yesterday, -i))
+    .map((day) => ({ value: day, label: windowLabel(day, day) }));
+  const weeks = Array.from({ length: WEEKS_OFFERED }, (_, i) => addDays(windows.lastWeekStart, -7 * i))
+    .map((start) => ({ value: start, label: windowLabel(start, addDays(start, 6)) }));
 
   return (
     <>
       <PageHeader
         eyebrow="Reports"
-        title="Monthly Management Report"
-        description="One report a month, from the figures MOTION has already calculated."
+        title="Reports"
+        description="Briefs and reports from the figures MOTION has already calculated. Nothing here is recalculated for the page."
       />
 
-      <div className="mt-8">
-        {reports.length === 0 ? (
-          <ReportsBeforeFirstMonthEmpty addDataHref={`/app/${orgSlug}/data/imports/new`} />
-        ) : (
-          <ul className="flex flex-col gap-3">
-            {reports.map((report) => (
-              <li key={report.periodId}>
-                <Card>
-                  <CardBody className="flex flex-wrap items-center justify-between gap-3 p-4">
-                    <div>
-                      <p className="text-ink">{report.periodLabel}</p>
-                      <p className="mt-1 text-sm text-ink-muted">
-                        {report.file === null
-                          ? 'Ready to read on screen. A PDF can be produced from the report.'
-                          : `PDF produced ${report.file.createdAt.slice(0, 10)}`}
-                      </p>
-                    </div>
-                    <Link
-                      href={`/app/${orgSlug}/reports/monthly/${report.periodId}`}
-                      className="text-sm text-accent underline underline-offset-2"
-                    >
-                      Open the report
-                      <span className="sr-only"> for {report.periodLabel}</span>
-                    </Link>
-                  </CardBody>
-                </Card>
-              </li>
-            ))}
-          </ul>
-        )}
+      <div className="flex flex-col gap-6">
+        <Section
+          title={KIND_LABELS.daily_brief}
+          description="Key movements, risks, opportunities and actions for one day — with what needs attention today."
+        >
+          <Link href={`/app/${orgSlug}/reports/preview/daily_brief`} className="text-sm text-accent underline underline-offset-2">
+            Today so far
+          </Link>
+          <StoredList orgSlug={orgSlug} reports={of('daily_brief', DAYS_OFFERED)}
+            empty="No brief yet. Each day's brief is produced shortly after midnight once MOTION has figures." />
+          {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="daily_brief" label="Produce a brief" windows={days} /> : null}
+        </Section>
+
+        <Section
+          title={KIND_LABELS.weekly_intelligence}
+          description="Financial changes, their causes and unresolved issues for a Monday-to-Sunday week, compared with the week before."
+        >
+          <Link href={`/app/${orgSlug}/reports/preview/weekly_intelligence`} className="text-sm text-accent underline underline-offset-2">
+            This week so far
+          </Link>
+          <StoredList orgSlug={orgSlug} reports={of('weekly_intelligence', WEEKS_OFFERED)}
+            empty="No weekly report yet. Each week's report is produced early on Monday." />
+          {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="weekly_intelligence" label="Produce a weekly report" windows={weeks} /> : null}
+        </Section>
+
+        <Section title="Monthly Management Report" description="One report a month, from the figures MOTION has already calculated.">
+          {monthly.length === 0 ? (
+            <ReportsBeforeFirstMonthEmpty addDataHref={`/app/${orgSlug}/data/imports/new`} />
+          ) : (
+            <ul className="flex flex-col divide-y divide-line">
+              {monthly.map((report) => (
+                <li key={report.periodId} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+                  <div>
+                    <p className="text-ink">{report.periodLabel}</p>
+                    <p className="mt-1 text-ink-muted">
+                      {report.file === null
+                        ? 'Ready to read on screen. A PDF can be produced from the report.'
+                        : `PDF produced ${report.file.createdAt.slice(0, 10)}`}
+                    </p>
+                  </div>
+                  {/* The link text is the monthly report's since ADR-024; journeys and screen readers rely on it. */}
+                  <Link href={`/app/${orgSlug}/reports/monthly/${report.periodId}`} className="text-accent underline underline-offset-2">
+                    Open the report
+                    <span className="sr-only"> for {report.periodLabel}</span>
+                  </Link>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+
+        <Section
+          title={KIND_LABELS.adviser}
+          description="Adviser-ready intelligence on this business: the latest month, health area by area, what stands open, what was done, and how far the data goes."
+        >
+          <StoredList orgSlug={orgSlug} reports={of('adviser', 6)} empty="No Accountant/CFO Report yet." />
+          {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="adviser" label="Produce one now" /> : null}
+        </Section>
+
+        <Section
+          title={KIND_LABELS.custom_ai}
+          description="Choose a month, the areas to look at and up to five questions; the AI Analyst answers each under its usual checks. Your custom reports are visible to you only."
+        >
+          <StoredList orgSlug={orgSlug} reports={of('custom_ai', 10)} empty="You have no custom reports yet." />
+          {canAsk ? (
+            <Link href={`/app/${orgSlug}/reports/custom/new`} className="text-sm text-accent underline underline-offset-2">
+              Create a custom report
+            </Link>
+          ) : null}
+        </Section>
+
+        <Section title="Funding Readiness Report" description="Indicative readiness assessment and evidence.">
+          <p className="text-sm text-ink-muted">
+            This report arrives with the Funding Readiness assessment, which is not available yet.
+          </p>
+        </Section>
       </div>
     </>
   );

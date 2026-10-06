@@ -44,7 +44,7 @@ export {
   type FiscalYearStartMonth,
 } from './fiscal';
 
-export { currentYearMonth, todayInTimeZone } from './timezone';
+export { addDays, currentYearMonth, isoWeekday, startOfLocalDay, todayInTimeZone } from './timezone';
 
 export {
   bankCoverageFromRatio,

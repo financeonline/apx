@@ -48,7 +48,8 @@ export async function GET(
         action: 'report.downloaded',
         targetTable: 'report_files',
         targetId: file.id,
-        metadata: { report_id: file.id, period_id: file.periodId },
+        // A Phase 17 report's PDF belongs to the report, not a month.
+        metadata: file.periodId === null ? { report_id: file.id } : { report_id: file.id, period_id: file.periodId },
       },
     );
 

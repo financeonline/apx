@@ -2,7 +2,8 @@
 
 export type JobType =
   | 'calculation.run' | 'document.extract' | 'import.commit_large' | 'alerts.evaluate'
-  | 'org.purge' | 'report.render' | 'ai.eval' | 'storage.cleanup_orphans' | 'snapshots.compact';
+  | 'org.purge' | 'report.render' | 'report.compose' | 'ai.eval' | 'storage.cleanup_orphans'
+  | 'snapshots.compact';
 
 export type JobStatus =
   | 'queued' | 'running' | 'succeeded' | 'failed' | 'dead' | 'cancelled' | 'deferred_upstream';

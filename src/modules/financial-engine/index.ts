@@ -123,3 +123,23 @@ export {
 } from './services/run';
 
 export { comparisonPeriodIds, monthsBefore, variancesForPeriod, type StoredFigure, type VariancePassInput } from './domain/variance-pass';
+
+/** Phase 17 (R17-1b): day- and week-level figures, kept apart from the monthly engine. */
+export {
+  INTERIM_RECORD_CAP,
+  INTERIM_RULES_VERSION,
+  computeInterimFigures,
+  interimChange,
+  type InterimAccountCoverage,
+  type InterimBankRow,
+  type InterimFigure,
+  type InterimFigureKey,
+  type InterimFigures,
+  type InterimInput,
+  type InterimInvoiceRow,
+  type InterimInvoiceType,
+  type InterimRecordRef,
+  type InterimStatus,
+  type InterimUnavailable,
+  type InterimWindow,
+} from './domain/interim';

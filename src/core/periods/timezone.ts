@@ -55,3 +55,49 @@ export function todayInTimeZone(clock: Clock, timeZone: string): IsoDate {
 export function currentYearMonth(clock: Clock, timeZone: string): YearMonth {
   return yearMonthOf(todayInTimeZone(clock, timeZone));
 }
+
+/** The calendar date `days` after `date` (negative for before). Pure date arithmetic, no zone. */
+export function addDays(date: IsoDate, days: number): IsoDate {
+  const [y, m, d] = date.split('-').map((part) => Number.parseInt(part, 10)) as [number, number, number];
+  const instant = new Date(Date.UTC(y, m - 1, d + days));
+  return instant.toISOString().slice(0, 10);
+}
+
+/** ISO weekday of a calendar date: 1 = Monday … 7 = Sunday. */
+export function isoWeekday(date: IsoDate): number {
+  const [y, m, d] = date.split('-').map((part) => Number.parseInt(part, 10)) as [number, number, number];
+  const day = new Date(Date.UTC(y, m - 1, d)).getUTCDay();
+  return day === 0 ? 7 : day;
+}
+
+/** The offset of `timeZone` from UTC at `instant`, in milliseconds (local − UTC). */
+function offsetAt(instant: Date, timeZone: string): number {
+  const parts = new Intl.DateTimeFormat('en-GB', {
+    timeZone, hourCycle: 'h23',
+    year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit',
+  }).formatToParts(instant);
+  const get = (type: Intl.DateTimeFormatPartTypes): number =>
+    Number.parseInt(parts.find((part) => part.type === type)?.value ?? '0', 10);
+  const asUtc = Date.UTC(get('year'), get('month') - 1, get('day'), get('hour'), get('minute'), get('second'));
+  return asUtc - Math.floor(instant.getTime() / 1000) * 1000;
+}
+
+/**
+ * The instant a calendar day begins in `timeZone` (Phase 17: report windows are organisation-local
+ * days, and timestamps are compared against them).
+ *
+ * The offset is read for the instant itself, twice, because the first guess can sit on the other
+ * side of a DST change from the answer. Where local midnight does not exist (a zone whose clocks
+ * jump forward AT midnight) the result is the first instant of that day that does.
+ */
+export function startOfLocalDay(date: IsoDate, timeZone: string): Date {
+  const [y, m, d] = date.split('-').map((part) => Number.parseInt(part, 10)) as [number, number, number];
+  const wall = Date.UTC(y, m - 1, d);
+  try {
+    const first = wall - offsetAt(new Date(wall), timeZone);
+    const second = wall - offsetAt(new Date(first), timeZone);
+    return new Date(second);
+  } catch {
+    throw new ValidationError('That timezone is not recognised.', [{ path: 'timezone', message: timeZone }]);
+  }
+}

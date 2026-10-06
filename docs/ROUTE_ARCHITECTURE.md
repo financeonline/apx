@@ -52,6 +52,9 @@ Next.js App Router. Three route families, each with its own root layout and shel
 /app/[orgSlug]/actions/[actionId]
 /app/[orgSlug]/reports
 /app/[orgSlug]/reports/monthly/[period]
+/app/[orgSlug]/reports/r/[reportId]
+/app/[orgSlug]/reports/preview/[kind]
+/app/[orgSlug]/reports/custom/new
 /app/[orgSlug]/analyst
 /app/[orgSlug]/analyst/[conversationId]
 /app/[orgSlug]/evidence/[bundleId]
@@ -133,8 +136,11 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 | `/customers/[counterpartyId]` | One counterparty: revenue, share and contribution (with the CD-08 note), what they buy, how they were won, revenue trend, invoices with their line split (split form for `customers.edit`) | all (edit needs `customers.edit`) | `customers.view` | — | Server + client form | `dashboard.loadCustomerDetail`, `dashboard.loadCustomerCommercial` | Cross-org id → 404 |
 | `/actions` | Action Centre list, filters | all | `actions.view` | — | Server; client filters | `actions.list` | None → "No actions yet" with create (if `actions.create`) |
 | `/actions/[actionId]` | Detail, status, outcome, evidence | all | `actions.view` (+`actions.update_own` / `actions.assign`) | — | Server + client form | `actions.get`, `evidence.getBundle` | Cross-org → 404 |
-| `/reports` | Report list (MVP: monthly) | all | `reports.view` | — | Server | `reporting.listAvailable` | No closed month → "First report available after month end" |
+| `/reports` | Report list: daily, weekly, monthly, adviser, custom; Funding Readiness shown as not available (ADR-141) | all | `reports.view` | — | Server | `reporting.listAvailable` | No closed month → "First report available after month end" |
 | `/reports/monthly/[period]` | Monthly Management Report view + PDF | all (PDF needs `reports.generate`) | `reports.view` | — | Server | `reporting.getMonthly(period)` | Period without data → 404-style empty |
+| `/reports/r/[reportId]` | A stored Phase 17 report (daily, weekly, adviser, custom) as composed + its PDF | all (PDF needs `reports.generate`); custom: author only | `reports.view` | — | Server | `reporting.getStoredReport` | Unknown, foreign or another person's custom report → 404 (ADR-141) |
+| `/reports/preview/[kind]` | Today / this week so far — composed now, not stored | all | `reports.view` | — | Server | `reporting.previewBrief` | Unknown kind → 404 |
+| `/reports/custom/new` | Build a Custom AI Report (each question through `POST /api/ai/chat`) | all with `ai.use` | `reports.view` + `ai.use` | — | Server + client | `reporting.customReportPeriods`; `finishCustomReport` | No complete month → empty state |
 | `/analyst` | New conversation | all | `ai.use` | — | Client chat shell | `ai.listConversations` | Quota exhausted → notice with reset time |
 | `/analyst/[conversationId]` | Conversation | owner of conversation, org owner/admin | `ai.use` | — | Client | `ai.getConversation` | Other user's conversation → 404 |
 | `/evidence/[bundleId]` | Evidence drawer as page (deep-linkable) | all (document items need `documents.view`) | `financials.view` | — | Server | `evidence.getBundle`, `evidence.resolveItems` | Cross-org → 404; client sees document items as "source document (restricted)" |

@@ -419,5 +419,10 @@ export function reportKey(orgId: string, period: string, jobId: string): string 
   return `${orgId}/${period}/${jobId}.pdf`;
 }
 
+/** Phase 17: the PDF of a stored report — the path `api_server.record_report_pdf` derives. */
+export function storedReportKey(orgId: string, reportId: string, fileId: string): string {
+  return `${orgId}/r/${reportId}/${fileId}.pdf`;
+}
+
 /** Exported for tests: the key rules are the tenant boundary and must be directly assertable. */
 export const __testing = { assertKeyBelongsTo, AUDIT_MAX_AGE_SECONDS, SIGNED_URL_TTL_SECONDS };

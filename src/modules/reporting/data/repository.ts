@@ -8,7 +8,8 @@ import type { ReportFileRef } from '../domain/types';
 
 export interface ReportFileRow {
   readonly id: string;
-  readonly periodId: string;
+  /** NULL for the PDF of a stored (Phase 17) report, which belongs to the report instead. */
+  readonly periodId: string | null;
   readonly storageBucket: string;
   readonly storagePath: string;
   readonly byteSize: number | null;
@@ -20,7 +21,7 @@ const FILE_SELECT =
 
 interface FileRow {
   id: string;
-  period_id: string;
+  period_id: string | null;
   storage_bucket: string;
   storage_path: string;
   byte_size: number | null;
@@ -35,6 +36,9 @@ export async function listReportFiles(
     .from('report_files')
     .select(`${FILE_SELECT}, fiscal_periods!inner (label)`)
     .eq('organization_id', orgId)
+    // Phase 17: an adviser or custom report's PDF names its month too; only the monthly
+    // management report's PDFs belong in this list.
+    .eq('report_kind', 'monthly_management')
     .is('deleted_at', null)
     .order('created_at', { ascending: false });
   if (error) throw toMotionError(error);
@@ -46,7 +50,8 @@ export async function listReportFiles(
     const period = Array.isArray(row.fiscal_periods) ? row.fiscal_periods[0] : row.fiscal_periods;
     return {
       id: row.id,
-      periodId: row.period_id,
+      // Monthly rows always name their month (`report_files_subject`).
+      periodId: row.period_id ?? '',
       periodLabel: period?.label ?? '',
       byteSize: row.byte_size,
       createdAt: row.created_at,

@@ -851,3 +851,71 @@ export async function finishPortfolioTurn(
   });
   if (error) throw toMotionError(error, actor.requestId);
 }
+
+/**
+ * Phase 17: stores what a composed report said (`public.reports`, append-only). Server-asserted and
+ * scoped — the job and the Custom AI Report's server action are the only callers.
+ */
+export async function recordReport(
+  actor: ServerRpcActor | null,
+  input: {
+    organizationId: string;
+    kind: 'daily_brief' | 'weekly_intelligence' | 'adviser' | 'custom_ai';
+    windowStart: string;
+    windowEnd: string;
+    periodId: string | null;
+    jobId: string | null;
+    origin: 'scheduled' | 'requested';
+    content: unknown;
+    contentVersion: string;
+  },
+): Promise<string> {
+  const { data, error } = await serverClient()
+    .schema('api_server')
+    .rpc('record_report', {
+      p_actor: actor?.userId ?? null,
+      p_org: input.organizationId,
+      p_kind: input.kind,
+      p_window_start: input.windowStart,
+      p_window_end: input.windowEnd,
+      p_period: input.periodId,
+      p_job: input.jobId,
+      p_origin: input.origin,
+      p_content: input.content,
+      p_content_version: input.contentVersion,
+    });
+  if (error) throw toMotionError(error, actor?.requestId);
+  return data as string;
+}
+
+/** Phase 17: records the PDF of a stored report; the path is derived by the database. */
+export async function recordReportPdf(
+  actor: ServerRpcActor | null,
+  input: {
+    organizationId: string;
+    reportId: string;
+    jobId: string | null;
+    fileId: string;
+    sha256: Uint8Array;
+    byteSize: number;
+  },
+): Promise<string> {
+  const { data, error } = await serverClient()
+    .schema('api_server')
+    .rpc('record_report_pdf', {
+      p_actor: actor?.userId ?? null,
+      p_org: input.organizationId,
+      p_report: input.reportId,
+      p_job: input.jobId,
+      p_file: input.fileId,
+      p_sha256: `\\x${Buffer.from(input.sha256).toString('hex')}`,
+      p_bytes: input.byteSize,
+    });
+  if (error) throw toMotionError(error, actor?.requestId);
+  return data as string;
+}
+
+/** Phase 17: the hourly sweep that queues yesterday's brief and, on Mondays, last week's report. */
+export async function enqueueScheduledReports(): Promise<number> {
+  return serverRpc<number>('enqueue_scheduled_reports', {});
+}
