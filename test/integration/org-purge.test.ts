@@ -157,6 +157,59 @@ async function seedTenantData(organizationId: string, period: string): Promise<v
            (id, organization_id, period_id, report_kind, storage_bucket, storage_path, byte_size)
     values ('${reportId}', '${organizationId}', '${period}', 'monthly_management', '${REPORTS}',
             '${reportKey}', 7);`);
+
+  /*
+   * The tables added after the deletion order was first written: forecasts and scenarios (Phases
+   * 11–12), the commercial records (Phase 14) and completeness attestations (Step 0F). None of them
+   * was in the order, so the guard refused the purge of any organisation that had used one — the
+   * customer's data stayed, and the job failed on every attempt. One row in each, so a table added
+   * later without its place in the order fails here first.
+   */
+  adminSql(`
+    insert into public.forecast_runs
+           (id, organization_id, method, config_version, horizon_months)
+    values ('${reportId}', '${organizationId}', 'fixture', '1', 3);
+    insert into public.forecast_values
+           (organization_id, forecast_run_id, period_id, metric_key, value, derivation)
+    values ('${organizationId}', '${reportId}', '${period}', 'revenue', 250.00, 'baseline');
+    insert into public.scenario_runs
+           (id, organization_id, name, forecast_run_id, method, config_version, horizon_months)
+    values ('${reportId}', '${organizationId}', 'Fixture scenario', '${reportId}', 'fixture', '1', 3);
+    insert into public.scenario_values
+           (organization_id, scenario_run_id, period_id, metric_key, baseline_value, scenario_value,
+            derivation)
+    values ('${organizationId}', '${reportId}', '${period}', 'revenue', 250.00, 275.00, 'baseline');
+
+    insert into public.counterparties (id, organization_id, name, kind)
+    values ('${reportId}', '${organizationId}', 'Fixture Customer ${RUN}', 'customer');
+    insert into public.invoices
+           (id, organization_id, invoice_type, counterparty_id, invoice_number, issue_date, period_id,
+            total_amount, currency, record_status, assurance_level)
+    values ('${reportId}', '${organizationId}', 'sales', '${reportId}', 'INV-1', '2026-05-10',
+            '${period}', 250.00, 'GBP', 'accepted', 'verified');
+    insert into public.products (id, organization_id, name)
+    values ('${reportId}', '${organizationId}', 'Fixture product');
+    insert into public.invoice_lines (organization_id, invoice_id, product_id, amount)
+    values ('${organizationId}', '${reportId}', '${reportId}', 250.00);
+    insert into public.marketing_channels (id, organization_id, name)
+    values ('${reportId}', '${organizationId}', 'Fixture channel');
+    insert into public.campaigns (id, organization_id, name, channel_id)
+    values ('${reportId}', '${organizationId}', 'Fixture campaign', '${reportId}');
+    insert into public.campaign_spend (organization_id, campaign_id, period_id, amount, currency)
+    values ('${organizationId}', '${reportId}', '${period}', 10.00, 'GBP');
+    insert into public.opportunities (organization_id, name, currency, campaign_id, channel_id)
+    values ('${organizationId}', 'Fixture opportunity', 'GBP', '${reportId}', '${reportId}');
+
+    insert into public.import_batches
+           (id, organization_id, source_document_id, import_type, target_table, balance_basis, status,
+            period_start, period_end)
+    values ('${reportId}', '${organizationId}', '${documentId}', 'trial_balance', 'period_balances', 'cumulative', 'committed',
+            '2026-05-01', '2026-05-31');
+    insert into public.report_completeness_attestations
+           (organization_id, import_batch_id, period_start, coverage, scope, reason, attested_by,
+            attested_role)
+    values ('${organizationId}', '${reportId}', '2026-05-01', 'complete', 'all_accounts',
+            'fixture', '${ownerId}', 'owner');`);
 }
 
 beforeAll(async () => {
