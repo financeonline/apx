@@ -114,6 +114,7 @@ const MISSING_REASONS: Readonly<Record<string, string>> = {
   report_completeness_unconfirmed: 'Your report has no line for this, and nobody has yet confirmed whether the report lists every account. An owner or admin can confirm it on the import.',
   stale_invoice_data: 'Your invoice list does not show the position at the end of this month.',
   vat_basis_unknown: 'What you owe includes VAT but your costs do not, so the days cannot be compared fairly.',
+  no_balance_sheet: 'No trial balance or balance sheet covers this month, so what is owed on borrowing is not known.',
   // The cost-of-sales reasons are the shared ones (ADR-106): Home, the report and the analyst all
   // explain this limitation, and they may not word it differently.
   ...AVAILABILITY_REASON_TEXT,

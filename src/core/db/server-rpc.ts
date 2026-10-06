@@ -245,6 +245,7 @@ export async function enqueueServerJob(
       | 'import.commit_large'
       | 'alerts.evaluate'
       | 'report.render'
+      | 'funding.assess'
       | 'ai.eval'
       | 'storage.cleanup_orphans'
       | 'snapshots.compact';
@@ -918,4 +919,14 @@ export async function recordReportPdf(
 /** Phase 17: the hourly sweep that queues yesterday's brief and, on Mondays, last week's report. */
 export async function enqueueScheduledReports(): Promise<number> {
   return serverRpc<number>('enqueue_scheduled_reports', {});
+}
+
+/** Phase 16 (ADR-145): writes Funding Readiness assessments (refused while the flag is off). */
+export async function finishFunding(organizationId: string, assessments: unknown[], trigger: string): Promise<number> {
+  return serverRpc<number>('finish_funding', { p_org: organizationId, p_assessments: assessments, p_trigger: trigger });
+}
+
+/** Phase 16 (ADR-145): the nightly backstop for enabled organisations whose latest month is unassessed. */
+export async function enqueueFundingBackstop(): Promise<number> {
+  return serverRpc<number>('enqueue_funding_backstop', {});
 }

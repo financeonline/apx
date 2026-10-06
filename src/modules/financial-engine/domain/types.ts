@@ -48,6 +48,8 @@ export const DATA_QUALITY_WARNINGS = [
   'partial_month', 'no_cost_of_sales', 'cash_positive', 'no_cost_allocation',
   /** N-1 (Step 0F): P's balance report is incomplete (not attested), so a ledger or invoice source stated the P&L. */
   'balance_report_incomplete',
+  /** Phase 16 (ADR-145): debt accounts carry a debit balance; reported, treated as no debt. */
+  'debit_balance_on_debt_accounts',
 ] as const;
 export type DataQualityWarning = (typeof DATA_QUALITY_WARNINGS)[number];
 
@@ -84,6 +86,8 @@ export const DATA_QUALITY_MISSING = [
    * put them on one — VAT-inclusive payables over VAT-exclusive costs, or a VAT status nobody set.
    */
   'vat_basis_unknown',
+  /** Phase 16 (ADR-145): no cumulative trial balance or balance sheet states P, so debt is unknown. */
+  'no_balance_sheet',
 ] as const;
 export type DataQualityMissing = (typeof DATA_QUALITY_MISSING)[number];
 

@@ -211,6 +211,15 @@ async function seedTenantData(organizationId: string, period: string): Promise<v
     values ('${organizationId}', '${reportId}', '2026-05-01', 'complete', 'all_accounts',
             'fixture', '${ownerId}', 'owner');
 
+    -- ADR-145: a funding assessment and its pointer.
+    insert into public.funding_assessments
+           (id, organization_id, calculation_run_id, period_id, overall_status, factors_used, substantive_weight_scored,
+            data_coverage_percent, breakdown, rules_version, engine_version, trigger, disclaimer)
+    values ('${reportId}', '${organizationId}', '${reportId}', '${period}', 'insufficient_data', 1, 20, 22,
+            '{}'::jsonb, 'funding_readiness.v1', '15.1.0', 'enablement_backfill', 'fixture');
+    insert into public.funding_current (organization_id, period_id, assessment_id, calculation_run_id)
+    values ('${organizationId}', '${period}', '${reportId}', '${reportId}');
+
     -- ADR-144: an action comment, a request with its event, and a notification.
     insert into public.action_comments (organization_id, action_id, author_id, body)
     select '${organizationId}', a.id, '${ownerId}', 'fixture' from public.actions a where a.organization_id = '${organizationId}' limit 1;

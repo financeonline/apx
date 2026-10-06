@@ -17,6 +17,8 @@ export {
   recordAccessEvent,
   revokeUserSessions,
   recordReportFile,
+  finishFunding,
+  enqueueFundingBackstop,
   recordReport,
   recordReportPdf,
   enqueueScheduledReports,

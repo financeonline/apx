@@ -190,6 +190,12 @@ export async function getBundle(ctx: AccessContext, bundleId: string): Promise<E
   if (bundle === null) throw new NotFound();
   assertBundleOrg(ctx, str(bundle, 'organization_id'));
 
+  // Phase 16 (§10, U-5): a Funding Readiness bundle is NOT FOUND while the feature is off.
+  if (String(bundle.kind) === 'funding_assessment') {
+    const { data: org } = await ctx.db.from('organizations').select('features').eq('id', orgId).maybeSingle();
+    if ((org as { features?: Record<string, unknown> } | null)?.features?.funding_readiness !== true) throw new NotFound();
+  }
+
   const itemRows = await fetchBundleItems(ctx.db, orgId, bundleId);
   const items: EvidenceItemView[] = [];
   for (const row of itemRows) items.push(await toItemView(ctx, orgId, row));

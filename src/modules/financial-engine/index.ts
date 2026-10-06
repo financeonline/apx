@@ -143,3 +143,10 @@ export {
   type InterimUnavailable,
   type InterimWindow,
 } from './domain/interim';
+
+/** Phase 16 (ADR-145): borrowing owed, read only by Funding Readiness. */
+export { computeDebtBalance, DEBT_CATEGORIES } from './domain/debt';
+
+/** Phase 16 (ADR-145): the bank evidence ratio's own rule, for Funding Readiness. */
+export { bankCoverageFor } from './domain/cash-history';
+export { invoiceOutstandingAt } from './domain/receivables';

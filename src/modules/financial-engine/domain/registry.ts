@@ -235,6 +235,13 @@ const RECEIVABLES: readonly MetricDefinition[] = [
     aggregation: 'recompute', asOfDependent: true,
   }),
   define({
+    // Phase 16 (ADR-145): read only by Funding Readiness.
+    key: 'debt_balance', label: 'Borrowing owed',
+    description: 'What the business owes on loans and long-term borrowing at the month end, from a trial balance or balance sheet.',
+    unit: 'money', family: 'receivables_payables', level: 2, dimensionType: 'none',
+    dependencies: [], aggregation: 'last', asOfDependent: false,
+  }),
+  define({
     key: 'working_capital', label: 'Working capital',
     description: 'Short-term assets less short-term liabilities: what the business has to work with.',
     unit: 'money', family: 'derived', level: 4, dimensionType: 'none',

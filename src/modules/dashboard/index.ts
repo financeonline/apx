@@ -144,6 +144,8 @@ export {
   loadPeriodSummary,
   loadRecurringPayments,
   parseListFilter,
+  reconciliationFor,
+  type SummaryStatement,
   type BankAccountCardView,
   type BankTransactionDetail,
   type BankTransactionRowView,

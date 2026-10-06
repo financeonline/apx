@@ -176,7 +176,13 @@
  * working-capital line is unknown unless it is confirmed complete for P — NF-2's rule, which 14.0.0
  * applied to trial balances only.
  */
-export const ENGINE_VERSION = '15.0.0';
+/**
+ * 15.1.0 (Phase 16, ADR-145): MINOR. A new metric, `debt_balance` — loans and long-term liabilities
+ * from the balance family's cumulative statement for P, NULL `no_balance_sheet` without one, a known
+ * zero only on a complete statement. Every existing value is unchanged (§6: a new metric is minor).
+ * Read only by Funding Readiness.
+ */
+export const ENGINE_VERSION = '15.1.0';
 
 /** Bumped independently of the engine (§6). */
 /**

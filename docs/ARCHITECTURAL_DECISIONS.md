@@ -2732,3 +2732,28 @@ Decision:
    A notification goes only to someone who may open what it points at, never to the person who caused it. The header shows the unread count, and `/notifications` lists them.
 4. **No new permission.** Comments and requests follow `actions.view`. Deliverables and status changes follow `actions.assign`, which the team holds and a client does not. RBAC_MATRIX is unchanged. A colleague's name is shown only with `users.view`; otherwise "You" or "A colleague".
 5. **Not built:** email, digests, notification preferences, and file attachments on requests. Each would be a change request.
+
+### ADR-145 · Phase 16 Funding Readiness, as built — and where the build departs from the design
+Status: **built locally on 2026-10-06 on the owner's instruction ("build it now, locally"), AHEAD of the design's prerequisite.** The independent re-review of the receivables/payables recovery (ADR-120) and its Health regression audit has not happened. F5 therefore rests on unreviewed engine work. Off by default. Not reviewed, merged or deployed.
+
+As designed (PHASE_16_IMPLEMENTATION.md §3–§11):
+- the seven factors, every threshold and A-1…A-5;
+- one clamp; unavailable is not a value; the 0.6 completeness exclusion and the 70 cap;
+- the gate (F1 + F2 + three of F3–F6), renormalised weights with Health's rounding, and the five bands;
+- the disclaimer word for word;
+- fixed-template sentences, missing lines and improvement actions, with no AI anywhere;
+- an append-only `funding_assessments` table and the `funding_current` pointer;
+- one `funding_assessment` evidence bundle per row;
+- RLS that includes the flag;
+- the page, a flagged navigation link, the portfolio link and the platform toggle;
+- the enablement backfill queued in the same transaction as the flag;
+- the nightly backstop;
+- the `debt_balance` engine metric (engine 15.1.0, minor).
+
+Departures, each to the owner's attention:
+1. **Assessment timing.** The design adds "a funding step in `calculation.run` immediately after the health step". It is built as a `funding.assess` job queued after every successful run while the flag is on. An assessment therefore always cites a run that succeeded, and a run that fails part-way never leaves a funding pointer to restore. Any queued assessment job assesses every complete month whose current assessment does not cite that month's current run, whatever triggered it, because queued jobs of one organisation merge.
+2. **F3.2** reads B3 as the period's current Health score recorded it, which is the same `bankingAnomalies` evaluation from the same run, rather than re-running the condition functions in the job.
+3. **The 70 cap** also applies to AI-read (`inferred`) required inputs, as owner decision D-2 set for Health. The design text named only estimated and proxy inputs.
+4. **A complete statement with no borrowing line** is a known zero debt. On an unconfirmed, partial or unbalanced statement it is unknown, consistent with Step 0F/NF-2. The design predates that rule.
+
+Still deferred, as designed: the Funding Readiness Health dimension (ADR-119), lender matching, and the analyst explaining an assessment.

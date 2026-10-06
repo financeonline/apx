@@ -18,6 +18,7 @@ import type { AccountPeriodState } from './cash-history';
 import type { TransferKind } from '@/modules/banking';
 import { computeConcentration, type ConcentrationPeriodInput } from './concentration';
 import { computeReceivables } from './receivables';
+import { computeDebtBalance } from './debt';
 import { receivablesPeriodInput, type ReceivablesComposeInput } from './receivables-input';
 import {
   bankDirectedPart, bankLineDirection, commercialPopulation, commercialSelection,
@@ -728,6 +729,12 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
         results.push(...periodMetrics.metrics.map((m) => withDerivedIds(m, resolve)));
       }
     }
+  }
+
+  // ---- Debt (Phase 16 §5.4.1, ADR-145) ----
+  // From the same balance-family statement receivables and payables read; needs the run's batches.
+  if (input.receivables !== undefined) {
+    results.push(computeDebtBalance(context, period, cells, input.receivables.batches));
   }
 
   // A stable order makes two runs over identical data write byte-identical snapshots, which is the

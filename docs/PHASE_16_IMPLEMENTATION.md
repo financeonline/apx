@@ -1,7 +1,9 @@
 # MOTION — Phase 16 Implementation Design
 ## Funding Readiness (REQ-FR-01…11)
 
-**Status: DESIGN FINALISED — IMPLEMENTATION NOT STARTED — BLOCKED BY DEPENDENCY.**
+**Status: BUILT LOCALLY (2026-10-06) on the owner's instruction "build it now, locally" — ahead of the dependency below, which is still unmet (the receivables/payables recovery and its Health regression audit have not been independently re-reviewed). Off by default (`features.funding_readiness`). Not reviewed, merged or deployed. As-built notes: ADR-145.**
+
+~~Status: DESIGN FINALISED — IMPLEMENTATION NOT STARTED — BLOCKED BY DEPENDENCY.~~
 
 - **Decisions:** the product owner decided U-1…U-6 on 2026-09-30 (§16). The thresholds in §5 are approved, with the five drafting amendments A-1…A-5 (§5.8) **confirmed by the owner on 2026-10-06** (ADR-140). F5.2/F5.3 use the gross overdue share (owner decision, 2026-10-06).
 - **Dependency:** Phase 16 implementation cannot begin until the separate **Receivables/Payables Engine Recovery** (ADR-120) and its **Health Score regression audit** are complete (§15).

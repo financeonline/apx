@@ -8,6 +8,7 @@ import { recordAccessEvent } from '@/core/db/server-rpc';
 import { Banner, Badge } from '@/components/ui/surfaces';
 import { ROLE_LABELS } from '@/components/labels';
 import { unreadCount } from '@/modules/engagement';
+import { fundingEnabled } from '@/modules/funding';
 
 export const dynamic = 'force-dynamic';
 
@@ -55,6 +56,8 @@ export default async function OrgLayout({
   const showSettings = can(ctx, 'settings.manage');
   // ADR-144: the inbox. Not for a suspended member, who keeps only the frozen Home (ADR-044.4).
   const unread = can(ctx, 'financials.view') ? await unreadCount(ctx) : null;
+  // Phase 16 (U-5): the Funding link exists only while the flag is on, for those with `reports.view`.
+  const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
 
   return (
     <div className="min-h-dvh">
@@ -64,6 +67,9 @@ export default async function OrgLayout({
             MOTION
           </Link>
           <PrimaryNav ctx={ctx} orgSlug={orgSlug} />
+          {showFunding ? (
+            <Link href={`/app/${orgSlug}/funding`} className="text-sm text-ink-muted transition-colors hover:text-ink">Funding</Link>
+          ) : null}
           <div className="ml-auto flex flex-wrap items-center justify-end gap-3 text-sm">
             <DataMenu ctx={ctx} orgSlug={orgSlug} />
             {unread === null ? null : (

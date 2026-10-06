@@ -12,6 +12,7 @@ const db = {
   enqueueEngineUpgrade: vi.fn(async (_v: string) => { calls.push('upgrade'); return 2; }),
   enqueueScheduledRecalculation: vi.fn(async () => { calls.push('scheduled'); return 5; }),
   enqueueScheduledReports: vi.fn(async () => { calls.push('reports'); return 3; }),
+  enqueueFundingBackstop: vi.fn(async () => { calls.push('funding'); return 1; }),
 };
 vi.mock('@/core/db', () => db);
 
@@ -37,9 +38,16 @@ describe('the cron routes', () => {
     expect(calls).toEqual([]);
   });
 
-  it('nightly: the sweep, then the engine upgrade — and not the daily recalculation', async () => {
+  it('nightly: the sweep, the engine upgrade, then the funding backstop — and not the daily recalculation', async () => {
     const response = await nightly.GET(request('cron-test-secret'));
     expect(response.status).toBe(200);
+    expect(calls).toEqual(['sweep', 'upgrade', 'funding']);
+  });
+
+  it('nightly: a failing funding backstop is reported after the other two were queued (ADR-121)', async () => {
+    db.enqueueFundingBackstop.mockRejectedValueOnce(new Error('boom'));
+    const response = await nightly.GET(request('cron-test-secret'));
+    expect(response.status).toBe(500);
     expect(calls).toEqual(['sweep', 'upgrade']);
   });
 

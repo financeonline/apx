@@ -56,7 +56,7 @@ interface SummaryCategory {
   readonly row_count: number;
 }
 
-interface SummaryStatement {
+export interface SummaryStatement {
   readonly batch_id: string;
   readonly bank_account_id: string | null;
   readonly period_start: string;
@@ -257,7 +257,8 @@ function index(rows: readonly SnapshotRow[]): Map<string, SnapshotRow> {
   return map;
 }
 
-function reconciliationFor(
+/** Exported unchanged for Funding Readiness F3.4 (PHASE_16 §5.3: "reused unchanged"). */
+export function reconciliationFor(
   accountId: string, statements: readonly SummaryStatement[],
 ): ReconciliationView {
   const mine = statements.filter((s) => s.bank_account_id === accountId);

@@ -206,6 +206,18 @@ export async function runCalculationJob(
       // run here would roll nothing back and would hide a good calculation behind a queue problem.
       return { deferred: cause instanceof Error ? cause.message : String(cause) };
     });
+
+    /*
+     * Phase 16 (ADR-121, ADR-145): Funding Readiness is assessed after every SUCCESSFUL run while the
+     * organisation has it switched on — a separate job, so an assessment always cites a run that
+     * succeeded, and nothing at all happens while the flag is off.
+     */
+    const { data: org } = await scoped.from('organizations').select('features').eq('id', orgId).maybeSingle();
+    if ((org as { features?: Record<string, unknown> } | null)?.features?.funding_readiness === true) {
+      await enqueueServerJob(null, {
+        organizationId: orgId, jobType: 'funding.assess', payload: { trigger: 'calculation_run', run_id: outcome.runId },
+      }).catch((cause: unknown) => ({ deferred: cause instanceof Error ? cause.message : String(cause) }));
+    }
   }
 
   return {

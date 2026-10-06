@@ -336,16 +336,16 @@ MVP column values:
 
 | ID | Requirement | SOW § | Type | MVP | Dependencies | Open question |
 |---|---|---|---|---|---|---|
-| REQ-FR-01 | MOTION shall provide an indicative Funding Readiness Assessment based on available financial, banking and business information. | SOW §3, §19 | SOW requirement | Post-MVP (P16) | — | — |
-| REQ-FR-02 | It shall not constitute a lending decision, approval or guarantee; funding readiness is indicative and does not guarantee funding. | SOW §19, §26 | SOW requirement | Post-MVP (P16) | Disclaimer copy | — |
-| REQ-FR-03 | Factor: Revenue and profitability. | SOW §19 | SOW requirement | Post-MVP (P16) | — | — |
-| REQ-FR-04 | Factor: Cash flow. | SOW §19 | SOW requirement | Post-MVP (P16) | — | — |
-| REQ-FR-05 | Factor: Banking behaviour. | SOW §19 | SOW requirement | Post-MVP (P16) | — | — |
-| REQ-FR-06 | Factor: Existing debt. | SOW §19 | SOW requirement | Post-MVP (P16) | standard categories `loan`, `long_term_liability` | — |
-| REQ-FR-07 | Factor: Receivables and payables. | SOW §19 | SOW requirement | Post-MVP (P16) | — | — |
-| REQ-FR-08 | Factor: Financial consistency. | SOW §19 | SOW requirement | Post-MVP (P16) | — | — |
-| REQ-FR-09 | Factor: Data completeness. | SOW §19 | SOW requirement | Post-MVP (P16) | `data_quality` | — |
-| REQ-FR-10 | The output shall show readiness score, positive factors, negative factors, missing information, improvement actions and evidence. | SOW §19 | SOW requirement | Post-MVP (P16) | — | — |
+| REQ-FR-01 | MOTION shall provide an indicative Funding Readiness Assessment based on available financial, banking and business information. | SOW §3, §19 | SOW requirement | Phase 16 — built locally (ADR-145), behind `features.funding_readiness` (off by default); not independently reviewed | — | — |
+| REQ-FR-02 | It shall not constitute a lending decision, approval or guarantee; funding readiness is indicative and does not guarantee funding. | SOW §19, §26 | SOW requirement | Phase 16 — built locally (ADR-145), behind `features.funding_readiness` (off by default); not independently reviewed | Disclaimer copy | — |
+| REQ-FR-03 | Factor: Revenue and profitability. | SOW §19 | SOW requirement | Phase 16 — built locally (ADR-145), behind `features.funding_readiness` (off by default); not independently reviewed | — | — |
+| REQ-FR-04 | Factor: Cash flow. | SOW §19 | SOW requirement | Phase 16 — built locally (ADR-145), behind `features.funding_readiness` (off by default); not independently reviewed | — | — |
+| REQ-FR-05 | Factor: Banking behaviour. | SOW §19 | SOW requirement | Phase 16 — built locally (ADR-145), behind `features.funding_readiness` (off by default); not independently reviewed | — | — |
+| REQ-FR-06 | Factor: Existing debt. | SOW §19 | SOW requirement | Phase 16 — built locally (ADR-145), behind `features.funding_readiness` (off by default); not independently reviewed | standard categories `loan`, `long_term_liability` | — |
+| REQ-FR-07 | Factor: Receivables and payables. | SOW §19 | SOW requirement | Phase 16 — built locally (ADR-145), behind `features.funding_readiness` (off by default); not independently reviewed | — | — |
+| REQ-FR-08 | Factor: Financial consistency. | SOW §19 | SOW requirement | Phase 16 — built locally (ADR-145), behind `features.funding_readiness` (off by default); not independently reviewed | — | — |
+| REQ-FR-09 | Factor: Data completeness. | SOW §19 | SOW requirement | Phase 16 — built locally (ADR-145), behind `features.funding_readiness` (off by default); not independently reviewed | `data_quality` | — |
+| REQ-FR-10 | The output shall show readiness score, positive factors, negative factors, missing information, improvement actions and evidence. | SOW §19 | SOW requirement | Phase 16 — built locally (ADR-145), behind `features.funding_readiness` (off by default); not independently reviewed | — | — |
 | REQ-FR-11 | Lender marketplace/matching is post-MVP expansion. | SOW §22 | SOW requirement | Post-MVP (P16+) | — | — |
 
 ## 19. Reporting

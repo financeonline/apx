@@ -34,6 +34,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
   }
   const { organization: org, quotas, members, assignments, counts } = detail;
   const aiExtraction = org.features.ai_pdf_extraction === true;
+  const fundingReadiness = org.features.funding_readiness === true;
 
   return (
     <>
@@ -89,6 +90,10 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
                 <OrgFeatureToggle orgId={org.id} feature="ai_pdf_extraction" label="Read PDFs with AI"
                   hint="statement text is sent to the AI provider; the customer consents per import (CD-35)"
                   enabled={aiExtraction} features={org.features} />
+                {/* Phase 16 (D-5, ADR-121): default off; switching it on assesses every eligible month. */}
+                <OrgFeatureToggle orgId={org.id} feature="funding_readiness" label="Funding Readiness"
+                  hint="an indicative readiness assessment; switching it on assesses every complete month, and switching it off hides it everywhere"
+                  enabled={fundingReadiness} features={org.features} />
               </div>
             </CardBody>
           </Card>

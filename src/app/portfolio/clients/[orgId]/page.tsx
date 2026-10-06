@@ -26,6 +26,9 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
   const row = view.clients.find((c) => c.organisation.id === orgId);
   if (row === undefined) notFound();
   const links = hrefs(organisation);
+  // Phase 16 (§11): one link to the client's Funding Readiness page, only while it is switched on.
+  const { data: features } = await ctx.db.from('organizations').select('features').eq('id', orgId).maybeSingle();
+  const fundingOn = (features as { features?: Record<string, unknown> } | null)?.features?.funding_readiness === true;
   // This client's own detail, read for this client alone; the counts are the aggregate's (ADR-114).
   const [alerts, actions] = await Promise.all([
     loadPortfolioAlerts(ctx, view, [orgId]),
@@ -102,6 +105,7 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
         <Link href={`/app/${organisation.slug}/actions`} className="text-accent underline underline-offset-2">Action Centre</Link>
         <Link href={`/app/${organisation.slug}/reports`} className="text-accent underline underline-offset-2">Reports</Link>
         <Link href={`/app/${organisation.slug}/analyst`} className="text-accent underline underline-offset-2">Analyst</Link>
+        {fundingOn ? <Link href={`/app/${organisation.slug}/funding`} className="text-accent underline underline-offset-2">Funding Readiness</Link> : null}
       </p>
       <Disclaimer />
     </>

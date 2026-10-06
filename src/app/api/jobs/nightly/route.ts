@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { enqueueEngineUpgrade, enqueueNightlySweep } from '@/core/db';
+import { enqueueEngineUpgrade, enqueueFundingBackstop, enqueueNightlySweep } from '@/core/db';
 import { ENGINE_VERSION } from '@/modules/financial-engine';
 import { log } from '@/core/logging';
 import { cronAuthorised } from '../_lib/cron-auth';
@@ -38,17 +38,32 @@ export async function GET(request: NextRequest) {
    * after a deploy does the bulk; later nights pick up only the ones whose run failed. Its own error
    * path: the sweep above is already queued, and a failure here must say what failed.
    */
+  let engineUpgrade: number;
   try {
-    const engineUpgrade = await enqueueEngineUpgrade(ENGINE_VERSION);
+    engineUpgrade = await enqueueEngineUpgrade(ENGINE_VERSION);
     if (engineUpgrade > 0) {
       log.info('organisations queued for the engine upgrade', { engineVersion: ENGINE_VERSION, count: engineUpgrade });
     }
-    return NextResponse.json({ jobId, engineUpgrade });
   } catch (cause) {
     log.error('the engine upgrade could not be queued', {
       engineVersion: ENGINE_VERSION,
       error: cause instanceof Error ? cause.message : String(cause),
     });
     return NextResponse.json({ jobId, error: 'The engine upgrade could not be queued.' }, { status: 500 });
+  }
+
+  /*
+   * Phase 16 (ADR-121): the Funding Readiness backstop — any organisation with it switched on whose
+   * latest scored month has no current assessment is queued. Its own error path, after the two above.
+   */
+  try {
+    const fundingBackstop = await enqueueFundingBackstop();
+    if (fundingBackstop > 0) log.info('organisations queued for a funding readiness assessment', { count: fundingBackstop });
+    return NextResponse.json({ jobId, engineUpgrade, fundingBackstop });
+  } catch (cause) {
+    log.error('the funding readiness backstop could not be queued', {
+      error: cause instanceof Error ? cause.message : String(cause),
+    });
+    return NextResponse.json({ jobId, engineUpgrade, error: 'The funding readiness backstop could not be queued.' }, { status: 500 });
   }
 }

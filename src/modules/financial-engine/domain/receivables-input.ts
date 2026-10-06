@@ -92,7 +92,7 @@ const PURCHASES = new Set(['purchase', 'purchase_credit_note']);
 
 /** The balance family's cumulative cells for P, or null when no cumulative TB/BS states P. */
 /** The chosen balance statement for P: its cells and its kind, which its evidence must pin (ADR-123 F-6). */
-interface BalanceStatement {
+export interface BalanceStatement {
   readonly kind: 'trial_balance' | 'balance_sheet';
   readonly cells: readonly AggregateCell[];
 }
@@ -105,7 +105,7 @@ interface BalanceStatement {
  * owed at the period end (ADR-027.1), so it gives way to the next kind rather than hiding it
  * (ADR-123, audit L-3: a movement-basis trial balance used to hide a cumulative balance sheet).
  */
-function balanceStatement(
+export function balanceStatement(
   cells: readonly AggregateCell[],
   batches: readonly CoverageBatch[],
   period: PeriodRef,
@@ -125,7 +125,7 @@ function accountsOf(ctx: EngineContext, categories: readonly StandardCategory[])
 }
 
 /** Σ closing balance of the accounts in `categories`, in reporting sign; zero when the statement has no row. */
-function statementTotal(
+export function statementTotal(
   statement: readonly AggregateCell[],
   ctx: EngineContext,
   categories: readonly StandardCategory[],
