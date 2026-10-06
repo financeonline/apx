@@ -51,6 +51,7 @@ Next.js App Router. Three route families, each with its own root layout and shel
 /app/[orgSlug]/actions
 /app/[orgSlug]/actions/[actionId]
 /app/[orgSlug]/money/budget
+/app/[orgSlug]/departments
 /app/[orgSlug]/reports
 /app/[orgSlug]/reports/monthly/[period]
 /app/[orgSlug]/reports/r/[reportId]

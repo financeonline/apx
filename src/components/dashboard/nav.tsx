@@ -6,7 +6,7 @@ import type { Permission } from '@/core/permissions';
 /**
  * Tenant navigation (UX_ARCHITECTURE.md §3.1, ADR-019).
  *
- * Seven items plus Settings, in a fixed order. Two rules make this a component rather than a list
+ * Eight items plus Settings, in a fixed order (Departments since ADR-143). Two rules make this a component rather than a list
  * in the layout:
  *
  *   - **An item the role lacks is hidden entirely, never shown disabled** (RBAC §5, §7.4). A
@@ -39,6 +39,13 @@ const PRIMARY: readonly NavItem[] = [
     built: true,
   },
   {
+    // ADR-143: the Departmental Dashboard (Agreement §4). Gated on `financials.view`, not
+    // `dashboard.view`: a suspended member keeps the frozen Home and nothing else (ADR-044.4).
+    label: 'Departments', path: 'departments', permission: 'financials.view',
+    hint: 'Every part of the business at a glance, and how MOTION is running',
+    built: true,
+  },
+  {
     label: 'Insights', path: 'insights', permission: 'financials.view',
     hint: 'Biggest changes this period, alerts, and the reasons behind them',
     built: true,
@@ -60,7 +67,7 @@ const PRIMARY: readonly NavItem[] = [
   },
   {
     label: 'Reports', path: 'reports', permission: 'reports.view',
-    hint: 'The Monthly Management Report',
+    hint: 'Daily, weekly, monthly, adviser and custom reports',
     built: true,
   },
   {

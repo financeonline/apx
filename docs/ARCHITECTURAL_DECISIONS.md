@@ -2701,3 +2701,14 @@ Decision:
 3. **Not a financial record.** The engine never reads `budget_lines`. No metric snapshot is written, and the engine version is unchanged.
 4. **Variance** (`modules/budgets`, `budget_variance.v1`) is pure. It reads the month's current lines summed by standard category, sets them beside the engine's actual snapshots in the engine's own P&L order, and subtracts. Budgeted profits are derived as the engine derives actual ones, and a category with no budget line counts as nil in a derived profit, which the row states. A missing actual is absent, never zero. Balance-sheet categories are listed as not compared.
 5. **Surfaces:** `/money/budget` (`financials.view`), and analyst tool 27 `get_budget_variance` (`financials.view`; budget figures labelled as an imported plan; actuals carry snapshot ids). The tool was recorded for the eval corpus with two adversarial cases (no budget imported; a budget the user invents), and the prompt is unchanged.
+
+### ADR-143 · The Departmental Dashboard is an overview of the departments MOTION already has, and of the system itself
+Status: **owner decision 2026-10-06 ("Department overview page"); built locally; not reviewed, merged or deployed.**
+
+Context: Agreement §4 / Annexure A list a "Departmental Dashboard: Business Department Overview. System Functional Overview" without defining it.
+
+Decision (the developer's reading, confirmed by the owner's choice, still to be confirmed in writing as the definition):
+1. `/app/[orgSlug]/departments`, a navigation item after Home. Gated on `financials.view` (every active role), not `dashboard.view`, so a suspended member keeps only the frozen Home (ADR-044.4).
+2. **Business department overview:** one tile per department (Finance, Banking, Customers, Actions, Alerts, Reports, AI Analyst, Planning), each with its headline, a status (in order / needs attention / nothing yet) by fixed rules, and a link into the section. A tile appears only for someone who may open the section (`banking.view`, `customers.view`, `actions.view`, `reports.view`, `ai.use`).
+3. **System functional overview:** when data was last added, the last calculation (status, time, engine version), imports waiting or failed (`imports.review` only), the team size (`users.view` only), what runs on a schedule, and the organisation switches that actually gate something. ADR-025's other four flags shipped ungated and are not shown as "off".
+4. Nothing is computed: every figure is a snapshot, count or row its own page reads.
