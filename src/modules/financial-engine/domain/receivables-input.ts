@@ -305,15 +305,15 @@ function resolveSide(
   const invoices = sideCoverage.covers ? input.invoices.filter((i) => types.has(i.invoiceType)) : null;
 
   /*
-   * NF-2 (the balance-sheet side of N-1): a trial balance's absent receivables or payables line is a
-   * zero only when the trial balance is complete for P (answered complete and balancing). Otherwise
-   * it is unknown: the next source states it (ledger), else NULL with the completeness reason. A
-   * balance sheet is never asked the question, and its absent lines stay zero (product decision).
+   * NF-2 (the balance-sheet side of N-1): a statement's absent receivables or payables line is a zero
+   * only when the statement is complete for P — a trial balance answered complete and balancing, a
+   * balance sheet answered complete (owner decision, 2026-10-06). Otherwise it is unknown: the next
+   * source states it (ledger), else NULL with the completeness reason.
    */
   let fromStatement = statement === null ? null : statementTotal(statement.cells, ctx, [category]);
   let statementGap: DataQualityMissing | null = null;
-  if (statement?.kind === 'trial_balance' && fromStatement !== null && fromStatement.accountIds.length === 0) {
-    const completeness = balanceReportCompleteness(input.batches, cells, period, 'trial_balance');
+  if (statement !== null && fromStatement !== null && fromStatement.accountIds.length === 0) {
+    const completeness = balanceReportCompleteness(input.batches, cells, period, statement.kind);
     if (completeness !== 'complete') {
       statementGap = completeness === 'unconfirmed' ? 'report_completeness_unconfirmed'
         : completeness === 'unbalanced' ? 'trial_balance_not_balanced' : 'category_not_in_report';
@@ -462,8 +462,7 @@ export function receivablesPeriodInput(
   if (statement !== null) {
     // NF-2: on an incomplete trial balance an absent working-capital line is unknown — left out, so
     // working capital says it is partial (`partial_working_capital`), never counts it as zero.
-    const tbIncomplete = statement.kind === 'trial_balance'
-      && balanceReportCompleteness(input.batches, cells, period, 'trial_balance') !== 'complete';
+    const tbIncomplete = balanceReportCompleteness(input.batches, cells, period, statement.kind) !== 'complete';
     for (const category of [...WORKING_CAPITAL_ASSETS, ...WORKING_CAPITAL_LIABILITIES]) {
       const term = statementTotal(statement.cells, ctx, [category]);
       if (tbIncomplete && term.accountIds.length === 0) continue;

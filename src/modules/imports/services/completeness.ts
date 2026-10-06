@@ -11,7 +11,7 @@ import { Decimal, parseDecimalOrNull } from '@/core/money';
  * report lists every account in its scope, not that the amounts are right.
  */
 
-export type ReportScope = 'all_accounts' | 'income_and_expense' | 'open_invoices';
+export type ReportScope = 'all_accounts' | 'income_and_expense' | 'open_invoices' | 'assets_and_liabilities';
 export type CompletenessAnswer = 'complete' | 'partial';
 
 export interface CompletenessMonth {
@@ -67,7 +67,7 @@ export async function loadReportCompleteness(
     return loadInvoiceListOpening(db, orgId, batchId, b.period_start, b.confirmations?.['IMP-INV-013']);
   }
   if (b.target_table !== 'period_balances'
-    || (b.import_type !== 'trial_balance' && b.import_type !== 'pnl_report')) return null;
+    || (b.import_type !== 'trial_balance' && b.import_type !== 'pnl_report' && b.import_type !== 'balance_sheet')) return null;
 
   const [rows, attestations] = await Promise.all([
     db.from('period_balances').select('period_start, closing_balance')
@@ -127,7 +127,7 @@ export async function loadReportCompleteness(
   });
 
   return {
-    scope: b.import_type === 'trial_balance' ? 'all_accounts' : 'income_and_expense',
+    scope: b.import_type === 'trial_balance' ? 'all_accounts' : b.import_type === 'balance_sheet' ? 'assets_and_liabilities' : 'income_and_expense',
     cumulative: b.balance_basis === 'cumulative',
     importAnswer, months, history,
   };

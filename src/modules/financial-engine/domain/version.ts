@@ -170,7 +170,13 @@
  *     sheet or trial balance stating the category; evidence `opening_balance + movements`.
  * The golden corpus has none of these shapes, so its hash does not move; the bump is the rule (§6).
  */
-export const ENGINE_VERSION = '14.0.0';
+/**
+ * 15.0.0 (owner decision 2026-10-06): MAJOR. 14.0.0 was never released. Balance sheets are asked
+ * whether they list every account (IMP-TB-016); a balance sheet's missing receivables, payables or
+ * working-capital line is unknown unless it is confirmed complete for P — NF-2's rule, which 14.0.0
+ * applied to trial balances only.
+ */
+export const ENGINE_VERSION = '15.0.0';
 
 /** Bumped independently of the engine (§6). */
 /**

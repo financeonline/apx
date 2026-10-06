@@ -249,6 +249,18 @@ describe('receivables and payables from a trial balance (§3.4 fallback)', () =>
     expect(metric(results, 'payables').dataQuality.missing).toContain('report_completeness_unconfirmed');
   });
 
+  it('owner decision: a BALANCE SHEET nobody confirmed complete — its missing payables line is unknown, never 0.00', () => {
+    const bs = batch({ targetTable: 'period_balances', importType: 'balance_sheet', balanceKind: 'balance_sheet', invoiceListKind: null, periodStart: '2026-08-01', periodEnd: '2026-08-31' });
+    const line = cell({ accountId: 'a-ar', standardCategory: 'receivables', amount: '9000', balanceKind: 'balance_sheet' });
+    const unanswered = compose({ batches: [bs] }, [line], {}, [bs]);
+    expect(metric(unanswered, 'receivables').value).toBe('9000.00');
+    expect(metric(unanswered, 'payables').value).toBeNull();
+    expect(metric(unanswered, 'payables').dataQuality.missing).toContain('report_completeness_unconfirmed');
+    // Confirmed complete (a balance sheet need not balance to count): the missing line is a zero.
+    const complete = { ...bs, reportComplete: true };
+    expect(metric(compose({ batches: [complete] }, [line], {}, [complete]), 'payables').value).toBe('0.00');
+  });
+
   it('NF-2: answered partial — category_not_in_report', () => {
     const partial = { ...tb, reportComplete: false };
     const results = compose({ batches: [partial] }, [

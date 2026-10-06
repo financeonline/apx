@@ -47,7 +47,14 @@ const CONFIRMATION_QUESTIONS: Readonly<Record<string, string>> = {
  * list accounts with no balance: an account left out of a complete report is the zero. The stored
  * scope (`all_accounts` | `income_and_expense`) is set by the server from the import type.
  */
-const COMPLETENESS: Readonly<Record<'trial_balance' | 'pnl_report', { question: string; help: string; complete: string; partial: string }>> = {
+const COMPLETENESS: Readonly<Record<'trial_balance' | 'pnl_report' | 'balance_sheet', { question: string; help: string; complete: string; partial: string }>> = {
+  // Owner decision (2026-10-06): balance sheets are asked too — a missing receivables line is not 0.00.
+  balance_sheet: {
+    question: 'Is this the full balance sheet — every asset, liability and equity account with a balance at the period end?',
+    help: 'Answer yes only for the complete balance sheet from your accounting system (accounts with nothing in them may be left out). We will count a missing line — receivables or payables, say — as zero. If this file is an extract, answer no: a missing line will show as unknown, never as zero.',
+    complete: 'Yes — the full balance sheet (accounts left out had nothing in them)',
+    partial: 'No — an extract: some accounts or sections are missing',
+  },
   trial_balance: {
     question: 'Is this the full trial balance — every account with a balance for the period: income, expenses, assets, liabilities and equity?',
     help: 'Answer yes only for the complete trial balance from your accounting system. Accounts with nothing in them may be left out: we will count any category with no line as zero, so a trial balance must also balance. If this file is an extract — some accounts or sections removed — answer no: categories it has no line for will show as unknown, never as zero.',
@@ -62,15 +69,19 @@ const COMPLETENESS: Readonly<Record<'trial_balance' | 'pnl_report', { question: 
   },
 };
 
+function completenessKind(importType: string): 'trial_balance' | 'pnl_report' | 'balance_sheet' {
+  return importType === 'pnl_report' ? 'pnl_report' : importType === 'balance_sheet' ? 'balance_sheet' : 'trial_balance';
+}
+
 function questionFor(code: string, importType: string): string {
-  if (code === 'IMP-TB-016') return COMPLETENESS[importType === 'pnl_report' ? 'pnl_report' : 'trial_balance'].question;
+  if (code === 'IMP-TB-016') return COMPLETENESS[completenessKind(importType)].question;
   return CONFIRMATION_QUESTIONS[code]
     ?? `Please confirm this file is as expected before importing (${code}).`;
 }
 
 function choiceFor(code: string, importType: string): (typeof CHOICES)[string] | undefined {
   if (code !== 'IMP-TB-016') return CHOICES[code];
-  const c = COMPLETENESS[importType === 'pnl_report' ? 'pnl_report' : 'trial_balance'];
+  const c = COMPLETENESS[completenessKind(importType)];
   return { ...CHOICES[code]!, options: [{ value: 'complete', label: c.complete }, { value: 'partial', label: c.partial }] };
 }
 
@@ -190,6 +201,8 @@ export default async function ReviewBatchPage({
               <p className="mt-1 text-sm text-ink-muted">
                 {completeness.scope === 'open_invoices'
                   ? 'Only a list that includes every invoice still unpaid on its start date — older ones too — can show what you are owed or owe. Otherwise we show it from a balance sheet, or not at all, never a total that misses old debts.'
+                  : completeness.scope === 'assets_and_liabilities'
+                    ? 'A full balance sheet lists every asset, liability and equity account with a balance. Only for a full one do we count a missing line (receivables, say) as zero; otherwise it shows as unknown.'
                   : completeness.scope === 'all_accounts'
                     ? 'A full trial balance lists every account with a balance — income, expenses, assets, liabilities and equity. Only for a full report do we count a category with no line as zero; otherwise it shows as unknown.'
                     : 'A full P&L report lists every income and expense line with an amount. Only for a full report do we count a category with no line as zero; otherwise it shows as unknown.'}{' '}
@@ -227,9 +240,10 @@ export default async function ReviewBatchPage({
                         <CompletenessAttestationForm
                           orgSlug={orgSlug} batchId={batchId} month={m.month} monthLabel={label}
                           completeLabel={invoices ? 'Every invoice unpaid at the start, however old'
+                            : completeness.scope === 'assets_and_liabilities' ? 'The full balance sheet (accounts left out had nothing in them)'
                             : completeness.scope === 'all_accounts' ? 'The full trial balance (accounts left out had nothing in them)' : 'The full P&L (lines left out had nothing in them)'}
                           partialLabel={invoices ? 'Only invoices issued in the period'
-                            : completeness.scope === 'all_accounts' ? 'An extract — some accounts or sections are missing' : 'Only part of the P&L'}
+                            : completeness.scope === 'all_accounts' || completeness.scope === 'assets_and_liabilities' ? 'An extract — some accounts or sections are missing' : 'Only part of the P&L'}
                         />
                       ) : null}
                     </li>
@@ -378,7 +392,7 @@ export default async function ReviewBatchPage({
                     code={code}
                     question={questionFor(code, review.batch.importType)}
                     help={code === 'IMP-TB-016'
-                      ? COMPLETENESS[review.batch.importType === 'pnl_report' ? 'pnl_report' : 'trial_balance'].help
+                      ? COMPLETENESS[completenessKind(review.batch.importType)].help
                       : code === 'IMP-INV-013'
                         ? 'An export of "invoices issued in this period" leaves out older invoices still unpaid — usually the most overdue ones. Answer yes only if the list includes every invoice unpaid at its start date, whenever it was issued. If not, answer no: we will show what is owed from a balance sheet if you add one, and never a total that misses old debts. (An aged-debtors or open-items list includes them by definition.)'
                         : undefined}

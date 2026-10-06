@@ -3,7 +3,7 @@
 
 **Status: DESIGN FINALISED — IMPLEMENTATION NOT STARTED — BLOCKED BY DEPENDENCY.**
 
-- **Decisions:** the product owner decided U-1…U-6 on 2026-09-30 (§16). The thresholds in §5 are approved, subject to the five drafting amendments A-1…A-5 (§5.8), which need a one-line confirmation.
+- **Decisions:** the product owner decided U-1…U-6 on 2026-09-30 (§16). The thresholds in §5 are approved, with the five drafting amendments A-1…A-5 (§5.8) **confirmed by the owner on 2026-10-06** (ADR-140). F5.2/F5.3 use the gross overdue share (owner decision, 2026-10-06).
 - **Dependency:** Phase 16 implementation cannot begin until the separate **Receivables/Payables Engine Recovery** (ADR-120) and its **Health Score regression audit** are complete (§15).
 - **Inspection record and source mapping:** `docs/PHASE_16_DESIGN_GATE.md`.
 - **Baseline:** Phase 15 released at `74050d1`; audit preserved in `1443e76`. Phase 15 is frozen.
@@ -63,7 +63,7 @@
 | D-15 | No AI anywhere in the assessment | APPROVED |
 | D-16 | Rules version `funding_readiness.v1` | APPROVED |
 | D-17 | Factor calculation contract (§4): baseline 50, all applicable rules summed, clamp once, 0.6 completeness exclusion, proxy cap 70, Health rounding | APPROVED (U-2) |
-| D-18 | Every threshold in §5 | APPROVED (U-2), with A-1…A-5 CONFIRM |
+| D-18 | Every threshold in §5 | APPROVED (U-2); A-1…A-5 CONFIRMED (2026-10-06, ADR-140) |
 | D-19 | New engine metric `debt_balance` | APPROVED (U-2, D-12) |
 | D-20 | Receivables/payables engine recovery is a separate remediation **before** Phase 16 implementation | APPROVED (U-1, ADR-120) |
 | D-21 | Loan-type bank account without balance-sheet debt → debt unavailable; name shown only as a data-quality hint | APPROVED (U-3) |

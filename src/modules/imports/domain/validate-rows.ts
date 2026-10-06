@@ -573,10 +573,10 @@ export function requiredConfirmations(input: {
   if (input.targetTable === 'period_balances') {
     codes.push('IMP-TB-012');
     if (input.singleSignedBalanceColumn) codes.push('IMP-TB-013');
-    // N-1 (Step 0F): only the reviewer can say a P&L-bearing report lists EVERY account for the period;
-    // without that, a category it has no line for is unknown, never zero (FINANCIAL_ENGINE §3). A
-    // balance sheet states no P&L, so the question is not asked of one.
-    if (input.importType === 'trial_balance' || input.importType === 'pnl_report') codes.push('IMP-TB-016');
+    // N-1 (Step 0F): only the reviewer can say a report lists EVERY account for the period; without
+    // that, a category or line it has no row for is unknown, never zero (FINANCIAL_ENGINE §3). Asked of
+    // balance sheets too (owner decision, 2026-10-06): a missing receivables line is not 0.00.
+    codes.push('IMP-TB-016');
     if (input.replacesExistingBalances) codes.push('IMP-COV-013');
   }
   if (input.targetTable === 'invoices' && input.looksLikeOpenItems) codes.push('IMP-INV-012');
