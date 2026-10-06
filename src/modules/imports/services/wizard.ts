@@ -132,7 +132,9 @@ export function assertImportSupported(input: {
  * the wrong shape and advice about statements. Those PDFs are kept, and the reader is told how to
  * get their figures in.
  */
-export function pdfHandling(importType: ImportType): 'read' | 'store_only' {
+export function pdfHandling(importType: ImportType): 'read' | 'read_on_request' | 'store_only' {
+  // ADR-150: a receipt (PDF or photo) is read with AI when a reviewer asks, never on upload.
+  if (importType === 'receipts') return 'read_on_request';
   return IMPORT_TYPE_SPECS[importType].pdfSupported ? 'read' : 'store_only';
 }
 
@@ -149,6 +151,10 @@ type Parsed =
   | { readonly kind: 'scanned' }
   /** §5.3: a text-layer PDF whose layout no grammar matched. Stored, batched, and the batch failed. */
   | { readonly kind: 'pdf_unparsed'; readonly reason: string };
+
+/** ADR-150: what a receipt upload says until a reviewer asks for it to be read. */
+export const RECEIPT_WAITING_MESSAGE =
+  'The receipt is stored. MOTION reads receipts with AI when you ask: choose the expense account and press "Read receipts with AI".';
 
 const PDF_UNPARSED_MESSAGE =
   'MOTION could not find a transaction table in this PDF. The file is stored; '
@@ -279,6 +285,41 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
   });
   const spec = IMPORT_TYPE_SPECS[importType];
   const isPdf = validation.detectedKind === 'pdf' || input.file.name.toLowerCase().endsWith('.pdf');
+  const isImage = validation.detectedKind === 'image';
+
+  // ADR-150: a photo is a receipt, or nothing MOTION reads. Refused before it is stored.
+  if (isImage && pdfHandling(importType) !== 'read_on_request') {
+    throw new ValidationError('Photos can be imported as receipts only. Choose "Receipts", or upload a CSV, Excel or PDF file.');
+  }
+
+  /*
+   * ADR-150: a receipt photo or PDF is stored and a batch is started WAITING to be read. Nothing is
+   * read yet — reading sends the file to the AI provider, which only a reviewer can ask for, after
+   * the consent line and after naming the expense account the receipts post to.
+   */
+  if (pdfHandling(importType) === 'read_on_request' && (isPdf || isImage)) {
+    const stored = await uploadDocument(
+      {
+        orgId: organizationId, userId, db, requestId,
+        registerDocument: (meta) => registerDocument(actor, organizationId, meta),
+        finalizeUpload: (documentId, byteSize, scanResult, status) =>
+          finalizeUpload(actor, organizationId, { documentId, byteSize, scanResult, status }),
+      },
+      { filename: input.file.name, declaredMimeType: input.file.type || (isImage ? 'image/jpeg' : 'application/pdf'), bytes, documentKind: spec.documentKind },
+    );
+    if (stored.status === 'quarantined') {
+      throw new ValidationError('That file did not pass the safety check, so it has not been imported.');
+    }
+    const batchId = await startImportBatch(db, {
+      documentId: stored.documentId, importType, periodStart: input.periodStart, periodEnd: input.periodEnd, extractionMethod: 'pdf_text',
+    }, requestId);
+    await failImportBatch(actor, organizationId, batchId, 'parsing', RECEIPT_WAITING_MESSAGE);
+    return {
+      batchId, documentId: stored.documentId, accountsCreated: 0, counterpartiesCreated: 0,
+      counts: {}, requiredConfirmations: [],
+      columns: [], columnMap: {}, headerConfirmationRequired: false, parseFailure: RECEIPT_WAITING_MESSAGE,
+    };
+  }
 
   if (isPdf && pdfHandling(importType) === 'store_only') {
     /*

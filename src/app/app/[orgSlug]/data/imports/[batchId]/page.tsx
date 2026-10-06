@@ -7,7 +7,7 @@ import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import {
   CommitControls, CompletenessAttestationForm, ConfirmationPrompt, DuplicateDecisions, SkipUnreadableRows,
 } from './review-controls';
-import { AiReadingRequest, DocumentPageView, PageConfirmation, StatementBalancesForm } from './pdf-review';
+import { AiReadingRequest, DocumentPageView, PageConfirmation, ReceiptReadingRequest, StatementBalancesForm } from './pdf-review';
 import { requirePermission } from '@/app/_lib/authz';
 import { can } from '@/core/permissions';
 
@@ -156,9 +156,17 @@ export default async function ReviewBatchPage({
     ctx.db.from('source_documents').select('has_text_layer').eq('organization_id', ctx.orgId!).eq('id', review.batch.sourceDocumentId).maybeSingle(),
     ctx.db.from('organizations').select('features').eq('id', ctx.orgId!).maybeSingle(),
   ]);
-  const aiReadingOffered = review.batch.status === 'failed' && review.batch.extractionMethod === 'pdf_text'
-    && (documentRow as { has_text_layer: boolean | null } | null)?.has_text_layer === true
-    && ((orgRow as { features: Record<string, unknown> } | null)?.features?.ai_pdf_extraction === true);
+  const aiFlag = (orgRow as { features: Record<string, unknown> } | null)?.features?.ai_pdf_extraction === true;
+  const isReceipts = review.batch.importType === 'receipts';
+  const aiReadingOffered = !isReceipts && review.batch.status === 'failed' && review.batch.extractionMethod === 'pdf_text'
+    && (documentRow as { has_text_layer: boolean | null } | null)?.has_text_layer === true && aiFlag;
+  // ADR-150: a receipt photo or PDF waits here to be read; the reviewer names the expense account.
+  const receiptWaiting = isReceipts && review.batch.status === 'failed' && review.batch.extractionMethod === 'pdf_text';
+  const expenseAccounts = receiptWaiting && aiFlag
+    ? (((await ctx.db.from('accounts').select('id, code, name').eq('organization_id', ctx.orgId!)
+      .eq('account_type', 'expense').eq('is_active', true).order('name')).data ?? []) as Array<{ id: string; code: string | null; name: string }>)
+      .map((a) => ({ id: a.id, label: a.code ? `${a.code} · ${a.name}` : a.name }))
+    : [];
   const balancesNeeded = review.batch.status === 'awaiting_review' && review.batch.targetTable === 'bank_transactions'
     && (review.batch.extractionMethod === 'pdf_claude' || review.batchIssues.some((i) => i.code === 'IMP-BAL-006' || i.code === 'IMP-BAL-007'));
   const aiPages = review.batch.extractionMethod === 'pdf_claude'
@@ -267,7 +275,11 @@ export default async function ReviewBatchPage({
             </CardBody>
           </Card>
         )}
-        {review.batch.status === 'failed' ? (
+        {receiptWaiting ? (
+          <Banner tone="info" title="These receipts are stored and waiting to be read.">
+            {review.batch.errorSummary?.message ?? 'Choose the expense account and ask MOTION to read them.'}
+          </Banner>
+        ) : review.batch.status === 'failed' ? (
           <Banner tone="danger" title="MOTION could not read this file.">
             {review.batch.errorSummary?.message ?? 'Nothing was imported. The file is stored as a source document.'}
           </Banner>
@@ -283,6 +295,28 @@ export default async function ReviewBatchPage({
               <div className="mt-3">
                 <AiReadingRequest orgSlug={orgSlug} batchId={batchId} documentId={review.batch.sourceDocumentId} />
               </div>
+            </CardBody>
+          </Card>
+        ) : null}
+        {receiptWaiting ? (
+          <Card>
+            <CardBody className="p-4">
+              <h2 className="font-serif text-lg text-ink">Read these receipts with AI</h2>
+              {aiFlag ? (
+                <>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    AI reads each receipt&rsquo;s date, who was paid and the total. Every receipt it reads needs your
+                    confirmation against the file before it counts, and is marked as read by AI (CD-11).
+                  </p>
+                  <div className="mt-3">
+                    <ReceiptReadingRequest orgSlug={orgSlug} batchId={batchId} documentId={review.batch.sourceDocumentId} accounts={expenseAccounts} />
+                  </div>
+                </>
+              ) : (
+                <p className="mt-1 text-sm text-ink-muted">
+                  AI reading of documents is switched off for this organisation. A MOTION administrator can switch it on; until then, enter the receipts as a CSV.
+                </p>
+              )}
             </CardBody>
           </Card>
         ) : null}
@@ -327,15 +361,15 @@ export default async function ReviewBatchPage({
                         <h3 className="text-sm font-medium text-ink">Page {page} · {pageRows.length} row{pageRows.length === 1 ? '' : 's'} read</h3>
                         <TableWrap>
                           <table className="w-full text-sm">
-                            <THead columns={['Line', 'Date', 'Description', 'Amount', 'Balance']} />
+                            <THead columns={isReceipts ? ['Receipt', 'Date', 'Who was paid', 'Total'] : ['Line', 'Date', 'Description', 'Amount', 'Balance']} />
                             <TBody>
                               {pageRows.map((row) => (
                                 <TR key={row.id}>
                                   <TD className="tabular">{(row.sourceRef ?? '').replace(/^page:\d+;line:/, '')}</TD>
-                                  <TD>{String(row.mappedData?.transaction_date ?? '')}</TD>
+                                  <TD>{String(row.mappedData?.transaction_date ?? row.mappedData?.entry_date ?? '')}</TD>
                                   <TD>{String(row.mappedData?.description ?? '')}</TD>
-                                  <TD className="tabular">{String(row.mappedData?.amount ?? '')}</TD>
-                                  <TD className="tabular">{String(row.mappedData?.balance_after ?? '')}</TD>
+                                  <TD className="tabular">{String(row.mappedData?.amount ?? row.mappedData?.debit ?? '')}</TD>
+                                  {isReceipts ? null : <TD className="tabular">{String(row.mappedData?.balance_after ?? '')}</TD>}
                                 </TR>
                               ))}
                             </TBody>

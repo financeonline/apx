@@ -10,6 +10,7 @@ export {
   persistAssistantTurn,
   persistUserTurn,
   beginExtraction,
+  beginReceiptExtraction,
   chargeExtractionPage,
   recordExtractionPage,
   createConversationAs,

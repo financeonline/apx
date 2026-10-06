@@ -3,7 +3,7 @@
 import { useActionState } from 'react';
 import { DocumentViewer } from '@/components/dashboard/document-viewer';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
-import { confirmPdfPageAction, requestAiReadingAction, statementBalancesAction } from '../actions';
+import { confirmPdfPageAction, requestAiReadingAction, requestReceiptReadingAction, statementBalancesAction } from '../actions';
 
 /**
  * The PDF side of the review screen (IMPORT_ENGINE.md §5.4; ADR-084).
@@ -32,6 +32,41 @@ export function AiReadingRequest({ orgSlug, batchId, documentId }: { orgSlug: st
       </label>
       <div className="flex items-center gap-3">
         <SubmitButton pendingLabel="Asking…">Read with AI</SubmitButton>
+        <ActionMessage state={state} />
+      </div>
+    </form>
+  );
+}
+
+export const RECEIPT_CONSENT_LINE =
+  'MOTION will send this receipt file — the photo or PDF itself — to its AI provider to read the date, who was paid and the total.';
+
+/** ADR-150: the consent line, the expense account the receipts post to, and the one button. */
+export function ReceiptReadingRequest({ orgSlug, batchId, documentId, accounts }: {
+  orgSlug: string; batchId: string; documentId: string;
+  accounts: readonly { readonly id: string; readonly label: string }[];
+}) {
+  const [state, submit] = useActionState(requestReceiptReadingAction, null);
+  if (state?.ok) return <ActionMessage state={state} />;
+  return (
+    <form action={submit} className="flex flex-col gap-3 text-sm">
+      <input type="hidden" name="org_slug" value={orgSlug} />
+      <input type="hidden" name="batch_id" value={batchId} />
+      <input type="hidden" name="document_id" value={documentId} />
+      <label className="flex flex-col gap-1">
+        <span className="text-ink-muted">Expense account these receipts belong to</span>
+        <select name="account_id" required defaultValue="" className="max-w-md rounded-md border border-line bg-surface px-3 py-2 text-ink">
+          <option value="" disabled>Choose an account…</option>
+          {accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
+        </select>
+      </label>
+      <p className="text-ink">{RECEIPT_CONSENT_LINE}</p>
+      <label className="flex items-center gap-2">
+        <input type="checkbox" name="consent" value="yes" required />
+        <span>I understand.</span>
+      </label>
+      <div className="flex items-center gap-3">
+        <SubmitButton pendingLabel="Asking…">Read receipts with AI</SubmitButton>
         <ActionMessage state={state} />
       </div>
     </form>

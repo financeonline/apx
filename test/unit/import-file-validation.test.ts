@@ -221,8 +221,9 @@ describe('IMP-FILE-001 — extension against magic bytes', () => {
   });
 
   it('refuses a file type MOTION does not read at all', () => {
-    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
-    const result = validateFile({ filename: 'scan.png', bytes: png });
+    // A PNG is a receipt photo since ADR-150 (receipt-reading.test.ts); a GIF is still nothing MOTION reads.
+    const gif = new Uint8Array([0x47, 0x49, 0x46, 0x38, 0x39, 0x61, 0, 0, 0, 0, 0, 0]);
+    const result = validateFile({ filename: 'scan.gif', bytes: gif });
     expect(result.ok).toBe(false);
     expect(codesOf(result.findings)).toEqual(['IMP-FILE-001']);
   });

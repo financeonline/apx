@@ -44,7 +44,7 @@ Streaming detail: the SSE channel sends `status` events (tool name and human lab
 
 Timeouts: 45 s total budget; 10 s per tool; the model call uses a 30 s timeout with one retry on transient errors. On budget exhaustion the user gets the fallback message (§10).
 
-PDF extraction (`ai.extractStatementPage`) is a separate, tools-free entry point used by the `document.extract` job (`IMPORT_ENGINE.md §5.4`, ADR-033). It shares the client, the untrusted-data wrapper and token accounting, runs under `withOrgScope` with a system context that writes only `import_rows`/`import_batches`, and is bounded by `platform_org_settings.ai_extraction_pages_per_day` and the organization's monthly token ceiling.
+Receipt reading (`ai.extractReceipts`, ADR-150) is the one entry point that sends a file — a receipt photo or PDF, as an image or document block — under the same flag, budget, consent and audit, answering through a forced `submit_receipts` and never choosing an account. PDF extraction (`ai.extractStatementPage`) is a separate, tools-free entry point used by the `document.extract` job (`IMPORT_ENGINE.md §5.4`, ADR-033). It shares the client, the untrusted-data wrapper and token accounting, runs under `withOrgScope` with a system context that writes only `import_rows`/`import_batches`, and is bounded by `platform_org_settings.ai_extraction_pages_per_day` and the organization's monthly token ceiling.
 
 ---
 

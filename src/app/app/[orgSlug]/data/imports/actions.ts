@@ -246,6 +246,39 @@ export async function requestAiReadingAction(_previous: ActionResult | null, for
 }
 
 /**
+ * "Read receipts with AI" (ADR-150). Like statements, a reviewer asks, after a consent line — which
+ * here says the FILE is sent — and names the expense account the receipts post to: the model reads
+ * what is printed and never chooses an account. `begin_receipt_extraction` re-checks the account,
+ * the flag, the batch and the permission when the job runs.
+ */
+export async function requestReceiptReadingAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    assertCan(ctx, 'imports.review');
+    if (!ctx.orgId) throw new Error('No organisation.');
+    if (form.get('consent') !== 'yes') {
+      return fail(new Error('Please confirm you understand the receipt file will be sent to the AI provider.'), { requestId, action: 'imports.receiptReading' });
+    }
+    const accountId = text(form, 'account_id');
+    if (!/^[0-9a-f-]{36}$/i.test(accountId)) {
+      return fail(new Error('Choose the expense account these receipts belong to.'), { requestId, action: 'imports.receiptReading' });
+    }
+    const batchId = text(form, 'batch_id');
+    const documentId = text(form, 'document_id');
+    await enqueueServerJob({ userId: ctx.userId, requestId }, {
+      organizationId: ctx.orgId, jobType: 'document.extract', payload: { document_id: documentId, batch_id: batchId, account_id: accountId },
+    });
+    revalidatePath(`/app/${orgSlug}/data/imports/${batchId}`);
+    return done('MOTION is reading the receipts. This page will show them when it is done.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'imports.receiptReading' });
+  }
+}
+
+/**
  * "I have compared all rows on page N" (§5.4). The page-wide tick is offered only when the page's
  * confidence was high and `IMP-PDF-002` passed; otherwise every row on the page must have been
  * decided first. Both are re-checked here, and `api.confirm_pdf_page` re-checks the permission and

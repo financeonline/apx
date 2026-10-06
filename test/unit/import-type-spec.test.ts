@@ -138,9 +138,9 @@ describe('combinations MOTION cannot import are refused before anything is store
     }
   });
 
-  it('reads PDF figures for bank statements only; every other PDF is stored, not read', () => {
+  it('reads PDF figures for bank statements; receipts are read with AI on request (ADR-150); every other PDF is stored, not read', () => {
     for (const type of IMPORT_TYPES) {
-      expect(pdfHandling(type), type).toBe(type === 'bank_statement' ? 'read' : 'store_only');
+      expect(pdfHandling(type), type).toBe(type === 'bank_statement' ? 'read' : type === 'receipts' ? 'read_on_request' : 'store_only');
     }
   });
 });

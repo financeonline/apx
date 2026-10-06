@@ -195,3 +195,7 @@ export {
   extractStatementPage, isProviderOutage, PageExtractionSchema, PageRowSchema, SUBMIT_PAGE_TOOL, EXTRACTION_PROMPT_VERSION,
   type ExtractPageInput, type ExtractPageResult, type PageExtraction,
 } from './services/extract-page';
+export {
+  extractReceipts, ReceiptExtractionSchema, ReceiptSchema, SUBMIT_RECEIPTS_TOOL, RECEIPT_PROMPT_VERSION,
+  type ExtractReceiptsInput, type ExtractReceiptsResult, type ReceiptExtraction,
+} from './services/extract-receipts';

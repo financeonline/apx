@@ -10,6 +10,7 @@
 export {
   MAX_DATA_ROWS,
   MAX_FILE_BYTES,
+  MAX_IMAGE_BYTES,
   checkRowCap,
   validateFile,
   type DocumentValidation,

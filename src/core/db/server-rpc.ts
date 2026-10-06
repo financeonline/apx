@@ -805,6 +805,17 @@ export async function beginExtraction(
   });
 }
 
+/** ADR-150: a Receipts batch waiting to be read becomes AI-read; the reviewer's expense account is kept. */
+export async function beginReceiptExtraction(
+  actor: ServerRpcActor, organizationId: string,
+  input: { batchId: string; documentId: string; pagesTotal: number; accountId: string },
+): Promise<void> {
+  await serverRpc('begin_receipt_extraction', {
+    p_actor: actor.userId, p_org: organizationId, p_batch: input.batchId, p_document: input.documentId,
+    p_pages_total: input.pagesTotal, p_account: input.accountId,
+  });
+}
+
 /** BEFORE every model call: the flag, the daily page budget and the monthly ceiling (R2-C-11). */
 export async function chargeExtractionPage(actor: ServerRpcActor, organizationId: string, documentId: string): Promise<void> {
   await serverRpc('charge_extraction_page', { p_actor: actor.userId, p_org: organizationId, p_document: documentId });

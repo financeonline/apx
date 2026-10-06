@@ -104,7 +104,7 @@ Each line is a capability, its SOW anchor, and the reason it is inside the line.
 | Partner ecosystem, lender marketplace, large third-party integrations, advanced attribution, ESG | §22 | Post-17 | SOW itself lists these as post-MVP |
 | Per-organization alert thresholds, custom roles, multi-currency, groups/consolidation, time-boxed super-admin support access, billing/subscriptions | various | Post-17 | CD-18, CD-10, CD-29, CD-13 |
 | Quarter and year views (materialised aggregate snapshots with per-metric aggregation rules) | §8 | Post-17 | ADR-030.6, F-B-15 |
-| Receipt OCR, email-in of documents | §6 | Post-17 | |
+| Receipt OCR, email-in of documents | §6 | Post-17 | **Receipt reading built locally (ADR-150): photos and PDFs read by AI on request, every row confirmed by a person.** Email-in not built. |
 
 ## 4a. Adopted defaults and round-2 corrections (ADR-040, ADR-043 to ADR-047)
 

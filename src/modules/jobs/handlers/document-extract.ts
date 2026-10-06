@@ -1,12 +1,12 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  beginExtraction, chargeExtractionPage, failImportBatch, recordExtractionPage,
+  beginExtraction, beginReceiptExtraction, chargeExtractionPage, failImportBatch, recordExtractionPage,
 } from '@/core/db';
 import { QuotaExceeded, isMotionError } from '@/core/errors';
 import { log } from '@/core/logging';
 import { getObject, SOURCE_DOCUMENTS_BUCKET } from '@/core/storage/signer';
-import { extractStatementPage, isProviderOutage, type ModelTransport, type PageExtraction } from '@/modules/ai';
+import { extractReceipts, extractStatementPage, isProviderOutage, type ModelTransport, type PageExtraction, type ReceiptExtraction } from '@/modules/ai';
 import { tokenisePdf, type ParsedRow, type ParsedTable } from '@/modules/imports';
 import { proposeColumnMap, validateBatch } from '@/modules/imports';
 import type { RowIssue } from '@/modules/imports';
@@ -74,15 +74,24 @@ export async function runDocumentExtractJob(job: ClaimedJob, scope: { db: unknow
   const [{ data: batch, error: batchError }, { data: document, error: documentError }] = await Promise.all([
     db.from('import_batches').select('id, organization_id, source_document_id, import_type, status, extraction_method, period_start, period_end, bank_account_id')
       .eq('organization_id', orgId).eq('id', batchId).maybeSingle(),
-    db.from('source_documents').select('id, storage_bucket, storage_path, has_text_layer, page_count, deleted_at')
+    db.from('source_documents').select('id, storage_bucket, storage_path, has_text_layer, page_count, deleted_at, mime_type, original_filename')
       .eq('organization_id', orgId).eq('id', documentId).maybeSingle(),
   ]);
   if (batchError) return { status: 'failed', error: batchError.message };
   if (documentError) return { status: 'failed', error: documentError.message };
   const b = batch as BatchRow | null;
-  const d = document as { id: string; storage_bucket: string | null; storage_path: string; has_text_layer: boolean | null; deleted_at: string | null } | null;
+  const d = document as {
+    id: string; storage_bucket: string | null; storage_path: string; has_text_layer: boolean | null; deleted_at: string | null;
+    page_count: number | null; mime_type: string | null; original_filename: string | null;
+  } | null;
   if (!b || !d || d.deleted_at !== null || b.source_document_id !== d.id) {
     return { status: 'failed', error: 'the batch and the document do not belong together in this organisation' };
+  }
+  // ADR-150: receipts are read from the FILE, with the expense account the reviewer chose.
+  if (b.import_type === 'receipts') {
+    const accountId = typeof job.payload.account_id === 'string' ? job.payload.account_id : null;
+    if (!accountId) return { status: 'failed', error: 'reading receipts needs the expense account they post to' };
+    return runReceiptExtraction({ db, orgId, actor, batch: b, document: d, accountId, requestedBy: job.requestedBy });
   }
   // The model's schema is a bank statement's (`extractStatementPage`); reading an invoice or a trial
   // balance with it would charge pages for rows of the wrong shape. The wizard no longer starts a
@@ -227,3 +236,115 @@ export async function runDocumentExtractJob(job: ClaimedJob, scope: { db: unknow
 }
 
 type ValidateBatchInputType = Parameters<typeof validateBatch>[0]['importType'];
+
+
+// -----------------------------------------------------------------------------------------------
+// Receipts (ADR-150)
+// -----------------------------------------------------------------------------------------------
+
+/** A receipt file is read whole; past this it is a bundle to split, not a receipt. */
+export const MAX_RECEIPT_PAGES = 10;
+export const RECEIPT_ROW_ISSUE = AI_ROW_ISSUE;
+
+function receiptMediaType(mime: string | null, filename: string | null): 'image/jpeg' | 'image/png' | 'application/pdf' | null {
+  const name = (filename ?? '').toLowerCase();
+  if (mime === 'application/pdf' || name.endsWith('.pdf')) return 'application/pdf';
+  if (mime === 'image/png' || name.endsWith('.png')) return 'image/png';
+  if (mime === 'image/jpeg' || name.endsWith('.jpg') || name.endsWith('.jpeg')) return 'image/jpeg';
+  return null;
+}
+
+async function runReceiptExtraction(input: {
+  db: SupabaseClient; orgId: string; actor: { userId: string; requestId: string }; batch: BatchRow;
+  document: { id: string; storage_bucket: string | null; storage_path: string; page_count: number | null; mime_type: string | null; original_filename: string | null };
+  accountId: string; requestedBy: string;
+}): Promise<JobOutcome> {
+  const { db, orgId, actor, batch: b, document: d, accountId } = input;
+  const batchId = b.id;
+  const mediaType = receiptMediaType(d.mime_type, d.original_filename);
+  if (mediaType === null) return { status: 'failed', error: 'a receipt is read from a JPEG, PNG or PDF file' };
+  const pages = mediaType === 'application/pdf' ? Math.max(1, d.page_count ?? 1) : 1;
+  if (pages > MAX_RECEIPT_PAGES) {
+    const message = `This file has ${pages} pages; receipts are read up to ${MAX_RECEIPT_PAGES} pages at a time. Split it and upload the parts.`;
+    await failImportBatch(actor, orgId, batchId, 'extracting', message);
+    return { status: 'failed', error: message };
+  }
+
+  try {
+    await beginReceiptExtraction(actor, orgId, { batchId, documentId: d.id, pagesTotal: pages, accountId });
+  } catch (cause) {
+    return { status: 'failed', error: isMotionError(cause) ? cause.message : String(cause) };
+  }
+  const { data: account, error: accountError } = await db.from('accounts').select('id, code, name')
+    .eq('organization_id', orgId).eq('id', accountId).maybeSingle();
+  if (accountError || !account) return { status: 'failed', error: 'the chosen account could not be read' };
+  const accountRef = (account as { code: string | null; name: string }).code ?? (account as { name: string }).name;
+
+  const bytes = await getObject({ orgId, userId: input.requestedBy }, d.storage_bucket ?? SOURCE_DOCUMENTS_BUCKET, d.storage_path);
+  let read: ReceiptExtraction | null = null;
+  let lastReason = 'no attempt';
+  for (let attempt = 1; attempt <= PAGE_ATTEMPTS && read === null; attempt += 1) {
+    try {
+      // The whole file goes in one call, so every page is charged before it (R2-C-11).
+      for (let p = 0; p < pages; p += 1) await chargeExtractionPage(actor, orgId, d.id);
+    } catch (cause) {
+      let stopped = isMotionError(cause) ? cause.message : String(cause);
+      if (cause instanceof QuotaExceeded && cause.resetAt) stopped += ` AI reading is paused until ${cause.resetAt.toISOString()}.`;
+      await failImportBatch(actor, orgId, batchId, 'extracting', stopped);
+      return { status: 'failed', error: stopped };
+    }
+    try {
+      const result = await extractReceipts({ mediaType, bytes, pages, ...(extractDeps.transport ? { transport: extractDeps.transport } : {}) });
+      for (let page = 1; page <= pages; page += 1) {
+        await recordExtractionPage(actor, orgId, {
+          batchId, page, outcome: result.ok ? 'extracted' : 'failed',
+          tokensIn: page === 1 ? result.inputTokens : 0, tokensOut: page === 1 ? result.outputTokens : 0,
+          // No deterministic count exists for a receipt; 0 is recorded, never the model's own count.
+          lineCount: 0,
+          ...(result.ok ? { confidence: result.read.confidence } : { error: result.reason }),
+        });
+      }
+      if (result.ok) read = result.read;
+      else lastReason = result.reason;
+    } catch (cause) {
+      if (isProviderOutage(cause)) {
+        const message = 'Waiting for the extraction service — we will keep trying for up to an hour.';
+        await failImportBatch(actor, orgId, batchId, 'extracting', message, true);
+        return { status: 'deferred_upstream', error: message };
+      }
+      throw cause;
+    }
+  }
+  if (read === null) {
+    const message = `The receipt could not be read by AI (${lastReason}). Try a clearer photo, or enter it as a CSV.`;
+    await failImportBatch(actor, orgId, batchId, 'extracting', message);
+    return { status: 'failed', error: message };
+  }
+  if (read.receipts.length === 0) {
+    const message = `No receipt with a readable date and total was found${read.notes.length > 0 ? `: ${read.notes.join(' ')}` : '.'}`;
+    await failImportBatch(actor, orgId, batchId, 'extracting', message);
+    return { status: 'failed', error: message };
+  }
+
+  // Every receipt through the SAME pipeline as a CSV receipts row, posting to the reviewer's account.
+  const ordered = [...read.receipts].sort((x, y) => x.page - y.page || x.index - y.index);
+  const rows: ParsedRow[] = ordered.map((r, i) => ({
+    rowNumber: i + 1, sourceRef: `page:${r.page};line:${r.index}`, sourcePage: r.page,
+    cells: [r.date, r.description ? `${r.supplier} — ${r.description}` : r.supplier, r.total, accountRef, r.currency ?? null],
+  }));
+  const table: ParsedTable = { columns: ['Date', 'Description', 'Amount', 'Account', 'Currency'], rows, warnings: [] };
+  const columnMap = proposeColumnMap(table, 'receipts');
+  const result = await validateBatch({
+    db, organizationId: orgId, actor, batchId, importType: 'receipts', table, columnMap,
+    transforms: {},
+    periodStart: b.period_start, periodEnd: b.period_end, bankAccountId: null,
+    annotateRow: (row) => [{
+      code: RECEIPT_ROW_ISSUE, severity: 'warning' as const,
+      message: `Read by AI — confirm against the receipt${pages > 1 ? ` on page ${row.sourcePage ?? 1}` : ''}.`,
+      suggestion: 'Compare the date, who was paid and the total with the receipt before it is imported.',
+    }],
+  });
+
+  log.info('receipts read by AI', { organizationId: orgId, batchId, documentId: d.id, pages, receipts: rows.length, counts: result.counts });
+  return { status: 'succeeded', result: { pages, rows: rows.length, counts: result.counts } };
+}

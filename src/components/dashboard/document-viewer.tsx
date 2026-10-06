@@ -26,6 +26,11 @@ export function DocumentViewer({ orgSlug, documentId, filename, page, height = 6
   if (failed) return <p className="text-sm text-ink-muted">{failed}</p>;
   if (!url) return <p className="text-sm text-ink-muted">Opening {filename}…</p>;
   const isPdf = /\.pdf$/i.test(filename);
+  // ADR-150: a receipt photo is shown as itself, from the same short-lived signed URL.
+  if (/\.(jpe?g|png)$/i.test(filename)) {
+    // eslint-disable-next-line @next/next/no-img-element -- a signed, expiring URL; next/image would proxy and cache it
+    return <img src={url} alt={filename} className="w-full rounded-md border border-line object-contain" style={{ maxHeight: height }} />;
+  }
   if (!isPdf) {
     return <p className="text-sm"><a className="underline" href={url} target="_blank" rel="noreferrer">Download {filename}</a> — the link works for the next minute.</p>;
   }

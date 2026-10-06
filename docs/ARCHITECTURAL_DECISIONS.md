@@ -2827,3 +2827,17 @@ Decision:
 3. The PDF renderer lives in `modules/reporting` (`renderPortfolioPdf`), which already reads the portfolio; the portfolio module does not import reporting, so there is no cycle.
 
 Consequences: the report is as current as the latest calculation of each client; two downloads minutes apart can differ.
+
+### ADR-150 · Receipts read by AI from a photo or PDF — the one path that sends a file
+Status: **built locally on 2026-10-06 on the owner's instruction. Not reviewed, merged or deployed.** SOW §8 lists "Invoices and receipts" for ingestion; receipts could be imported only as a CSV/XLSX list, and a receipt photo or PDF was refused or stored unread (`MVP_SCOPE.md` "Receipt OCR: post-17").
+
+Context: every AI reading so far sends text only (ADR-033, ADR-084; SECURITY_MODEL: "never binaries"). A receipt photo has no text, so reading one means sending the file.
+
+Decision:
+1. **The one exception to "never binaries", fenced the way statements are.** Only for the Receipts import; only while `ai_pdf_extraction` is on; only when a reviewer with `imports.review` asks, after a consent line that says the FILE is sent; audited `document.sent_to_ai` (`file_sent: true`) before it is sent; each page charged against the daily page budget and the monthly token ceiling before the call. Never on upload.
+2. **Accepted files.** JPEG or PNG by magic bytes (GIF refused), ≤ 5 MB (`IMP-FILE-009`, the provider's image limit); a PDF ≤ 10 pages, scanned or not. A photo uploaded as any other import type is refused before anything is stored.
+3. **The model reads; it never decides.** `ai.extractReceipts` answers through a forced `submit_receipts` tool — page, position, date, who was paid, description, a POSITIVE total, currency only when printed; anything else, or a page the file lacks, is a failure, retried, then the batch says so. The account is the reviewer's choice of one of the organisation's active expense accounts, checked in SQL (`api_server.begin_receipt_extraction`); the model has no field for it.
+4. **The same pipeline and gate as an AI-read statement.** Receipts become rows through the CSV pipeline (`IMP-PDF-001` on each), under `extraction_method = pdf_claude` — so the commit gate requires every page confirmed and the ledger entries are `inferred` (CD-11). One-sided debits, as for any receipts list (the bank statement carries the payment).
+5. **Who was paid** is kept in the description ("Ryman — Printer paper"); it is not matched to a counterparty in this version.
+
+Consequences: `extraction_method = pdf_claude` now also means "a receipt file read by AI", not only a PDF statement's text — the name is kept so the commit and its gate apply unchanged. No deterministic line count exists for a receipt, so the page-wide tick rests on the model's confidence and a reviewer's look at the photo beside the rows.

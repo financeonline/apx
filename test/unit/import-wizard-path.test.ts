@@ -436,7 +436,7 @@ describe('the bank statement path is unchanged', () => {
 });
 
 describe('a PDF of any other type is stored, not read', () => {
-  it.each(['sales_invoices', 'purchase_invoices', 'receipts', 'trial_balance', 'balance_sheet'])(
+  it.each(['sales_invoices', 'purchase_invoices', 'trial_balance', 'balance_sheet'])(
     'a %s PDF is kept as a source document under its kind, with no batch and no rows', async (type) => {
       await expect(run('bank_text.pdf', type, null, 'application/pdf'))
         .rejects.toThrow(/stored as a source document.*bank statements only/);
@@ -447,6 +447,15 @@ describe('a PDF of any other type is stored, not read', () => {
       expect(state.batches).toHaveLength(0);
       expect(state.rows).toHaveLength(0);
     });
+
+  it('a receipts PDF is stored and its batch WAITS to be read with AI — nothing read, no rows (ADR-150)', async () => {
+    const result = await run('bank_text.pdf', 'receipts', null, 'application/pdf');
+    expect(result.parseFailure).toMatch(/Read receipts with AI/);
+    expect(state.documents[0]!.document_kind).toBe('receipt');
+    expect(state.batches[0]).toMatchObject({ importType: 'receipts', target: 'ledger_entries' });
+    expect(state.failed).toMatchObject({ stage: 'parsing' });
+    expect(state.rows).toHaveLength(0);
+  });
 
   it('a bank statement PDF is still read', async () => {
     const result = await run('bank_text.pdf', 'bank_statement', BANK, 'application/pdf');

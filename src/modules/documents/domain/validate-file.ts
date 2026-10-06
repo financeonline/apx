@@ -47,8 +47,14 @@ const REQUIRED_XLSX_ENTRIES = ['[Content_Types].xml', 'xl/workbook.xml'] as cons
 const MAX_XLSX_UNCOMPRESSED_BYTES = 250 * 1024 * 1024;
 const MAX_XLSX_COMPRESSION_RATIO = 100;
 
-/** The three shapes MOTION reads (§4). */
-export type FileKind = 'csv' | 'xlsx' | 'pdf';
+/**
+ * The shapes MOTION reads (§4). `image` (JPEG or PNG) is a receipt photo (ADR-150): stored like any
+ * document and read only by AI, only for the Receipts import, only when a reviewer asks.
+ */
+export type FileKind = 'csv' | 'xlsx' | 'pdf' | 'image';
+
+/** ADR-150: the AI provider reads an image up to 5 MB; a larger photo is refused before storage. */
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
 
 export interface FileToValidate {
   readonly filename: string;
@@ -127,6 +133,9 @@ const EXTENSION_KINDS: Readonly<Record<string, FileKind | 'xls'>> = {
   xlsm: 'xlsx',
   xls: 'xls',
   pdf: 'pdf',
+  jpg: 'image',
+  jpeg: 'image',
+  png: 'image',
 };
 
 const MIME_KINDS: Readonly<Record<string, FileKind | 'xls'>> = {
@@ -137,6 +146,8 @@ const MIME_KINDS: Readonly<Record<string, FileKind | 'xls'>> = {
   'application/vnd.ms-excel.sheet.macroenabled.12': 'xlsx',
   'application/vnd.ms-excel': 'xls',
   'application/pdf': 'pdf',
+  'image/jpeg': 'image',
+  'image/png': 'image',
 };
 
 function extensionOf(filename: string): string {
@@ -380,24 +391,41 @@ export function validateFile(input: FileToValidate): DocumentValidation {
     return refuse(sanitisedFilename, null, [
       finding(
         'IMP-FILE-001',
-        'MOTION reads CSV, Excel (.xlsx) and PDF files.',
+        'MOTION reads CSV, Excel (.xlsx) and PDF files, and JPEG or PNG photos of receipts.',
         `"${input.filename}" is none of those.`,
       ),
     ]);
   }
 
-  const expected: Container = declared === 'xlsx' ? 'zip' : declared === 'pdf' ? 'pdf' : 'text';
+  const expected: Container = declared === 'xlsx' ? 'zip' : declared === 'pdf' ? 'pdf' : declared === 'image' ? 'image' : 'text';
   if (container !== expected) {
     return refuse(sanitisedFilename, container === 'pdf' ? 'pdf' : null, [
       finding(
         'IMP-FILE-001',
-        `"${input.filename}" is not a ${declared === 'csv' ? 'CSV' : declared.toUpperCase()} file.`,
+        `"${input.filename}" is not a ${declared === 'csv' ? 'CSV' : declared === 'image' ? 'JPEG or PNG' : declared.toUpperCase()} file.`,
         `Its contents are ${describeContainer(container)}, whatever the file is named.`,
       ),
     ]);
   }
 
   // Stage 3 — structure, per kind.
+  if (declared === 'image') {
+    // JPEG or PNG only — the image container also matches GIF, which the AI path does not take.
+    const jpeg = bytes[0] === 0xff && bytes[1] === 0xd8 && bytes[2] === 0xff;
+    const png = [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a].every((b, i) => bytes[i] === b);
+    if (!jpeg && !png) {
+      return refuse(sanitisedFilename, null, [
+        finding('IMP-FILE-001', `"${input.filename}" is not a JPEG or PNG photo.`, 'Save the photo as JPEG or PNG and upload that.'),
+      ]);
+    }
+    if (bytes.byteLength > MAX_IMAGE_BYTES) {
+      return refuse(sanitisedFilename, 'image', [
+        finding('IMP-FILE-009', 'This photo is larger than 5 MB.', 'Take the photo at a lower resolution, or save it as a smaller JPEG, and upload that.'),
+      ]);
+    }
+    return { ok: true, findings: [], sanitisedFilename, detectedKind: 'image', pageCount: 1, hasTextLayer: false };
+  }
+
   if (declared === 'xlsx') {
     const findings = validateXlsx(bytes);
     return findings.length > 0

@@ -66,6 +66,8 @@ const KIND_TO_FILE_KIND: Readonly<Record<string, FileKind>> = {
   'text/plain': 'csv',
   'application/pdf': 'pdf',
   'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet': 'xlsx',
+  'image/jpeg': 'image',
+  'image/png': 'image',
 };
 
 function sha256Hex(bytes: Uint8Array): string {

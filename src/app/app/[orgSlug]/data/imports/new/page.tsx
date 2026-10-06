@@ -1,5 +1,5 @@
 import { getAccessContext } from '@/modules/tenancy';
-import { IMPORT_TYPE_SPECS, IMPORT_TYPES } from '@/modules/imports';
+import { IMPORT_TYPE_SPECS, IMPORT_TYPES, pdfHandling } from '@/modules/imports';
 import { PageHeader, Card, CardBody } from '@/components/ui/surfaces';
 import { UploadForm } from './upload-form';
 import { requirePermission } from '@/app/_lib/authz';
@@ -54,6 +54,7 @@ export default async function NewImportPage({
               bankAccounts={bankAccounts}
               bankAccountTypes={IMPORT_TYPES.filter((t) => IMPORT_TYPE_SPECS[t].bankAccount === 'required')}
               pdfReadTypes={IMPORT_TYPES.filter((t) => IMPORT_TYPE_SPECS[t].pdfSupported)}
+              aiReadTypes={IMPORT_TYPES.filter((t) => pdfHandling(t) === 'read_on_request')}
             />
           </CardBody>
         </Card>

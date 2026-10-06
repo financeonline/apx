@@ -99,7 +99,7 @@ MVP column values:
 | REQ-DI-01 | The system shall support initial ingestion of CSV files. | SOW §6 | SOW requirement | MVP | `import_batches` | — |
 | REQ-DI-02 | The system shall support initial ingestion of XLSX spreadsheets. | SOW §6 | SOW requirement | MVP | — | — |
 | REQ-DI-03 | The system shall support initial ingestion of PDF bank statements and financial documents. | SOW §6 | SOW requirement | MVP-limited: text-layer PDFs parsed deterministically, Claude-assisted extraction requires row-level review, scanned PDFs stored only | CD-11, ADR-011 | CD-11 |
-| REQ-DI-04 | The system shall support ingestion of invoices and receipts. | SOW §6 | SOW requirement | MVP-limited: invoice lists as CSV/XLSX; receipts stored as documents with optional manual ledger entry; no OCR | `invoices`, `source_documents` | — |
+| REQ-DI-04 | The system shall support ingestion of invoices and receipts. | SOW §6 | SOW requirement | Built locally, not reviewed (ADR-150): invoice lists as CSV/XLSX; receipts as CSV/XLSX, or a photo (JPEG/PNG) or PDF read by AI on request, posted to the expense account the reviewer chooses, confirmed by a person, imported as `inferred` | `invoices`, `source_documents` | — |
 | REQ-DI-05 | The system shall support ingestion of trial balances. | SOW §6 | SOW requirement | MVP | `period_balances` | CD-03 |
 | REQ-DI-06 | The system shall support ingestion of general ledgers. | SOW §6 | SOW requirement | MVP | `ledger_entries` | CD-04 |
 | REQ-DI-07 | The system shall support ingestion of P&L and balance sheet reports. | SOW §6 | SOW requirement | MVP | `period_balances` | CD-03 |

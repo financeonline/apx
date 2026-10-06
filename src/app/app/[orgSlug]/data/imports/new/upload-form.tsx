@@ -35,6 +35,7 @@ export function UploadForm({
   bankAccounts,
   bankAccountTypes,
   pdfReadTypes,
+  aiReadTypes = [],
 }: {
   orgSlug: string;
   bankAccounts: ReadonlyArray<{ id: string; label: string }>;
@@ -42,6 +43,8 @@ export function UploadForm({
   bankAccountTypes: readonly string[];
   /** The import types whose PDF figures MOTION reads. */
   pdfReadTypes: readonly string[];
+  /** ADR-150: the import types whose PDFs and photos MOTION reads with AI when asked (receipts). */
+  aiReadTypes?: readonly string[];
 }) {
   const [state, action] = useActionState(startImportAction, null);
   const [importType, setImportType] = useState('bank_statement');
@@ -103,15 +106,17 @@ export function UploadForm({
       <Field
         label="The file"
         htmlFor="file"
-        hint={pdfReadTypes.includes(importType)
-          ? 'CSV, Excel or a PDF statement, up to 25 MB.'
-          : 'CSV or Excel, up to 25 MB. A PDF is stored as a document, but its figures are not read.'}
+        hint={aiReadTypes.includes(importType)
+          ? 'CSV or Excel, or a photo (JPEG or PNG, up to 5 MB) or PDF of receipts, which MOTION can read with AI when you ask.'
+          : pdfReadTypes.includes(importType)
+            ? 'CSV, Excel or a PDF statement, up to 25 MB.'
+            : 'CSV or Excel, up to 25 MB. A PDF is stored as a document, but its figures are not read.'}
       >
         <Input
           id="file"
           type="file"
           name="file"
-          accept=".csv,.xlsx,.xlsm,.txt,.pdf,text/csv,application/pdf"
+          accept=".csv,.xlsx,.xlsm,.txt,.pdf,.jpg,.jpeg,.png,text/csv,application/pdf,image/jpeg,image/png"
           required
         />
       </Field>
