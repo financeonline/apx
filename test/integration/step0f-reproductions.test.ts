@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it } from 'vitest';
 import { Decimal } from '@/core/money';
 import { permissionsFor } from '@/core/permissions';
 import { buildBundleForMetric, loadEvidenceDrawer } from '@/modules/evidence';
@@ -98,6 +98,9 @@ const current = (o: string, ym: string) => lines(`select a.name || '=' || b.clos
 const TB = (revenue: string, opex: string, cash: string) => `Account,Balance\nRevenue,${revenue}\nOperating Expenses,${opex}\nCash,${cash}\n`;
 
 beforeAll(() => { owner = createAuthUser(`owner@${DOMAIN}`); });
+// A reviewer per test: every import now answers several confirmations, and one shared reviewer would
+// reach `app.throttle`'s 120 calls a minute across the file (QUOTA), failing a test for its neighbours.
+beforeEach(() => { owner = createAuthUser(`owner-${n++}@${DOMAIN}`); });
 afterAll(() => {
   adminSql(`delete from public.organizations where name like 'ITest Step0F %${RUN}';
     delete from auth.users where email like '%@${DOMAIN}';`);
