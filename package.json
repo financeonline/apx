@@ -32,9 +32,13 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "0.124.0",
+    "@radix-ui/react-label": "^2.1.16",
+    "@radix-ui/react-slot": "^1.4.0",
     "@supabase/ssr": "^0.12.6",
     "@supabase/supabase-js": "^2.115.0",
     "canonicalize": "^4.0.0",
+    "class-variance-authority": "^0.7.1",
+    "clsx": "^2.1.1",
     "decimal.js": "^10.6.0",
     "exceljs": "^4.4.0",
     "next": "^16.3.4",
@@ -42,6 +46,7 @@
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "server-only": "^0.0.1",
+    "tailwind-merge": "^3.7.0",
     "zod": "^4.5.4"
   },
   "devDependencies": {

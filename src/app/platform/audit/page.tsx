@@ -4,8 +4,9 @@ import { toMotionError } from '@/core/errors';
 import { searchAudit } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { Card, CardBody, EmptyState, PageHeader } from '@/components/ui/surfaces';
-import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
+import { THead, TBody, TR, TD } from '@/components/ui/table';
 import { auditActionLabel, formatDateTime } from '@/components/labels';
+import { Button, Input, NativeSelect, Table } from '@/components/ui/shadcn';
 
 export const dynamic = 'force-dynamic';
 
@@ -82,18 +83,18 @@ export default async function PlatformAuditPage({
           {prefix ? <input type="hidden" name="action" value={prefix} /> : null}
           <label className="flex items-center gap-2">
             <span className="text-ink-muted">Organisation</span>
-            <select name="org" defaultValue={organizationId ?? ''} className="rounded-md border border-line bg-surface px-2 py-1">
+            <NativeSelect name="org" defaultValue={organizationId ?? ''} className="w-auto px-2 py-1">
               <option value="">All</option>
               {((organizations ?? []) as Array<{ id: string; name: string }>).map((o) => (
                 <option key={o.id} value={o.id}>{o.name}</option>
               ))}
-            </select>
+            </NativeSelect>
           </label>
           <label className="flex items-center gap-2">
             <span className="text-ink-muted">Since</span>
-            <input type="date" name="from" defaultValue={since ?? ''} className="rounded-md border border-line bg-surface px-2 py-1" />
+            <Input type="date" name="from" defaultValue={since ?? ''} className="w-auto px-2 py-1" />
           </label>
-          <button type="submit" className="rounded-md border border-line px-3 py-1 text-ink hover:bg-surface-sunken">Apply</button>
+          <Button type="submit" variant="secondary" className="px-3 py-1">Apply</Button>
         </form>
         {organizationId || since ? <Link href="/platform/audit" className="underline text-ink-muted">Clear</Link> : null}
       </div>
@@ -104,29 +105,27 @@ export default async function PlatformAuditPage({
             {events.length === 0 ? (
               <EmptyState title="Nothing matches">Widen the filters, or come back when something has happened.</EmptyState>
             ) : (
-              <TableWrap>
-                <table className="w-full text-sm">
-                  <caption className="sr-only">Audit events</caption>
-                  <THead columns={['When', 'What', 'Who', 'Organisation', 'Target']} />
-                  <TBody>
-                    {events.map((event) => (
-                      <TR key={event.id}>
-                        <TD className="text-ink-muted">{formatDateTime(event.createdAt)}</TD>
-                        <TD>{auditActionLabel(event.action)}</TD>
-                        <TD className="text-ink-muted">{event.actorName ?? event.actorType.replace('_', ' ')}</TD>
-                        <TD>
-                          {event.organizationId
-                            ? <Link className="underline" href={`/platform/organizations/${event.organizationId}`}>{event.organizationName ?? 'Unknown'}</Link>
-                            : <span className="text-ink-muted">Platform</span>}
-                        </TD>
-                        <TD className="text-ink-muted">
-                          {event.targetTable ? <span className="font-mono text-xs">{event.targetTable}</span> : '—'}
-                        </TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </table>
-              </TableWrap>
+              <Table>
+                <caption className="sr-only">Audit events</caption>
+                <THead columns={['When', 'What', 'Who', 'Organisation', 'Target']} />
+                <TBody>
+                  {events.map((event) => (
+                    <TR key={event.id}>
+                      <TD className="text-ink-muted">{formatDateTime(event.createdAt)}</TD>
+                      <TD>{auditActionLabel(event.action)}</TD>
+                      <TD className="text-ink-muted">{event.actorName ?? event.actorType.replace('_', ' ')}</TD>
+                      <TD>
+                        {event.organizationId
+                          ? <Link className="underline" href={`/platform/organizations/${event.organizationId}`}>{event.organizationName ?? 'Unknown'}</Link>
+                          : <span className="text-ink-muted">Platform</span>}
+                      </TD>
+                      <TD className="text-ink-muted">
+                        {event.targetTable ? <span className="font-mono text-xs">{event.targetTable}</span> : '—'}
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
             )}
           </CardBody>
         </Card>

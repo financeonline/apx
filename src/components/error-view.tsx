@@ -1,6 +1,6 @@
 'use client';
 
-import { buttonClass } from './ui/button';
+import { Button } from '@/components/ui/shadcn';
 
 /**
  * The body of every error boundary (ROUTE_ARCHITECTURE.md §9, UX_ARCHITECTURE.md §7.2):
@@ -29,9 +29,9 @@ export function ErrorView({
         </p>
       ) : null}
       <div className="mt-6">
-        <button type="button" onClick={reset} className={buttonClass('primary')}>
+        <Button type="button" onClick={reset}>
           Try again
-        </button>
+        </Button>
       </div>
     </div>
   );

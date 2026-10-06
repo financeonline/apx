@@ -2,9 +2,10 @@
 
 import { useActionState } from 'react';
 import { ActionMessage } from '@/components/ui/action-form';
-import { buttonClass } from '@/components/ui/button';
+import { Button } from '@/components/ui/button';
 import type { ActionStatus } from '@/modules/actions';
 import { setStatusAction } from './actions';
+import { Textarea } from '@/components/ui/shadcn';
 
 /**
  * The status controls on an action (UX_ARCHITECTURE.md §7; SOW §17).
@@ -53,10 +54,9 @@ export function StatusControls({
       {withOutcome ? (
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-muted">What came of it? (optional)</span>
-          <textarea
+          <Textarea
             name="outcome_notes"
             rows={2}
-            className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
             placeholder="What happened, in a sentence"
           />
         </label>
@@ -69,16 +69,16 @@ export function StatusControls({
         */}
       <div className="flex flex-wrap gap-2">
         {NEXT[status].map((next) => (
-          <button
+          <Button
             key={next.status}
             type="submit"
             name="status"
             value={next.status}
             disabled={pending}
-            className={buttonClass(next.status === 'dismissed' ? 'secondary' : 'primary')}
+            tone={next.status === 'dismissed' ? 'secondary' : 'primary'}
           >
             {next.label}
-          </button>
+          </Button>
         ))}
       </div>
 

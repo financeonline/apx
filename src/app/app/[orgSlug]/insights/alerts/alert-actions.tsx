@@ -7,6 +7,7 @@ import {
   STATUS_ACTION_LABELS, UNDO_WINDOW_MS, allowedStatuses, type AlertStatus,
 } from '@/components/dashboard/alert-status';
 import { setAlertStatusAction } from './actions';
+import { Button } from '@/components/ui/shadcn';
 
 /**
  * The status controls on an alert card (UX_ARCHITECTURE.md §7.4).
@@ -64,16 +65,17 @@ export function AlertActions({
         </>
       ) : (
         available.map((next) => (
-          <button
+          <Button
             key={next}
             type="submit"
             name="status"
             value={next}
             disabled={pending}
-            className="rounded-md border border-line px-2 py-1 text-sm text-ink hover:border-line-strong disabled:opacity-60"
+            variant="secondary"
+            className="px-2 py-1 text-sm"
           >
             {STATUS_ACTION_LABELS[next]}
-          </button>
+          </Button>
         ))
       )}
 

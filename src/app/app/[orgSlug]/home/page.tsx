@@ -10,6 +10,7 @@ import { PageHeader, Card, CardBody, Banner } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
 import { AlertCard, HealthScoreCard, NO_ALERTS_BODY, NO_ALERTS_TITLE } from '@/components/dashboard';
 import { requirePermission } from '@/app/_lib/authz';
+import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 
 export const dynamic = 'force-dynamic';
 
@@ -318,39 +319,39 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
         <Card>
           <CardBody className="p-4">
             <h2 className="font-serif text-lg text-ink">What is moving</h2>
-            <table className="mt-4 w-full text-sm">
-              <caption className="sr-only">
+            <Table className="mt-4 min-w-0">
+              <TableCaption className="sr-only">
                 Revenue, profit and cash over the last twelve months
-              </caption>
-              <thead>
-                <tr className="border-b border-line text-left text-ink-muted">
-                  <th scope="col" className="py-2 pr-4 font-normal">Month</th>
+              </TableCaption>
+              <TableHeader>
+                <TableRow className="border-b border-line text-left text-ink-muted">
+                  <TableHead scope="col" className="py-2 pl-0 pr-4 font-normal">Month</TableHead>
                   {trend.map((series) => (
-                    <th key={series.key} scope="col" className="py-2 pr-4 font-normal">
+                    <TableHead key={series.key} scope="col" className="py-2 pl-0 pr-4 font-normal">
                       {series.label}
-                    </th>
+                    </TableHead>
                   ))}
-                </tr>
-              </thead>
-              <tbody>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
                 {(trend[0]?.points ?? []).map((point, index) => (
-                  <tr key={point.period} className="border-b border-line/60">
-                    <th scope="row" className="py-2 pr-4 font-normal text-ink-muted">
+                  <TableRow key={point.period} className="border-b border-line/60">
+                    <TableHead scope="row" className="py-2 pl-0 pr-4 font-normal text-sm normal-case tracking-normal text-ink-muted">
                       {point.label}
-                    </th>
+                    </TableHead>
                     {trend.map((series) => {
                       const value = series.points[index]?.value ?? null;
                       return (
-                        <td key={series.key} className="py-2 pr-4 font-mono tabular-nums text-ink">
+                        <TableCell key={series.key} className="py-2 pl-0 pr-4 font-mono tabular-nums text-ink">
                           {/* A month with no figure is a gap, never a zero (§4). */}
                           {value === null ? '—' : value}
-                        </td>
+                        </TableCell>
                       );
                     })}
-                  </tr>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
           </CardBody>
         </Card>
       </div>

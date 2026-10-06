@@ -1,9 +1,7 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes } from 'react';
+import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import { Input as ShadcnInput, Label, NativeSelect, Textarea as ShadcnTextarea } from './shadcn';
 
-const CONTROL =
-  'block w-full rounded-md border border-line-strong bg-surface px-3 py-2 text-sm text-ink ' +
-  'transition-colors duration-100 hover:border-ink-faint disabled:opacity-60';
-
+/** Form fields on shadcn/ui (SOW §6; ADR-151): a Label, the control, and a hint. */
 export function Field({
   label,
   htmlFor,
@@ -17,29 +15,23 @@ export function Field({
 }) {
   return (
     <div className="space-y-1.5">
-      <label htmlFor={htmlFor} className="block text-sm font-medium">
-        {label}
-      </label>
+      <Label htmlFor={htmlFor}>{label}</Label>
       {children}
       {hint ? <p className="text-xs text-ink-muted">{hint}</p> : null}
     </div>
   );
 }
 
-export function Input({ className = '', ...props }: InputHTMLAttributes<HTMLInputElement>) {
-  return <input {...props} className={`${CONTROL} ${className}`.trim()} />;
+export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
+  return <ShadcnInput {...props} />;
 }
 
-export function Select({
-  className = '',
-  children,
-  ...props
-}: SelectHTMLAttributes<HTMLSelectElement>) {
-  return (
-    <select {...props} className={`${CONTROL} ${className}`.trim()}>
-      {children}
-    </select>
-  );
+export function Select({ children, ...props }: SelectHTMLAttributes<HTMLSelectElement>) {
+  return <NativeSelect {...props}>{children}</NativeSelect>;
+}
+
+export function Textarea(props: TextareaHTMLAttributes<HTMLTextAreaElement>) {
+  return <ShadcnTextarea {...props} />;
 }
 
 export function Fieldset({ children, className = '' }: { children: ReactNode; className?: string }) {

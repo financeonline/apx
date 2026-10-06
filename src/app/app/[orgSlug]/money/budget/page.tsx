@@ -5,6 +5,7 @@ import { getBudgetView, type BudgetLineKey } from '@/modules/budgets';
 import { getAccessContext } from '@/modules/tenancy';
 import { Badge, Card, CardBody, EmptyState, PageHeader } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 
 export const dynamic = 'force-dynamic';
 
@@ -80,48 +81,46 @@ export default async function BudgetPage({
 
       <Card>
         <CardBody>
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[36rem] text-sm">
-              <thead>
-                <tr className="border-b border-line text-left text-ink-muted">
-                  <th className="py-2 font-normal">Line</th>
-                  <th className="py-2 text-right font-normal">Budget</th>
-                  <th className="py-2 text-right font-normal">Actual</th>
-                  <th className="py-2 text-right font-normal">Difference</th>
-                </tr>
-              </thead>
-              <tbody>
-                {(view.variance?.rows ?? []).map((row) => (
-                  <tr key={row.key} className={`border-b border-line align-top last:border-0 ${row.derived ? 'font-medium' : ''}`}>
-                    <th scope="row" className="py-2 pr-3 text-left font-normal text-ink">
-                      {LINE_LABELS[row.key]}
-                      {row.assumedZero.length === 0 ? null : (
-                        <span className="block text-xs text-ink-faint">
-                          No budget for {row.assumedZero.map(CATEGORY_NAME).join(', ')}; counted as nil.
-                        </span>
-                      )}
-                    </th>
-                    <td className="py-2 text-right text-ink">{row.budget === null ? '—' : money(row.budget)}</td>
-                    <td className="py-2 text-right text-ink">
-                      {row.actual === null ? (
-                        <span className="text-ink-muted" title={missingReasonText(row.actualMissing)}>—</span>
-                      ) : money(row.actual)}
-                      {row.actualStatusLabel === null ? null : <span className="ml-1"><Badge>{row.actualStatusLabel}</Badge></span>}
-                    </td>
-                    <td className={`py-2 text-right ${row.favourable === null ? 'text-ink-muted' : row.favourable ? 'text-ink' : 'text-danger'}`}>
-                      {row.variance === null ? '—' : formatMoney(row.variance, { currency: view.currency, showMinorUnits: true, signDisplay: 'always' })}
-                      {row.variancePct === null ? null : (
-                        <span className="block text-xs text-ink-muted">{formatPercent(row.variancePct, { signDisplay: 'always' })}</span>
-                      )}
-                      {row.favourable === null ? null : (
-                        <span className="sr-only">{row.favourable ? ' favourable' : ' unfavourable'}</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table className="min-w-0">
+            <TableHeader>
+              <TableRow className="border-b border-line text-left text-ink-muted">
+                <TableHead className="py-2 pl-0 font-normal">Line</TableHead>
+                <TableHead className="py-2 pl-0 text-right font-normal">Budget</TableHead>
+                <TableHead className="py-2 pl-0 text-right font-normal">Actual</TableHead>
+                <TableHead className="py-2 pl-0 text-right font-normal">Difference</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {(view.variance?.rows ?? []).map((row) => (
+                <TableRow key={row.key} className={`border-b border-line align-top last:border-0 ${row.derived ? 'font-medium' : ''}`}>
+                  <TableHead scope="row" className="py-2 pl-0 pr-3 text-left font-normal text-sm normal-case tracking-normal text-ink">
+                    {LINE_LABELS[row.key]}
+                    {row.assumedZero.length === 0 ? null : (
+                      <span className="block text-xs text-ink-faint">
+                        No budget for {row.assumedZero.map(CATEGORY_NAME).join(', ')}; counted as nil.
+                      </span>
+                    )}
+                  </TableHead>
+                  <TableCell className="py-2 pl-0 text-right text-ink">{row.budget === null ? '—' : money(row.budget)}</TableCell>
+                  <TableCell className="py-2 pl-0 text-right text-ink">
+                    {row.actual === null ? (
+                      <span className="text-ink-muted" title={missingReasonText(row.actualMissing)}>—</span>
+                    ) : money(row.actual)}
+                    {row.actualStatusLabel === null ? null : <span className="ml-1"><Badge>{row.actualStatusLabel}</Badge></span>}
+                  </TableCell>
+                  <TableCell className={`py-2 pl-0 text-right ${row.favourable === null ? 'text-ink-muted' : row.favourable ? 'text-ink' : 'text-danger'}`}>
+                    {row.variance === null ? '—' : formatMoney(row.variance, { currency: view.currency, showMinorUnits: true, signDisplay: 'always' })}
+                    {row.variancePct === null ? null : (
+                      <span className="block text-xs text-ink-muted">{formatPercent(row.variancePct, { signDisplay: 'always' })}</span>
+                    )}
+                    {row.favourable === null ? null : (
+                      <span className="sr-only">{row.favourable ? ' favourable' : ' unfavourable'}</span>
+                    )}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
           {(view.variance?.notCompared ?? []).length === 0 ? null : (
             <p className="mt-4 text-sm text-ink-muted">
               Also budgeted, but not part of the profit and loss so not compared:{' '}

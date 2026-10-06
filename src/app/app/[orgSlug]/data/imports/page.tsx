@@ -4,7 +4,8 @@ import { can } from '@/core/permissions';
 import { loadImportHistory } from '@/modules/imports';
 import { PageHeader, Card, CardBody, Badge, EmptyState } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
-import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
+import { THead, TBody, TR, TD } from '@/components/ui/table';
+import { Table } from '@/components/ui/shadcn';
 import { RollbackControl } from './rollback-control';
 import { requirePermission } from '@/app/_lib/authz';
 
@@ -53,37 +54,35 @@ export default async function ImportsPage({ params }: { params: Promise<{ orgSlu
                   <ButtonLink href={`/app/${orgSlug}/data/imports/new`}>Add data</ButtonLink>
                 ) : null}
               </div>
-              <TableWrap>
-                <table className="w-full text-sm">
-                  <caption className="sr-only">Files imported into this organisation</caption>
-                  <THead columns={['File', 'What it is', 'Covers', 'Rows', 'Status', '']} />
-                  <TBody>
-                    {history.map(({ batch, filename, rows }) => (
-                      <TR key={batch.id}>
-                        <TD>
-                          <Link
-                            href={`/app/${orgSlug}/data/imports/${batch.id}`}
-                            className="text-accent underline underline-offset-2"
-                          >
-                            {filename ?? 'Untitled file'}
-                          </Link>
-                        </TD>
-                        <TD className="text-ink-muted">{TYPE_LABELS[batch.importType] ?? batch.importType}</TD>
-                        <TD className="tabular text-ink-muted">
-                          {batch.periodStart ?? '—'} → {batch.periodEnd ?? '—'}
-                        </TD>
-                        <TD className="tabular">{rows}</TD>
-                        <TD><StatusBadge status={batch.status} /></TD>
-                        <TD>
-                          {batch.status === 'committed' && can(ctx, 'imports.review') ? (
-                            <RollbackControl orgSlug={orgSlug} batchId={batch.id} />
-                          ) : null}
-                        </TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </table>
-              </TableWrap>
+              <Table>
+                <caption className="sr-only">Files imported into this organisation</caption>
+                <THead columns={['File', 'What it is', 'Covers', 'Rows', 'Status', '']} />
+                <TBody>
+                  {history.map(({ batch, filename, rows }) => (
+                    <TR key={batch.id}>
+                      <TD>
+                        <Link
+                          href={`/app/${orgSlug}/data/imports/${batch.id}`}
+                          className="text-accent underline underline-offset-2"
+                        >
+                          {filename ?? 'Untitled file'}
+                        </Link>
+                      </TD>
+                      <TD className="text-ink-muted">{TYPE_LABELS[batch.importType] ?? batch.importType}</TD>
+                      <TD className="tabular text-ink-muted">
+                        {batch.periodStart ?? '—'} → {batch.periodEnd ?? '—'}
+                      </TD>
+                      <TD className="tabular">{rows}</TD>
+                      <TD><StatusBadge status={batch.status} /></TD>
+                      <TD>
+                        {batch.status === 'committed' && can(ctx, 'imports.review') ? (
+                          <RollbackControl orgSlug={orgSlug} batchId={batch.id} />
+                        ) : null}
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
             </CardBody>
           </Card>
         )}

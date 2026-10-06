@@ -4,8 +4,8 @@ import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'rea
 import type { SubmitAnswer, QuotaStatus } from '@/modules/ai';
 import { drainSse, quotaNotice, remainingLine, statusLine } from '@/components/dashboard/analyst-presentation';
 import { Banner } from '@/components/ui/surfaces';
-import { buttonClass } from '@/components/ui/button';
 import { AnswerView, FALLBACK_TITLE } from './answer-view';
+import { Button, Textarea } from '@/components/ui/shadcn';
 
 /**
  * The chat shell (UX_ARCHITECTURE.md §5 `AnalystChat`; AI_ARCHITECTURE.md §2 step 13).
@@ -208,7 +208,7 @@ export function AnalystChat({
         <form onSubmit={onSubmit} className="flex flex-col gap-2">
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-muted">Ask a question about the numbers</span>
-            <textarea
+            <Textarea
               name="message"
               value={question}
               onChange={(e) => setQuestion(e.target.value)}
@@ -216,7 +216,6 @@ export function AnalystChat({
               maxLength={MAX_QUESTION_CHARS}
               disabled={busy}
               placeholder="How did we do last month?"
-              className="rounded-md border border-line bg-surface px-3 py-2 text-ink"
               onKeyDown={(e) => {
                 if (e.key === 'Enter' && !e.shiftKey) {
                   e.preventDefault();
@@ -227,9 +226,9 @@ export function AnalystChat({
           </label>
           <div className="flex items-center justify-between gap-3">
             <span className="text-xs text-ink-faint">{remainingLine(remaining)}</span>
-            <button type="submit" disabled={busy || question.trim() === ''} className={buttonClass('primary')}>
+            <Button type="submit" disabled={busy || question.trim() === ''}>
               {busy ? 'Asking…' : 'Ask'}
-            </button>
+            </Button>
           </div>
         </form>
       )}

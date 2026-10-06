@@ -15,6 +15,7 @@ import {
   valueY,
   type TrendSeriesView,
 } from './presentation';
+import { Button } from '@/components/ui/shadcn';
 
 /**
  * Twelve months of up to three figures (UX_ARCHITECTURE.md §4 level 3, §5, §11).
@@ -75,17 +76,17 @@ export function TrendChart({
           {series.map((one, index) => {
             const isShown = !hidden.has(one.key);
             return (
-              <button
+              <Button
                 key={one.key}
                 type="button"
+                variant="secondary"
+                size="sm"
                 aria-pressed={isShown}
                 onClick={() => toggle(one.key)}
                 className={
-                  'inline-flex items-center gap-2 rounded-md border px-2.5 py-1 text-xs font-medium '
-                  + 'transition-colors duration-100 '
-                  + (isShown
+                  isShown
                     ? 'border-line-strong bg-surface text-ink'
-                    : 'border-line bg-surface-sunken text-ink-faint')
+                    : 'border-line bg-surface-sunken text-ink-faint'
                 }
               >
                 <svg width="18" height="8" aria-hidden="true" className="shrink-0">
@@ -101,20 +102,21 @@ export function TrendChart({
                 </svg>
                 {one.label}
                 <span className="sr-only">{isShown ? ' (showing)' : ' (hidden)'}</span>
-              </button>
+              </Button>
             );
           })}
         </div>
 
-        <button
+        <Button
           type="button"
+          variant="secondary"
+          size="sm"
           aria-expanded={tableVisible}
           aria-controls={tableFallbackId}
           onClick={() => setTableVisible((v) => !v)}
-          className="rounded-md border border-line-strong bg-surface px-2.5 py-1 text-xs font-medium transition-colors duration-100 hover:bg-surface-sunken"
         >
           {tableVisible ? 'Hide table' : 'Show as table'}
-        </button>
+        </Button>
       </div>
 
       {scale.empty ? (

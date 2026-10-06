@@ -3,12 +3,13 @@
 import { useActionState } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import type { ActionResult } from '@/components/action-result';
+import { Input, NativeSelect, Textarea } from '@/components/ui/shadcn';
 
 /** The small forms of Team/Client Management (ADR-144). Each posts to a server action passed in. */
 
 type Action = (previous: ActionResult | null, form: FormData) => Promise<ActionResult>;
 
-const FIELD = 'rounded-md border border-line px-2 py-1 text-sm text-ink';
+const FIELD = 'px-2 py-1';
 
 export function CommentForm({ action, hidden, label = 'Add a comment' }: { action: Action; hidden: Record<string, string>; label?: string }) {
   const [state, submit] = useActionState(action, null);
@@ -18,7 +19,7 @@ export function CommentForm({ action, hidden, label = 'Add a comment' }: { actio
       {Object.entries(hidden).map(([name, value]) => <input key={name} type="hidden" name={name} value={value} />)}
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink-muted">{label}</span>
-        <textarea name={field} rows={3} maxLength={4000} required className={FIELD} />
+        <Textarea name={field} rows={3} maxLength={4000} required className={FIELD} />
       </label>
       <div className="flex items-center gap-3">
         <SubmitButton tone="secondary">Post</SubmitButton>
@@ -36,23 +37,23 @@ export function NewItemForm({ action, orgSlug, kinds }: { action: Action; orgSlu
       {kinds.length === 1 ? <input type="hidden" name="kind" value={kinds[0]} /> : (
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-muted">What is it?</span>
-          <select name="kind" className={FIELD} defaultValue="request">
+          <NativeSelect name="kind" className={FIELD} defaultValue="request">
             <option value="request">A request of the team</option>
             <option value="deliverable">A deliverable for the client</option>
-          </select>
+          </NativeSelect>
         </label>
       )}
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink-muted">Title</span>
-        <input name="title" required maxLength={200} className={FIELD} />
+        <Input name="title" required maxLength={200} className={FIELD} />
       </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink-muted">Details (optional)</span>
-        <textarea name="detail" rows={3} maxLength={4000} className={FIELD} />
+        <Textarea name="detail" rows={3} maxLength={4000} className={FIELD} />
       </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink-muted">Wanted by (optional)</span>
-        <input type="date" name="due_date" className={`${FIELD} max-w-xs`} />
+        <Input type="date" name="due_date" className={`${FIELD} max-w-xs`} />
       </label>
       <div className="flex items-center gap-3">
         <SubmitButton>{kinds.length === 1 && kinds[0] === 'request' ? 'Send the request' : 'Add it'}</SubmitButton>
@@ -72,13 +73,13 @@ export function StatusForm({ action, orgSlug, itemId, options }: {
       <input type="hidden" name="item_id" value={itemId} />
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink-muted">Move it to</span>
-        <select name="status" className={FIELD}>
+        <NativeSelect name="status" className={FIELD}>
           {options.map((o) => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>
+        </NativeSelect>
       </label>
       <label className="flex min-w-[12rem] flex-1 flex-col gap-1 text-sm">
         <span className="text-ink-muted">Note (optional)</span>
-        <input name="note" maxLength={4000} className={FIELD} />
+        <Input name="note" maxLength={4000} className={FIELD} />
       </label>
       <SubmitButton tone="secondary">Update</SubmitButton>
       <ActionMessage state={state} />

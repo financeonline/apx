@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import { Input } from '@/components/ui/field';
+import { Input, Select } from '@/components/ui/field';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { mergeHeldAction, renameHeldAction } from './actions';
 
@@ -16,7 +16,7 @@ export function MergeHeldForm({ orgSlug, members }: {
       {members.map((m) => <input key={m.id} type="hidden" name="member_id" value={m.id} />)}
       <label className="flex flex-col gap-1">
         <span className="text-ink">They are the same business. Keep:</span>
-        <select name="into_id" required defaultValue="" className="rounded-md border border-line bg-surface px-2 py-1"
+        <Select name="into_id" required defaultValue="" className="px-2 py-1"
           onChange={(e) => {
             const chosen = members.find((m) => m.id === e.currentTarget.value);
             const hidden = e.currentTarget.form?.elements.namedItem('into_name') as HTMLInputElement | null;
@@ -24,7 +24,7 @@ export function MergeHeldForm({ orgSlug, members }: {
           }}>
           <option value="" disabled>Choose the record to keep</option>
           {members.map((m) => <option key={m.id} value={m.id}>{m.name}</option>)}
-        </select>
+        </Select>
       </label>
       <input type="hidden" name="into_name" defaultValue="" />
       <div><SubmitButton pendingLabel="Merging…">Merge into the chosen record</SubmitButton></div>

@@ -1,11 +1,12 @@
 'use client';
 
 import { useActionState } from 'react';
-import { Input } from '@/components/ui/field';
+import { Input, Select } from '@/components/ui/field';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import {
   attestCompletenessAction, commitBatchAction, confirmBatchAction, decideRowsAction, rejectBatchAction,
 } from '../actions';
+import { Button } from '@/components/ui/shadcn';
 
 /**
  * The decisions a reviewer makes (IMPORT_ENGINE.md §8, §9).
@@ -60,22 +61,24 @@ export function DuplicateDecisions({
           placeholder="Why? (optional, but it helps in six months)"
           className="max-w-sm"
         />
-        <button
+        <Button
           type="submit"
           name="decision"
           value="keep"
-          className="rounded-md border border-line px-3 py-1.5 text-sm text-ink hover:border-line-strong"
+          variant="secondary"
+          className="px-3 py-1.5"
         >
           These are genuine — import them
-        </button>
-        <button
+        </Button>
+        <Button
           type="submit"
           name="decision"
           value="skip"
-          className="rounded-md border border-line px-3 py-1.5 text-sm text-ink hover:border-line-strong"
+          variant="secondary"
+          className="px-3 py-1.5"
         >
           These are duplicates — skip them
-        </button>
+        </Button>
       </div>
 
       {undecided.length > 0 ? (
@@ -120,9 +123,9 @@ export function ConfirmationPrompt({
       {choice ? (
         <label className="flex items-center gap-2">
           <span className="sr-only">{choice.label}</span>
-          <select
+          <Select
             name={`value_${choice.name}`}
-            className="rounded-md border border-line bg-surface px-2 py-1 text-sm"
+            className="w-auto px-2 py-1"
             required={choice.explicit === true}
             defaultValue={choice.explicit === true ? '' : undefined}
           >
@@ -130,7 +133,7 @@ export function ConfirmationPrompt({
             {choice.options.map((option) => (
               <option key={option.value} value={option.value}>{option.label}</option>
             ))}
-          </select>
+          </Select>
         </label>
       ) : null}
 
@@ -178,12 +181,13 @@ export function CommitControls({
         <input type="hidden" name="org_slug" value={orgSlug} />
         <input type="hidden" name="batch_id" value={batchId} />
         <Input name="reason" placeholder="Why are you discarding this?" className="max-w-sm" required />
-        <button
+        <Button
           type="submit"
-          className="rounded-md border border-line px-3 py-1.5 text-sm text-ink-muted hover:border-line-strong hover:text-ink"
+          variant="secondary"
+          className="px-3 py-1.5 text-ink-muted hover:text-ink"
         >
           Discard this file
-        </button>
+        </Button>
       </form>
       <ActionMessage state={rejectState} />
     </div>
@@ -257,11 +261,11 @@ export function CompletenessAttestationForm({
       <input type="hidden" name="month" value={month} />
       <label className="flex flex-col gap-1">
         <span className="text-ink">What does this report cover for {monthLabel}?</span>
-        <select name="coverage" required defaultValue="" className="rounded-md border border-line bg-surface px-2 py-1 text-sm">
+        <Select name="coverage" required defaultValue="" className="px-2 py-1">
           <option value="" disabled>Choose an answer</option>
           <option value="complete">{completeLabel}</option>
           <option value="partial">{partialLabel}</option>
-        </select>
+        </Select>
       </label>
       <label className="flex flex-col gap-1">
         <span className="text-ink">What did you check?</span>

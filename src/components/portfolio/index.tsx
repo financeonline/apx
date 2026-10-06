@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Badge, Card, CardBody, EmptyState } from '@/components/ui/surfaces';
-import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
+import { THead, TBody, TR, TD } from '@/components/ui/table';
+import { Table } from '@/components/ui/shadcn';
 import { HealthScoreInline } from '@/components/dashboard';
 import { ORG_STATUS_LABELS } from '@/components/labels';
 import { HEALTH_DIMENSION_KEYS, bandLabel } from '@/modules/health';
@@ -142,52 +143,50 @@ export function ClientTable({ rows }: { rows: readonly ClientRow[] }) {
         })}
       </ul>
       <div className="hidden md:block">
-    <TableWrap>
-      <table className="w-full text-sm">
-        <THead columns={['Client', 'Health', 'Trend', 'Alerts', 'Open actions', 'Latest change', '']} />
-        <TBody>
-          {rows.map((row) => {
-            const links = hrefs(row.organisation);
-            return (
-              <TR key={row.organisation.id}>
-                <TD>
-                  <Link href={links.client} className="font-medium text-ink underline-offset-2 hover:underline">{row.organisation.name}</Link>
-                  {row.organisation.status !== 'active' ? (
-                    <span className="ml-2"><Badge tone="warn">{ORG_STATUS_LABELS[row.organisation.status]}</Badge></span>
-                  ) : null}
-                </TD>
-                <TD>
-                  {row.health === null ? (
-                    <span className="text-ink-faint">Not yet scored</span>
-                  ) : (
-                    <span>
-                      <span className="tabular-nums">{row.health.score ?? '—'}</span>
-                      <span className="ml-2 text-ink-muted">{bandLabel(row.health.band) ?? 'Not enough data'}</span>
-                      <span className="block text-xs text-ink-faint">{row.health.periodLabel}</span>
-                    </span>
-                  )}
-                </TD>
-                <TD>{row.trend === null ? <span className="text-ink-faint">—</span> : TREND_LABELS[row.trend]}</TD>
-                <TD className="tabular-nums">
-                  {row.counts.alertsStanding}
-                  {seriousAlerts(row.counts) > 0 ? <span className="ml-2"><Badge tone="danger">{seriousAlerts(row.counts)} serious</Badge></span> : null}
-                </TD>
-                <TD className="tabular-nums">
-                  {row.counts.actionsOpen}
-                  {row.counts.actionsOverdue > 0 ? <span className="ml-2"><Badge tone="warn">{row.counts.actionsOverdue} overdue</Badge></span> : null}
-                </TD>
-                <TD>
-                  {row.latestChange === null ? <span className="text-ink-faint">—</span> : (
-                    <Link href={row.latestChange.href} className="text-ink-muted hover:text-ink">{row.latestChange.label}</Link>
-                  )}
-                </TD>
-                <TD><Link href={links.home} className="text-accent underline underline-offset-2">Open</Link></TD>
-              </TR>
-            );
-          })}
-        </TBody>
-      </table>
-    </TableWrap>
+    <Table>
+      <THead columns={['Client', 'Health', 'Trend', 'Alerts', 'Open actions', 'Latest change', '']} />
+      <TBody>
+        {rows.map((row) => {
+          const links = hrefs(row.organisation);
+          return (
+            <TR key={row.organisation.id}>
+              <TD>
+                <Link href={links.client} className="font-medium text-ink underline-offset-2 hover:underline">{row.organisation.name}</Link>
+                {row.organisation.status !== 'active' ? (
+                  <span className="ml-2"><Badge tone="warn">{ORG_STATUS_LABELS[row.organisation.status]}</Badge></span>
+                ) : null}
+              </TD>
+              <TD>
+                {row.health === null ? (
+                  <span className="text-ink-faint">Not yet scored</span>
+                ) : (
+                  <span>
+                    <span className="tabular-nums">{row.health.score ?? '—'}</span>
+                    <span className="ml-2 text-ink-muted">{bandLabel(row.health.band) ?? 'Not enough data'}</span>
+                    <span className="block text-xs text-ink-faint">{row.health.periodLabel}</span>
+                  </span>
+                )}
+              </TD>
+              <TD>{row.trend === null ? <span className="text-ink-faint">—</span> : TREND_LABELS[row.trend]}</TD>
+              <TD className="tabular-nums">
+                {row.counts.alertsStanding}
+                {seriousAlerts(row.counts) > 0 ? <span className="ml-2"><Badge tone="danger">{seriousAlerts(row.counts)} serious</Badge></span> : null}
+              </TD>
+              <TD className="tabular-nums">
+                {row.counts.actionsOpen}
+                {row.counts.actionsOverdue > 0 ? <span className="ml-2"><Badge tone="warn">{row.counts.actionsOverdue} overdue</Badge></span> : null}
+              </TD>
+              <TD>
+                {row.latestChange === null ? <span className="text-ink-faint">—</span> : (
+                  <Link href={row.latestChange.href} className="text-ink-muted hover:text-ink">{row.latestChange.label}</Link>
+                )}
+              </TD>
+              <TD><Link href={links.home} className="text-accent underline underline-offset-2">Open</Link></TD>
+            </TR>
+          );
+        })}
+      </TBody>
+    </Table>
       </div>
     </>
   );
@@ -205,28 +204,26 @@ export function AlertsTable({
   return (
     <>
     {note ? <p className="mb-2 text-sm text-ink-muted" role="status">{note}</p> : null}
-    <TableWrap>
-      <table className="w-full text-sm">
-        <THead columns={['Severity', 'Client', 'Alert', 'Status', 'Standing since', 'Evidence']} />
-        <TBody>
-          {alerts.map((alert) => {
-            const org = orgs.get(alert.organizationId);
-            if (org === undefined) return null;
-            const links = hrefs(org);
-            return (
-              <TR key={alert.id}>
-                <TD><Badge tone={severityTone(alert.severity)}>{SEVERITY_LABELS[alert.severity]}</Badge></TD>
-                <TD><Link href={links.client} className="text-ink hover:underline">{org.name}</Link></TD>
-                <TD><Link href={links.alert(alert.id)} className="text-accent underline underline-offset-2">{alert.title}</Link></TD>
-                <TD>{alert.status === 'acknowledged' ? 'Acknowledged' : 'Open'}{alert.actionId ? ' · has an action' : ''}</TD>
-                <TD>{ageLabel(alert.firstSeenAt, now)}</TD>
-                <TD>{alert.evidenceBundleId ? <Link href={links.evidence(alert.evidenceBundleId)} className="text-ink-muted hover:text-ink">Why?</Link> : <span className="text-ink-faint">—</span>}</TD>
-              </TR>
-            );
-          })}
-        </TBody>
-      </table>
-    </TableWrap>
+    <Table>
+      <THead columns={['Severity', 'Client', 'Alert', 'Status', 'Standing since', 'Evidence']} />
+      <TBody>
+        {alerts.map((alert) => {
+          const org = orgs.get(alert.organizationId);
+          if (org === undefined) return null;
+          const links = hrefs(org);
+          return (
+            <TR key={alert.id}>
+              <TD><Badge tone={severityTone(alert.severity)}>{SEVERITY_LABELS[alert.severity]}</Badge></TD>
+              <TD><Link href={links.client} className="text-ink hover:underline">{org.name}</Link></TD>
+              <TD><Link href={links.alert(alert.id)} className="text-accent underline underline-offset-2">{alert.title}</Link></TD>
+              <TD>{alert.status === 'acknowledged' ? 'Acknowledged' : 'Open'}{alert.actionId ? ' · has an action' : ''}</TD>
+              <TD>{ageLabel(alert.firstSeenAt, now)}</TD>
+              <TD>{alert.evidenceBundleId ? <Link href={links.evidence(alert.evidenceBundleId)} className="text-ink-muted hover:text-ink">Why?</Link> : <span className="text-ink-faint">—</span>}</TD>
+            </TR>
+          );
+        })}
+      </TBody>
+    </Table>
     </>
   );
 }
@@ -243,29 +240,27 @@ export function ActionsTable({
   return (
     <>
     {note ? <p className="mb-2 text-sm text-ink-muted" role="status">{note}</p> : null}
-    <TableWrap>
-      <table className="w-full text-sm">
-        <THead columns={['Priority', 'Client', 'Action', 'Owner', 'Due', 'Evidence']} />
-        <TBody>
-          {actions.map((action) => {
-            const org = orgs.get(action.organizationId);
-            if (org === undefined) return null;
-            const links = hrefs(org);
-            const due = dueLabel(action.dueDate, today);
-            return (
-              <TR key={action.id}>
-                <TD><Badge tone={priorityTone(action.priority)}>{PRIORITY_LABELS[action.priority]}</Badge></TD>
-                <TD><Link href={links.client} className="text-ink hover:underline">{org.name}</Link></TD>
-                <TD><Link href={links.action(action.id)} className="text-accent underline underline-offset-2">{action.title}</Link></TD>
-                <TD>{action.ownerUserId === viewerUserId ? 'You' : action.ownerUserId === null ? <span className="text-ink-faint">Unassigned</span> : 'Assigned'}</TD>
-                <TD>{due === null ? <span className="text-ink-faint">No date</span> : due}</TD>
-                <TD>{action.evidenceBundleId ? <Link href={links.evidence(action.evidenceBundleId)} className="text-ink-muted hover:text-ink">Why?</Link> : <span className="text-ink-faint">—</span>}</TD>
-              </TR>
-            );
-          })}
-        </TBody>
-      </table>
-    </TableWrap>
+    <Table>
+      <THead columns={['Priority', 'Client', 'Action', 'Owner', 'Due', 'Evidence']} />
+      <TBody>
+        {actions.map((action) => {
+          const org = orgs.get(action.organizationId);
+          if (org === undefined) return null;
+          const links = hrefs(org);
+          const due = dueLabel(action.dueDate, today);
+          return (
+            <TR key={action.id}>
+              <TD><Badge tone={priorityTone(action.priority)}>{PRIORITY_LABELS[action.priority]}</Badge></TD>
+              <TD><Link href={links.client} className="text-ink hover:underline">{org.name}</Link></TD>
+              <TD><Link href={links.action(action.id)} className="text-accent underline underline-offset-2">{action.title}</Link></TD>
+              <TD>{action.ownerUserId === viewerUserId ? 'You' : action.ownerUserId === null ? <span className="text-ink-faint">Unassigned</span> : 'Assigned'}</TD>
+              <TD>{due === null ? <span className="text-ink-faint">No date</span> : due}</TD>
+              <TD>{action.evidenceBundleId ? <Link href={links.evidence(action.evidenceBundleId)} className="text-ink-muted hover:text-ink">Why?</Link> : <span className="text-ink-faint">—</span>}</TD>
+            </TR>
+          );
+        })}
+      </TBody>
+    </Table>
     </>
   );
 }

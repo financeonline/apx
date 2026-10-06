@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { updateSettingAction } from './actions';
+import { Input } from '@/components/ui/shadcn';
 
 export function SettingForm({ settingKey, label, hint, value, numeric }: {
   settingKey: string; label: string; hint: string; value: string; numeric: boolean;
@@ -14,8 +15,8 @@ export function SettingForm({ settingKey, label, hint, value, numeric }: {
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink">{label}</span>
         <span className="text-xs text-ink-muted">{hint}</span>
-        <input name="value" defaultValue={value} inputMode={numeric ? 'numeric' : 'text'}
-          className={`mt-1 rounded-md border border-line bg-surface px-3 py-2 text-ink ${numeric ? 'tabular w-48' : 'font-mono text-xs'}`} />
+        <Input name="value" defaultValue={value} inputMode={numeric ? 'numeric' : 'text'}
+          className={`mt-1 ${numeric ? 'tabular w-48' : 'font-mono text-xs'}`} />
       </label>
       <div className="flex items-center gap-3">
         <SubmitButton tone="secondary" pendingLabel="Saving…">Save</SubmitButton>

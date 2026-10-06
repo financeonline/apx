@@ -12,6 +12,7 @@ import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { Badge, Banner } from '@/components/ui/surfaces';
 import type { MessageView } from './analyst-chat';
 import { createActionFromAnswerAction, reportAnswerAction } from './actions';
+import { Button, NativeSelect, Textarea } from '@/components/ui/shadcn';
 
 /**
  * One assistant message (UX_ARCHITECTURE.md §5 `AnalystChat`, §7.2, §8.1, §8.3).
@@ -236,19 +237,19 @@ function FeedbackControls({ orgSlug, messageId }: { orgSlug: string; messageId: 
         <input type="hidden" name="message_id" value={messageId} />
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-muted">What was wrong?</span>
-          <select name="type" required className="rounded-md border border-line bg-surface px-3 py-2 text-ink" defaultValue="incorrect">
+          <NativeSelect name="type" required defaultValue="incorrect">
             <option value="incorrect">A figure or claim is incorrect</option>
             <option value="unsafe">It said something it should not have</option>
             <option value="unhelpful">It did not answer the question</option>
-          </select>
+          </NativeSelect>
         </label>
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-muted">Which figure, and what should it be? (optional)</span>
-          <textarea name="comment" rows={2} maxLength={1000} className="rounded-md border border-line bg-surface px-3 py-2 text-ink" />
+          <Textarea name="comment" rows={2} maxLength={1000} />
         </label>
         <div className="flex items-center gap-3">
           <SubmitButton tone="secondary" pendingLabel="Sending…">Send report</SubmitButton>
-          <button type="button" onClick={() => setReporting(false)} className="text-sm text-ink-muted">Cancel</button>
+          <Button type="button" variant="ghost" onClick={() => setReporting(false)}>Cancel</Button>
           <ActionMessage state={state} />
         </div>
       </form>
@@ -270,9 +271,9 @@ function FeedbackControls({ orgSlug, messageId }: { orgSlug: string; messageId: 
         <input type="hidden" name="type" value="unhelpful" />
         <SubmitButton tone="quiet" pendingLabel="Saving…">Not helpful</SubmitButton>
       </form>
-      <button type="button" onClick={() => setReporting(true)} className="text-ink-muted underline underline-offset-2 hover:text-ink">
+      <Button type="button" variant="link" onClick={() => setReporting(true)} className="py-0 text-ink-muted hover:text-ink">
         Report an incorrect figure
-      </button>
+      </Button>
     </div>
   );
 }

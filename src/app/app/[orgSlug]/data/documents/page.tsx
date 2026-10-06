@@ -5,7 +5,8 @@ import { deletable, listDocuments } from '@/modules/documents';
 import { getAccessContext } from '@/modules/tenancy';
 import { Badge, Card, CardBody, EmptyState, PageHeader } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
-import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
+import { THead, TBody, TR, TD } from '@/components/ui/table';
+import { Table } from '@/components/ui/shadcn';
 import { formatDateTime } from '@/components/labels';
 import { DeleteDocumentControl } from './delete-control';
 import { DOCUMENT_KIND_LABELS, DOCUMENT_STATUS_LABELS, DOCUMENT_STATUS_TONES, formatBytes } from './presentation';
@@ -40,29 +41,27 @@ export default async function DocumentsPage({ params, searchParams }: { params: 
                 Files you upload — bank statements, ledger exports, invoice lists — are kept here as the source of your figures.
               </EmptyState>
             ) : (
-              <TableWrap>
-                <table className="w-full text-sm">
-                  <caption className="sr-only">Documents</caption>
-                  <THead columns={['File', 'Kind', 'Size', 'Uploaded', 'Status', 'Imports', '']} />
-                  <TBody>
-                    {documents.map((d) => (
-                      <TR key={d.id}>
-                        <TD><Link href={`/app/${orgSlug}/data/documents/${d.id}`} className="text-accent underline underline-offset-2">{d.filename}</Link></TD>
-                        <TD className="text-ink-muted">{DOCUMENT_KIND_LABELS[d.kind] ?? d.kind}</TD>
-                        <TD className="tabular text-ink-muted">{formatBytes(d.byteSize)}</TD>
-                        <TD className="text-ink-muted">{formatDateTime(d.createdAt)}</TD>
-                        <TD><Badge tone={DOCUMENT_STATUS_TONES[d.status] ?? 'neutral'}>{DOCUMENT_STATUS_LABELS[d.status] ?? d.status}</Badge></TD>
-                        <TD className="text-ink-muted">
-                          {d.batches.length === 0 ? '—' : d.batches.map((b) => (
-                            <Link key={b.id} href={`/app/${orgSlug}/data/imports/${b.id}`} className="mr-2 underline">{b.status.replace('_', ' ')}</Link>
-                          ))}
-                        </TD>
-                        <TD>{can(ctx, 'imports.review') && deletable(d) ? <DeleteDocumentControl orgSlug={orgSlug} documentId={d.id} filename={d.filename} /> : null}</TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </table>
-              </TableWrap>
+              <Table>
+                <caption className="sr-only">Documents</caption>
+                <THead columns={['File', 'Kind', 'Size', 'Uploaded', 'Status', 'Imports', '']} />
+                <TBody>
+                  {documents.map((d) => (
+                    <TR key={d.id}>
+                      <TD><Link href={`/app/${orgSlug}/data/documents/${d.id}`} className="text-accent underline underline-offset-2">{d.filename}</Link></TD>
+                      <TD className="text-ink-muted">{DOCUMENT_KIND_LABELS[d.kind] ?? d.kind}</TD>
+                      <TD className="tabular text-ink-muted">{formatBytes(d.byteSize)}</TD>
+                      <TD className="text-ink-muted">{formatDateTime(d.createdAt)}</TD>
+                      <TD><Badge tone={DOCUMENT_STATUS_TONES[d.status] ?? 'neutral'}>{DOCUMENT_STATUS_LABELS[d.status] ?? d.status}</Badge></TD>
+                      <TD className="text-ink-muted">
+                        {d.batches.length === 0 ? '—' : d.batches.map((b) => (
+                          <Link key={b.id} href={`/app/${orgSlug}/data/imports/${b.id}`} className="mr-2 underline">{b.status.replace('_', ' ')}</Link>
+                        ))}
+                      </TD>
+                      <TD>{can(ctx, 'imports.review') && deletable(d) ? <DeleteDocumentControl orgSlug={orgSlug} documentId={d.id} filename={d.filename} /> : null}</TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
             )}
           </CardBody>
         </Card>

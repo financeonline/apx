@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { Card, CardBody } from '@/components/ui/surfaces';
 import { assignActionAction } from '../actions';
+import { NativeSelect } from '@/components/ui/shadcn';
 
 /**
  * Who owns this action (SOW §17; RBAC_MATRIX.md `actions.assign`).
@@ -34,16 +35,16 @@ export function AssignControl({
           <input type="hidden" name="action_id" value={actionId} />
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-muted">Assign to</span>
-            <select
+            <NativeSelect
               name="owner_user_id"
               defaultValue={ownerUserId ?? ''}
-              className="w-72 max-w-full rounded-md border border-line px-3 py-2 text-ink"
+              className="w-72 max-w-full"
             >
               <option value="">Nobody</option>
               {owners.map((owner) => (
                 <option key={owner.userId} value={owner.userId}>{owner.name}</option>
               ))}
-            </select>
+            </NativeSelect>
           </label>
           <SubmitButton tone="secondary">Assign</SubmitButton>
         </form>

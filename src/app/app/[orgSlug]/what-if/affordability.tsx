@@ -4,6 +4,7 @@ import {
   type AffordabilityCheck,
 } from '@/modules/scenarios';
 import { Badge, Card, CardBody, CardHeader } from '@/components/ui/surfaces';
+import { Button, Input, NativeSelect, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 
 /**
  * "Can we afford it?" (SOW §12; ADR-146). A plain GET form: the check is worked out on the server
@@ -30,25 +31,25 @@ export function AffordabilityCard({
         <form method="get" action={`/app/${orgSlug}/what-if`} className="flex flex-wrap items-end gap-3">
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-muted">Amount</span>
-            <input name="afford_amount" defaultValue={asked?.amount ?? ''} inputMode="decimal" required
-              className="w-40 rounded-md border border-line px-2 py-1 text-sm text-ink" placeholder="25,000" />
+            <Input name="afford_amount" defaultValue={asked?.amount ?? ''} inputMode="decimal" required
+              className="w-40 px-2 py-1" placeholder="25,000" />
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-muted">How often</span>
-            <select name="afford_recurrence" defaultValue={asked?.recurrence ?? 'one_off'}
-              className="rounded-md border border-line px-2 py-1 text-sm text-ink">
+            <NativeSelect name="afford_recurrence" defaultValue={asked?.recurrence ?? 'one_off'}
+              className="px-2 py-1">
               <option value="one_off">Once</option>
               <option value="monthly">Every month</option>
-            </select>
+            </NativeSelect>
           </label>
           <label className="flex flex-col gap-1 text-sm">
             <span className="text-ink-muted">From</span>
-            <select name="afford_start" defaultValue={String(asked?.start ?? 1)}
-              className="rounded-md border border-line px-2 py-1 text-sm text-ink">
+            <NativeSelect name="afford_start" defaultValue={String(asked?.start ?? 1)}
+              className="px-2 py-1">
               {months.map((m) => <option key={m.value} value={m.value}>{m.label}</option>)}
-            </select>
+            </NativeSelect>
           </label>
-          <button type="submit" className="rounded-md border border-line px-3 py-1.5 text-sm text-ink hover:bg-surface-muted">Check</button>
+          <Button type="submit" variant="secondary" className="px-3 py-1.5">Check</Button>
         </form>
 
         {check === 'unreadable' ? (
@@ -67,18 +68,18 @@ export function AffordabilityCard({
               {' '}One month of normal money out: {fmt(check.result.buffer!, check.currency)}.
               {check.result.verdictWithout !== 'affordable' ? ' Cash is already below that cushion before this spend.' : ''}
             </p>
-            <table className="mt-4 w-full max-w-lg text-sm">
-              <thead><tr className="text-left text-ink-muted"><th className="py-1 font-normal">Month</th><th className="py-1 text-right font-normal">Cash expected</th><th className="py-1 text-right font-normal">After this spend</th></tr></thead>
-              <tbody>
+            <Table className="mt-4 min-w-0 max-w-lg">
+              <TableHeader><TableRow className="text-left text-ink-muted"><TableHead className="py-1 font-normal">Month</TableHead><TableHead className="py-1 text-right font-normal">Cash expected</TableHead><TableHead className="py-1 text-right font-normal">After this spend</TableHead></TableRow></TableHeader>
+              <TableBody>
                 {check.result.months.map((m) => (
-                  <tr key={m.periodId} className="border-t border-line">
-                    <td className="py-1 text-ink">{m.periodLabel}</td>
-                    <td className="py-1 text-right text-ink-muted">{fmt(m.expectedCash, check.currency)}</td>
-                    <td className="py-1 text-right text-ink">{fmt(m.cashAfter, check.currency)}</td>
-                  </tr>
+                  <TableRow key={m.periodId} className="border-t border-line">
+                    <TableCell className="py-1 text-ink">{m.periodLabel}</TableCell>
+                    <TableCell className="py-1 text-right text-ink-muted">{fmt(m.expectedCash, check.currency)}</TableCell>
+                    <TableCell className="py-1 text-right text-ink">{fmt(m.cashAfter, check.currency)}</TableCell>
+                  </TableRow>
                 ))}
-              </tbody>
-            </table>
+              </TableBody>
+            </Table>
             {check.forecast?.stale ? <p className="mt-2 text-sm text-ink">The figures have moved since this forecast was worked out; work it out again for a current answer.</p> : null}
             <p className="mt-3 text-xs text-ink-faint">{AFFORDABILITY_RULE_TEXT}</p>
           </section>

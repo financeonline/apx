@@ -62,17 +62,17 @@ export function MoveStageForm({ orgSlug, opportunityId, stage, customerId, custo
       <input type="hidden" name="opportunity_id" value={opportunityId} />
       <label className="text-xs text-ink-muted">
         Stage{' '}
-        <select name="stage" defaultValue={stage} className="rounded-md border border-line px-2 py-1 text-sm text-ink">
+        <Select name="stage" defaultValue={stage} className="inline-block w-auto px-2 py-1">
           {STAGES.map((s) => <option key={s.value} value={s.value}>{s.label}</option>)}
-        </select>
+        </Select>
       </label>
       {customerId === null ? (
         <label className="text-xs text-ink-muted">
           Customer{' '}
-          <select name="counterparty_id" defaultValue="" className="rounded-md border border-line px-2 py-1 text-sm text-ink">
+          <Select name="counterparty_id" defaultValue="" className="inline-block w-auto px-2 py-1">
             <option value="">—</option>
             {customers.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
+          </Select>
         </label>
       ) : null}
       <Button type="submit" tone="secondary">Update</Button>

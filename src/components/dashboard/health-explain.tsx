@@ -7,6 +7,7 @@ import {
   BAND_SCALE, DIMENSION_DESCRIPTIONS, DIMENSION_LABELS, EXCLUSION_TEXT, capNote,
   RULE_LABELS, bandText, bandTone, dimensionsNote, orderedDimensions, pointsText, skipText,
 } from './health-presentation';
+import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 
 /**
  * The explainability panel (UX_ARCHITECTURE.md §Level 1 "explainability panel per dimension",
@@ -210,46 +211,46 @@ function MetricLinks({
  */
 function RuleTable({ dimension }: { dimension: DimensionBreakdown }) {
   return (
-    <table className="mt-3 w-full text-sm">
-      <caption className="sr-only">
+    <Table className="mt-3 min-w-0">
+      <TableCaption className="sr-only">
         How {DIMENSION_LABELS[dimension.key]} reached {dimension.score}
-      </caption>
-      <thead>
-        <tr className="text-left text-xs uppercase tracking-wide text-ink-muted">
-          <th scope="col" className="py-1 font-medium">Check</th>
-          <th scope="col" className="py-1 font-medium">Result</th>
-          <th scope="col" className="py-1 text-right font-medium">Points</th>
-        </tr>
-      </thead>
-      <tbody>
-        <tr className="border-t border-line">
-          <td className="py-1 text-ink-muted" colSpan={2}>Starting point</td>
-          <td className="tabular py-1 text-right text-ink-muted">50</td>
-        </tr>
+      </TableCaption>
+      <TableHeader>
+        <TableRow className="text-left text-xs uppercase tracking-wide text-ink-muted">
+          <TableHead scope="col" className="py-1 font-medium">Check</TableHead>
+          <TableHead scope="col" className="py-1 font-medium">Result</TableHead>
+          <TableHead scope="col" className="py-1 text-right font-medium">Points</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        <TableRow className="border-t border-line">
+          <TableCell className="py-1 text-ink-muted" colSpan={2}>Starting point</TableCell>
+          <TableCell className="tabular py-1 text-right text-ink-muted">50</TableCell>
+        </TableRow>
         {dimension.rules.map((rule) => {
           const skipped = skipText(rule.skipped_reason);
           return (
-            <tr key={rule.rule} className="border-t border-line align-top">
-              <th scope="row" className="py-1 text-left font-normal text-ink">
+            <TableRow key={rule.rule} className="border-t border-line align-top">
+              <TableHead scope="row" className="py-1 text-left font-normal text-sm normal-case tracking-normal text-ink">
                 {RULE_LABELS[rule.rule] ?? rule.rule}
-              </th>
-              <td className="py-1 text-ink-muted">
+              </TableHead>
+              <TableCell className="py-1 text-ink-muted">
                 {skipped ?? rule.result}
-              </td>
-              <td className="tabular py-1 text-right text-ink">
+              </TableCell>
+              <TableCell className="tabular py-1 text-right text-ink">
                 {skipped === null ? pointsText(rule.points) : '—'}
-              </td>
-            </tr>
+              </TableCell>
+            </TableRow>
           );
         })}
-        <tr className="border-t border-line font-medium">
-          <td className="py-1 text-ink" colSpan={2}>
+        <TableRow className="border-t border-line font-medium">
+          <TableCell className="py-1 text-ink" colSpan={2}>
             {dimension.capped ? 'Total, capped' : 'Total'}
-          </td>
-          <td className="tabular py-1 text-right text-ink">{dimension.score}</td>
-        </tr>
-      </tbody>
-    </table>
+          </TableCell>
+          <TableCell className="tabular py-1 text-right text-ink">{dimension.score}</TableCell>
+        </TableRow>
+      </TableBody>
+    </Table>
   );
 }
 

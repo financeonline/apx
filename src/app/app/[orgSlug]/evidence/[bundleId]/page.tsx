@@ -10,7 +10,8 @@ import {
 import { getAccessContext } from '@/modules/tenancy';
 import { StatusBadgeView } from '@/components/dashboard';
 import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
-import { TBody, TD, THead, TR, TableWrap } from '@/components/ui/table';
+import { TBody, TD, THead, TR } from '@/components/ui/table';
+import { Table } from '@/components/ui/shadcn';
 import { DocumentPanel } from './document-panel';
 import { requirePermission } from '@/app/_lib/authz';
 
@@ -329,58 +330,56 @@ export default async function EvidenceBundlePage({
               </p>
 
               <div className="mt-4">
-                <TableWrap>
-                  <table className="w-full text-sm">
-                    <THead columns={['Date', 'Description', 'Amount', 'Status', 'Source', 'This row']} />
-                    <TBody>
-                      {block.selection.rows.map((record) => (
-                        <TR key={record.id}>
-                          <TD>{record.date ?? '—'}</TD>
-                          <TD>{record.description ?? '—'}</TD>
-                          <TD className="tabular-nums">{record.amount ?? '—'}</TD>
-                          <TD>
-                            {record.superseded ? (
-                              <Badge tone="warn">Replaced</Badge>
-                            ) : record.recordStatus === 'rejected' ? (
-                              <Badge tone="danger">Rejected</Badge>
-                            ) : (
-                              <span className="text-ink-faint">—</span>
-                            )}
-                          </TD>
-                          <TD>
+                <Table>
+                  <THead columns={['Date', 'Description', 'Amount', 'Status', 'Source', 'This row']} />
+                  <TBody>
+                    {block.selection.rows.map((record) => (
+                      <TR key={record.id}>
+                        <TD>{record.date ?? '—'}</TD>
+                        <TD>{record.description ?? '—'}</TD>
+                        <TD className="tabular-nums">{record.amount ?? '—'}</TD>
+                        <TD>
+                          {record.superseded ? (
+                            <Badge tone="warn">Replaced</Badge>
+                          ) : record.recordStatus === 'rejected' ? (
+                            <Badge tone="danger">Rejected</Badge>
+                          ) : (
+                            <span className="text-ink-faint">—</span>
+                          )}
+                        </TD>
+                        <TD>
+                          <Link
+                            href={`/app/${orgSlug}/evidence/${bundleId}?row=${record.table}:${record.id}`}
+                            className="text-accent underline underline-offset-2"
+                          >
+                            Source
+                            <span className="sr-only"> document for this row</span>
+                          </Link>
+                        </TD>
+                        {/*
+                          * The chain, turned round (ADR-096). "Source" stays where it was: it opens
+                          * the FILE behind this row, in place, which is what a reader reconciling a
+                          * figure wants. This asks a different question — is this one row counted,
+                          * which import brought it in, has something replaced it — and so it is a
+                          * page of its own rather than a fourth panel on this one.
+                          */}
+                        <TD>
+                          {recordKindOf(record.table) === null ? (
+                            <span className="text-ink-faint">—</span>
+                          ) : (
                             <Link
-                              href={`/app/${orgSlug}/evidence/${bundleId}?row=${record.table}:${record.id}`}
+                              href={`/app/${orgSlug}/evidence/record/${recordKindOf(record.table)}/${record.id}`}
                               className="text-accent underline underline-offset-2"
                             >
-                              Source
-                              <span className="sr-only"> document for this row</span>
+                              Where from?
+                              <span className="sr-only"> — the history of this record</span>
                             </Link>
-                          </TD>
-                          {/*
-                            * The chain, turned round (ADR-096). "Source" stays where it was: it opens
-                            * the FILE behind this row, in place, which is what a reader reconciling a
-                            * figure wants. This asks a different question — is this one row counted,
-                            * which import brought it in, has something replaced it — and so it is a
-                            * page of its own rather than a fourth panel on this one.
-                            */}
-                          <TD>
-                            {recordKindOf(record.table) === null ? (
-                              <span className="text-ink-faint">—</span>
-                            ) : (
-                              <Link
-                                href={`/app/${orgSlug}/evidence/record/${recordKindOf(record.table)}/${record.id}`}
-                                className="text-accent underline underline-offset-2"
-                              >
-                                Where from?
-                                <span className="sr-only"> — the history of this record</span>
-                              </Link>
-                            )}
-                          </TD>
-                        </TR>
-                      ))}
-                    </TBody>
-                  </table>
-                </TableWrap>
+                          )}
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
               </div>
 
               {/*

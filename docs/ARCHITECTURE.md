@@ -66,7 +66,7 @@ Owner and Super Admin are different families and are never merged. Employees hav
 | Runtime | Node 24.14, npm 11.13 | Toolchain baseline recorded 2026-09-04 |
 | Framework | Next.js 16.3.x, App Router, React Server Components, Server Actions | Vercel hosting assumed (CD-22) |
 | Language | TypeScript strict, `noUncheckedIndexedAccess` | |
-| UI | Tailwind CSS v4, shadcn/ui, Recharts | Design tokens decided in the DESIGN phase before build |
+| UI | Tailwind CSS v4, shadcn/ui (owned source in `src/components/ui/shadcn`, themed with MOTION's tokens; ADR-151); charts are MOTION's own SVG — the SOW's "Recharts or equivalent" | Design tokens decided in the DESIGN phase before build |
 | Validation | Zod at every boundary | |
 | Money | `decimal.js`; Postgres `NUMERIC(18,2)` | ADR-006 |
 | Database | Supabase PostgreSQL 16 with RLS, pgTAP | ADR-013 |

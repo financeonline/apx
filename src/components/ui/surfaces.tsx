@@ -1,13 +1,15 @@
 import type { ReactNode } from 'react';
 import { ButtonLink } from './button';
+import {
+  Alert, AlertDescription, AlertTitle, Badge as ShadcnBadge, Card as ShadcnCard, CardAction, CardContent,
+  CardDescription, CardHeader as ShadcnCardHeader, CardTitle, Skeleton as ShadcnSkeleton,
+} from './shadcn';
+
+/* MOTION's surfaces, on shadcn/ui (SOW §6; ADR-151): the same names and props as before. */
 
 /** A white surface on paper with a single hairline. Elevation comes from the border, never a shadow. */
 export function Card({ children, className = '', id }: { children: ReactNode; className?: string; id?: string }) {
-  return (
-    <section id={id} className={`rounded-card border border-line bg-surface ${className}`.trim()}>
-      {children}
-    </section>
-  );
+  return <ShadcnCard id={id} className={className}>{children}</ShadcnCard>;
 }
 
 export function CardHeader({
@@ -20,18 +22,18 @@ export function CardHeader({
   action?: ReactNode;
 }) {
   return (
-    <header className="flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4">
+    <ShadcnCardHeader>
       <div className="min-w-0">
-        <h2 className="text-base">{title}</h2>
-        {description ? <p className="mt-1 text-sm text-ink-muted">{description}</p> : null}
+        <CardTitle>{title}</CardTitle>
+        {description ? <CardDescription>{description}</CardDescription> : null}
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
-    </header>
+      {action ? <CardAction>{action}</CardAction> : null}
+    </ShadcnCardHeader>
   );
 }
 
 export function CardBody({ children, className = '' }: { children: ReactNode; className?: string }) {
-  return <div className={`px-5 py-4 ${className}`.trim()}>{children}</div>;
+  return <CardContent className={className}>{children}</CardContent>;
 }
 
 export function PageHeader({
@@ -65,12 +67,7 @@ export function PageHeader({
 
 export type BadgeTone = 'neutral' | 'accent' | 'warn' | 'danger';
 
-const BADGE_TONES: Record<BadgeTone, string> = {
-  neutral: 'bg-surface-sunken text-ink-muted border-line',
-  accent: 'bg-accent-soft text-accent border-transparent',
-  warn: 'bg-warn-soft text-warn border-transparent',
-  danger: 'bg-danger-soft text-danger border-transparent',
-};
+const BADGE_VARIANT = { neutral: 'default', accent: 'accent', warn: 'warn', danger: 'destructive' } as const;
 
 export function Badge({
   children,
@@ -79,22 +76,12 @@ export function Badge({
   children: ReactNode;
   tone?: BadgeTone;
 }) {
-  return (
-    <span
-      className={`inline-flex items-center rounded-md border px-2 py-0.5 text-xs font-medium ${BADGE_TONES[tone]}`}
-    >
-      {children}
-    </span>
-  );
+  return <ShadcnBadge variant={BADGE_VARIANT[tone]}>{children}</ShadcnBadge>;
 }
 
 export type BannerTone = 'info' | 'warn' | 'danger';
 
-const BANNER_TONES: Record<BannerTone, string> = {
-  info: 'border-line bg-surface-sunken text-ink',
-  warn: 'border-warn/40 bg-warn-soft text-ink',
-  danger: 'border-danger/40 bg-danger-soft text-ink',
-};
+const BANNER_VARIANT = { info: 'default', warn: 'warn', danger: 'destructive' } as const;
 
 export function Banner({
   tone = 'info',
@@ -106,10 +93,10 @@ export function Banner({
   children?: ReactNode;
 }) {
   return (
-    <div className={`rounded-card border px-4 py-3 text-sm ${BANNER_TONES[tone]}`} role="status">
-      <p className="font-medium">{title}</p>
-      {children ? <div className="mt-1 text-ink-muted">{children}</div> : null}
-    </div>
+    <Alert variant={BANNER_VARIANT[tone]}>
+      <AlertTitle>{title}</AlertTitle>
+      {children ? <AlertDescription>{children}</AlertDescription> : null}
+    </Alert>
   );
 }
 
@@ -145,7 +132,7 @@ export function EmptyState({
 }
 
 export function Skeleton({ className = 'h-4 w-full' }: { className?: string }) {
-  return <div className={`skeleton ${className}`} aria-hidden="true" />;
+  return <ShadcnSkeleton className={className} />;
 }
 
 /** Label/value pairs, used for read-only detail (organisation, profile, assignment). */

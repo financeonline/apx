@@ -1,4 +1,5 @@
-import { TBody, TD, THead, TR, TableWrap } from '@/components/ui/table';
+import { TBody, TD, THead, TR } from '@/components/ui/table';
+import { Table } from '@/components/ui/shadcn';
 import type { HealthHistoryPoint } from '@/modules/health';
 import {
   CHART_STROKE, DEFAULT_CHART_BOX, chartClass, columnX, polylinePoints, segmentsFor, valueY,
@@ -122,21 +123,19 @@ export function HealthHistoryChart({
       </svg>
 
       {/* §11: the picture always has a real table behind it, not a caption describing it. */}
-      <TableWrap>
-        <table id={tableFallbackId} className="w-full text-sm">
-          <caption className="sr-only">Health score by month</caption>
-          <THead columns={['Month', 'Score', 'Band']} />
-          <TBody>
-            {points.map((point) => (
-              <TR key={point.periodId}>
-                <TD>{labels.get(point.periodId) ?? point.periodId}</TD>
-                <TD className="tabular">{point.score === null ? '—' : point.score}</TD>
-                <TD>{point.score === null ? 'Not scored' : bandText(point.band)}</TD>
-              </TR>
-            ))}
-          </TBody>
-        </table>
-      </TableWrap>
+      <Table id={tableFallbackId}>
+        <caption className="sr-only">Health score by month</caption>
+        <THead columns={['Month', 'Score', 'Band']} />
+        <TBody>
+          {points.map((point) => (
+            <TR key={point.periodId}>
+              <TD>{labels.get(point.periodId) ?? point.periodId}</TD>
+              <TD className="tabular">{point.score === null ? '—' : point.score}</TD>
+              <TD>{point.score === null ? 'Not scored' : bandText(point.band)}</TD>
+            </TR>
+          ))}
+        </TBody>
+      </Table>
     </figure>
   );
 }

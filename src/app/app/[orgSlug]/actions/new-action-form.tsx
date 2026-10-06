@@ -3,6 +3,7 @@
 import { useActionState, useState } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { createActionAction } from './actions';
+import { Button, Input, NativeSelect, Textarea } from '@/components/ui/shadcn';
 
 /**
  * Adding an action by hand (SOW §17).
@@ -16,13 +17,13 @@ export function NewActionForm({ orgSlug }: { orgSlug: string }) {
 
   if (!open) {
     return (
-      <button
+      <Button
         type="button"
+        variant="link"
         onClick={() => setOpen(true)}
-        className="text-sm text-accent underline underline-offset-2"
       >
         Add something to do
-      </button>
+      </Button>
     );
   }
 
@@ -30,38 +31,36 @@ export function NewActionForm({ orgSlug }: { orgSlug: string }) {
     <form action={submit} className="flex flex-col gap-3 rounded-md border border-line bg-surface p-4">
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink-muted">What needs doing?</span>
-        <input
+        <Input
           name="title"
           required
           maxLength={200}
-          className="rounded-md border border-line px-3 py-2 text-ink"
           placeholder="Chase the overdue invoices"
         />
       </label>
 
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink-muted">Why? (optional)</span>
-        <textarea
+        <Textarea
           name="issue"
           rows={2}
-          className="rounded-md border border-line px-3 py-2 text-ink"
         />
       </label>
 
       <div className="flex flex-wrap gap-4">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-muted">How urgent?</span>
-          <select name="priority" defaultValue="medium" className="rounded-md border border-line px-3 py-2 text-ink">
+          <NativeSelect name="priority" defaultValue="medium">
             <option value="critical">Critical</option>
             <option value="high">High</option>
             <option value="medium">Medium</option>
             <option value="low">Low</option>
-          </select>
+          </NativeSelect>
         </label>
 
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-muted">Due by (optional)</span>
-          <input type="date" name="due_date" className="rounded-md border border-line px-3 py-2 text-ink" />
+          <Input type="date" name="due_date" />
         </label>
       </div>
 
@@ -69,14 +68,15 @@ export function NewActionForm({ orgSlug }: { orgSlug: string }) {
 
       <div className="flex items-center gap-3">
         <SubmitButton>Add it</SubmitButton>
-        <button
+        <Button
           type="button"
+          variant="link"
           onClick={() => setOpen(false)}
           disabled={pending}
-          className="text-sm text-ink-muted underline underline-offset-2"
+          className="text-ink-muted"
         >
           Cancel
-        </button>
+        </Button>
       </div>
 
       <ActionMessage state={state} />

@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { Button } from '@/components/ui/button';
 import { requestComposeAction, requestStoredPdfAction } from '../actions';
+import { NativeSelect } from '@/components/ui/shadcn';
 
 /**
  * Asking for a report (Phase 17). Producing is queued work: the job composes and stores the report,
@@ -27,9 +28,9 @@ export function ComposeForm({
       {windows === undefined ? null : (
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-muted">{kind === 'daily_brief' ? 'Day' : 'Week'}</span>
-          <select name="window_start" className="rounded-md border border-line px-2 py-1 text-sm text-ink">
+          <NativeSelect name="window_start" className="px-2 py-1">
             {windows.map((w) => <option key={w.value} value={w.value}>{w.label}</option>)}
-          </select>
+          </NativeSelect>
         </label>
       )}
       <SubmitButton tone="secondary">{label}</SubmitButton>

@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import { Input } from '@/components/ui/field';
 import { ActionMessage } from '@/components/ui/action-form';
 import { rollbackBatchAction } from './actions';
+import { Button } from '@/components/ui/shadcn';
 
 /**
  * Rolling an import back (IMPORT_ENGINE.md §12).
@@ -24,12 +25,13 @@ export function RollbackControl({ orgSlug, batchId }: { orgSlug: string; batchId
         <input type="hidden" name="org_slug" value={orgSlug} />
         <input type="hidden" name="batch_id" value={batchId} />
         <Input name="reason" placeholder="Why are you rolling this back?" required className="max-w-xs" />
-        <button
+        <Button
           type="submit"
-          className="rounded-md border border-line px-3 py-1.5 text-sm text-ink hover:border-line-strong"
+          variant="secondary"
+          className="px-3 py-1.5"
         >
           Remove these rows
-        </button>
+        </Button>
         <ActionMessage state={state} />
       </form>
     </details>

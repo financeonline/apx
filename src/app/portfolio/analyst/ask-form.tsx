@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { askAdviserAction } from './actions';
+import { Textarea } from '@/components/ui/shadcn';
 
 const SUGGESTIONS = [
   'Which clients need attention, and why?',
@@ -16,13 +17,12 @@ export function AskForm() {
   return (
     <form action={action} className="flex flex-col gap-3">
       <label htmlFor="question" className="text-sm font-medium">Ask about the clients you advise</label>
-      <textarea
+      <Textarea
         id="question"
         name="question"
         required
         maxLength={1000}
         rows={3}
-        className="w-full rounded-md border border-line bg-surface px-3 py-2 text-sm"
         placeholder={SUGGESTIONS[0]}
       />
       <div className="flex flex-wrap items-center gap-3">

@@ -5,6 +5,7 @@ import { useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Banner } from '@/components/ui/surfaces';
 import { finishCustomReportAction } from '../../actions';
+import { NativeSelect, Textarea } from '@/components/ui/shadcn';
 
 /**
  * The Custom AI Report builder (Phase 17, R17-4).
@@ -139,9 +140,9 @@ export function CustomBuilder({
       <fieldset disabled={busy} className="flex flex-col gap-6">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-muted">Month</span>
-          <select value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="max-w-xs rounded-md border border-line px-2 py-1 text-sm text-ink">
+          <NativeSelect value={periodId} onChange={(e) => setPeriodId(e.target.value)} className="max-w-xs px-2 py-1">
             {periods.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
-          </select>
+          </NativeSelect>
         </label>
 
         <div>
@@ -169,8 +170,8 @@ export function CustomBuilder({
           </div>
           <label className="mt-4 flex flex-col gap-1 text-sm">
             <span className="text-ink-muted">…and add your own, one per line</span>
-            <textarea value={own} onChange={(e) => setOwn(e.target.value)} rows={3}
-              className="rounded-md border border-line px-2 py-1 text-sm text-ink" />
+            <Textarea value={own} onChange={(e) => setOwn(e.target.value)} rows={3}
+              className="px-2 py-1" />
           </label>
           <p className={`mt-2 text-sm ${tooMany || tooLong ? 'text-danger' : 'text-ink-muted'}`}>
             {questions.length} of at most {maxQuestions} questions.

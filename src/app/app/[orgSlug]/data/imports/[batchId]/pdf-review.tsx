@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import { DocumentViewer } from '@/components/dashboard/document-viewer';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { confirmPdfPageAction, requestAiReadingAction, requestReceiptReadingAction, statementBalancesAction } from '../actions';
+import { Input, NativeSelect } from '@/components/ui/shadcn';
 
 /**
  * The PDF side of the review screen (IMPORT_ENGINE.md §5.4; ADR-084).
@@ -55,10 +56,10 @@ export function ReceiptReadingRequest({ orgSlug, batchId, documentId, accounts }
       <input type="hidden" name="document_id" value={documentId} />
       <label className="flex flex-col gap-1">
         <span className="text-ink-muted">Expense account these receipts belong to</span>
-        <select name="account_id" required defaultValue="" className="max-w-md rounded-md border border-line bg-surface px-3 py-2 text-ink">
+        <NativeSelect name="account_id" required defaultValue="" className="max-w-md">
           <option value="" disabled>Choose an account…</option>
           {accounts.map((a) => <option key={a.id} value={a.id}>{a.label}</option>)}
-        </select>
+        </NativeSelect>
       </label>
       <p className="text-ink">{RECEIPT_CONSENT_LINE}</p>
       <label className="flex items-center gap-2">
@@ -108,11 +109,11 @@ export function StatementBalancesForm({ orgSlug, batchId, opening, closing, comp
       <div className="flex flex-wrap gap-4">
         <label className="flex flex-col gap-1">
           <span className="text-ink-muted">Opening balance printed on the statement</span>
-          <input name="opening" inputMode="decimal" required defaultValue={opening ?? ''} className="rounded-md border border-line bg-surface px-3 py-2 text-ink tabular" placeholder="1000.00" />
+          <Input name="opening" inputMode="decimal" required defaultValue={opening ?? ''} className="tabular" placeholder="1000.00" />
         </label>
         <label className="flex flex-col gap-1">
           <span className="text-ink-muted">Closing balance printed on the statement</span>
-          <input name="closing" inputMode="decimal" required defaultValue={closing ?? ''} className="rounded-md border border-line bg-surface px-3 py-2 text-ink tabular" placeholder="7320.14" />
+          <Input name="closing" inputMode="decimal" required defaultValue={closing ?? ''} className="tabular" placeholder="7320.14" />
         </label>
       </div>
       {comparison === 'matches_ai' ? (

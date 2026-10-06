@@ -4,6 +4,7 @@ import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardBody, EmptyState, Badge, type BadgeTone } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { requeueJobForm } from './actions';
+import { Button } from '@/components/ui/shadcn';
 
 export const dynamic = 'force-dynamic';
 
@@ -104,7 +105,7 @@ export default async function PlatformJobsPage({
                         {(job.status === 'dead' || job.status === 'failed') && (
                           <form action={requeueJobForm}>
                             <input type="hidden" name="jobId" value={job.id} />
-                            <button type="submit" className="text-sm underline">Requeue</button>
+                            <Button type="submit" variant="link" className="py-0">Requeue</Button>
                           </form>
                         )}
                       </TD>

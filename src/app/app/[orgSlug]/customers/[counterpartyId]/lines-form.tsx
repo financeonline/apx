@@ -3,6 +3,7 @@
 import { useActionState } from 'react';
 import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 import { setInvoiceLinesAction } from '../actions';
+import { Input, NativeSelect } from '@/components/ui/shadcn';
 
 /**
  * Split one invoice across products or services (`customers.edit`). Up to four lines per save; the
@@ -24,12 +25,12 @@ export function InvoiceLinesForm({ orgSlug, counterpartyId, invoiceId, net, exis
       <p className="text-xs text-ink-muted">Invoice net amount {net}. Lines may not add up to more than that; anything left is shown as not yet attributed.</p>
       {rows.map((row, i) => (
         <div key={i} className="grid grid-cols-1 gap-2 sm:grid-cols-3">
-          <select name="product_id" defaultValue={row.productId ?? ''} aria-label={`Line ${i + 1} product`} className="rounded-md border border-line px-2 py-1 text-ink">
+          <NativeSelect name="product_id" defaultValue={row.productId ?? ''} aria-label={`Line ${i + 1} product`} className="px-2 py-1">
             <option value="">No product</option>
             {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-          </select>
-          <input name="amount" defaultValue={row.amountRaw} inputMode="decimal" placeholder="Amount" aria-label={`Line ${i + 1} amount`} className="rounded-md border border-line px-2 py-1 text-ink tabular-nums" />
-          <input name="description" defaultValue={row.description ?? ''} placeholder="Description (optional)" aria-label={`Line ${i + 1} description`} className="rounded-md border border-line px-2 py-1 text-ink" />
+          </NativeSelect>
+          <Input name="amount" defaultValue={row.amountRaw} inputMode="decimal" placeholder="Amount" aria-label={`Line ${i + 1} amount`} className="px-2 py-1 tabular-nums" />
+          <Input name="description" defaultValue={row.description ?? ''} placeholder="Description (optional)" aria-label={`Line ${i + 1} description`} className="px-2 py-1" />
         </div>
       ))}
       <ActionMessage state={state} />

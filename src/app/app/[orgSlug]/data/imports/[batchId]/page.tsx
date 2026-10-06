@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { loadBatchReview, loadReportCompleteness, type BatchIssueGroup } from '@/modules/imports';
 import { PageHeader, Card, CardBody, Badge, Banner } from '@/components/ui/surfaces';
-import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
+import { THead, TBody, TR, TD } from '@/components/ui/table';
+import { Table } from '@/components/ui/shadcn';
 import {
   CommitControls, CompletenessAttestationForm, ConfirmationPrompt, DuplicateDecisions, SkipUnreadableRows,
 } from './review-controls';
@@ -359,22 +360,20 @@ export default async function ReviewBatchPage({
                       <DocumentPageView orgSlug={orgSlug} documentId={review.batch.sourceDocumentId} page={page} filename={review.filename ?? 'statement.pdf'} />
                       <div className="flex flex-col gap-3">
                         <h3 className="text-sm font-medium text-ink">Page {page} · {pageRows.length} row{pageRows.length === 1 ? '' : 's'} read</h3>
-                        <TableWrap>
-                          <table className="w-full text-sm">
-                            <THead columns={isReceipts ? ['Receipt', 'Date', 'Who was paid', 'Total'] : ['Line', 'Date', 'Description', 'Amount', 'Balance']} />
-                            <TBody>
-                              {pageRows.map((row) => (
-                                <TR key={row.id}>
-                                  <TD className="tabular">{(row.sourceRef ?? '').replace(/^page:\d+;line:/, '')}</TD>
-                                  <TD>{String(row.mappedData?.transaction_date ?? row.mappedData?.entry_date ?? '')}</TD>
-                                  <TD>{String(row.mappedData?.description ?? '')}</TD>
-                                  <TD className="tabular">{String(row.mappedData?.amount ?? row.mappedData?.debit ?? '')}</TD>
-                                  {isReceipts ? null : <TD className="tabular">{String(row.mappedData?.balance_after ?? '')}</TD>}
-                                </TR>
-                              ))}
-                            </TBody>
-                          </table>
-                        </TableWrap>
+                        <Table>
+                          <THead columns={isReceipts ? ['Receipt', 'Date', 'Who was paid', 'Total'] : ['Line', 'Date', 'Description', 'Amount', 'Balance']} />
+                          <TBody>
+                            {pageRows.map((row) => (
+                              <TR key={row.id}>
+                                <TD className="tabular">{(row.sourceRef ?? '').replace(/^page:\d+;line:/, '')}</TD>
+                                <TD>{String(row.mappedData?.transaction_date ?? row.mappedData?.entry_date ?? '')}</TD>
+                                <TD>{String(row.mappedData?.description ?? '')}</TD>
+                                <TD className="tabular">{String(row.mappedData?.amount ?? row.mappedData?.debit ?? '')}</TD>
+                                {isReceipts ? null : <TD className="tabular">{String(row.mappedData?.balance_after ?? '')}</TD>}
+                              </TR>
+                            ))}
+                          </TBody>
+                        </Table>
                         {review.batch.status === 'awaiting_review' ? (
                           <PageConfirmation orgSlug={orgSlug} batchId={batchId} page={page} pageWide={pageWide}
                             confirmed={review.batch.pageConfirmations[String(page)] !== undefined} />
@@ -533,24 +532,22 @@ export default async function ReviewBatchPage({
               Including the ones that will not import. Nothing from your file is thrown away.
             </p>
             <div className="mt-3">
-              <TableWrap>
-                <table className="w-full text-sm">
-                  <caption className="sr-only">Rows read from this file</caption>
-                  <THead columns={['Row', 'Status', 'What it says', 'Why it needs a look']} />
-                  <TBody>
-                    {review.rows.slice(0, 200).map((row) => (
-                      <TR key={row.id}>
-                        <TD className="tabular">{row.rowNumber}</TD>
-                        <TD><StatusBadge status={row.status} /></TD>
-                        <TD>{summarise(row.rawData)}</TD>
-                        <TD className="text-ink-muted">
-                          {row.issues.map((issue) => issue.message).join(' · ') || '—'}
-                        </TD>
-                      </TR>
-                    ))}
-                  </TBody>
-                </table>
-              </TableWrap>
+              <Table>
+                <caption className="sr-only">Rows read from this file</caption>
+                <THead columns={['Row', 'Status', 'What it says', 'Why it needs a look']} />
+                <TBody>
+                  {review.rows.slice(0, 200).map((row) => (
+                    <TR key={row.id}>
+                      <TD className="tabular">{row.rowNumber}</TD>
+                      <TD><StatusBadge status={row.status} /></TD>
+                      <TD>{summarise(row.rawData)}</TD>
+                      <TD className="text-ink-muted">
+                        {row.issues.map((issue) => issue.message).join(' · ') || '—'}
+                      </TD>
+                    </TR>
+                  ))}
+                </TBody>
+              </Table>
               {review.rows.length > 200 ? (
                 <p className="mt-2 text-sm text-ink-faint">
                   Showing the first 200 of {review.rows.length} rows.

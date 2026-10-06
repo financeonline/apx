@@ -2841,3 +2841,14 @@ Decision:
 5. **Who was paid** is kept in the description ("Ryman — Printer paper"); it is not matched to a counterparty in this version.
 
 Consequences: `extraction_method = pdf_claude` now also means "a receipt file read by AI", not only a PDF statement's text — the name is kept so the commit and its gate apply unchanged. No deterministic line count exists for a receipt, so the page-wide tick rests on the model's confidence and a reviewer's look at the photo beside the rows.
+
+### ADR-151 · The interface on shadcn/ui
+Status: **built locally on 2026-10-06 on the owner's instruction ("Switch to shadcn/ui"). Not reviewed, merged or deployed.** SOW §6 names "Tailwind CSS and shadcn/ui"; the build had used its own Tailwind primitives.
+
+Decision:
+1. **shadcn/ui as shadcn/ui intends: owned source.** `components.json`; `src/lib/utils.ts` (`cn` = clsx + tailwind-merge, told about MOTION's `rounded-card` radius); `src/components/ui/shadcn/` — Button and Badge (`cva` variants, Radix `Slot`/`asChild`), Input, Textarea, NativeSelect, Label (Radix Label), Card parts, Alert, Table parts, Skeleton — themed with MOTION's design tokens rather than shadcn's default palette, so contrast and the accessibility sweep are unchanged.
+2. **The app's shared primitives are built on them**, keeping their names and props (`Button`/`ButtonLink` tones → variants `default`/`secondary`/`ghost`/`destructive`; `Card`/`CardHeader`/`CardBody`; `Badge`; `Banner` → `Alert`; `TableWrap`/`THead`/`TBody`/`TR`/`TD` → Table; `Field`/`Input`/`Select`/`Textarea`), so every screen using them is on shadcn/ui; hand-styled controls in screens were converted to the shadcn components directly.
+3. **Deliberate departures from shadcn's defaults:** the Card root is a `<section>` (pages name cards as regions); the Table container keeps `min-w-0` and `relative` (ADR-058.12); selects are shadcn's NativeSelect, not the Radix popover Select (screen readers, phones, and journeys selecting by label); hidden, checkbox, radio and file inputs stay native.
+4. **Charts stay MOTION's own SVG**, which §6 allows ("Recharts or equivalent").
+
+Consequences: new dependencies `class-variance-authority`, `clsx`, `tailwind-merge`, `@radix-ui/react-slot`, `@radix-ui/react-label`. Visual output is intended to be unchanged; the browser journeys and the accessibility sweep are the check.
