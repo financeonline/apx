@@ -4,7 +4,7 @@
  * Exclusion and capping are decided in ONE place rather than inside each dimension, because they are
  * the two rules that decide whether a number is shown at all. "Excluded because a required metric is
  * missing" and "capped at 70 because the figures are a bank proxy" must mean the same thing in
- * profitability as in cost control, or "based on 4 of 6 areas" stops being a statement anyone can
+ * profitability as in cost control, or "based on 4 of 8 areas" stops being a statement anyone can
  * check.
  *
  * Pure.
@@ -12,7 +12,7 @@
 
 import { observationOf, usableValue, type MetricObservation } from '@/modules/alerts';
 import type {
-  ConditionReference, FactorSentence, MetricReference, RuleApplication,
+  ConditionReference, ExclusionReason, FactorSentence, MetricReference, RuleApplication,
 } from './types';
 import type { HealthDimensionKey } from './config';
 
@@ -47,6 +47,11 @@ export interface DimensionEvaluation {
   readonly scoredInputs?: ReadonlyArray<{ readonly periodId: string; readonly metricKey: string }>;
   readonly positives: readonly FactorSentence[];
   readonly negatives: readonly FactorSentence[];
+  /**
+   * ADR-147: a dimension whose inputs are not metrics (marketing's campaign records) states its own
+   * exclusion here, decided in the dimension and applied by `assess` like every other one.
+   */
+  readonly unavailable?: ExclusionReason;
 }
 
 /** The observation that satisfies a requirement group, or `undefined` when none does. */

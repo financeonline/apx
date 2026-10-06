@@ -91,7 +91,7 @@ describe('every rule and every skip reason has words', () => {
 
   it('explains every exclusion reason the engine can produce', () => {
     expect(Object.keys(EXCLUSION_TEXT).sort()).toEqual([
-      'insufficient_completeness', 'no_bank_coverage', 'required_metric_missing',
+      'insufficient_completeness', 'no_bank_coverage', 'no_campaign_data', 'required_metric_missing',
     ]);
   });
 

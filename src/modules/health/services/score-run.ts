@@ -42,6 +42,8 @@ export interface HealthChunkRequest {
   readonly counterpartyNames: ReadonlyMap<string, string>;
   /** The last day of each period, for the rules that test "overdue" against a period end. */
   readonly periodEnds: ReadonlyMap<string, string>;
+  /** The first day of each period in the window (health.config.v5: marketing's window). */
+  readonly periodStarts?: ReadonlyMap<string, string>;
 }
 
 export interface HealthRunDeps {
@@ -95,10 +97,15 @@ export async function scoreChunk(
   );
   if (scoreable.length === 0) return { written: 0, scores: [] };
 
-  const [snapshots, records, recurringGroups] = await Promise.all([
+  // health.config.v5 (ADR-147): invoices issued by the last scored month's end, and the Commercial
+  // records, for the two dimensions that read them.
+  const lastEnd = scoreable.map((p) => request.periodEnds.get(p) ?? '').sort().at(-1) ?? '';
+  const [snapshots, records, recurringGroups, invoices, commercial] = await Promise.all([
     repo.loadObservations(scoped, orgId, request.windowPeriodIds),
     repo.loadBankRecords(scoped, orgId, request.windowPeriodIds, request.aggregatedAt),
     repo.loadRecurringGroups(scoped, orgId),
+    repo.loadInvoicesForHealth(scoped, orgId, lastEnd),
+    repo.loadCommercialForHealth(scoped, orgId, request.windowPeriodIds),
   ]);
 
   const scores: HealthScore[] = [];
@@ -136,6 +143,10 @@ export async function scoreChunk(
       snapshots,
       bankCoverageRatio: request.bankCoverage.get(periodId) ?? null,
       conditions,
+      periodEnds: request.periodEnds,
+      ...(request.periodStarts === undefined ? {} : { periodStarts: request.periodStarts }),
+      invoices,
+      commercial,
     };
 
     const score = computeHealthScore(input);

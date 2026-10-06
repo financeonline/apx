@@ -10,6 +10,7 @@ const calls: string[] = [];
 const db = {
   enqueueNightlySweep: vi.fn(async () => { calls.push('sweep'); return 'job-sweep'; }),
   enqueueEngineUpgrade: vi.fn(async (_v: string) => { calls.push('upgrade'); return 2; }),
+  enqueueHealthUpgrade: vi.fn(async (_v: string) => { calls.push('health'); return 4; }),
   enqueueScheduledRecalculation: vi.fn(async () => { calls.push('scheduled'); return 5; }),
   enqueueScheduledReports: vi.fn(async () => { calls.push('reports'); return 3; }),
   enqueueFundingBackstop: vi.fn(async () => { calls.push('funding'); return 1; }),
@@ -38,17 +39,25 @@ describe('the cron routes', () => {
     expect(calls).toEqual([]);
   });
 
-  it('nightly: the sweep, the engine upgrade, then the funding backstop — and not the daily recalculation', async () => {
+  it('nightly: the sweep, the engine upgrade, the health re-score, then the funding backstop — and not the daily recalculation', async () => {
     const response = await nightly.GET(request('cron-test-secret'));
     expect(response.status).toBe(200);
-    expect(calls).toEqual(['sweep', 'upgrade', 'funding']);
+    expect(calls).toEqual(['sweep', 'upgrade', 'health', 'funding']);
+    expect(db.enqueueHealthUpgrade).toHaveBeenCalledWith('health.config.v5');
   });
 
-  it('nightly: a failing funding backstop is reported after the other two were queued (ADR-121)', async () => {
-    db.enqueueFundingBackstop.mockRejectedValueOnce(new Error('boom'));
+  it('nightly: a failing health re-score is reported, and the backstop after it is not queued (ADR-147)', async () => {
+    db.enqueueHealthUpgrade.mockRejectedValueOnce(new Error('boom'));
     const response = await nightly.GET(request('cron-test-secret'));
     expect(response.status).toBe(500);
     expect(calls).toEqual(['sweep', 'upgrade']);
+  });
+
+  it('nightly: a failing funding backstop is reported after the others were queued (ADR-121)', async () => {
+    db.enqueueFundingBackstop.mockRejectedValueOnce(new Error('boom'));
+    const response = await nightly.GET(request('cron-test-secret'));
+    expect(response.status).toBe(500);
+    expect(calls).toEqual(['sweep', 'upgrade', 'health']);
   });
 
   it('hourly: the daily recalculation, then the scheduled reports (Phase 17)', async () => {

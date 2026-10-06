@@ -14,7 +14,7 @@ import { computeFingerprint } from '../domain/fingerprint';
 import { AS_OF_DEPENDENT_KEYS } from '../domain/registry';
 import { VARIANCE_BASE_METRICS } from '../domain/variance';
 import { comparisonPeriodIds, variancesForPeriod } from '../domain/variance-pass';
-import { ENGINE_VERSION as VERSION } from '../domain/version';
+import { ENGINE_VERSION as VERSION, HEALTH_CONFIG_VERSION } from '../domain/version';
 import type { AggregateCell, MetricResult, PeriodRef } from '../domain/types';
 import * as repo from '../data/repository';
 
@@ -142,6 +142,8 @@ export interface HealthChunkInput {
   readonly bankCoverage: ReadonlyMap<string, number | null>;
   readonly firstPeriodWithDataId: string | null;
   readonly periodEnds: ReadonlyMap<string, string>;
+  /** The first day of each window period (health.config.v5, ADR-147). */
+  readonly periodStarts?: ReadonlyMap<string, string>;
   readonly accounts: ReadonlyArray<{ id: string; name: string; standardCategory: string }>;
   readonly counterpartyNames: ReadonlyMap<string, string>;
 }
@@ -237,11 +239,17 @@ export async function runCalculation(
    * stored figures of the period before their range, and figures an older engine wrote are not a
    * starting point this one can build on.
    */
-  const [lastVersion, previousAsOf] = await Promise.all([
+  const [lastVersion, previousAsOf, lastHealthConfig] = await Promise.all([
     repo.loadLatestEngineVersion(scoped, orgId),
     repo.loadLatestRunAsOf(scoped, orgId),
+    repo.loadLatestHealthConfigVersion(scoped, orgId),
   ]);
-  const versionChanged = lastVersion !== null && lastVersion !== VERSION;
+  /*
+   * ADR-147: a new Health config re-scores the whole history the same way, so no organisation shows
+   * months scored under two sets of rules side by side.
+   */
+  const versionChanged = (lastVersion !== null && lastVersion !== VERSION)
+    || (lastHealthConfig !== null && lastHealthConfig !== HEALTH_CONFIG_VERSION);
 
   const range = affectedRange({
     trigger: versionChanged ? 'recalc_manual' : request.trigger,
@@ -591,6 +599,7 @@ export async function runCalculation(
           bankCoverage,
           firstPeriodWithDataId,
           periodEnds: new Map(window.map((p) => [p.id, p.periodEnd])),
+          periodStarts: new Map(window.map((p) => [p.id, p.periodStart])),
           accounts: accounts.map((a) => ({
             id: a.id, name: a.name, standardCategory: a.standardCategory,
           })),

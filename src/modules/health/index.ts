@@ -48,6 +48,9 @@ export {
   INFERRED_CAP_NOTE,
   capReasonFor,
   REVENUE_GROWTH_RULES,
+  FUNDING_READINESS_RULES,
+  MARKETING_EFFICIENCY_RULES,
+  MARKETING_WINDOW_MONTHS,
   TOTAL_WEIGHT,
   bandFor,
   bandLabel,
@@ -106,13 +109,17 @@ export { coefficientOfVariation, evaluateRevenueGrowth } from './domain/rules/re
 export { evaluateCostControl, spikeConditions } from './domain/rules/cost-control';
 export { evaluateCustomerQuality } from './domain/rules/customer-quality';
 export { balanceTrendRule, bankingAnomalies, evaluateBankingHealth } from './domain/rules/banking-health';
+export { evaluateMarketingEfficiency } from './domain/rules/marketing-efficiency';
+export { evaluateFundingReadiness } from './domain/rules/funding-readiness';
 
 export type {
   ConditionReference,
   DimensionBreakdown,
   ExclusionReason,
   FactorSentence,
+  HealthCommercial,
   HealthInput,
+  HealthInvoice,
   HealthScore,
   MetricReference,
   RuleApplication,

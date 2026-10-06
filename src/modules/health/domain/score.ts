@@ -34,6 +34,8 @@ import { evaluateRevenueGrowth } from './rules/revenue-growth';
 import { evaluateCostControl } from './rules/cost-control';
 import { evaluateCustomerQuality } from './rules/customer-quality';
 import { evaluateBankingHealth } from './rules/banking-health';
+import { evaluateMarketingEfficiency } from './rules/marketing-efficiency';
+import { evaluateFundingReadiness } from './rules/funding-readiness';
 import type {
   DimensionBreakdown, ExclusionReason, HealthInput, HealthScore,
 } from './types';
@@ -47,6 +49,8 @@ const EVALUATORS: ReadonlyArray<(input: HealthInput) => DimensionEvaluation> = [
   evaluateCostControl,
   evaluateCustomerQuality,
   evaluateBankingHealth,
+  evaluateMarketingEfficiency,
+  evaluateFundingReadiness,
 ];
 
 interface Assessed {
@@ -63,6 +67,14 @@ interface Assessed {
 
 function assess(input: HealthInput, evaluation: DimensionEvaluation): Assessed {
   const verdict = testRequirements(input.snapshots, input.periodId, evaluation.requirements);
+
+  // ADR-147: a dimension that decided its own exclusion (marketing: no campaign spend).
+  if (evaluation.unavailable !== undefined) {
+    return {
+      evaluation, included: false, exclusionReason: evaluation.unavailable,
+      rawScore: DIMENSION_BASELINE, capped: false, completeness: 0, warnings: [],
+    };
+  }
 
   // banking_health's requirement is coverage, not a metric (§7.1).
   if (evaluation.coverageSatisfied === false) {

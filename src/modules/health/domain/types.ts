@@ -19,7 +19,9 @@ export type { HealthBand, HealthDimensionKey };
 export type ExclusionReason =
   | 'required_metric_missing'
   | 'insufficient_completeness'
-  | 'no_bank_coverage';
+  | 'no_bank_coverage'
+  /** marketing_efficiency: no campaign spend recorded in its three-month window (ADR-147). */
+  | 'no_campaign_data';
 
 /** One rule's verdict, exactly as it is stored in `breakdown[].rules` (§7.4). */
 export interface RuleApplication {
@@ -129,4 +131,37 @@ export interface HealthInput {
   readonly bankCoverageRatio: number | null;
   /** The shared alert-rule context for this period, or NULL when record-level data was not loaded. */
   readonly conditions: RuleContext | null;
+  /**
+   * health.config.v5 (ADR-147). The last day of each period in `periodIds`: the as-of for the
+   * overdue shares (R3/R4) and the bounds of marketing's window. Absent: those rules are skipped.
+   */
+  readonly periodEnds?: ReadonlyMap<string, string>;
+  /** The first day of each period in `periodIds`, for marketing's window. */
+  readonly periodStarts?: ReadonlyMap<string, string>;
+  /** Live invoices issued by the end of the window, for R3/R4's gross population. Absent: skipped. */
+  readonly invoices?: readonly HealthInvoice[];
+  /** The Commercial records marketing_efficiency reads. Absent: excluded `no_campaign_data`. */
+  readonly commercial?: HealthCommercial;
+}
+
+/** An invoice as R3/R4 read it (the fields `invoiceOutstandingAt` needs, plus the dates). */
+export interface HealthInvoice {
+  readonly invoiceType: 'sales' | 'purchase' | 'sales_credit_note' | 'purchase_credit_note';
+  readonly issueDate: string;
+  readonly dueDate: string | null;
+  readonly totalAmount: string;
+  readonly balanceDue: string;
+  readonly paidDate: string | null;
+}
+
+/** ADR-102's inputs, as recorded: campaign spend per period and opportunities. */
+export interface HealthCommercial {
+  readonly spend: ReadonlyArray<{ readonly campaignId: string; readonly periodId: string; readonly amount: string }>;
+  readonly opportunities: ReadonlyArray<{
+    readonly id: string;
+    readonly stage: 'lead' | 'qualified' | 'proposal' | 'won' | 'lost';
+    readonly counterpartyId: string | null;
+    readonly campaignId: string | null;
+    readonly wonOn: string | null;
+  }>;
 }

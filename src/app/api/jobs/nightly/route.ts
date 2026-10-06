@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { enqueueEngineUpgrade, enqueueFundingBackstop, enqueueNightlySweep } from '@/core/db';
-import { ENGINE_VERSION } from '@/modules/financial-engine';
+import { enqueueEngineUpgrade, enqueueFundingBackstop, enqueueHealthUpgrade, enqueueNightlySweep } from '@/core/db';
+import { ENGINE_VERSION, HEALTH_CONFIG_VERSION } from '@/modules/financial-engine';
 import { log } from '@/core/logging';
 import { cronAuthorised } from '../_lib/cron-auth';
 
@@ -53,17 +53,33 @@ export async function GET(request: NextRequest) {
   }
 
   /*
+   * ADR-147: the same for a new Health config — every organisation whose scores were all worked out
+   * under another one is queued for a full re-score. Its own error path.
+   */
+  let healthUpgrade: number;
+  try {
+    healthUpgrade = await enqueueHealthUpgrade(HEALTH_CONFIG_VERSION);
+    if (healthUpgrade > 0) log.info('organisations queued for the health config upgrade', { configVersion: HEALTH_CONFIG_VERSION, count: healthUpgrade });
+  } catch (cause) {
+    log.error('the health config upgrade could not be queued', {
+      configVersion: HEALTH_CONFIG_VERSION,
+      error: cause instanceof Error ? cause.message : String(cause),
+    });
+    return NextResponse.json({ jobId, engineUpgrade, error: 'The health config upgrade could not be queued.' }, { status: 500 });
+  }
+
+  /*
    * Phase 16 (ADR-121): the Funding Readiness backstop — any organisation with it switched on whose
    * latest scored month has no current assessment is queued. Its own error path, after the two above.
    */
   try {
     const fundingBackstop = await enqueueFundingBackstop();
     if (fundingBackstop > 0) log.info('organisations queued for a funding readiness assessment', { count: fundingBackstop });
-    return NextResponse.json({ jobId, engineUpgrade, fundingBackstop });
+    return NextResponse.json({ jobId, engineUpgrade, healthUpgrade, fundingBackstop });
   } catch (cause) {
     log.error('the funding readiness backstop could not be queued', {
       error: cause instanceof Error ? cause.message : String(cause),
     });
-    return NextResponse.json({ jobId, engineUpgrade, error: 'The funding readiness backstop could not be queued.' }, { status: 500 });
+    return NextResponse.json({ jobId, engineUpgrade, healthUpgrade, error: 'The funding readiness backstop could not be queued.' }, { status: 500 });
   }
 }

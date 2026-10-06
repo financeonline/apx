@@ -538,6 +538,14 @@ export async function enqueueEngineUpgrade(engineVersion: string): Promise<numbe
 }
 
 /**
+ * ADR-147: queue a full recalculation for every organisation whose Health Scores were all worked out
+ * under another Health config (`api_server.enqueue_health_upgrade`). Idempotent and resumable.
+ */
+export async function enqueueHealthUpgrade(configVersion: string): Promise<number> {
+  return serverRpc<number>('enqueue_health_upgrade', { p_config_version: configVersion });
+}
+
+/**
  * FU-6 (ADR-131): one `calculation.run` (trigger `scheduled`) per active organisation whose latest
  * succeeded run is dated before today in its own timezone. Idempotent per organisation and date.
  */

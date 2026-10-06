@@ -34,7 +34,22 @@ export type TemplateId =
   | 'collections_slow'
   | 'bank_balance_rising'
   | 'bank_balance_falling'
-  | 'bank_anomalies';
+  | 'bank_anomalies'
+  // health.config.v5 (ADR-147)
+  | 'no_debt'
+  | 'debt_light'
+  | 'debt_heavy'
+  | 'debt_fell'
+  | 'debt_rose'
+  | 'receivables_overdue_high'
+  | 'payables_overdue_high'
+  | 'figures_complete'
+  | 'figures_gaps'
+  | 'campaigns_pay_back'
+  | 'campaigns_below_cost'
+  | 'campaigns_won_nobody'
+  | 'cac_fell'
+  | 'cac_rose';
 
 type Renderer = (values: Readonly<Record<string, string>>, currency: string) => string;
 
@@ -72,6 +87,20 @@ const TEMPLATES: Readonly<Record<TemplateId, Renderer>> = {
   bank_balance_rising: () => 'The bank balance has risen for three months',
   bank_balance_falling: () => 'The bank balance has fallen for three months',
   bank_anomalies: (v) => `${v.count} unusual banking items need a look`,
+  no_debt: () => 'The business owes nothing on loans or long-term borrowing',
+  debt_light: (v) => `Debt is ${v.multiple}x a year of operating profit`,
+  debt_heavy: (v) => `Debt is ${v.multiple}x a year of operating profit — a heavy load`,
+  debt_fell: (v) => `Debt fell ${percent(v.pct!)} over three months`,
+  debt_rose: (v) => `Debt rose ${percent(v.pct!)} over three months`,
+  receivables_overdue_high: (v) => `${percent(v.share!)} of what customers owe is overdue`,
+  payables_overdue_high: (v) => `${percent(v.share!)} of what you owe suppliers is overdue`,
+  figures_complete: () => 'Each of the last six months has complete figures',
+  figures_gaps: (v) => `Only ${v.months} of the last six months have complete figures`,
+  campaigns_pay_back: (v) => `Customers won by campaigns brought in ${v.multiple}x what the campaigns cost over three months`,
+  campaigns_below_cost: (v) => `Customers won by campaigns brought in ${v.multiple}x what the campaigns cost over three months — less than they cost`,
+  campaigns_won_nobody: (v, c) => `Campaigns spent ${money(v.spend!, c)} over three months and won no customers`,
+  cac_fell: (v) => `Each customer won cost ${percent(v.pct!)} less than in the three months before`,
+  cac_rose: (v) => `Each customer won cost ${percent(v.pct!)} more than in the three months before`,
 };
 
 /**

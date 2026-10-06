@@ -108,14 +108,16 @@ describe('§7.1 weights', () => {
     expect(TOTAL_WEIGHT).toBe(100);
   });
 
-  it('declares exactly the six MVP dimensions with the documented weights', () => {
+  it('declares the eight dimensions with the health.config.v5 weights (ADR-147)', () => {
     expect(HEALTH_DIMENSION_KEYS).toEqual([
       'profitability', 'cash_flow', 'revenue_growth', 'cost_control',
-      'customer_quality', 'banking_health',
+      'customer_quality', 'banking_health', 'marketing_efficiency', 'funding_readiness',
     ]);
+    // 25/25/15/15/10/10 plus the two reserved 10s is 120; ×100/120 by largest remainder:
+    // 20.83 → 21, 12.5 → 13, 8.33 → 8.
     expect(DIMENSION_WEIGHTS).toEqual({
-      profitability: 25, cash_flow: 25, revenue_growth: 15,
-      cost_control: 15, customer_quality: 10, banking_health: 10,
+      profitability: 21, cash_flow: 21, revenue_growth: 13, cost_control: 13,
+      customer_quality: 8, banking_health: 8, marketing_efficiency: 8, funding_readiness: 8,
     });
   });
 });

@@ -137,8 +137,8 @@ describe('a queued calculation actually runs (ADR-057.1)', () => {
         join public.health_scores h
           on h.organization_id = c.organization_id and h.id = c.health_score_id
        where c.organization_id = '${orgId}' and c.period_id = '${mayPeriodId}'`);
-    // The run stamps the CURRENT config (health.config.v4 since the H-3 fix).
-    expect(score).toContain('|6|health.config.v4');
+    // The run stamps the CURRENT config (health.config.v5 since ADR-147: eight dimensions).
+    expect(score).toContain('|8|health.config.v5');
 
     // The breakdown is what the explainability panel reads; an empty one would render nothing.
     const dimensions = one(`
@@ -147,7 +147,7 @@ describe('a queued calculation actually runs (ADR-057.1)', () => {
         join public.health_scores h
           on h.organization_id = c.organization_id and h.id = c.health_score_id
        where c.organization_id = '${orgId}' and c.period_id = '${mayPeriodId}'`);
-    expect(dimensions).toBe('6');
+    expect(dimensions).toBe('8');
   });
 
   it('queued the alert pass, rather than running it inside the calculation (§8.1)', () => {

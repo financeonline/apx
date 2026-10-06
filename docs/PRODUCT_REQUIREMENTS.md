@@ -186,9 +186,9 @@ MVP column values:
 | REQ-BH-05 | Dimension: Revenue Growth (growth, recurring revenue, volatility and concentration). | SOW §9 | SOW requirement | MVP-limited: recurring revenue only where invoice data supports it | REQ-CA-02, 12 | — |
 | REQ-BH-06 | Dimension: Cost Control (cost/revenue ratios, variance and unusual expenditure). | SOW §9 | SOW requirement | MVP | REQ-CA-04, 13; alerts | — |
 | REQ-BH-07 | Dimension: Customer Quality (customer contribution, concentration and retention where available). | SOW §9 | SOW requirement | MVP-limited: retention requires 12+ months of invoice data | REQ-CA-11, 12 | — |
-| REQ-BH-08 | Dimension: Marketing Efficiency (CAC, revenue/contribution per acquisition where available). | SOW §9 | SOW requirement | Post-MVP (P14) | Commercial Intelligence | — |
+| REQ-BH-08 | Dimension: Marketing Efficiency (CAC, revenue/contribution per acquisition where available). | SOW §9 | SOW requirement | Built locally, health.config.v5, not reviewed (ADR-147); thresholds PROPOSED | Commercial Intelligence | — |
 | REQ-BH-09 | Dimension: Banking Health (balance trends, inflow/outflow behaviour and transaction anomalies). | SOW §9 | SOW requirement | MVP | REQ-BK-02..06 | — |
-| REQ-BH-10 | Dimension: Funding Readiness (indicative financial and banking readiness factors). | SOW §9 | SOW requirement | Post-MVP (P16) | Funding Readiness | — |
+| REQ-BH-10 | Dimension: Funding Readiness (indicative financial and banking readiness factors). | SOW §9 | SOW requirement | Built locally, health.config.v5, for every organisation, not reviewed (ADR-147) | Funding Readiness | — |
 | REQ-BH-13 | Each dimension shall expose the underlying metrics, rules, positive factors, negative factors and data-quality status. | SOW §9 | SOW requirement | MVP | `health_scores.breakdown` | — |
 | REQ-BH-12 | Dimensions with insufficient data are excluded and weights renormalised; the score states how many dimensions it is based on; weights and rules are versioned. | SOW §9 | Architectural | MVP | ADR-017, CD-19 | — |
 

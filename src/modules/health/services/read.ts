@@ -57,7 +57,10 @@ export async function loadHealthCard(
     periodId: current.periodId,
     score: current.score,
     band: current.band,
+    // ADR-119 / ADR-147: two scores worked out under different rules are not comparable — a change
+    // would be the rules moving, not the business. Said as "no comparison", never as a movement.
     changeVsPrevious: current.score !== null && previous?.score != null
+      && previous.configVersion === current.configVersion
       ? current.score - previous.score
       : null,
     dimensionsUsed: current.dimensionsUsed,

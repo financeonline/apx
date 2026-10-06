@@ -35,7 +35,7 @@ export function bandText(band: HealthBand | null): string | null {
 export const BAND_SCALE = BANDS.map((b) => ({ band: b.band, label: b.label, min: b.min }));
 
 /**
- * Plain-language names for the six dimensions.
+ * Plain-language names for the eight dimensions.
  *
  * "Cost control" and "customer quality" are the config's words; these are the words a business owner
  * uses. The panel is meant to be readable by the person whose business it describes, not only by
@@ -48,6 +48,8 @@ export const DIMENSION_LABELS: Readonly<Record<HealthDimensionKey, string>> = {
   cost_control: 'Costs',
   customer_quality: 'Customers',
   banking_health: 'Banking',
+  marketing_efficiency: 'Marketing',
+  funding_readiness: 'Funding readiness',
 };
 
 /** What each dimension is measuring, for the "what is this?" line in the panel. */
@@ -58,6 +60,8 @@ export const DIMENSION_DESCRIPTIONS: Readonly<Record<HealthDimensionKey, string>
   cost_control: 'How your costs compare with your sales, and whether any category jumped.',
   customer_quality: 'How spread your sales are across customers, and how fast they pay.',
   banking_health: 'What your bank statements show about your balance and anything unusual in them.',
+  marketing_efficiency: 'What your recorded campaigns cost, against the sales from the customers they won.',
+  funding_readiness: 'What you owe and which way it is moving, how much of what is owed is overdue, and how complete recent months are.',
 };
 
 /** §7.2 requires an excluded dimension to say why. These are those reasons, in plain words. */
@@ -65,6 +69,7 @@ export const EXCLUSION_TEXT: Readonly<Record<ExclusionReason, string>> = {
   required_metric_missing: 'Not scored — we do not have the figures this needs yet.',
   insufficient_completeness: 'Not scored — we can see too little of this month to judge it.',
   no_bank_coverage: 'Not scored — no bank statement covers this month.',
+  no_campaign_data: 'Not scored — no campaign spend is recorded for the last three months.',
 };
 
 /**
@@ -95,6 +100,13 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   B2: 'Money in against money out',
   B3: 'Unusual items in your bank data',
   B4: 'How much of your banking we can see',
+  M1: 'Sales from customers campaigns won, against campaign spend',
+  M2: 'Cost of each customer won, against the three months before',
+  R1: 'Debt against a year of operating profit',
+  R2: 'Debt over three months',
+  R3: 'Overdue share of what customers owe',
+  R4: 'Overdue share of what you owe suppliers',
+  R5: 'Months with complete figures, of the last six',
 };
 
 /** Why a rule did not run. A skipped rule shows this instead of a score, never a silent zero. */
@@ -116,6 +128,11 @@ export const SKIP_TEXT: Readonly<Record<string, string>> = {
   low_completeness: 'We can see too little of this month to judge it.',
   first_period: 'This is your earliest month, so there is nothing to compare with.',
   suppressed: 'This check could not run on this month’s data.',
+  capacity_unavailable: 'There are not twelve complete months of operating profit to compare debt with.',
+  no_prior_debt: 'We do not know what was owed three months earlier.',
+  aging_unavailable: 'We cannot tell how much of it is overdue.',
+  no_customers_won: 'Campaigns spent money but won no customers in these months.',
+  no_prior_window: 'There is no cost per customer for the three months before to compare with.',
 };
 
 export function skipText(reason: string | null): string | null {
@@ -123,7 +140,7 @@ export function skipText(reason: string | null): string | null {
   return SKIP_TEXT[reason] ?? 'This check could not run on this month’s data.';
 }
 
-/** §Level 1: "based on N of 6 areas", shown only when something is missing. */
+/** §Level 1: "based on N of 8 areas" (health.config.v5), shown only when something is missing. */
 export function dimensionsNote(used: number, total: number): string | null {
   return used === total ? null : `Based on ${used} of ${total} areas`;
 }

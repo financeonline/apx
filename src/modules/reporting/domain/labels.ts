@@ -60,12 +60,15 @@ export const REPORT_DIMENSION_LABELS: Readonly<Record<HealthDimensionKey, string
   cost_control: 'Costs',
   customer_quality: 'Customers',
   banking_health: 'Banking',
+  marketing_efficiency: 'Marketing',
+  funding_readiness: 'Funding readiness',
 };
 
 export const REPORT_EXCLUSION_TEXT: Readonly<Record<string, string>> = {
   required_metric_missing: 'Not scored — we do not have the figures this needs yet.',
   insufficient_completeness: 'Not scored — we can see too little of this month to judge it.',
   no_bank_coverage: 'Not scored — no bank statement covers this month.',
+  no_campaign_data: 'Not scored — no campaign spend is recorded for the last three months.',
 };
 
 /** "7 September 2026", or "7–13 September 2026" for a week (en-GB, as the product writes dates). */

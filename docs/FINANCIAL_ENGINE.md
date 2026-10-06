@@ -401,14 +401,14 @@ Analytical indicator only; every screen carries the SOW §9 disclaimer text ("in
 
 | Dimension key | Weight | Required metrics (NULL ⇒ excluded) | Supporting metrics |
 |---|---|---|---|
-| `profitability` | 25 | `net_margin`, `gross_margin` (or `no_cost_of_sales_accounts` → use `operating_margin`) | `net_profit.variance.prev_period`, `gross_margin.variance.trailing_3m_avg`, `contribution_margin_ratio` |
-| `cash_flow` | 25 | `closing_cash`, `net_cash_movement` | `cash_runway_months`, `net_cash_movement` last 3 |
-| `revenue_growth` | 15 | `revenue`, `revenue_growth_mom` or `revenue_growth_yoy` | `revenue` trailing 6 (volatility), `customer_concentration_top1` |
-| `cost_control` | 15 | `operating_expenses`, `revenue` | `operating_expenses.variance.prev_period`, `expense_by_category.variance.prev_period` |
-| `customer_quality` | 10 | `customer_concentration_top1` | `customer_concentration_top5`, `revenue_concentration_hhi`, `receivables_days` |
-| `banking_health` | 10 | any bank coverage for P | `closing_cash` trend 3, `cash_outflows` vs `cash_inflows`, open alerts of families `bank.*`, `recurring.*`, `duplicate.*` |
-| `marketing_efficiency` | (10, reserved) | post-MVP (CAC, contribution per acquisition) | — |
-| `funding_readiness` | (10, reserved) | post-MVP; **deferred by ADR-119** (Phase 16 ships a standalone assessment; this dimension is not activated) | — |
+| `profitability` | 21 | `net_margin`, `gross_margin` (or `no_cost_of_sales_accounts` → use `operating_margin`) | `net_profit.variance.prev_period`, `gross_margin.variance.trailing_3m_avg`, `contribution_margin_ratio` |
+| `cash_flow` | 21 | `closing_cash`, `net_cash_movement` | `cash_runway_months`, `net_cash_movement` last 3 |
+| `revenue_growth` | 13 | `revenue`, `revenue_growth_mom` or `revenue_growth_yoy` | `revenue` trailing 6 (volatility), `customer_concentration_top1` |
+| `cost_control` | 13 | `operating_expenses`, `revenue` | `operating_expenses.variance.prev_period`, `expense_by_category.variance.prev_period` |
+| `customer_quality` | 8 | `customer_concentration_top1` | `customer_concentration_top5`, `revenue_concentration_hhi`, `receivables_days` |
+| `banking_health` | 8 | any bank coverage for P | `closing_cash` trend 3, `cash_outflows` vs `cash_inflows`, open alerts of families `bank.*`, `recurring.*`, `duplicate.*` |
+| `marketing_efficiency` | 8 | campaign spend recorded in the three months ending P (else excluded `no_campaign_data`) | `campaign_spend`, won `opportunities` (ADR-102 attribution), `customer_revenue` by counterparty, `revenue` (for the cap) |
+| `funding_readiness` | 8 | any one of `debt_balance`, `receivables`, `payables` | `operating_profit` P−11…P, `debt_balance` P−3, `receivables_overdue`, `payables_overdue`, open invoices (gross), `revenue`/`operating_profit` P−5…P |
 
 When post-MVP dimensions arrive, MVP weights are scaled so the eight sum to 100; the config version bumps.
 
@@ -472,6 +472,19 @@ Templates: "No single customer is more than {share} of revenue", "{customer} is 
 | B2 inflow/outflow ratio | `cash_inflows / cash_outflows ≥ 1.1` +15; `0.9–1.1` 0; `< 0.9` −15 | |
 | B3 anomaly conditions | count of `bank.unusual_transaction`, `recurring.amount_changed`/`missed`/`inflow_missed` and `duplicate.transaction` **conditions** for P from the pure rule functions over this run's snapshots and accepted records: 0 +10; 1–2 −5; ≥ 3 −15 (contributing record ids stored in `breakdown[].conditions`) | |
 | B4 coverage | bank coverage full +10; partial −5 | |
+
+**health.config.v5 (ADR-147).** Weights above are the eight-dimension weights (25/25/15/15/10/10 + 10 + 10, rescaled ×100/120 by largest remainder; awaiting sign-off with CD-19).
+
+| Rule | Bands / points | Notes |
+|---|---|---|
+| M1 return on campaign spend | `customer_revenue` in the window of customers campaigns WON (from the month of each win; earliest win counts) ÷ campaign spend in the window: ≥ 3x +20; 1.5–3x +10; 1–1.5x 0; < 1x −20 | **PROPOSED thresholds** (no product document states them) |
+| M2 cost per customer won | (spend ÷ customers won in the window) against the same for the three months before: down ≥ 10% +10; within 10% 0; up ≥ 10% −10 | skipped with no customers won, or no earlier spend/customers; PROPOSED |
+| R1 debt capacity | `debt_balance` ÷ Σ12 `operating_profit` (all twelve P&L-complete): ≤ 1.0x +25; 1–2x +10; 2–3x 0; 3–4x −15; > 4x −30; no debt +25; no operating profit −30 | = Funding Readiness F4.1 (approved, ADR-140) |
+| R2 debt trend | debt against P−3: down ≥ 10% +10; within 10% 0; up ≥ 10% −10; new debt −10 | = F4.2 |
+| R3 / R4 overdue shares | overdue ÷ gross open sales (R3) / purchase (R4) invoices at the overdue figure's as-of: < 30% +10; 30–50% −10; ≥ 50% −20; nothing outstanding +10 | = F5.2 / F5.3 |
+| R5 continuity | P&L-complete months among the last six: 6 +10; 4–5 0; 1–3 −10 | = F6.1 |
+
+Funding readiness scores only signals no other dimension reads (ADR-119's double-counting question): revenue, profit, cash, banking, days to get paid (Q3) and revenue steadiness (G2) stay where they are scored. A new config re-scores each organisation's whole history (the first run after it, queued nightly by `api_server.enqueue_health_upgrade`), and no score is compared with one made under another config (Home, reports, the analyst and the Command Centre show no change instead).
 
 ### 7.4 Stored breakdown (`health_scores.breakdown`)
 

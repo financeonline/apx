@@ -4,6 +4,7 @@ export {
   aggregationInstant,
   buildMetricBundle,
   enqueueEngineUpgrade,
+  enqueueHealthUpgrade,
   enqueueScheduledRecalculation,
   enqueueNightlySweep,
   persistAssistantTurn,

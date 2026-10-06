@@ -23,24 +23,28 @@ export { HEALTH_CONFIG_VERSION };
 
 export const HEALTH_DIMENSION_KEYS = [
   'profitability', 'cash_flow', 'revenue_growth', 'cost_control',
-  'customer_quality', 'banking_health',
+  'customer_quality', 'banking_health', 'marketing_efficiency', 'funding_readiness',
 ] as const;
 export type HealthDimensionKey = (typeof HEALTH_DIMENSION_KEYS)[number];
 
 /**
- * §7.1. Marketing Efficiency and Funding Readiness are reserved at 10 each and land post-MVP, at
- * which point every weight is rescaled to sum to 100 again and the config version bumps.
+ * §7.1. Marketing Efficiency and Funding Readiness were reserved at 10 each beside the six MVP
+ * weights (25/25/15/15/10/10); health.config.v5 (ADR-147) activates both and rescales all eight to
+ * sum to 100 again, proportionally (×100/120), rounding by largest remainder: 20.83 → 21,
+ * 12.5 → 13, 8.33 → 8. The rescaled weights await product-owner sign-off with the rest of CD-19.
  */
 export const DIMENSION_WEIGHTS: Readonly<Record<HealthDimensionKey, number>> = {
-  profitability: 25,
-  cash_flow: 25,
-  revenue_growth: 15,
-  cost_control: 15,
-  customer_quality: 10,
-  banking_health: 10,
+  profitability: 21,
+  cash_flow: 21,
+  revenue_growth: 13,
+  cost_control: 13,
+  customer_quality: 8,
+  banking_health: 8,
+  marketing_efficiency: 8,
+  funding_readiness: 8,
 };
 
-/** The six MVP weights sum to 100. Asserted by a test, because a silent 99 would skew every score. */
+/** The eight weights sum to 100. Asserted by a test, because a silent 99 would skew every score. */
 export const TOTAL_WEIGHT = HEALTH_DIMENSION_KEYS
   .reduce((total, key) => total + DIMENSION_WEIGHTS[key], 0);
 
@@ -283,3 +287,87 @@ export const B1_FALLING_POINTS = -15;
 /** B4 bank coverage. */
 export const B4_FULL_POINTS = 10;
 export const B4_PARTIAL_POINTS = -5;
+
+/**
+ * Funding readiness, the Health dimension (health.config.v5; ADR-147, REQ-BH-10).
+ *
+ * ADR-119 asked how this avoids counting twice what Health already scores. The answer: it scores
+ * ONLY the Funding Readiness signals no other dimension reads — what the business owes and how that
+ * moved (F4), how much of what customers and suppliers are owed is overdue (F5.2, F5.3), and how
+ * many recent months have complete figures (F6.1). Revenue, profit, cash, banking behaviour, days to
+ * get paid (Q3) and revenue steadiness (G2) stay in the dimensions that already score them.
+ *
+ * The thresholds are `funding_readiness.v1`'s APPROVED ones (ADR-140), copied here because the
+ * funding module imports Health's rule shape and a runtime import back would be a cycle. A unit test
+ * asserts the copies equal the originals, so the two cannot drift.
+ */
+export const FUNDING_READINESS_RULES = {
+  R1: lower('R1', 'Debt against twelve months of operating profit', [
+    { bound: '1.0', points: 25, result: '<= 1.0x' },
+    { bound: '2.0', points: 10, result: '1.0x to 2.0x' },
+    { bound: '3.0', points: 0, result: '2.0x to 3.0x' },
+    { bound: '4.0', points: -15, result: '3.0x to 4.0x' },
+    { bound: null, points: -30, result: 'above 4.0x' },
+  ]),
+  R2: lower('R2', 'Debt over three months', [
+    { bound: '-0.10', points: 10, result: 'down 10% or more' },
+    { bound: '0.10', exclusive: true, points: 0, result: 'within 10%' },
+    { bound: null, points: -10, result: 'up 10% or more' },
+  ]),
+  R3: lower('R3', 'Share of what customers owe that is overdue', [
+    { bound: '0.30', exclusive: true, points: 10, result: 'below 30%' },
+    { bound: '0.50', exclusive: true, points: -10, result: '30% to 50%' },
+    { bound: null, points: -20, result: '50% or more' },
+  ]),
+  R4: lower('R4', 'Share of what you owe suppliers that is overdue', [
+    { bound: '0.30', exclusive: true, points: 10, result: 'below 30%' },
+    { bound: '0.50', exclusive: true, points: -10, result: '30% to 50%' },
+    { bound: null, points: -20, result: '50% or more' },
+  ]),
+} as const;
+
+/** R1: no debt at all is the best band's points; debt with no operating profit, the worst. */
+export const R1_NO_DEBT_POINTS = 25;
+export const R1_NO_PROFIT_POINTS = -30;
+/** R2: debt appearing where there was none three months earlier. */
+export const R2_NEW_DEBT_POINTS = -10;
+/** R3/R4: nothing outstanding at all. */
+export const R_NOTHING_OUTSTANDING_POINTS = 10;
+/** R5 (F6.1): complete months among the last six — 6 / 4–5 / 1–3. */
+export const R5_PERIODS = 6;
+export const R5_ALL_POINTS = 10;
+export const R5_MOST_POINTS = 0;
+export const R5_FEW_POINTS = -10;
+/** R1 needs twelve P&L-complete months of operating profit. */
+export const R1_PERIODS = 12;
+/** R2 compares with the debt three months earlier. */
+export const R2_OFFSET = 3;
+
+/**
+ * Marketing efficiency (health.config.v5; ADR-147; SOW §11 "CAC, revenue/contribution per
+ * acquisition where available").
+ *
+ * Built from the Commercial records under ADR-102's rules and no others: a customer counts for a
+ * campaign only through a WON opportunity naming both, revenue reaches a campaign only from the month
+ * of the win, and acquisition cost is recorded campaign spend over customers won through campaigns —
+ * never marketing spend over all customers. Over the last three months ending in the scored month.
+ *
+ * **These thresholds are PROPOSED, not approved (CD-19).** Unlike every other rule here, no product
+ * document states them; they are implemented so the dimension can be seen and judged.
+ */
+export const MARKETING_WINDOW_MONTHS = 3;
+export const MARKETING_EFFICIENCY_RULES = {
+  M1: higher('M1', 'Revenue from customers campaigns won, against campaign spend', [
+    { bound: '3', points: 20, result: '>= 3x' },
+    { bound: '1.5', points: 10, result: '1.5x to 3x' },
+    { bound: '1', points: 0, result: '1x to 1.5x' },
+    { bound: null, points: -20, result: 'below 1x' },
+  ]),
+  M2: lower('M2', 'Cost of each customer won, against the three months before', [
+    { bound: '-0.10', points: 10, result: 'down 10% or more' },
+    { bound: '0.10', exclusive: true, points: 0, result: 'within 10%' },
+    { bound: null, points: -10, result: 'up 10% or more' },
+  ]),
+} as const;
+/** M1 when campaigns spent money and won nobody in the window. */
+export const M1_NO_CUSTOMERS_POINTS = -20;

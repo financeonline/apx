@@ -4,7 +4,7 @@ import { toMotionError } from '@/core/errors';
 import type {
   MetricObservation, RecordObservation, RecurringGroupObservation,
 } from '@/modules/alerts';
-import type { DimensionBreakdown, HealthBand } from '../domain/types';
+import type { DimensionBreakdown, HealthBand, HealthCommercial, HealthInvoice } from '../domain/types';
 
 /**
  * Health reads and writes (FINANCIAL_ENGINE.md §7; DATABASE_ARCHITECTURE.md §6).
@@ -445,4 +445,62 @@ export async function loadHealthBundleId(
     .maybeSingle();
   if (error) throw toMotionError(error);
   return (data as { id?: string } | null)?.id ?? null;
+}
+
+/**
+ * health.config.v5 (ADR-147): live invoices issued by `issuedBy`, for funding readiness's overdue
+ * shares — the same population the standalone Funding Readiness assessment reads (accepted, not
+ * superseded, not void). Paged: an invoice list is not bounded the way a pipeline is.
+ */
+export async function loadInvoicesForHealth(
+  db: SupabaseClient, orgId: string, issuedBy: string, requestId?: string,
+): Promise<HealthInvoice[]> {
+  const out: HealthInvoice[] = [];
+  for (let from = 0; ; from += OBSERVATION_PAGE) {
+    const { data, error } = await db.from('invoices')
+      .select('id, invoice_type, issue_date, due_date, total_amount, balance_due, paid_date')
+      .eq('organization_id', orgId).eq('record_status', 'accepted').is('superseded_by', null).neq('status', 'void')
+      .lte('issue_date', issuedBy).order('id').range(from, from + OBSERVATION_PAGE - 1);
+    const page = unwrap(data as unknown as Array<Record<string, unknown>> | null, error, requestId);
+    for (const r of page) {
+      out.push({
+        invoiceType: r.invoice_type as HealthInvoice['invoiceType'], issueDate: r.issue_date as string,
+        dueDate: (r.due_date as string | null) ?? null, totalAmount: String(r.total_amount),
+        balanceDue: String(r.balance_due ?? '0'), paidDate: (r.paid_date as string | null) ?? null,
+      });
+    }
+    if (page.length < OBSERVATION_PAGE) break;
+  }
+  return out;
+}
+
+/**
+ * health.config.v5 (ADR-147): the Commercial records marketing efficiency reads — campaign spend for
+ * the window's periods and the opportunities, each naming its SURVIVING customer, as the Customers
+ * pages read them (ADR-103): `customer_revenue` is keyed by the survivor.
+ */
+export async function loadCommercialForHealth(
+  db: SupabaseClient, orgId: string, periodIds: readonly string[], requestId?: string,
+): Promise<HealthCommercial> {
+  const [spend, opportunities] = await Promise.all([
+    db.from('campaign_spend').select('campaign_id, period_id, amount')
+      .eq('organization_id', orgId).in('period_id', [...periodIds]).order('period_id').order('campaign_id'),
+    db.from('opportunities')
+      .select('id, stage, counterparty_id, campaign_id, won_on, counterparties!opportunities_counterparty_fk(merged_into_id)')
+      .eq('organization_id', orgId).eq('stage', 'won').order('id').limit(5000),
+  ]);
+  const spendRows = unwrap(spend.data as unknown as Array<{ campaign_id: string; period_id: string; amount: unknown }> | null, spend.error, requestId);
+  const oppRows = unwrap(opportunities.data as unknown as Array<Record<string, unknown>> | null, opportunities.error, requestId);
+  return {
+    spend: spendRows.map((r) => ({ campaignId: r.campaign_id, periodId: r.period_id, amount: String(r.amount) })),
+    opportunities: oppRows.map((r) => {
+      const linked = ([] as Array<{ merged_into_id: string | null }>)
+        .concat((r.counterparties ?? []) as Array<{ merged_into_id: string | null }>)[0] ?? null;
+      return {
+        id: r.id as string, stage: r.stage as HealthCommercial['opportunities'][number]['stage'],
+        counterpartyId: linked?.merged_into_id ?? (r.counterparty_id as string | null),
+        campaignId: (r.campaign_id as string | null) ?? null, wonOn: (r.won_on as string | null) ?? null,
+      };
+    }),
+  };
 }

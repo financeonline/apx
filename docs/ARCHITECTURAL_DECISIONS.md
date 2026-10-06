@@ -2756,7 +2756,7 @@ Departures, each to the owner's attention:
 3. **The 70 cap** also applies to AI-read (`inferred`) required inputs, as owner decision D-2 set for Health. The design text named only estimated and proxy inputs.
 4. **A complete statement with no borrowing line** is a known zero debt. On an unconfirmed, partial or unbalanced statement it is unknown, consistent with Step 0F/NF-2. The design predates that rule.
 
-Still deferred, as designed: the Funding Readiness Health dimension (ADR-119), lender matching, and the analyst explaining an assessment.
+Still deferred, as designed: lender matching and the analyst explaining an assessment. (The Funding Readiness Health dimension was deferred here by ADR-119; ADR-147 later activated it.)
 
 - **Addendum (2026-10-06): the Funding Readiness Report (REQ-RP-05).** Built in Phase 17 on the same flag. It freezes the latest month's current assessment (`funding.v1`) into `reports`; it recalculates nothing and carries the disclaimer verbatim. Produced on request only (not scheduled). While the flag is off: the Reports page says it is switched off, `api.enqueue_job` refuses (NOT FOUND), and the `reports_select` policy hides earlier Funding Readiness Reports; the rows are kept, as assessments are. It inherits everything above: unreviewed, ahead of its prerequisite, and off by default.
 
@@ -2781,3 +2781,21 @@ Decision:
 Consequences:
 - The registry is closed at 28 tools; the eval recording gains a `check_affordability` call (NO_DATA: the recorded organisation has no forecast) and two adversarial cases in which no verdict or worked-out balance may appear.
 - The buffer of one month is a product rule, not advice; the owner may change it (a config bump to `affordability.v2`).
+
+### ADR-147 · health.config.v5 — Marketing Efficiency and Funding Readiness join the Health Score
+Status: **built locally on 2026-10-06. Not reviewed, merged or deployed.** The owner chose, when asked: Funding Readiness dimension — "Build, for everyone"; Marketing Efficiency — "Build it from existing data". SOW §11 lists both dimensions; FINANCIAL_ENGINE.md §7.1 reserved them; ADR-119 deferred the second and set five conditions for activating it, each answered below.
+
+Decision:
+1. **One config bump for both, `health.config.v5`.** Eight dimensions. The weights are rescaled proportionally from 25/25/15/15/10/10 plus the two reserved 10s (×100/120, largest remainder): 21/21/13/13/8/8/8/8. Like every Health threshold, the weights await product-owner sign-off (CD-19).
+2. **Funding readiness (REQ-BH-10)** scores only Funding Readiness signals Health does not already read (ADR-119 condition 4, double counting): R1/R2 debt against a year of operating profit and its three-month trend (F4.1, F4.2), R3/R4 the overdue share of what customers and suppliers are owed over the gross open-invoice population (F5.2, F5.3), R5 complete months of the last six (F6.1). F1, F2, F3, F5.1 (= Q3), F6.2 (= G2), F6.3 and F7 are left out. Thresholds are the APPROVED `funding_readiness.v1` ones, copied into Health's config (the funding module imports Health's rule shape, so a runtime import back would be a cycle) and asserted equal by a unit test. Required: any one of debt, receivables, payables; none of them established is excluded, never "owes nothing". It is computed **for every organisation** inside the Health run, whatever `features.funding_readiness` says; the standalone assessment, its page and its report still follow the flag (ADR-121, ADR-145). The dimension states facts the engine already established; it is not the Funding Readiness score.
+3. **Marketing efficiency (REQ-BH-08)** reads the Commercial records under ADR-102's rules: M1 the revenue (`customer_revenue`, from the month of each first win) of customers campaigns won, over campaign spend, in the three months ending P; M2 the cost per customer won against the three months before. No campaign spend in the window excludes it (`no_campaign_data`, a new exclusion reason) — having no campaigns is not inefficiency. **The M1/M2 thresholds are PROPOSED**: no product document states them. Campaign records changing does not by itself trigger a recalculation; the next run picks them up. The Marketing Analysis module itself stays out of Phase 1 (SOW §5).
+4. **The whole history is re-scored** (condition 2): a calculation run whose organisation's latest score was made under another config recomputes its full history, as an engine-version change does; `api_server.enqueue_health_upgrade(config)` queues every such organisation nightly.
+5. **Never compared across configs** (condition 3): `loadHealthCard` gives no change when the previous month's config differs (Home, the reports, the analyst), and `api.portfolio_summary` returns no previous month across a config change, so Phase 15 attention cannot see a band "fall" that is a rules change.
+6. Condition 5, its own independent audit, is **not met**; this is listed with the open items.
+
+Consequences:
+- Every organisation's scores can move. Fixture checks: on the shared unit fixture the overall score is unchanged (78 under v4 and v5); in the audit H-2 cumulative trial-balance case July goes NULL → 82 and August 87 → 84, because a complete cumulative statement states debt as a known zero and the new dimension scores (worked by hand in the test).
+- "Based on N of 8 areas" replaces "of 6".
+
+### ADR-119 addendum (2026-10-06)
+The dimension is activated by ADR-147 on the owner's instruction, for every organisation. Conditions 1–4 are answered there; condition 5 (independent audit) is not yet met.

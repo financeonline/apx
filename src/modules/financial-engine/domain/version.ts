@@ -201,7 +201,14 @@ export const ENGINE_VERSION = '15.1.0';
  * flow's C3 sees earlier months' movement. Weights and thresholds unchanged; the cap of 70 still
  * awaits approval (D-2).
  */
-export const HEALTH_CONFIG_VERSION = 'health.config.v4';
+/**
+ * health.config.v5 (ADR-147): the two reserved dimensions are activated — marketing_efficiency
+ * (from Commercial records, ADR-102 rules; thresholds PROPOSED) and funding_readiness (the Funding
+ * Readiness signals Health does not already score; approved thresholds). Every weight is rescaled
+ * (25/25/15/15/10/10 → 21/21/13/13/8/8, plus 8 and 8). Every existing score can move: the first run on
+ * it re-scores the organisation's whole history, and Phase 15 never compares scores across versions.
+ */
+export const HEALTH_CONFIG_VERSION = 'health.config.v5';
 /**
  * alerts.rules.v2 (Step 0F, N-5): an expense spike on a trial-balance or P&L-report basis cites the
  * report lines its figure was read from (both year-to-date sides for a cumulative month), not ledger

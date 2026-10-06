@@ -658,6 +658,23 @@ export async function loadLinesBeforeJournal(
  * carries (cash, the days windows) start from the stored figures of the period before the range, and
  * figures an older engine wrote are not a starting point this one can trust (ADR-120).
  */
+/**
+ * The Health config the organisation's latest score was worked out under (ADR-147), or NULL when it
+ * has no score. A different config than the deployed one means its history is re-scored.
+ */
+export async function loadLatestHealthConfigVersion(
+  scoped: SupabaseClient, orgId: string,
+): Promise<string | null> {
+  const { data, error } = await scoped
+    .from('health_scores')
+    .select('config_version, created_at')
+    .eq('organization_id', orgId)
+    .order('created_at', { ascending: false })
+    .limit(1);
+  const rows = unwrap(data, error) as Array<{ config_version: string }>;
+  return rows[0]?.config_version ?? null;
+}
+
 export async function loadLatestEngineVersion(
   scoped: SupabaseClient, orgId: string,
 ): Promise<string | null> {

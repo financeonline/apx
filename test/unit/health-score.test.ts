@@ -20,30 +20,31 @@ describe('§7.2 the completeness gate', () => {
     expect(score).not.toBeNull();
     expect(score!.score).toBeGreaterThan(0);
     expect(score!.configVersion).toBe(HEALTH_CONFIG_VERSION);
-    expect(score!.dimensionsTotal).toBe(6);
+    expect(score!.dimensionsTotal).toBe(8);
   });
 });
 
 describe('§7.2 exclusion and renormalisation', () => {
-  it('scales the remaining weights to 100 and reports 4 of 6', () => {
-    // Customer quality loses its required metric; banking health loses its coverage.
+  it('scales the remaining weights to 100 and reports 4 of 8', () => {
+    // Customer quality loses its required metric; banking health loses its coverage; the fixture has
+    // no campaign spend and no debt, receivables or payables, so the two v5 dimensions are out too.
     const snapshots = withoutMetric(baselineSnapshots(), 'customer_concentration_top1');
     const score = computeHealthScore(healthInput({ snapshots, bankCoverageRatio: 0 }))!;
 
     expect(score.dimensionsUsed).toBe(4);
-    expect(score.dimensionsTotal).toBe(6);
+    expect(score.dimensionsTotal).toBe(8);
 
     const included = score.breakdown.filter((d) => d.included);
     expect(included.map((d) => d.key)).toEqual([
       'profitability', 'cash_flow', 'revenue_growth', 'cost_control',
     ]);
 
-    // 25/80 → 31.25 → 31.3, 15/80 → 18.75 → 18.8, each rounded once to the 1 dp §7.4 stores.
-    expect(included.map((d) => d.weight_applied)).toEqual([31.3, 31.3, 18.8, 18.8]);
+    // 21/68 → 30.88 → 30.9, 13/68 → 19.12 → 19.1, each rounded once to the 1 dp §7.4 stores.
+    expect(included.map((d) => d.weight_applied)).toEqual([30.9, 30.9, 19.1, 19.1]);
 
     /*
-     * Rounding four weights to one decimal place cannot land on exactly 100 for every split —
-     * here it lands on 100.2. That drift is why the score divides by the SUM OF THE STORED
+     * Rounding four weights to one decimal place cannot land on exactly 100 for every split (under
+     * v4's 25/15 it landed on 100.2; here it is 100.0). That drift is why the score divides by the SUM OF THE STORED
      * weights rather than by 100: the number on the card is then reproducible from the breakdown
      * exactly, instead of within a rounding error (ADR-054.7).
      */
@@ -60,10 +61,17 @@ describe('§7.2 exclusion and renormalisation', () => {
     expect(quality.exclusion_reason).toBe('required_metric_missing');
     expect(quality.score).toBeNull();
     expect(quality.weight_applied).toBe(0);
-    expect(quality.weight_config).toBe(10);
+    expect(quality.weight_config).toBe(8);
 
     const banking = score.breakdown.find((d) => d.key === 'banking_health')!;
     expect(banking.exclusion_reason).toBe('no_bank_coverage');
+
+    // ADR-147: no campaign spend is "not scored", never "inefficient".
+    const marketing = score.breakdown.find((d) => d.key === 'marketing_efficiency')!;
+    expect(marketing).toMatchObject({ included: false, exclusion_reason: 'no_campaign_data', score: null });
+    // No debt, receivables or payables established: excluded, never "owes nothing".
+    const funding = score.breakdown.find((d) => d.key === 'funding_readiness')!;
+    expect(funding).toMatchObject({ included: false, exclusion_reason: 'required_metric_missing', score: null });
   });
 
   it('excludes a dimension whose required metrics are thinner than 0.6 complete', () => {
@@ -216,7 +224,7 @@ describe('determinism', () => {
     const score = computeHealthScore(healthInput())!;
     expect(score.breakdown.map((d) => d.key)).toEqual([
       'profitability', 'cash_flow', 'revenue_growth', 'cost_control',
-      'customer_quality', 'banking_health',
+      'customer_quality', 'banking_health', 'marketing_efficiency', 'funding_readiness',
     ]);
   });
 

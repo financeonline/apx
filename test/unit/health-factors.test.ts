@@ -32,6 +32,20 @@ const VALUES: Readonly<Record<TemplateId, Record<string, string>>> = {
   bank_balance_rising: {},
   bank_balance_falling: {},
   bank_anomalies: { count: '3' },
+  no_debt: {},
+  debt_light: { multiple: '0.8' },
+  debt_heavy: { multiple: '4.6' },
+  debt_fell: { pct: '0.15' },
+  debt_rose: { pct: '0.25' },
+  receivables_overdue_high: { share: '0.42' },
+  payables_overdue_high: { share: '0.55' },
+  figures_complete: {},
+  figures_gaps: { months: '3' },
+  campaigns_pay_back: { multiple: '3.4' },
+  campaigns_below_cost: { multiple: '0.6' },
+  campaigns_won_nobody: { spend: '1500.00' },
+  cac_fell: { pct: '0.2' },
+  cac_rose: { pct: '0.3' },
 };
 
 describe('every template renders', () => {

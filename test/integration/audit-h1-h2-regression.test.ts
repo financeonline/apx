@@ -187,11 +187,24 @@ describe('H-2 · a trial balance states its P&L', () => {
     expect(values(tbdc, 'revenue')).toEqual(['1000.00', '1100.00', '1210.00']);
   });
 
-  it('Health on an attested trial balance with no bank: NULL / 87 / 87 movement, NULL / NULL / 87 cumulative (by hand)', () => {
-    // Same P&L as HT-NOBANK, so the same dimensions and totals.
+  it('Health on an attested trial balance with no bank: NULL / 87 / 87 movement, NULL / 82 / 84 cumulative (by hand)', () => {
+    // Same P&L as HT-NOBANK, so the same dimensions and totals. A movement trial balance states no
+    // debt (debt reads a cumulative statement), so funding readiness is excluded here (v5, ADR-147):
+    // Jul/Aug (95·44.7 + 65·27.7 + 95·27.7) / 100.1 = 86.7 → 87.
     expect(totals(tbmovC)).toEqual([null, 87, 87]);
-    // Cumulative: June has no P&L; July's growth needs June's revenue → 2 dimensions; August as above.
-    expect(totals(tbcumC)).toEqual([null, null, 87]);
+    /*
+     * Cumulative, health.config.v5 (ADR-147). The attested, balancing cumulative statement has no
+     * borrowing line, so debt is a KNOWN zero (ADR-145 §4) and funding readiness is included:
+     * R1 no debt +25, R2 no figure three months back (skipped), R3/R4 no aging (skipped), R5 one
+     * (Jul) then two (Aug) complete months of six → −10: 50 + 25 − 10 = 65.
+     *   June: no P&L at all → only funding readiness → fewer than three dimensions → NULL.
+     *   July: profitability 90, cost control 80, funding 65; weights 21/13/8 of 42 → 50.0/31.0/19.0;
+     *         (90·50 + 80·31 + 65·19) / 100 = 82.15 → 82.
+     *   Aug:  profitability 95, revenue growth 65, cost control 95, funding 65; 21/13/13/8 of 55 →
+     *         38.2/23.6/23.6/14.5; (95·38.2 + 65·23.6 + 95·23.6 + 65·14.5) / 99.9 = 83.56 → 84.
+     * Under v4 these were NULL / NULL / 87.
+     */
+    expect(totals(tbcumC)).toEqual([null, 82, 84]);
   });
 
   it('Health on the unattested extracts: no score any month — only revenue growth is computable (< 3 dimensions)', () => {
