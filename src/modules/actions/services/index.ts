@@ -52,6 +52,28 @@ export async function createAction(ctx: AccessContext, input: CreateActionInput)
 }
 
 /**
+ * ADR-148: from an advisory opportunity — the Health Score whose breakdown triggered it is the
+ * source, so the action can always be traced back to the facts that suggested it.
+ */
+export async function createFromHealthScore(
+  ctx: AccessContext, healthScoreId: string, input: CreateActionInput,
+): Promise<string> {
+  assertCan(ctx, 'actions.create');
+  return callApi<string>(ctx.db, 'create_action', {
+    p_org: orgOf(ctx),
+    p_input: {
+      title: input.title,
+      issue: input.issue ?? null,
+      recommendation: input.recommendation ?? null,
+      priority: input.priority ?? 'medium',
+      owner_user_id: input.ownerUserId ?? null,
+      due_date: input.dueDate ?? null,
+    },
+    p_source: { type: 'health_score', id: healthScoreId },
+  }, ctx.requestId);
+}
+
+/**
  * §4.13: from an alert, pinning the revision that prompted it.
  *
  * An alert is re-evaluated whenever the figures change (ADR-034). The action keeps saying what the

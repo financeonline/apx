@@ -2799,3 +2799,21 @@ Consequences:
 
 ### ADR-119 addendum (2026-10-06)
 The dimension is activated by ADR-147 on the owner's instruction, for every organisation. Conditions 1–4 are answered there; condition 5 (independent audit) is not yet met.
+
+### ADR-148 · Advisory opportunities in the Command Centre — fixed rules over the latest Health breakdown
+Status: **built locally on 2026-10-06 on the owner's instruction; rules chosen by the owner from a proposal. Not reviewed, merged or deployed.** SOW §20 lists "Advisory opportunities"; it was the only §20 item not built (REQ-AD-10).
+
+Decision:
+1. **The attention queue's mirror image, built the same way.** `opportunities.v1` (`portfolio/domain/opportunities.ts`, pure) reads each client's latest complete scored month — the breakdown already stored, dimension by dimension and rule by rule — through one scoped statement, `api.portfolio_health_breakdowns(orgs[])` (`app.portfolio_scope`, POST, ADR-117). No model, no new figure: every opportunity lists the stored scores and rule results that triggered it.
+2. **Six rules, in a fixed order** (owner's choice; thresholds proposed and declared once):
+   - *Ready to fund growth*: Health Stable or Strong, funding readiness ≥ 70 and cash ≥ 70;
+   - *Surplus cash*: C2 "≥ 6 months" and profitability ≥ 60;
+   - *Campaigns paying back*: marketing ≥ 70;
+   - *Growing on thin margins*: sales growth ≥ 65 and profitability < 50;
+   - *Collections and working capital*: Q3 above 60 days, or R3 overdue share ≥ 30%;
+   - *Momentum*: Health up ≥ 10 points or a band since the previous month — only across the same config (the summary returns no previous month otherwise, ADR-147).
+   A skipped rule or an excluded dimension never satisfies a rule.
+3. **Where.** An "Advisory opportunities" section on `/portfolio` (clients with the most opportunities first, then by name; 25 shown, all counted) and on each client page, with a link to the Health Score's evidence.
+4. **Into an action.** "Record as an action" sends only the client and the rule; the server works the opportunity out again from the current breakdown and creates the action in the client's Action Centre (`api.create_action`, source `health_score` = the score it rests on), under the client organisation's own `actions.create`.
+
+Consequences: an opportunity is only as current as the latest calculation; the thresholds can change with a bump to `opportunities.v2`.

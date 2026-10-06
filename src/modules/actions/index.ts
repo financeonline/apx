@@ -43,6 +43,7 @@ export {
   canManage,
   createAction,
   createFromAlert,
+  createFromHealthScore,
   createFromRecommendation,
   getAction,
   getActionsSummary,

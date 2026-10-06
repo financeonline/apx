@@ -323,14 +323,14 @@ MVP column values:
 |---|---|---|---|---|---|---|
 | REQ-AD-01 | An authorised adviser shall be able to monitor multiple client companies. | SOW §18 | SOW requirement | MVP-limited: `/portfolio` list of assigned organizations with health score and open alert count | `organization_assignments` | CD-02 |
 | REQ-AD-02 | Client isolation and explicit assignment permissions are mandatory. | SOW §18 | SOW requirement | MVP | TENANCY §5 | — |
-| REQ-AD-03 | Client portfolio dashboard. | SOW §18 | SOW requirement | Post-MVP (P15) | REQ-AD-01 | — |
-| REQ-AD-04 | Client health scores (portfolio view). | SOW §18 | SOW requirement | Post-MVP (P15); MVP shows score per card | — | — |
-| REQ-AD-05 | Clients requiring attention. | SOW §18 | SOW requirement | Post-MVP (P15) | — | — |
-| REQ-AD-06 | Client alerts (cross-client). | SOW §18 | SOW requirement | Post-MVP (P15) | — | — |
-| REQ-AD-07 | Client AI analysis (cross-client). | SOW §18 | SOW requirement | Post-MVP (P15); MVP AI is per organization | — | — |
-| REQ-AD-08 | Client reports (cross-client). | SOW §18 | SOW requirement | Post-MVP (P15) | — | — |
-| REQ-AD-09 | Outstanding actions (cross-client). | SOW §18 | SOW requirement | Post-MVP (P15) | — | — |
-| REQ-AD-10 | Advisory opportunities. | SOW §18 | SOW requirement | Post-MVP (P15) | — | — |
+| REQ-AD-03 | Client portfolio dashboard. | SOW §18 | SOW requirement | **Built (P15)**: `/portfolio` (ADR-112) | REQ-AD-01 | — |
+| REQ-AD-04 | Client health scores (portfolio view). | SOW §18 | SOW requirement | **Built (P15)**: score, band and trend per client | — | — |
+| REQ-AD-05 | Clients requiring attention. | SOW §18 | SOW requirement | **Built (P15)**: the attention queue (ADR-112 §3) | — | — |
+| REQ-AD-06 | Client alerts (cross-client). | SOW §18 | SOW requirement | **Built (P15)**: `/portfolio/alerts` | — | — |
+| REQ-AD-07 | Client AI analysis (cross-client). | SOW §18 | SOW requirement | **Built (P15)**: `/portfolio/analyst` (ADR-113, ADR-118) | — | — |
+| REQ-AD-08 | Client reports (cross-client). | SOW §18 | SOW requirement | Partly built: each client's Accountant/CFO Report (Phase 17, ADR-141), reached from the client page; no combined cross-client report | — | — |
+| REQ-AD-09 | Outstanding actions (cross-client). | SOW §18 | SOW requirement | **Built (P15)**: `/portfolio/actions` | — | — |
+| REQ-AD-10 | Advisory opportunities. | SOW §18 | SOW requirement | Built locally, not reviewed (ADR-148): six fixed rules over each client's latest Health breakdown, on the overview and the client page, recordable as an action | — | — |
 
 ## 18. Funding Readiness
 

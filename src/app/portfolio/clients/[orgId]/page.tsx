@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { getPortfolioContext, hrefs, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts } from '@/modules/portfolio';
+import { getPortfolioContext, hrefs, loadOpportunities, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts } from '@/modules/portfolio';
+import { OpportunityList } from '../../_components/opportunities';
 import { bandLabel } from '@/modules/health';
 import { PageHeader, Card, CardBody, CardHeader, Badge } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
@@ -30,9 +31,10 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
   const { data: features } = await ctx.db.from('organizations').select('features').eq('id', orgId).maybeSingle();
   const fundingOn = (features as { features?: Record<string, unknown> } | null)?.features?.funding_readiness === true;
   // This client's own detail, read for this client alone; the counts are the aggregate's (ADR-114).
-  const [alerts, actions] = await Promise.all([
+  const [alerts, actions, opportunities] = await Promise.all([
     loadPortfolioAlerts(ctx, view, [orgId]),
     loadPortfolioActions(ctx, view, 'attention', [orgId]),
+    loadOpportunities(ctx, view, [orgId]),
   ]);
 
   return (
@@ -89,6 +91,11 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
           </CardBody>
         </Card>
       </div>
+
+      <section aria-labelledby="client-opportunities" className="mt-8">
+        <h2 id="client-opportunities" className="mb-3 font-serif text-lg">Advisory opportunities</h2>
+        <OpportunityList entries={opportunities} organisations={[organisation]} withActions />
+      </section>
 
       <section aria-labelledby="client-alerts" className="mt-8">
         <h2 id="client-alerts" className="mb-3 font-serif text-lg">Alerts standing ({alerts.total.toLocaleString('en-GB')})</h2>

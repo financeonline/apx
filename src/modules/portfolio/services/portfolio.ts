@@ -1,6 +1,7 @@
 import 'server-only';
 import { DUE_SOON_DAYS, addDays } from '@/modules/actions';
 import { attentionEntry, attentionReasons, compareAttention, trendOf } from '../domain/attention';
+import { opportunityEntry, type OpportunityEntry } from '../domain/opportunities';
 import type {
   CappedList, ClientCounts, ClientRow, PortfolioAction, PortfolioAlert, PortfolioCounts,
   PortfolioOrganisation, PortfolioView, RecentChange,
@@ -122,6 +123,27 @@ export async function loadPortfolioAlerts(
     .filter((c) => organisationIds.includes(c.organisation.id))
     .reduce((n, c) => n + c.counts.alertsStanding, 0);
   return capped(rows, total);
+}
+
+/** The opportunities shown on the overview; every client with one is still counted. */
+export const OPPORTUNITY_CAP = 25;
+
+/**
+ * Advisory opportunities (SOW §20, REQ-AD-10; ADR-148): the fixed rules over each client's latest
+ * complete Health breakdown, read in one scoped statement. Ordered by how many opportunities a
+ * client has, then by name — never by a model.
+ */
+export async function loadOpportunities(
+  ctx: PortfolioContext, view: PortfolioView, organisationIds: readonly string[] = ctx.organisationIds,
+): Promise<OpportunityEntry[]> {
+  const breakdowns = await repo.loadHealthBreakdowns(ctx.db, scopeFor(ctx, organisationIds), ctx.requestId);
+  const healthOf = new Map(view.clients.map((c) => [c.organisation.id, c.health]));
+  const nameOf = new Map(view.clients.map((c) => [c.organisation.id, c.organisation.name]));
+  return breakdowns
+    .map((b) => opportunityEntry(b, healthOf.get(b.organizationId) ?? null))
+    .filter((e): e is OpportunityEntry => e !== null)
+    .sort((a, b) => b.opportunities.length - a.opportunities.length
+      || (nameOf.get(a.organizationId) ?? '').localeCompare(nameOf.get(b.organizationId) ?? ''));
 }
 
 /** The count behind each open-work lens, from the aggregate. */

@@ -1,7 +1,8 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { isMotionError } from '@/core/errors';
 import {
-  loadPortfolio, loadPortfolioActions, loadPortfolioAlerts, resolvePortfolioContext, type PortfolioContext, type PortfolioView,
+  loadOpportunities, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts, resolvePortfolioContext,
+  type PortfolioContext, type PortfolioView,
 } from '@/modules/portfolio';
 import { adminSql, clientFor, createAuthUser } from './setup';
 
@@ -288,5 +289,40 @@ describe('an eligible employee with no assignment has an empty Command Centre (A
     } finally {
       adminSql(`update public.platform_users set status='active' where user_id='${unassigned}'`);
     }
+  });
+});
+
+describe('advisory opportunities follow the same boundary (ADR-148)', () => {
+  // A's and C's latest months carry a marketing score of 80: "campaigns paying back" for both.
+  const marketing = `'[{"key":"marketing_efficiency","included":true,"score":80,"rules":[{"rule":"M1","points":20,"result":">= 3x","value":"3.2","skipped_reason":null}]}]'::jsonb`;
+  beforeAll(() => {
+    adminSql(`set session_replication_role = replica;
+      update public.health_scores set breakdown = ${marketing}
+       where id in (select health_score_id from public.health_current where organization_id in ('${A}','${C}') and period_id in ('${period(A)}','${period(C)}'));`);
+  });
+
+  it('the employee sees A\'s, never C\'s — even with C forged into the context', async () => {
+    const real = await ctxFor(employee, 'aal2');
+    const view = await loadPortfolio(real);
+    expect((await loadOpportunities(real, view)).map((e) => [e.organizationId, e.opportunities.map((o) => o.kind)]))
+      .toEqual([[A, ['campaigns_paying_back']]]);
+    const forged: PortfolioContext = {
+      ...real,
+      organisations: [...real.organisations, { id: C, slug: 'gamma', name: 'Gamma', status: 'active', role: 'employee' }],
+      organisationIds: [...real.organisationIds, C],
+    };
+    const forgedView = await loadPortfolio(forged);
+    expect((await loadOpportunities(forged, forgedView, [C]))).toEqual([]);
+    expect((await loadOpportunities(forged, forgedView)).map((e) => e.organizationId)).toEqual([A]);
+  });
+
+  it('the super admin sees A\'s and C\'s; the database function gives a stranger nothing', async () => {
+    const admin = await ctxFor(superAdmin, 'aal2');
+    const view = await loadPortfolio(admin);
+    expect((await loadOpportunities(admin, view)).map((e) => e.organizationId).sort()).toEqual([A, C].sort());
+    const { data, error } = await clientFor(stranger, { email: `stranger@${DOMAIN}` }).schema('api')
+      .rpc('portfolio_health_breakdowns', { p_orgs: [A, B, C] });
+    expect(error).toBeNull();
+    expect(data ?? []).toEqual([]);
   });
 });

@@ -70,6 +70,24 @@ test('an owner of two organisations sees both on the Command Centre; a client se
 
   await page.screenshot({ path: `${SHOTS}/command-centre-1440.png`, fullPage: true });
 
+  // ---- Advisory opportunities (ADR-148): A's latest month shows campaigns paying back ----------
+  sql(`set session_replication_role = replica;
+       update public.health_scores set breakdown = coalesce((select jsonb_agg(d) from jsonb_array_elements(breakdown) d where d->>'key' <> 'marketing_efficiency'), '[]'::jsonb)
+         || '[{"key":"marketing_efficiency","included":true,"score":80,"rules":[{"rule":"M1","points":20,"result":">= 3x","value":"3.2","skipped_reason":null}]}]'::jsonb
+        where id in (select health_score_id from public.health_current where organization_id = '${orgA}')`);
+  await page.reload();
+  const opportunities = page.getByRole('region', { name: /advisory opportunities/i });
+  await expect(opportunities.getByRole('link', { name: ORG_A, exact: true })).toBeVisible();
+  await expect(opportunities.getByText('Campaigns paying back', { exact: true })).toBeVisible();
+  await expect(opportunities.getByText(/Because: Marketing scores 80/)).toBeVisible();
+  await opportunities.getByRole('link', { name: ORG_A, exact: true }).click();
+  await page.waitForURL(new RegExp(`/portfolio/clients/${orgA}`));
+  const clientOpps = page.getByRole('region', { name: /advisory opportunities/i });
+  await clientOpps.getByRole('button', { name: 'Record as an action' }).first().click();
+  await expect(clientOpps.getByText(`Added to ${ORG_A}'s Action Centre.`)).toBeVisible({ timeout: 15_000 });
+  expect(sql(`select count(*) from public.actions where organization_id = '${orgA}' and source_type = 'health_score' and title = 'Campaigns paying back'`)).toBe('1');
+  await page.goto('/portfolio');
+
   // ---- Drill-down: the client brief, then the organisation's own alert page --------------------
   await queue.getByRole('link', { name: /why, and what next/i }).first().click();
   await page.waitForURL(new RegExp(`/portfolio/clients/${orgA}`));

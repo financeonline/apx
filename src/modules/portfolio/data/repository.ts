@@ -4,6 +4,7 @@ import type { ActionPriority, ActionStatus } from '@/modules/actions';
 import type { AlertSeverity } from '@/modules/alerts';
 import { bandFor } from '@/modules/health';
 import type { ClientCounts, PortfolioAction, PortfolioAlert, PortfolioHealth } from '../domain/types';
+import type { ClientBreakdown } from '../domain/opportunities';
 
 /**
  * The Command Centre's reads (ADR-112 §3, ADR-114).
@@ -217,4 +218,34 @@ export async function loadRecentlyFinishedActions(
   if (orgIds !== null && orgIds.length === 0) return [];
   const { data, error } = await db.schema('api').rpc('portfolio_finished_actions', { p_orgs: scopeArg(orgIds), p_since: sinceIso, p_limit: RECENT_CAP });
   return unwrap(data as ActionRow[] | null, error, requestId).map(toAction);
+}
+
+// ---------------------------------------------------------------------------------------------
+// Advisory opportunities (ADR-148): the latest complete month's breakdown, per client
+// ---------------------------------------------------------------------------------------------
+
+interface BreakdownRow {
+  organization_id: string; health_score_id: string; period_label: string; config_version: string;
+  evidence_bundle_id: string | null;
+  dimensions: Array<{ key: string; included: boolean; score: number | null; rules: Array<{
+    rule: string; points: number | null; result: string | null; value: string | null; skipped: string | null;
+  }> }>;
+}
+
+export async function loadHealthBreakdowns(
+  db: SupabaseClient, orgIds: Scope, requestId?: string,
+): Promise<ClientBreakdown[]> {
+  if (orgIds !== null && orgIds.length === 0) return [];
+  const { data, error } = await db.schema('api').rpc('portfolio_health_breakdowns', { p_orgs: scopeArg(orgIds) });
+  return unwrap(data as BreakdownRow[] | null, error, requestId).map((r) => ({
+    organizationId: r.organization_id, healthScoreId: r.health_score_id, periodLabel: r.period_label,
+    configVersion: r.config_version, evidenceBundleId: r.evidence_bundle_id,
+    dimensions: (r.dimensions ?? []).map((d) => ({
+      key: d.key, included: d.included === true, score: typeof d.score === 'number' ? d.score : null,
+      rules: (d.rules ?? []).map((x) => ({
+        rule: x.rule, points: typeof x.points === 'number' ? x.points : null, result: x.result ?? null,
+        value: x.value ?? null, skipped: x.skipped ?? null,
+      })),
+    })),
+  }));
 }

@@ -50,8 +50,13 @@ export {
 } from './services/access';
 
 export {
-  ATTENTION_CAP, RECENT_DAYS, hrefs, lensTotal, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts,
+  ATTENTION_CAP, OPPORTUNITY_CAP, RECENT_DAYS, hrefs, lensTotal, loadOpportunities, loadPortfolio,
+  loadPortfolioActions, loadPortfolioAlerts,
 } from './services/portfolio';
+export {
+  OPPORTUNITY_KINDS, OPPORTUNITY_RULES_VERSION, OPPORTUNITY_THRESHOLDS, opportunitiesFor, opportunityEntry,
+  type BreakdownDimension, type ClientBreakdown, type Opportunity, type OpportunityEntry, type OpportunityKind,
+} from './domain/opportunities';
 export { ACTION_DETAIL_CAP, ALERT_DETAIL_CAP, type OpenLens } from './data/repository';
 
 export {

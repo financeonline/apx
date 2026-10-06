@@ -3,7 +3,7 @@ import { Badge, Card, CardBody, EmptyState } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { HealthScoreInline } from '@/components/dashboard';
 import { ORG_STATUS_LABELS } from '@/components/labels';
-import { bandLabel } from '@/modules/health';
+import { HEALTH_DIMENSION_KEYS, bandLabel } from '@/modules/health';
 import {
   PRIORITY_LABELS, SEVERITY_LABELS, TREND_LABELS, ageLabel, dueLabel, hrefs, priorityTone, reasonTone,
   seriousAlerts, severityTone, truncationNote, type CappedList, type ClientRow, type PortfolioAction,
@@ -74,7 +74,7 @@ export function AttentionQueue({ rows, today, now }: { rows: readonly ClientRow[
                     score={row.health?.score ?? null}
                     band={row.health?.band ?? null}
                     dimensionsUsed={row.health?.dimensionsUsed ?? 0}
-                    dimensionsTotal={row.health?.dimensionsTotal ?? 6}
+                    dimensionsTotal={row.health?.dimensionsTotal ?? HEALTH_DIMENSION_KEYS.length}
                   />
                 </div>
                 <ul className="mt-3 flex flex-wrap gap-2">
