@@ -14,9 +14,9 @@ export function ComposeForm({
   orgSlug, kind, label, windows,
 }: {
   orgSlug: string;
-  kind: 'daily_brief' | 'weekly_intelligence' | 'adviser';
+  kind: 'daily_brief' | 'weekly_intelligence' | 'adviser' | 'funding_readiness';
   label: string;
-  /** The choosable windows, newest first; absent for the adviser report. */
+  /** The choosable windows, newest first; absent for the adviser and Funding Readiness reports. */
   windows?: readonly { readonly value: string; readonly label: string }[];
 }) {
   const [state, submit] = useActionState(requestComposeAction, null);

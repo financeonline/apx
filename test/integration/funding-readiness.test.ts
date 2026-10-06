@@ -3,6 +3,7 @@ import { permissionsFor, type EffectiveRole } from '@/core/permissions';
 import { getBundle } from '@/modules/evidence';
 import { getFundingView } from '@/modules/funding';
 import { drainJobs } from '@/modules/jobs';
+import { getStoredReport, requestCompose, requestStoredPdf, type FundingReportContent } from '@/modules/reporting';
 import type { AccessContext } from '@/modules/tenancy';
 import { adminSql, clientFor, createAuthUser, drainUntilFinished, serviceStorage, sqlstate } from './setup';
 
@@ -139,7 +140,46 @@ describe('switching it on', () => {
   });
 });
 
+let fundingReportId: string;
+
+describe('the Funding Readiness Report (REQ-RP-05)', () => {
+  it('stores the latest month\'s current assessment as it stands, with its disclaimer', async () => {
+    const job = await requestCompose(ctxFor(ownerId, 'owner'), 'funding_readiness', null);
+    expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
+    fundingReportId = one(`select id from public.reports where organization_id = '${orgId}' and report_kind = 'funding_readiness'`);
+    const report = await getStoredReport(ctxFor(ownerId, 'owner'), fundingReportId);
+    expect(report).toMatchObject({ kind: 'funding_readiness', contentVersion: 'funding.v1', origin: 'requested', periodId: august });
+    const content = report!.content as FundingReportContent;
+    // The same row the Funding page shows for the month, not a recomposition.
+    const current = one(`select assessment_id from public.funding_current where organization_id = '${orgId}' and period_id = '${august}'`);
+    expect(content.assessment.id).toBe(current);
+    expect(content.assessment).toMatchObject({ status: 'insufficient_data', score: null, band: null });
+    expect(content.assessment.disclaimer).toMatch(/^Funding Readiness is an indicative/);
+    expect(content.assessment.factors).toHaveLength(7);
+    expect(report!.windowStart).toBe('2026-08-01');
+    expect(report!.windowEnd).toBe('2026-08-31');
+  });
+
+  it('renders its PDF under the report', async () => {
+    const job = await requestStoredPdf(ctxFor(ownerId, 'owner'), fundingReportId);
+    expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
+    expect(one(`select count(*) from public.report_files where organization_id = '${orgId}' and report_id = '${fundingReportId}'`)).toBe('1');
+  });
+
+  it('a client may read it but not produce one', async () => {
+    expect(await getStoredReport(ctxFor(clientId, 'client'), fundingReportId)).not.toBeNull();
+    await expect(requestCompose(ctxFor(clientId, 'client'), 'funding_readiness', null)).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+  });
+});
+
 describe('switching it off again', () => {
+  it('hides the Funding Readiness Report and refuses a new one, keeping the stored row', async () => {
+    setFlag(false);
+    expect(await getStoredReport(ctxFor(ownerId, 'owner'), fundingReportId)).toBeNull();
+    await expect(requestCompose(ctxFor(ownerId, 'owner'), 'funding_readiness', null)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect(one(`select count(*) from public.reports where id = '${fundingReportId}'`)).toBe('1');
+  });
+
   it('hides it at every layer — page, evidence and RLS — and keeps the rows', async () => {
     const bundle = one(`select b.id from public.evidence_bundles b where b.organization_id = '${orgId}' and b.kind = 'funding_assessment' limit 1`);
     expect(bundle).toMatch(/^[0-9a-f-]{36}$/);

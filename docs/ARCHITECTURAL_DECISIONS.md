@@ -2757,3 +2757,5 @@ Departures, each to the owner's attention:
 4. **A complete statement with no borrowing line** is a known zero debt. On an unconfirmed, partial or unbalanced statement it is unknown, consistent with Step 0F/NF-2. The design predates that rule.
 
 Still deferred, as designed: the Funding Readiness Health dimension (ADR-119), lender matching, and the analyst explaining an assessment.
+
+- **Addendum (2026-10-06): the Funding Readiness Report (REQ-RP-05).** Built in Phase 17 on the same flag. It freezes the latest month's current assessment (`funding.v1`) into `reports`; it recalculates nothing and carries the disclaimer verbatim. Produced on request only (not scheduled). While the flag is off: the Reports page says it is switched off, `api.enqueue_job` refuses (NOT FOUND), and the `reports_select` policy hides earlier Funding Readiness Reports; the rows are kept, as assessments are. It inherits everything above: unreviewed, ahead of its prerequisite, and off by default.

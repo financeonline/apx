@@ -6,9 +6,9 @@ import { log } from '@/core/logging';
 import { putObject, REPORTS_BUCKET, reportKey, storedReportKey } from '@/core/storage/signer';
 import { listOpenActionsForJob } from '@/modules/actions';
 import {
-  ADVISER_CONTENT_VERSION, BRIEF_CONTENT_VERSION, CUSTOM_CONTENT_VERSION, buildMonthlyReport,
-  loadStoredReportForJob, renderAdviserPdf, renderBriefPdf, renderCustomPdf, renderReportPdf,
-  type AdviserContent, type BriefContent, type CustomReportContent,
+  ADVISER_CONTENT_VERSION, BRIEF_CONTENT_VERSION, CUSTOM_CONTENT_VERSION, FUNDING_REPORT_VERSION, buildMonthlyReport,
+  loadStoredReportForJob, renderAdviserPdf, renderBriefPdf, renderCustomPdf, renderFundingPdf, renderReportPdf,
+  type AdviserContent, type BriefContent, type CustomReportContent, type FundingReportContent,
 } from '@/modules/reporting';
 import type { ClaimedJob, JobOutcome } from '../domain/types';
 
@@ -98,6 +98,7 @@ async function renderStored(kind: string, version: string, content: unknown): Pr
   }
   if (kind === 'adviser' && version === ADVISER_CONTENT_VERSION) return renderAdviserPdf(content as AdviserContent);
   if (kind === 'custom_ai' && version === CUSTOM_CONTENT_VERSION) return renderCustomPdf(content as CustomReportContent);
+  if (kind === 'funding_readiness' && version === FUNDING_REPORT_VERSION) return renderFundingPdf(content as FundingReportContent);
   return null;
 }
 

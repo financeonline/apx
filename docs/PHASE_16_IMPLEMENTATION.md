@@ -35,7 +35,7 @@
 | A standalone assessment and one interactive tenant page | APPROVED | ADR-119 |
 | F5 receivables & payables | BLOCKED BY DEPENDENCY | ADR-120 |
 | Funding Readiness as a Health Score dimension | DEFERRED | ADR-119 (REQ-BH-10 stays open) |
-| Printable/exportable Funding Readiness Report (PDF, report job) | DEFERRED to Phase 17 | SOW §20, REQ-RP-05 |
+| Printable/exportable Funding Readiness Report (PDF, report job) | Built in Phase 17, locally (`PHASE_17_IMPLEMENTATION.md` §1) | SOW §20, REQ-RP-05 |
 | Lender marketplace, matching, provider directory, application submission, credit-decision simulation | DEFERRED | SOW §22, REQ-FR-11 |
 | AI-generated scores, figures, reasons or recommendations | REJECTED | §12 |
 | User-entered financial assumptions that change the score | DEFERRED | — |

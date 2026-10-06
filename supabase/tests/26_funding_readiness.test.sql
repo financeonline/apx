@@ -1,8 +1,9 @@
 -- MOTION — pgTAP · Funding Readiness (Phase 16, ADR-145), migrations 20261013000001/2. The lifecycle
--- through real calculations is in test/integration/funding-readiness.test.ts.
+-- through real calculations is in test/integration/funding-readiness.test.ts. The Funding Readiness
+-- Report (REQ-RP-05) follows the flag too: migrations 20261014000001/2.
 begin;
 create extension if not exists pgtap;
-select plan(9);
+select plan(12);
 
 insert into public.organizations (id, slug, name) values ('e2600000-0000-0000-0000-0000000000e2', 'pgt-funding', 'PGT Funding');
 
@@ -29,6 +30,13 @@ select ok(exists (select 1 from pg_trigger where tgname = 'append_only_guard' an
           'assessments are append-only');
 select ok(position('''funding_assessments''' in pg_get_functiondef('api_server.purge_organization(uuid, uuid)'::regprocedure)) > 0,
           'the purge deletes the assessments');
+
+select ok(position('funding_enabled' in (select pg_get_expr(polqual, polrelid) from pg_policy where polname = 'reports_select')) > 0,
+          'RLS hides a stored Funding Readiness Report while the flag is off');
+select ok(position('''funding_readiness''' in (select pg_get_constraintdef(oid) from pg_constraint where conname = 'reports_period_required')) > 0,
+          'a Funding Readiness Report names its month');
+select ok(position('funding_enabled' in pg_get_functiondef('api.enqueue_job(uuid, public.job_type_enum, jsonb)'::regprocedure)) > 0,
+          'asking for one is refused while the flag is off');
 
 select * from finish();
 rollback;

@@ -25,7 +25,7 @@
 | Weekly Development Comparison | *(no purpose given)* | **INTERPRETATION / DECIDED (R17-2):** the weekly report compares every interim figure with the week before (§4.2). |
 | Monthly Management Report | Financial, cash, commercial and management analysis. | Exists (ADR-024), unchanged. The commercial section is **EXCLUDED**, because Commercial Intelligence (CRM) is out of Phase 1 (Agreement §5). |
 | Accountant/CFO Report | Adviser-ready client intelligence. | Built (§6) |
-| Funding Readiness Report | Indicative readiness assessment and evidence. | **BLOCKED:** Phase 16 has not started, so there is no assessment to report on. The Reports page shows the slot and says it is not available yet. |
+| Funding Readiness Report | Indicative readiness assessment and evidence. | **Built locally, follows the Funding Readiness flag (ADR-145), not reviewed.** `report.compose` with kind `funding_readiness` freezes the latest month's CURRENT assessment (`funding_current` → `funding_assessments`) as `funding.v1`: score or "Insufficient data", coverage, the seven factors, what helps and hurts, what is missing, the actions, the disclaimer verbatim and the rules/engine/run. Nothing is recalculated. On screen and as a PDF; produced on request only (no schedule). While the flag is off the Reports page says so, `api.enqueue_job` refuses (NOT FOUND) and RLS hides earlier such reports (migrations 20261014000001/2). It inherits Phase 16's status: the assessment it reports is itself unreviewed and its prerequisite (ADR-120 recovery re-review and Health audit) is unmet. |
 | Custom AI Report | User-selected period, questions and analytical dimensions. | Built (§7) |
 
 ## 2. Owner decisions (2026-10-06, ADR-141)
@@ -154,7 +154,7 @@ The full gate results are recorded in the handover note, not here.
 
 ## 11. Known limitations and open items
 
-- **Funding Readiness Report:** BLOCKED (§1).
+- **Funding Readiness Report:** built locally behind `features.funding_readiness` (§1); not scheduled; unreviewed, as Phase 16 is.
 - **Monthly report commercial section:** EXCLUDED (§1).
 - **R17-2** interpretations await the owner's written confirmation.
 - **R17-1(b)** is computed beside the engine, not in it (§2). The owner may ask for it in the engine.

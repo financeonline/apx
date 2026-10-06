@@ -101,3 +101,5 @@ export {
 export { renderAdviserPdf, renderBriefPdf } from './domain/pdf-composed';
 export { renderCustomPdf } from './domain/pdf-custom';
 export type { AdviserCompletedAction, AdviserDimensionLine } from './domain/adviser';
+export { FUNDING_REPORT_VERSION, type FundingReportContent } from './domain/funding-report';
+export { renderFundingPdf } from './domain/pdf-funding';

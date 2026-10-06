@@ -861,7 +861,7 @@ export async function recordReport(
   actor: ServerRpcActor | null,
   input: {
     organizationId: string;
-    kind: 'daily_brief' | 'weekly_intelligence' | 'adviser' | 'custom_ai';
+    kind: 'daily_brief' | 'weekly_intelligence' | 'adviser' | 'custom_ai' | 'funding_readiness';
     windowStart: string;
     windowEnd: string;
     periodId: string | null;

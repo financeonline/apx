@@ -5,6 +5,7 @@ import {
   KIND_LABELS, latestCompletedWindows, listAvailable, listStoredReports, windowLabel,
   type StoredKind, type StoredReportSummary,
 } from '@/modules/reporting';
+import { fundingEnabled } from '@/modules/funding';
 import { getAccessContext } from '@/modules/tenancy';
 import { ReportsBeforeFirstMonthEmpty } from '@/components/dashboard';
 import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
@@ -19,7 +20,8 @@ export const dynamic = 'force-dynamic';
  * Every report the agreement lists for Phase 1, each in its own section. The daily and weekly
  * reports are produced on a schedule and kept; a day or week still in progress has a live preview
  * instead, because a stored report says the period was reported on. The Funding Readiness Report
- * waits for the Funding Readiness assessment (Phase 16), and the page says so rather than hiding it.
+ * follows the Funding Readiness feature (Phase 16, ADR-145): while it is switched off the section
+ * says so rather than hiding it, and the database hides any earlier such report (`reports_select`).
  */
 
 const DAYS_OFFERED = 14;
@@ -63,10 +65,11 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
 
   const canGenerate = can(ctx, 'reports.generate');
   const canAsk = can(ctx, 'ai.use');
-  const [monthly, stored, windows] = await Promise.all([
+  const [monthly, stored, windows, funding] = await Promise.all([
     listAvailable(ctx),
-    listStoredReports(ctx, ['daily_brief', 'weekly_intelligence', 'adviser', 'custom_ai']),
+    listStoredReports(ctx, ['daily_brief', 'weekly_intelligence', 'adviser', 'custom_ai', 'funding_readiness']),
     latestCompletedWindows(ctx),
+    fundingEnabled(ctx),
   ]);
   const of = (kind: StoredKind, limit: number) => stored.filter((r) => r.kind === kind).slice(0, limit);
 
@@ -154,10 +157,20 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
           ) : null}
         </Section>
 
-        <Section title="Funding Readiness Report" description="Indicative readiness assessment and evidence.">
-          <p className="text-sm text-ink-muted">
-            This report arrives with the Funding Readiness assessment, which is not available yet.
-          </p>
+        <Section
+          title={KIND_LABELS.funding_readiness}
+          description="The latest month's indicative Funding Readiness assessment, as it stood when the report was produced. Not a lending decision."
+        >
+          {funding ? (
+            <>
+              <StoredList orgSlug={orgSlug} reports={of('funding_readiness', 6)} empty="No Funding Readiness Report yet." />
+              {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="funding_readiness" label="Produce one now" /> : null}
+            </>
+          ) : (
+            <p className="text-sm text-ink-muted">
+              Funding Readiness is switched off for this organisation, so this report is not available.
+            </p>
+          )}
         </Section>
       </div>
     </>

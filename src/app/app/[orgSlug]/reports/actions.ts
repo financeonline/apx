@@ -12,7 +12,7 @@ import type { ActionResult } from '@/components/action-result';
  * `reports.generate` and the window, and merges a second press onto the job already waiting.
  */
 
-const COMPOSABLE: readonly ComposableKind[] = ['daily_brief', 'weekly_intelligence', 'adviser'];
+const COMPOSABLE: readonly ComposableKind[] = ['daily_brief', 'weekly_intelligence', 'adviser', 'funding_readiness'];
 
 export async function requestComposeAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
   const orgSlug = text(form, 'org_slug');
@@ -22,7 +22,7 @@ export async function requestComposeAction(_previous: ActionResult | null, form:
     requestId = ctx.requestId;
     const kind = text(form, 'kind') as ComposableKind;
     if (!COMPOSABLE.includes(kind)) throw new ValidationError('That report cannot be produced here.');
-    await requestCompose(ctx, kind, kind === 'adviser' ? null : text(form, 'window_start'));
+    await requestCompose(ctx, kind, kind === 'adviser' || kind === 'funding_readiness' ? null : text(form, 'window_start'));
     revalidatePath(`/app/${orgSlug}/reports`);
     return done('We are producing the report. It will appear in the list shortly.');
   } catch (error) {

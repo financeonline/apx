@@ -2,8 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { computeInterimFigures, type InterimInput } from '@/modules/financial-engine';
 import {
   BRIEF_LIST_CAP, assembleBrief, customQuestionMessage, entriesFromConversation, notShown, renderAdviserPdf,
-  renderBriefPdf, renderCustomPdf, resolveHref,
+  renderBriefPdf, renderCustomPdf, renderFundingPdf, resolveHref,
   type AdviserContent, type BriefActionLine, type BriefAlertLine, type BriefSources, type CustomReportContent,
+  type FundingReportContent,
 } from '@/modules/reporting';
 
 /** Phase 17: the brief assembler, the custom report's pairing rule and the PDFs. */
@@ -189,5 +190,32 @@ describe('the PDFs render the stored content', () => {
       ],
     };
     expect(isPdf(await renderCustomPdf(custom))).toBe(true);
+  });
+
+  it('renders a Funding Readiness Report, scored or not', async () => {
+    const factor = (key: 'F1' | 'F4', scored: boolean): FundingReportContent['assessment']['factors'][number] => ({
+      key, name: key === 'F1' ? 'Revenue and profitability' : 'Existing debt', weight: 20, appliedWeight: scored ? 20 : 0,
+      status: scored ? 'scored' : 'missing', score: scored ? 64 : null, reason: scored ? null : 'no_balance_sheet',
+      missingCodes: scored ? [] : ['no_balance_sheet'], capped: false, capReason: null, completeness: scored ? 1 : null,
+      rules: [], metrics: [],
+      positives: scored ? [{ rule: 'F1.1', template: 't', text: 'Revenue grew.', values: {}, snapshotIds: [] }] : [],
+      negatives: [],
+      missing: scored ? [] : [{ factor: key, rule: null, reason: 'no_balance_sheet', text: 'Debt could not be established.' }],
+      actions: [],
+    });
+    const content = (status: 'scored' | 'insufficient_data'): FundingReportContent => ({
+      version: 'funding.v1', organisationName: 'Acme',
+      period: { id: 'p', label: 'August 2026', start: '2026-08-01', end: '2026-08-31' },
+      assessment: {
+        id: 'a', status, score: status === 'scored' ? 64 : null, band: status === 'scored' ? 'Developing' : null,
+        dataCoveragePercent: 71, factorsUsed: 1, factors: [factor('F1', true), factor('F4', false)],
+        actions: [{ factor: 'F4', rule: null, reason: 'no_balance_sheet', text: 'Import a trial balance.', priority: 'high', evidence: [] }],
+        rulesVersion: 'funding_readiness.v1', engineVersion: '15.1.0', calculationRunId: '12345678-0000', assessedAt: '2026-09-14T01:00:00.000Z',
+        disclaimer: 'Funding Readiness is an indicative assessment.',
+      },
+      composedAt: '2026-09-14T02:00:00.000Z',
+    });
+    expect(isPdf(await renderFundingPdf(content('scored')))).toBe(true);
+    expect(isPdf(await renderFundingPdf(content('insufficient_data')))).toBe(true);
   });
 });

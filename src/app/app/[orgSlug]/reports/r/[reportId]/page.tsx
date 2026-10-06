@@ -2,8 +2,9 @@ import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { can } from '@/core/permissions';
 import {
-  ADVISER_CONTENT_VERSION, BRIEF_CONTENT_VERSION, CUSTOM_CONTENT_VERSION, KIND_LABELS, getStoredReport, windowLabel,
-  type AdviserContent, type BriefContent, type CustomReportContent,
+  ADVISER_CONTENT_VERSION, BRIEF_CONTENT_VERSION, CUSTOM_CONTENT_VERSION, FUNDING_REPORT_VERSION, KIND_LABELS,
+  getStoredReport, windowLabel,
+  type AdviserContent, type BriefContent, type CustomReportContent, type FundingReportContent,
 } from '@/modules/reporting';
 import { getAccessContext } from '@/modules/tenancy';
 import { Banner, PageHeader } from '@/components/ui/surfaces';
@@ -11,6 +12,7 @@ import { requirePermission } from '@/app/_lib/authz';
 import { BriefView } from '../../_components/brief-view';
 import { AdviserView } from '../../_components/adviser-view';
 import { CustomView } from '../../_components/custom-view';
+import { FundingReportView } from '../../_components/funding-view';
 import { StoredPdfControl } from '../../_components/report-controls';
 
 export const dynamic = 'force-dynamic';
@@ -43,6 +45,10 @@ export default async function StoredReportPage({ params }: { params: Promise<{ o
         name: content.organisationName,
         view: <CustomView content={content} orgSlug={orgSlug} canCreateAction={can(ctx, 'actions.create')} />,
       };
+    }
+    if (report.kind === 'funding_readiness' && report.contentVersion === FUNDING_REPORT_VERSION) {
+      const content = report.content as FundingReportContent;
+      return { name: content.organisationName, view: <FundingReportView content={content} orgSlug={orgSlug} /> };
     }
     return null;
   })();

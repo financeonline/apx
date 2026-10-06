@@ -17,7 +17,7 @@ import type { ClaimedJob, JobOutcome } from '../domain/types';
  * payload is data the database merged, and "nobody asked" is a fact about who enqueued it.
  */
 
-const KINDS: readonly ComposableKind[] = ['daily_brief', 'weekly_intelligence', 'adviser'];
+const KINDS: readonly ComposableKind[] = ['daily_brief', 'weekly_intelligence', 'adviser', 'funding_readiness'];
 
 export async function runReportComposeJob(
   job: ClaimedJob,
@@ -31,7 +31,7 @@ export async function runReportComposeJob(
     return { status: 'failed', error: `report.compose cannot compose "${String(kind)}"` };
   }
   const windowStart = typeof job.payload.windowStart === 'string' ? job.payload.windowStart : null;
-  if (kind !== 'adviser' && windowStart === null) {
+  if (kind !== 'adviser' && kind !== 'funding_readiness' && windowStart === null) {
     return { status: 'failed', error: 'report.compose needs a windowStart' };
   }
 
@@ -41,11 +41,15 @@ export async function runReportComposeJob(
     kind: kind as ComposableKind,
     windowStart,
     now: new Date(),
+    periodId: typeof job.payload.periodId === 'string' ? job.payload.periodId : null,
   });
   if (composed === null) {
-    // The adviser report needs a complete month with figures; failing rather than storing an empty
-    // report, for the reason the monthly render gives: a stored report says it was reported on.
-    return { status: 'failed', error: 'there is no complete month with figures to report on' };
+    // The adviser report needs a complete month with figures, and the Funding Readiness Report an
+    // assessment while the feature is on; failing rather than storing an empty report, for the reason
+    // the monthly render gives: a stored report says it was reported on.
+    return { status: 'failed', error: kind === 'funding_readiness'
+      ? 'there is no Funding Readiness assessment to report on, or it is switched off'
+      : 'there is no complete month with figures to report on' };
   }
 
   const origin = job.requestedBy === null ? 'scheduled' : 'requested';

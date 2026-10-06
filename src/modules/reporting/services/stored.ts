@@ -9,6 +9,8 @@ import { BRIEF_CONTENT_VERSION, type BriefContent, type BriefKind } from '../dom
 import { briefWindows, composeBrief } from './brief';
 import { ADVISER_CONTENT_VERSION, composeAdviserReport, type AdviserContent } from './adviser';
 import { loadOrganisationBasics } from '../data/brief-sources';
+import { composeFundingReport } from './funding-report';
+import { FUNDING_REPORT_VERSION, type FundingReportContent } from '../domain/funding-report';
 
 /**
  * Stored reports (Phase 17): composing one for the job, listing and reading them for a person,
@@ -19,7 +21,7 @@ import { loadOrganisationBasics } from '../data/brief-sources';
  * (NOT FOUND, never FORBIDDEN; SECURITY_MODEL.md §14).
  */
 
-export type ComposableKind = BriefKind | 'adviser';
+export type ComposableKind = BriefKind | 'adviser' | 'funding_readiness';
 export type StoredKind = ComposableKind | 'custom_ai';
 
 export const KIND_LABELS: Readonly<Record<StoredKind, string>> = {
@@ -27,10 +29,11 @@ export const KIND_LABELS: Readonly<Record<StoredKind, string>> = {
   weekly_intelligence: 'Weekly Intelligence Report',
   adviser: 'Accountant/CFO Report',
   custom_ai: 'Custom AI Report',
+  funding_readiness: 'Funding Readiness Report',
 };
 
 export interface Composed {
-  readonly content: BriefContent | AdviserContent;
+  readonly content: BriefContent | AdviserContent | FundingReportContent;
   readonly contentVersion: string;
   readonly window: { readonly start: string; readonly end: string };
   readonly periodId: string | null;
@@ -43,7 +46,14 @@ export async function composeStoredReport(input: {
   readonly kind: ComposableKind;
   readonly windowStart: string | null;
   readonly now: Date;
+  /** The Funding Readiness Report's month, when one was named. */
+  readonly periodId?: string | null;
 }): Promise<Composed | null> {
+  if (input.kind === 'funding_readiness') {
+    const funding = await composeFundingReport({ db: input.db, orgId: input.orgId, periodId: input.periodId ?? null, now: input.now });
+    if (funding === null) return null;
+    return { content: funding.content, contentVersion: FUNDING_REPORT_VERSION, window: funding.window, periodId: funding.periodId };
+  }
   if (input.kind === 'adviser') {
     const adviser = await composeAdviserReport({ db: input.db, orgId: input.orgId, now: input.now });
     if (adviser === null) return null;
@@ -185,7 +195,7 @@ export async function requestCompose(
   ctx: AccessContext, kind: ComposableKind, windowStart: string | null,
 ): Promise<string> {
   assertCan(ctx, 'reports.generate');
-  if (kind !== 'adviser') {
+  if (kind !== 'adviser' && kind !== 'funding_readiness') {
     if (windowStart === null || !/^\d{4}-\d{2}-\d{2}$/.test(windowStart)) {
       throw new ValidationError('Choose the day or week the report covers.');
     }
@@ -194,7 +204,7 @@ export async function requestCompose(
   return callApi<string>(ctx.db, 'enqueue_job', {
     p_org: orgOf(ctx),
     p_job_type: 'report.compose',
-    p_payload: kind === 'adviser' ? { kind } : { kind, windowStart },
+    p_payload: kind === 'adviser' || kind === 'funding_readiness' ? { kind } : { kind, windowStart },
   }, ctx.requestId);
 }
 

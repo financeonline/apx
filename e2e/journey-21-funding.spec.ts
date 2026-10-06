@@ -25,6 +25,8 @@ test('funding readiness is hidden until switched on, then honest about what it d
   await expect(page.getByRole('link', { name: 'Funding', exact: true })).toHaveCount(0);
   const off = await page.goto(`/app/${slug}/funding`);
   expect(off?.status()).toBe(404);
+  await page.goto(`/app/${slug}/reports`);
+  await expect(page.getByText('Funding Readiness is switched off for this organisation, so this report is not available.')).toBeVisible();
 
   // On (the super admin's switch, as the platform page sets it), then the backfill runs.
   sql(`update public.organizations set features = features || '{"funding_readiness": true}' where slug = '${slug}'`);
@@ -48,4 +50,17 @@ test('funding readiness is hidden until switched on, then honest about what it d
 
   await page.getByRole('link', { name: 'See the figures behind this assessment' }).click();
   await expect(page).toHaveURL(/\/evidence\/[0-9a-f-]{36}$/);
+
+  // The Funding Readiness Report (REQ-RP-05): the assessment as it stood, kept.
+  await page.goto(`/app/${slug}/reports`);
+  // The innermost block holding the section's heading; the adviser section has its own "Produce one now".
+  const section = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Funding Readiness Report', exact: true }) }).last();
+  await expect(page.getByText('No Funding Readiness Report yet.')).toBeVisible();
+  await section.getByRole('button', { name: 'Produce one now' }).click();
+  await drainQueue(page, slug);
+  await page.goto(`/app/${slug}/reports`);
+  await page.getByRole('link', { name: '1–31 August 2026', exact: true }).click();
+  await expect(page.getByRole('heading', { name: /^Funding Readiness Report — / })).toBeVisible();
+  await expect(page.getByText(/It is not a lender, credit, investment or funding approval rating/)).toBeVisible();
+  await expect(page.getByText('Insufficient data', { exact: true })).toBeVisible();
 });
