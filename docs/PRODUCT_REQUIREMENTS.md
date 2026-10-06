@@ -328,7 +328,7 @@ MVP column values:
 | REQ-AD-05 | Clients requiring attention. | SOW §18 | SOW requirement | **Built (P15)**: the attention queue (ADR-112 §3) | — | — |
 | REQ-AD-06 | Client alerts (cross-client). | SOW §18 | SOW requirement | **Built (P15)**: `/portfolio/alerts` | — | — |
 | REQ-AD-07 | Client AI analysis (cross-client). | SOW §18 | SOW requirement | **Built (P15)**: `/portfolio/analyst` (ADR-113, ADR-118) | — | — |
-| REQ-AD-08 | Client reports (cross-client). | SOW §18 | SOW requirement | Partly built: each client's Accountant/CFO Report (Phase 17, ADR-141), reached from the client page; no combined cross-client report | — | — |
+| REQ-AD-08 | Client reports (cross-client). | SOW §18 | SOW requirement | Built locally, not reviewed: each client's Accountant/CFO Report (Phase 17, ADR-141), and the combined Portfolio Report on screen and as a PDF (ADR-149) | — | — |
 | REQ-AD-09 | Outstanding actions (cross-client). | SOW §18 | SOW requirement | **Built (P15)**: `/portfolio/actions` | — | — |
 | REQ-AD-10 | Advisory opportunities. | SOW §18 | SOW requirement | Built locally, not reviewed (ADR-148): six fixed rules over each client's latest Health breakdown, on the overview and the client page, recordable as an action | — | — |
 

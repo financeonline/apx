@@ -183,7 +183,7 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 | Stranger (signed in, no membership) | 404 | 404 | none |
 | Anonymous | 302 → sign-in | 302 → sign-in | — |
 
-`/portfolio/alerts`, `/portfolio/actions` and `/portfolio/analyst` follow the `/portfolio` column. The analyst form is hidden when the scope is empty. Each stored answer carries the server's grounding status: *Grounded* only when every block was rendered by the server from authorised facts, attention reasons, sources and library phrases, and nothing the model sent was discarded (`passed`, ADR-118); *Partly grounded* when something was discarded (`degraded`). The model writes no text into the briefing.
+`/portfolio/alerts`, `/portfolio/actions`, `/portfolio/analyst`, `/portfolio/report` and `/portfolio/report/pdf` (ADR-149: the Portfolio Report on screen and as a PDF download, composed from `loadPortfolio` + `loadOpportunities`, never stored) follow the `/portfolio` column. The overview and each client page carry the advisory opportunities (ADR-148). The analyst form is hidden when the scope is empty. Each stored answer carries the server's grounding status: *Grounded* only when every block was rendered by the server from authorised facts, attention reasons, sources and library phrases, and nothing the model sent was discarded (`passed`, ADR-118); *Partly grounded* when something was discarded (`degraded`). The model writes no text into the briefing.
 
 ## 6. Platform family `/platform/*`
 

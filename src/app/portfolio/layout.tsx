@@ -30,6 +30,7 @@ export default async function PortfolioLayout({ children }: { children: React.Re
             <Link href="/portfolio/alerts" className="text-ink-muted hover:text-ink">Alerts</Link>
             <Link href="/portfolio/actions" className="text-ink-muted hover:text-ink">Actions</Link>
             <Link href="/portfolio/analyst" className="text-ink-muted hover:text-ink">Adviser analyst</Link>
+            <Link href="/portfolio/report" className="text-ink-muted hover:text-ink">Report</Link>
           </nav>
           <div className="ml-auto flex items-center gap-4 text-sm">
             <Link href="/select-organization" className="text-ink-muted hover:text-ink">Organisations</Link>

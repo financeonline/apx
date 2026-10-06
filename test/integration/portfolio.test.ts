@@ -1,7 +1,7 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { isMotionError } from '@/core/errors';
 import {
-  loadOpportunities, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts, resolvePortfolioContext,
+  loadOpportunities, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts, loadPortfolioReport, resolvePortfolioContext,
   type PortfolioContext, type PortfolioView,
 } from '@/modules/portfolio';
 import { adminSql, clientFor, createAuthUser } from './setup';
@@ -324,5 +324,16 @@ describe('advisory opportunities follow the same boundary (ADR-148)', () => {
       .rpc('portfolio_health_breakdowns', { p_orgs: [A, B, C] });
     expect(error).toBeNull();
     expect(data ?? []).toEqual([]);
+  });
+});
+
+describe('the portfolio report covers the caller\'s portfolio and nothing else (ADR-149)', () => {
+  it('the employee\'s report is A and B, attention first; the super admin\'s includes C', async () => {
+    const report = await loadPortfolioReport(await ctxFor(employee, 'aal2'));
+    expect(report.clients.map((c) => c.organizationId)).toEqual([A, B]);
+    expect(report.clients[0]!.attention.length).toBeGreaterThan(0);
+    expect(report.counts.clients).toBe(2);
+    const admin = await loadPortfolioReport(await ctxFor(superAdmin, 'aal2'));
+    expect(admin.clients.map((c) => c.organizationId)).toEqual(expect.arrayContaining([A, B, C]));
   });
 });

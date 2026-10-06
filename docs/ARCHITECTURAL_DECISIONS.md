@@ -2817,3 +2817,13 @@ Decision:
 4. **Into an action.** "Record as an action" sends only the client and the rule; the server works the opportunity out again from the current breakdown and creates the action in the client's Action Centre (`api.create_action`, source `health_score` = the score it rests on), under the client organisation's own `actions.create`.
 
 Consequences: an opportunity is only as current as the latest calculation; the thresholds can change with a bump to `opportunities.v2`.
+
+### ADR-149 · The Portfolio Report — every advised client on one page and in one PDF
+Status: **built locally on 2026-10-06 on the owner's instruction. Not reviewed, merged or deployed.** SOW §20 lists "Client reports" for the Command Centre; each client already had its own Accountant/CFO Report (ADR-141), but there was no report across clients (REQ-AD-08).
+
+Decision:
+1. **The overview's facts, assembled** (`portfolio/domain/report.ts`, `portfolio_report.v1`, pure): portfolio counts; then every advised client — attention queue first in its order, then the rest by name — with its health (score, band, month, trend, areas scored), attention reasons, alert and action counts, and its advisory opportunities with their reasons. No new figure or judgement; the Health disclaimer is carried.
+2. **Composed when asked, not stored.** A portfolio spans organisations and every stored report belongs to exactly one (`public.reports`), so `/portfolio/report` and `/portfolio/report/pdf` compose it from the current figures each time (`no-store`), for the caller's own portfolio and nothing else; no portfolio is the uniform 404.
+3. The PDF renderer lives in `modules/reporting` (`renderPortfolioPdf`), which already reads the portfolio; the portfolio module does not import reporting, so there is no cycle.
+
+Consequences: the report is as current as the latest calculation of each client; two downloads minutes apart can differ.

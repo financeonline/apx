@@ -86,6 +86,16 @@ test('an owner of two organisations sees both on the Command Centre; a client se
   await clientOpps.getByRole('button', { name: 'Record as an action' }).first().click();
   await expect(clientOpps.getByText(`Added to ${ORG_A}'s Action Centre.`)).toBeVisible({ timeout: 15_000 });
   expect(sql(`select count(*) from public.actions where organization_id = '${orgA}' and source_type = 'health_score' and title = 'Campaigns paying back'`)).toBe('1');
+  // ---- The Portfolio Report (ADR-149): on screen and as a PDF -----------------------------------
+  await page.goto('/portfolio/report');
+  await expect(page.getByRole('heading', { level: 1, name: 'Portfolio Report' })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: ORG_A })).toBeVisible();
+  await expect(page.getByRole('heading', { level: 2, name: ORG_B })).toBeVisible();
+  await expect(page.getByText(/Opportunity: Campaigns paying back/)).toBeVisible();
+  const pdf = await page.request.get('/portfolio/report/pdf');
+  expect(pdf.status()).toBe(200);
+  expect(pdf.headers()['content-type']).toBe('application/pdf');
+  expect((await pdf.body()).subarray(0, 5).toString()).toBe('%PDF-');
   await page.goto('/portfolio');
 
   // ---- Drill-down: the client brief, then the organisation's own alert page --------------------

@@ -2,6 +2,7 @@ import 'server-only';
 import { DUE_SOON_DAYS, addDays } from '@/modules/actions';
 import { attentionEntry, attentionReasons, compareAttention, trendOf } from '../domain/attention';
 import { opportunityEntry, type OpportunityEntry } from '../domain/opportunities';
+import { assemblePortfolioReport, type PortfolioReportContent } from '../domain/report';
 import type {
   CappedList, ClientCounts, ClientRow, PortfolioAction, PortfolioAlert, PortfolioCounts,
   PortfolioOrganisation, PortfolioView, RecentChange,
@@ -187,4 +188,15 @@ function recentChanges(
     }
   }
   return out.sort((a, b) => b.at.localeCompare(a.at) || a.href.localeCompare(b.href));
+}
+
+/**
+ * The Portfolio Report (ADR-149): the overview and the opportunities, assembled for every client the
+ * caller advises. Composed when asked and not stored — a portfolio spans organisations, and every
+ * stored report belongs to exactly one.
+ */
+export async function loadPortfolioReport(ctx: PortfolioContext): Promise<PortfolioReportContent> {
+  const view = await loadPortfolio(ctx);
+  const opportunities = await loadOpportunities(ctx, view);
+  return assemblePortfolioReport(view, opportunities, ctx.now());
 }

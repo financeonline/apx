@@ -51,8 +51,12 @@ export {
 
 export {
   ATTENTION_CAP, OPPORTUNITY_CAP, RECENT_DAYS, hrefs, lensTotal, loadOpportunities, loadPortfolio,
-  loadPortfolioActions, loadPortfolioAlerts,
+  loadPortfolioActions, loadPortfolioAlerts, loadPortfolioReport,
 } from './services/portfolio';
+export {
+  PORTFOLIO_REPORT_VERSION, assemblePortfolioReport,
+  type PortfolioReportClient, type PortfolioReportContent,
+} from './domain/report';
 export {
   OPPORTUNITY_KINDS, OPPORTUNITY_RULES_VERSION, OPPORTUNITY_THRESHOLDS, opportunitiesFor, opportunityEntry,
   type BreakdownDimension, type ClientBreakdown, type Opportunity, type OpportunityEntry, type OpportunityKind,
