@@ -210,6 +210,26 @@ export async function parseAndValidate(
       bankIdentity,
     });
 
+    /*
+     * ADR-139 C4: a report that would REPLACE an accepted report of its kind for a month it states is
+     * asked about here, while the reviewer is reading the file — not only when Import is pressed
+     * (commit still re-checks under the organisation lock, for a report committed in between).
+     */
+    let requiredConfirmations = [...result.requiredConfirmations];
+    const kind = input.importType === 'trial_balance' || input.importType === 'pnl_report' || input.importType === 'balance_sheet'
+      ? input.importType : null;
+    if (input.targetTable === 'period_balances' && kind !== null && !requiredConfirmations.includes('IMP-COV-013')) {
+      const months = [...new Set(result.rows.filter((r) => r.status !== 'error')
+        .map((r) => r.mapped.period_start).filter((m): m is string => typeof m === 'string' && m !== ''))];
+      if (months.length > 0) {
+        const { count } = await deps.db.from('period_balances').select('id', { count: 'exact', head: true })
+          .eq('organization_id', input.organizationId).eq('balance_kind', kind)
+          .eq('record_status', 'accepted').is('superseded_by', null)
+          .in('period_start', months).neq('import_batch_id', input.batchId);
+        if ((count ?? 0) > 0) requiredConfirmations = [...requiredConfirmations, 'IMP-COV-013'];
+      }
+    }
+
     // Every parsed line becomes a row, including the ones that will never commit. That is the
     // invariant the whole engine rests on (SOW §23).
     await deps.writeRows(
@@ -231,7 +251,7 @@ export async function parseAndValidate(
     await deps.setValidation(
       input.batchId,
       [...result.batchIssues],
-      [...result.requiredConfirmations],
+      requiredConfirmations,
       result.counts,
       input.table.statement
         ? {
@@ -242,7 +262,7 @@ export async function parseAndValidate(
         : null,
     );
 
-    return { counts: result.counts, requiredConfirmations: result.requiredConfirmations };
+    return { counts: result.counts, requiredConfirmations };
   } catch (cause) {
     // §16: a parse or validation failure leaves the batch `failed` with a reason the user can act
     // on, and the document intact so they can retry without re-uploading. It is never swallowed.

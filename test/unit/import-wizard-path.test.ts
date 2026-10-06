@@ -107,6 +107,8 @@ class Query implements PromiseLike<{ data: Row[]; error: null }> {
   limit() { return this; }
   eq(column: string, value: unknown) { this.filters.push((r) => r[column] === value); return this; }
   is(column: string, value: unknown) { this.filters.push((r) => (r[column] ?? null) === value); return this; }
+  neq(column: string, value: unknown) { this.filters.push((r) => r[column] !== value); return this; }
+  in(column: string, values: readonly unknown[]) { this.filters.push((r) => values.includes(r[column])); return this; }
   range(from: number, to: number) { this.window = [from, to]; return this; }
   private result(): Row[] {
     const rows = (state.tables[this.table] ?? []).filter((r) => this.filters.every((f) => f(r)));
@@ -114,7 +116,7 @@ class Query implements PromiseLike<{ data: Row[]; error: null }> {
   }
   maybeSingle() { return Promise.resolve({ data: this.result()[0] ?? null, error: null }); }
   then<A, B>(ok?: ((v: { data: Row[]; error: null }) => A | PromiseLike<A>) | null, bad?: ((e: unknown) => B | PromiseLike<B>) | null) {
-    return Promise.resolve({ data: this.result(), error: null }).then(ok, bad);
+    return Promise.resolve({ data: this.result(), error: null, count: this.result().length }).then(ok, bad);
   }
 }
 
@@ -589,6 +591,16 @@ describe('balance report layouts → closing_balance', () => {
     organizationId: ORG, userId: '0a000000-0000-4000-8000-000000000001', requestId: 'unit', db: fakeDb as never,
     file: new File([[header, ...rows].join('\n')], 'balances.csv', { type: 'text/csv' }),
     importType: importType as never, periodStart: '2026-08-01', periodEnd: '2026-08-31', bankAccountId: null,
+  });
+
+  it('ADR-139 C4: a trial balance for a month that already has one asks IMP-COV-013 while it is reviewed, not at Import', async () => {
+    state.tables.period_balances = [{ id: 'pb-old', organization_id: ORG, balance_kind: 'trial_balance', period_start: '2026-08-01',
+      record_status: 'accepted', superseded_by: null, import_batch_id: 'b-earlier' }];
+    const result = await upload('trial_balance', 'Account,Debit,Credit', ['Sales,,1210.00', 'Cost of Sales,1210.00,']);
+    expect(result.requiredConfirmations).toContain('IMP-COV-013');
+    state.tables.period_balances = [];
+    const fresh = await upload('trial_balance', 'Account,Debit,Credit', ['Sales,,1210.00', 'Cost of Sales,1210.00,']);
+    expect(fresh.requiredConfirmations).not.toContain('IMP-COV-013');
   });
 
   it('a Debit / Credit trial balance: closing = debit − credit, both totals kept, no sign question', async () => {

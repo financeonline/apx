@@ -116,13 +116,12 @@ describe('N-3 · a corrected report replaces the previous one', () => {
     const oldBundle = await buildBundleForMetric(ctxFor(o), oldSnapshot);
 
     const corrected = await upload(o, 'trial_balance', '2026-07', TB('-7100.00', '2100.00', '5000.00'));
-    await confirm(corrected, 'cumulative');
-    // The first attempt writes nothing and asks: this replaces July's report (IMP-COV-013).
-    const ask = await rpc('commit_import_batch', { p_batch: corrected });
-    expect(ask.error, ask.error?.message).toBeNull();
-    expect(ask.data).toMatchObject({ status: 'needs_confirmation', code: 'IMP-COV-013', replaces: 3 });
+    // ADR-139 C4: the replacement is asked while the file is reviewed (IMP-COV-013), before Import.
     expect(one(`select ('IMP-COV-013' = any (required_confirmations))::text || '|' || status from public.import_batches where id = '${corrected}'`))
       .toBe('true|awaiting_review');
+    // Unanswered, commit is refused and writes nothing.
+    const early = await rpc('commit_import_batch', { p_batch: corrected });
+    expect(early.error?.message ?? '').toContain('IMP-COV-013');
     expect(one(`select count(*) from public.period_balances where import_batch_id = '${corrected}'`)).toBe('0');
 
     const done = await commit(corrected, 'cumulative');
@@ -143,7 +142,7 @@ describe('N-3 · a corrected report replaces the previous one', () => {
        where b.import_batch_id = '${wrong}' and e.event = 'superseded' and e.import_batch_id = '${corrected}'`)).toBe('3');
     expect(lines(`select action from public.audit_events where organization_id = '${o}' and target_id = '${corrected}'
        and action in ('import.replacement_unconfirmed', 'import.confirmed', 'import.committed') order by id`))
-      .toEqual(expect.arrayContaining(['import.replacement_unconfirmed', 'import.committed']));
+      .toEqual(expect.arrayContaining(['import.confirmed', 'import.committed']));
 
     // Evidence: the bundle opened on the wrong figure still shows what was shown THEN — 9,999 − 6,000.
     const view = await loadEvidenceDrawer(ctxFor(o), oldBundle);
@@ -158,9 +157,7 @@ describe('N-3 · a corrected report replaces the previous one', () => {
     const first = await upload(o, 'trial_balance', '2026-07', TB('-1100.00', '300.00', '800.00'));
     await commit(first, 'movement');
     const corrected = await upload(o, 'trial_balance', '2026-07', TB('-1200.00', '300.00', '900.00'));
-    await confirm(corrected, 'movement');
-    // Ask, and answer, the replacement question so the commit gets as far as writing.
-    await rpc('commit_import_batch', { p_batch: corrected });
+    // Every question answered (IMP-COV-013 is asked at validation, C4), so the commit gets as far as writing.
     await confirm(corrected, 'movement');
     // Sabotage the LAST row so the failure comes after earlier rows were written in the transaction.
     adminSql(`update public.import_rows set mapped_data = jsonb_set(mapped_data, '{closing_balance}', '"not a number"')
@@ -184,8 +181,8 @@ describe('N-3 · a corrected report replaces the previous one', () => {
     const a = await upload(o, 'trial_balance', '2026-07', TB('-1200.00', '300.00', '900.00'));
     const b = await upload(o, 'trial_balance', '2026-07', TB('-1300.00', '300.00', '1000.00'));
     for (const batch of [a, b]) {
-      await confirm(batch, 'movement');
-      expect((await rpc('commit_import_batch', { p_batch: batch })).data).toMatchObject({ status: 'needs_confirmation' });
+      // Both are checked against July's report while it is current: both are asked IMP-COV-013.
+      expect(one(`select ('IMP-COV-013' = any (required_confirmations))::text from public.import_batches where id = '${batch}'`)).toBe('true');
       await confirm(batch, 'movement');
     }
     const results = await Promise.all([a, b].map((batch) => rpc('commit_import_batch', { p_batch: batch })));
@@ -226,6 +223,43 @@ describe('N-3 · a corrected report replaces the previous one', () => {
     expect(current(a, '2026-07')).toEqual(['Cash=900.00', 'Operating Expenses=300.00', 'Revenue=-1200.00']);
     expect(current(b, '2026-07')).toEqual(['Cash=4700.00', 'Operating Expenses=300.00', 'Revenue=-5000.00']);
     expect(one(`select count(*) from public.period_balances where organization_id = '${b}' and superseded_by is not null`)).toBe('0');
+  }, 300_000);
+});
+
+describe('ADR-139 C4 · commit still re-checks: a report committed after this one was validated', () => {
+  it('a correction validated BEFORE the original was committed is asked at commit, and nothing is written meanwhile', async () => {
+    const { id: o } = await org('LATEASK');
+    const original = await upload(o, 'trial_balance', '2026-07', TB('-1100.00', '300.00', '800.00'));
+    const correction = await upload(o, 'trial_balance', '2026-07', TB('-1200.00', '300.00', '900.00'));
+    // Neither saw the other when validated.
+    expect(one(`select ('IMP-COV-013' = any (required_confirmations))::text from public.import_batches where id = '${correction}'`)).toBe('false');
+    await commit(original, 'movement');
+    await confirm(correction, 'movement');
+    const ask = await rpc('commit_import_batch', { p_batch: correction });
+    expect(ask.error, ask.error?.message).toBeNull();
+    expect(ask.data).toMatchObject({ status: 'needs_confirmation', code: 'IMP-COV-013', replaces: 3 });
+    expect(one(`select count(*) from public.period_balances where import_batch_id = '${correction}'`)).toBe('0');
+    expect(one(`select status from public.import_batches where id = '${correction}'`)).toBe('awaiting_review');
+    expect(await commit(correction, 'movement')).toMatchObject({ status: 'committed', superseded: 3 });
+  }, 300_000);
+});
+
+describe('NF-3 · a corrected report can be rolled back', () => {
+  it('rolling back the correction restores the original: July 1,100 again, nothing lost, no duplicate-key error', async () => {
+    const { id: o } = await org('UNDO');
+    const original = await upload(o, 'trial_balance', '2026-07', TB('-1100.00', '300.00', '800.00'));
+    await commit(original, 'movement');
+    const correction = await upload(o, 'trial_balance', '2026-07', TB('-1200.00', '300.00', '900.00'));
+    await commit(correction, 'movement');
+    expect(current(o, '2026-07')).toEqual(['Cash=900.00', 'Operating Expenses=300.00', 'Revenue=-1200.00']);
+    const undo = await rpc('rollback_import_batch', { p_batch: correction, p_reason: 'the correction was wrong' });
+    expect(undo.error, undo.error?.message).toBeNull();
+    expect(undo.data).toMatchObject({ rejected: 3, restored: 3 });
+    expect(current(o, '2026-07')).toEqual(['Cash=800.00', 'Operating Expenses=300.00', 'Revenue=-1100.00']);
+    expect(one(`select count(*) from public.record_status_events e join public.period_balances b on b.id = e.record_id
+      where b.import_batch_id = '${original}' and e.event = 'restored'`)).toBe('3');
+    await calculateAndAlert(o);
+    expect(value(o, '2026-07', 'revenue')).toBe('1100.00');
   }, 300_000);
 });
 
