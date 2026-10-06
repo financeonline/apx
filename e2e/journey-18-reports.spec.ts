@@ -44,7 +44,8 @@ test('a daily brief is produced, kept, drilled to its records and printed', asyn
     'Accountant/CFO Report', 'Custom AI Report', 'Funding Readiness Report']) {
     await expect(page.getByRole('heading', { name: heading })).toBeVisible();
   }
-  await expect(page.getByText(/arrives with the Funding Readiness assessment, which is not available yet/)).toBeVisible();
+  // Funding Readiness is off by default (ADR-145): the section says so rather than hiding it.
+  await expect(page.getByText('Funding Readiness is switched off for this organisation, so this report is not available.')).toBeVisible();
 
   // Today so far: shown, and said to be unfinished.
   await page.getByRole('link', { name: 'Today so far' }).click();

@@ -197,6 +197,7 @@ begin
   return new;
 end $$;
 alter function app.funding_enablement() owner to motion_definer;
+revoke all on function app.funding_enablement() from public, anon, authenticated;
 create trigger funding_enablement after update of features on public.organizations
   for each row execute function app.funding_enablement();
 

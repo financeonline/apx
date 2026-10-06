@@ -372,6 +372,7 @@ begin
   return new;
 end $$;
 alter function app.notify_data_added() owner to motion_definer;
+revoke all on function app.notify_data_added() from public, anon, authenticated;
 create trigger notify_data_added after update of status on public.import_batches
   for each row execute function app.notify_data_added();
 
@@ -392,6 +393,7 @@ begin
   return new;
 end $$;
 alter function app.notify_report_ready() owner to motion_definer;
+revoke all on function app.notify_report_ready() from public, anon, authenticated;
 create trigger notify_report_ready after insert on public.reports
   for each row execute function app.notify_report_ready();
 

@@ -57,9 +57,12 @@ test('funding readiness is hidden until switched on, then honest about what it d
   const section = page.locator('div').filter({ has: page.getByRole('heading', { name: 'Funding Readiness Report', exact: true }) }).last();
   await expect(page.getByText('No Funding Readiness Report yet.')).toBeVisible();
   await section.getByRole('button', { name: 'Produce one now' }).click();
+  // Wait for the job to be queued before draining, or the drain can run first.
+  await expect(section.getByText('We are producing the report. It will appear in the list shortly.')).toBeVisible();
   await drainQueue(page, slug);
   await page.goto(`/app/${slug}/reports`);
-  await page.getByRole('link', { name: '1–31 August 2026', exact: true }).click();
+  // The ledger's only complete month is May 2026.
+  await page.getByRole('link', { name: '1–31 May 2026', exact: true }).click();
   await expect(page.getByRole('heading', { name: /^Funding Readiness Report — / })).toBeVisible();
   await expect(page.getByText(/It is not a lender, credit, investment or funding approval rating/)).toBeVisible();
   await expect(page.getByText('Insufficient data', { exact: true })).toBeVisible();
