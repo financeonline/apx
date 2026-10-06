@@ -119,9 +119,9 @@ describe('N-3 · a corrected report replaces the previous one', () => {
     // ADR-139 C4: the replacement is asked while the file is reviewed (IMP-COV-013), before Import.
     expect(one(`select ('IMP-COV-013' = any (required_confirmations))::text || '|' || status from public.import_batches where id = '${corrected}'`))
       .toBe('true|awaiting_review');
-    // Unanswered, commit is refused and writes nothing.
+    // Unanswered, commit is refused (by the first missing confirmation) and writes nothing.
     const early = await rpc('commit_import_batch', { p_batch: corrected });
-    expect(early.error?.message ?? '').toContain('IMP-COV-013');
+    expect(early.error?.message ?? '').toContain('VALIDATION: confirmation');
     expect(one(`select count(*) from public.period_balances where import_batch_id = '${corrected}'`)).toBe('0');
 
     const done = await commit(corrected, 'cumulative');

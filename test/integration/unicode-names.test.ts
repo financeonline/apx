@@ -184,10 +184,14 @@ describe('customers in five scripts, through the wizard and commit', () => {
  */
 describe('D-5 · resolving a held name', () => {
   const held = (a: string, b: string, key: string): [string, string] => {
+    // Seeded as the migration leaves a collision: both rows on held keys. The name trigger would refuse
+    // the second insert (the two names share a key), so it is bypassed for the seed only.
     const ids = adminSql(`
-      insert into public.counterparties (organization_id, name, kind) values ('${orgId}', '${a}', 'customer'), ('${orgId}', '${b}', 'customer');
-      update public.counterparties set normalized_name = app.held_name_key('${key}', id)
-       where organization_id = '${orgId}' and name in ('${a}', '${b}');
+      set session_replication_role = replica;
+      insert into public.counterparties (id, organization_id, name, normalized_name, kind)
+      select g, '${orgId}', n, app.held_name_key('${key}', g), 'customer'
+        from (values (gen_random_uuid(), '${a}'), (gen_random_uuid(), '${b}')) v(g, n);
+      set session_replication_role = origin;
       select string_agg(id::text, ',' order by name) from public.counterparties where organization_id = '${orgId}' and name in ('${a}', '${b}');`)
       .split('\n').pop()!.trim().split(',');
     return [ids[0]!, ids[1]!];

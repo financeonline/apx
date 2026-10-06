@@ -135,11 +135,13 @@ describe('the ledger and trial-balance bases', () => {
     expect(headline(org.LEDGER, '2026-08-01', 'receivables_overdue')?.value).toBeNull(); // a ledger has no due dates
   });
 
-  it('trial balance: balances, and a stated zero for an account it does not list', () => {
+  it('trial balance: balances; an account it does not list is unknown on a trial balance nobody confirmed complete (NF-2)', () => {
     expect([v(org.TB, '2026-06-01', 'receivables'), v(org.TB, '2026-07-01', 'receivables'), v(org.TB, '2026-08-01', 'receivables')])
       .toEqual(['7000.00', '8000.00', '9000.00']);
+    // July lists no payables line. The fixture's trial balance was never answered complete (IMP-TB-016),
+    // so July's payables are unknown — not the 0.00 earlier engines read into the missing line.
     expect([v(org.TB, '2026-06-01', 'payables'), v(org.TB, '2026-07-01', 'payables'), v(org.TB, '2026-08-01', 'payables')])
-      .toEqual(['3000.00', '0.00', '4000.00']);
+      .toEqual(['3000.00', null, '4000.00']);
     expect(v(org.TB, '2026-08-01', 'working_capital')).toBe('10400.00'); // 3,400 + 9,000 + 2,000 − 4,000
   });
 });
