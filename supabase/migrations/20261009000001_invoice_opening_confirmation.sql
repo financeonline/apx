@@ -1,3 +1,6 @@
+-- (Also re-review NF-5: `api.attest_report_completeness` takes the organisation lock, so a confirmation
+-- made while a corrected report is committing is refused as "replaced", never attached to the old one.)
+--
 -- MOTION — audit R-2 (owner decision): a full invoice list states receivables or payables only once
 -- someone has confirmed it includes every invoice still UNPAID AT ITS START, older ones included.
 --
@@ -174,6 +177,23 @@ begin
   if p_reason is null or length(btrim(p_reason)) = 0 then
     raise exception 'VALIDATION: say what you checked in the report' using errcode = '22023';
   end if;
+  -- NF-5: the organisation lock commit and rollback hold. A confirmation never interleaves with a
+  -- report that is replacing this one; once the lock is ours, what we read below is what was committed.
+  perform pg_advisory_xact_lock(hashtext('org:' || v_org::text));
+
+  -- A report replaced for that month is refused in words, not attached to rows nobody reads any more.
+  if v_target = 'period_balances' and exists (
+       select 1 from public.period_balances pb
+        where pb.organization_id = v_org and pb.import_batch_id = p_batch and pb.period_start = p_period_start
+          and pb.superseded_by is not null)
+     and not exists (
+       select 1 from public.period_balances pb
+        where pb.organization_id = v_org and pb.import_batch_id = p_batch and pb.period_start = p_period_start
+          and pb.record_status = 'accepted' and pb.superseded_by is null) then
+    raise exception 'CONFLICT: this report was replaced by a newer one for that month; confirm the newer import instead'
+      using errcode = '40001';
+  end if;
+
   -- One import, one month, and only a month this import still states (its lines are current). An
   -- invoice list's opening is a fact about its START: the month it starts in.
   if p_period_start is null or p_period_start <> date_trunc('month', p_period_start)::date

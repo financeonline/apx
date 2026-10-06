@@ -216,6 +216,45 @@ describe('D-4 · an opening journal takes effect from its date', () => {
     expect(receivablesAt(aug, false).value).toBe('6000.00');
   });
 
+  /*
+   * D-6 (owner decision; FU-5): no opening journal, but a cumulative balance sheet for June states
+   * receivables 3,000. July and August come from it plus the ledger's movements: July +1,000 → 4,000;
+   * August −2,000 → 2,000. Without the sheet: NULL `no_opening_balance`, as before.
+   */
+  const sheetJune: AggregateCell = {
+    periodId: jun.id, source: 'period_balances', standardCategory: 'receivables', accountId: 'a-ar', counterpartyId: null, bankAccountId: null,
+    balanceKind: 'balance_sheet', balanceBasis: 'cumulative', invoiceType: null, transferKind: null, unpairedTransferCandidate: false,
+    debit: '3000', credit: '0', amount: '3000', rowCount: 1, fallbackRows: 0, minDate: null, maxDate: null,
+  };
+  const movementsOnly = [ar(jul, '1000'), ar(aug, '0', '2000')];
+  const anchoredAt = (p: PeriodRef, withSheet: boolean): MetricResult => {
+    const all = [...(withSheet ? [sheetJune] : []), ...movementsOnly];
+    const glJulAug = batch({ targetTable: 'ledger_entries', importType: 'general_ledger', invoiceListKind: null, periodStart: '2026-07-01', periodEnd: '2026-08-31' });
+    const coverage = computeCoverage({ period: p, batches: [glJulAug], bankAccounts: [], rowCounts: { ledger: 1 }, asOf: ctx.asOf });
+    return composePeriod({
+      period: p, coverage, cells: all.filter((c) => c.periodId === p.id), transferLegs: [], context: ctx,
+      receivables: { invoices: [], batches: [glJulAug], asOfIsPeriodEnd: true, priorDenominators: [],
+        ledger: { cells: all, openingJournal: [], periodStarts } },
+    }).find((r) => r.key === 'receivables' && r.dimensionType === 'none')!;
+  };
+
+  it('D-6: no journal, a June balance sheet of 3,000 anchors the ledger — July 4,000, August 2,000', () => {
+    expect([anchoredAt(jul, true).value, anchoredAt(jul, true).basis]).toEqual(['4000.00', 'ledger']);
+    expect(anchoredAt(aug, true).value).toBe('2000.00');
+    expect(anchoredAt(aug, true).components).toMatchObject({ opening_balance: '3000.00', movements: '-1000.00' });
+  });
+
+  it('D-6: its evidence is the sheet\'s line plus the ledger rows since, each with its own expected total', () => {
+    const q = anchoredAt(aug, true).evidenceQuery as unknown as { kind: string; formula: string; terms: Array<{ name: string; expected: string; descriptor: { table: string } }> };
+    expect([q.kind, q.formula]).toEqual(['difference', 'opening_balance + movements']);
+    expect(q.terms.map((t) => [t.name, t.descriptor.table, t.expected])).toEqual([
+      ['opening_balance', 'period_balances', '3000.00'], ['movements', 'ledger_entries', '-1000.00']]);
+  });
+
+  it('D-6: without an anchoring statement, still NULL no_opening_balance — never the movements alone', () => {
+    expect(anchoredAt(aug, false).value).toBeNull();
+  });
+
   it('the drill-down starts on the journal\'s day, so it selects exactly the rows the figure summed', () => {
     const evidence = receivablesAt(aug).evidenceQuery as { kind: 'leaf'; descriptor: { filters: Record<string, unknown> } };
     expect(evidence.descriptor.filters).toMatchObject({ period_ids: [aug.id, jul.id].sort(), entry_date_from: '2026-07-15' });

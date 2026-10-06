@@ -64,15 +64,28 @@ export function statusFor(input: {
     return {
       kind: 'estimate',
       label: 'Estimate',
-      tooltip: 'Estimated from bank activity; may include VAT and timing differences',
+      // R-3: an estimate can rest on undated payments rather than on bank activity — say which.
+      tooltip: dataQuality.warnings.includes('payment_date_unknown')
+        ? 'Some invoices were paid on dates that were not recorded, so this could be higher; tap for the range'
+        : 'Estimated from bank activity; may include VAT and timing differences',
     };
   }
 
-  if (dataQuality.completeness < PARTIAL_DATA_THRESHOLD || dataQuality.warnings.length > 0) {
+  // NF-7: a zero resting on a confirmed-complete report is not missing data; it is said, not hidden.
+  const gaps = dataQuality.warnings.filter((w) => w !== 'zero_by_completeness');
+  if (dataQuality.completeness < PARTIAL_DATA_THRESHOLD || gaps.length > 0) {
     return {
       kind: 'partial',
       label: 'Partial data',
       tooltip: 'Some data is missing or uncategorised — tap for details',
+    };
+  }
+
+  if (dataQuality.warnings.includes('zero_by_completeness')) {
+    return {
+      kind: 'calculated',
+      label: 'Calculated',
+      tooltip: 'Some categories count as zero because the report was confirmed as listing every account',
     };
   }
 
@@ -95,6 +108,9 @@ const MISSING_REASONS: Readonly<Record<string, string>> = {
   account_absent_unconfirmed: 'An account appears in one month’s report but not the other’s, and the report does not show it is complete, so this month cannot be worked out.',
   category_not_in_report: 'Your report has no line for this and is only part of your accounts, so we cannot treat it as zero.',
   opening_invoices_unconfirmed: 'Your invoice list may leave out older invoices that were still unpaid, so we cannot show what is owed. Confirm on the import that it includes every unpaid invoice, or add a balance sheet.',
+  prior_report_not_complete: 'This month is worked out from this month’s and last month’s year-to-date reports, and last month’s report has not been confirmed as listing every account. Confirm it on last month’s import.',
+  trial_balance_not_balanced: 'Your trial balance was confirmed as complete, but its lines do not balance, so an account it leaves out cannot be counted as zero. Check the file.',
+  zero_by_completeness: 'Some categories count as zero because this report was confirmed as listing every account, not because it shows a zero.',
   report_completeness_unconfirmed: 'Your report has no line for this, and nobody has yet confirmed whether the report lists every account. An owner or admin can confirm it on the import.',
   stale_invoice_data: 'Your invoice list does not show the position at the end of this month.',
   vat_basis_unknown: 'What you owe includes VAT but your costs do not, so the days cannot be compared fairly.',

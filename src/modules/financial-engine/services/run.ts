@@ -390,7 +390,10 @@ export async function runCalculation(
         repo.loadOpeningJournal(scoped, orgId, aggregatedAt),
       ]);
       const historyFrom = allPeriods[0]!.periodStart;
-      const ledgerHistory: readonly AggregateCell[] = openingJournal === null
+      // D-6 (FU-5): the history is needed with no opening journal too — a statement before P can
+      // anchor the ledger's balance. Loaded only when a ledger exists at all.
+      const anyLedger = batches.some((b) => b.targetTable === 'ledger_entries');
+      const ledgerHistory: readonly AggregateCell[] = openingJournal === null && !anyLedger
         ? []
         : windowFrom <= historyFrom
           ? aggregates
@@ -451,6 +454,12 @@ export async function runCalculation(
       // H-1: the evidence ratio, NULL when nothing about banking is known (never the completeness 1).
       const bankCoverage = new Map<string, number | null>();
 
+      // NF-4: the calendar month before P (the one a cumulative report differences against).
+      const coveragePrior = (p: PeriodRef): PeriodRef | undefined => {
+        const i = allPeriods.findIndex((x) => x.id === p.id);
+        return i >= 1 && consecutive(allPeriods[i - 1]!, p) ? allPeriods[i - 1] : undefined;
+      };
+
       for (const period of chunk) {
         const rowCounts: Record<string, number> = {};
         for (const cell of aggregates) {
@@ -466,6 +475,9 @@ export async function runCalculation(
           balanceRowsByKind: balanceRowsByKind(aggregates, period.id),
           // N-1: the completeness test (an attested trial balance must balance) reads P's balance cells.
           balanceCells: aggregates,
+          // NF-4: a cumulative month is only as complete as the prior month's report too.
+          ...(coveragePrior(period) ? { prior: coveragePrior(period)! } : {}),
+          organisationFiscalYearStartMonth: settings.fiscalYearStartMonth,
         });
 
         const index = allPeriods.findIndex((p) => p.id === period.id);
@@ -498,7 +510,8 @@ export async function runCalculation(
           batches: allBatches,
           asOfIsPeriodEnd: period.id !== currentPeriod?.id,
           priorDenominators,
-          ledger: openingJournal === null ? null : { cells: ledgerHistory, openingJournal, periodStarts, preJournal },
+          ledger: openingJournal === null && !anyLedger ? null
+            : { cells: ledgerHistory, openingJournal: openingJournal ?? [], periodStarts, preJournal },
         };
 
         const results = await deps.computePeriod({

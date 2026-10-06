@@ -40,6 +40,8 @@ export type DimensionType =
 export const DATA_QUALITY_WARNINGS = [
   'cash_basis_proxy', 'vat_inclusive', 'card_spend_unclassified', 'account_absent_prior',
   'open_items_only', 'uncategorised_amounts', 'bank_coverage_partial',
+  // NF-7: some categories are zero only because the report was confirmed as listing every account.
+  'zero_by_completeness',
   'statement_balance_mismatch', 'unreconciled_statement', 'basis_differs', 'sign_change',
   'new_in_period', 'partial_working_capital', 'no_due_dates', 'payment_date_unknown',
   'fewer_than_5', 'high_unattributed_share', 'negative_revenue', 'unpaired_transfer_candidate',
@@ -67,6 +69,9 @@ export const DATA_QUALITY_MISSING = [
   'report_completeness_unconfirmed',
   // R-2: a full invoice list nobody has confirmed holds the invoices still unpaid at its start.
   'opening_invoices_unconfirmed',
+  // NF-6: a cumulative month whose PRIOR month's report is not complete; a trial balance answered
+  // complete whose lines do not balance.
+  'prior_report_not_complete', 'trial_balance_not_balanced',
   /**
    * N-1 (Step 0F): P's balance report has no line in this P&L category and does not establish its
    * completeness (no attestation, IMP-TB-016), so the category is unknown — never an inferred zero.
@@ -137,7 +142,8 @@ export interface LeafDescriptor {
  * records; a term that cannot be read names why instead (`descriptor` NULL, `unavailable` set).
  */
 export interface DifferenceTerm {
-  readonly name: 'year_to_date' | 'prior_year_to_date';
+  /** D-6: `opening_balance` + `movements` is the other two-selection figure (a statement-anchored ledger). */
+  readonly name: 'year_to_date' | 'prior_year_to_date' | 'opening_balance' | 'movements';
   /** +1 for the minuend, −1 for the subtrahend: figure = Σ sign × total(term). */
   readonly sign: 1 | -1;
   readonly period_id: string | null;
@@ -161,7 +167,7 @@ export type EvidenceQuery =
    */
   | {
       readonly kind: 'difference';
-      readonly formula: 'year_to_date - prior_year_to_date';
+      readonly formula: 'year_to_date - prior_year_to_date' | 'opening_balance + movements';
       readonly terms: readonly DifferenceTerm[];
     };
 

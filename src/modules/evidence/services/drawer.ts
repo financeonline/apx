@@ -139,7 +139,7 @@ function rangeOf(snapshot: Row): { low: string; high: string; undated: number } 
 }
 
 export interface DrawerDifferenceTerm {
-  readonly name: 'year_to_date' | 'prior_year_to_date';
+  readonly name: 'year_to_date' | 'prior_year_to_date' | 'opening_balance' | 'movements';
   readonly sign: 1 | -1;
   readonly periodId: string | null;
   readonly periodLabel: string | null;
@@ -182,7 +182,7 @@ async function differenceOf(ctx: AccessContext, orgId: string, snapshot: Row): P
     kind?: string;
     formula?: string;
     terms?: Array<{
-      name: 'year_to_date' | 'prior_year_to_date'; sign: 1 | -1; period_id: string | null; descriptor: unknown;
+      name: 'year_to_date' | 'prior_year_to_date' | 'opening_balance' | 'movements'; sign: 1 | -1; period_id: string | null; descriptor: unknown;
       unavailable: string | null; expected?: string | null;
     }>;
   } | null;
@@ -522,7 +522,9 @@ export async function loadEvidenceDrawer(
       : term !== undefined ? term.reconciles
         : sameMoney(selection.total, forValue);
     const termWords = term === undefined ? undefined
-      : `the year-to-date amount the calculation used${term.periodLabel ? ` (to ${term.periodLabel})` : ''}`;
+      : term.name === 'opening_balance' ? `the opening balance the calculation used${term.periodLabel ? ` (at the end of ${term.periodLabel})` : ''}`
+        : term.name === 'movements' ? 'the movements the calculation used'
+          : `the year-to-date amount the calculation used${term.periodLabel ? ` (to ${term.periodLabel})` : ''}`;
 
     records.push({
       itemId: item.id,

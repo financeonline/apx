@@ -286,3 +286,17 @@ describe('the metric card view model (§5)', () => {
     expect(card.status.tooltip).toContain('covering this month');
   });
 });
+
+describe('NF-7 / R-3 badges', () => {
+  it('a zero by completeness is "Calculated", says why, and is not "Partial data"', () => {
+    const badge = statusFor({ value: '1', assurance: 'verified', dataQuality: quality({ warnings: ['zero_by_completeness'] }) });
+    expect(badge.kind).toBe('calculated');
+    expect(badge.tooltip).toMatch(/confirmed as listing every account/);
+  });
+
+  it('an R-3 estimate names undated payments, not bank activity', () => {
+    const badge = statusFor({ value: '1', assurance: 'estimated', dataQuality: quality({ warnings: ['payment_date_unknown'] }) });
+    expect(badge.kind).toBe('estimate');
+    expect(badge.tooltip).toMatch(/paid on dates that were not recorded/);
+  });
+});

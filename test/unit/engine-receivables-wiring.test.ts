@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  buildCashHistory, composePeriod, computeCash, computeCoverage, ENGINE_VERSION, invoiceOutstandingAt, invoiceSideCoverage,
+  buildCashHistory, composePeriod, computeCash, denominatorInputsFor, computeCoverage, ENGINE_VERSION, invoiceOutstandingAt, invoiceSideCoverage,
   type AccountRef, type AggregateCell, type AgingInvoice, type BankAccountRef, type CoverageBatch, type DailyMovement,
   type EngineContext, type MetricResult, type PeriodRef, type ReceivablesComposeInput, type StatementRef,
 } from '@/modules/financial-engine';
@@ -225,16 +225,37 @@ describe('receivables and payables from invoices (§3.4)', () => {
 describe('receivables and payables from a trial balance (§3.4 fallback)', () => {
   const tb = batch({ targetTable: 'period_balances', importType: 'trial_balance', balanceKind: 'trial_balance', invoiceListKind: null, periodStart: '2026-08-01', periodEnd: '2026-08-31' });
 
-  it('reads the closing balance in reporting sign, and states a zero for an absent row', () => {
+  it('reads the closing balance in reporting sign, and states a zero for an absent row of a COMPLETE trial balance', () => {
+    // Answered complete (IMP-TB-016) and balancing: an account it lists no balance for is zero.
+    const complete = { ...tb, reportComplete: true };
+    const results = compose({ batches: [complete] }, [
+      cell({ accountId: 'a-ar', standardCategory: 'receivables', amount: '9000' }),
+      cell({ accountId: 'a-inv', standardCategory: 'inventory', amount: '2000' }),
+      cell({ accountId: 'a-eq', standardCategory: 'equity', amount: '-11000' }),
+    ], {}, [complete]);
+    expect(metric(results, 'receivables').value).toBe('9000.00');
+    expect(metric(results, 'receivables').basis).toBe('period_balances');
+    expect(metric(results, 'payables').value).toBe('0.00');
+    expect(metric(results, 'receivables_overdue').value).toBeNull();
+  });
+
+  it('NF-2: the same lines on a trial balance nobody confirmed complete — payables unknown, never 0.00', () => {
     const results = compose({ batches: [tb] }, [
       cell({ accountId: 'a-ar', standardCategory: 'receivables', amount: '9000' }),
       cell({ accountId: 'a-inv', standardCategory: 'inventory', amount: '2000' }),
     ], {}, [tb]);
     expect(metric(results, 'receivables').value).toBe('9000.00');
-    expect(metric(results, 'receivables').basis).toBe('period_balances');
-    // The trial balance lists no payables: a statement that lists no balance states zero.
-    expect(metric(results, 'payables').value).toBe('0.00');
-    expect(metric(results, 'receivables_overdue').value).toBeNull();
+    expect(metric(results, 'payables').value).toBeNull();
+    expect(metric(results, 'payables').dataQuality.missing).toContain('report_completeness_unconfirmed');
+  });
+
+  it('NF-2: answered partial — category_not_in_report', () => {
+    const partial = { ...tb, reportComplete: false };
+    const results = compose({ batches: [partial] }, [
+      cell({ accountId: 'a-ar', standardCategory: 'receivables', amount: '9000' }),
+    ], {}, [partial]);
+    expect(metric(results, 'payables').value).toBeNull();
+    expect(metric(results, 'payables').dataQuality.missing).toContain('category_not_in_report');
   });
 
   it('a liability stated as a credit reads positive', () => {
@@ -435,5 +456,27 @@ describe('an opening is a balance stated exactly at the boundary, or the chain t
   it('a statement that did not reconcile at import marks the month', () => {
     const results = run({ ...typedLongAgo, openingBalanceDate: '2026-07-31' }, { unreconciled: true });
     expect(metric(results, 'closing_cash').dataQuality.warnings).toContain('unreconciled_statement');
+  });
+});
+
+/**
+ * NF-1 (review of 6a551de): payables days divides by cost of sales + operating expense + marketing.
+ * A category the P&L wrote as NULL (a report that does not establish it, N-1) is unknown, not zero —
+ * the base must be NULL, never cost of sales alone.
+ */
+describe('NF-1 · the payables expense base is unknown when a category in it is unknown', () => {
+  const r = (key: string, value: string | null, dimensionKey: string | null = null) =>
+    ({ key, value, dimensionKey, dimensionType: dimensionKey === null ? 'none' : 'standard_category', basis: 'period_balances',
+      dataQuality: { completeness: 1, proxy: false, warnings: [], missing: value === null ? ['category_not_in_report'] : [] } }) as unknown as MetricResult;
+  const period = { id: 'p-aug', periodStart: '2026-08-01', periodEnd: '2026-08-31', fiscalYear: 2026, fiscalQuarter: 3, label: 'Aug', isComplete: true };
+
+  it('cost of sales 440 with operating expense NULL → no base (was 440)', () => {
+    const inputs = denominatorInputsFor(period, [r('cost_of_sales', '440.00'), r('expense_by_category', null, 'operating_expense')], [], []);
+    expect(inputs.payablesExpenseBase).toBeNull();
+  });
+
+  it('a category with no snapshot at all is still a known zero: 440 + 0 + 60 = 500', () => {
+    const inputs = denominatorInputsFor(period, [r('cost_of_sales', '440.00'), r('expense_by_category', '60.00', 'marketing')], [], []);
+    expect(inputs.payablesExpenseBase).toBe('500.00');
   });
 });

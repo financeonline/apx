@@ -62,8 +62,8 @@ export interface BalancePnlContext {
   readonly currentComplete?: boolean;
   readonly priorComplete?: boolean;
   /** Step 0F: why not complete — `unconfirmed` (never answered) or `partial` (answered, or an unbalanced trial balance). */
-  readonly currentCompleteness?: 'complete' | 'partial' | 'unconfirmed';
-  readonly priorCompleteness?: 'complete' | 'partial' | 'unconfirmed';
+  readonly currentCompleteness?: 'complete' | 'partial' | 'unconfirmed' | 'unbalanced';
+  readonly priorCompleteness?: 'complete' | 'partial' | 'unconfirmed' | 'unbalanced';
   /** The prior month's report's own record assurance, for a cumulative month (it is half the figure). */
   readonly priorAssurance?: AssuranceLevel | null;
 }
@@ -276,9 +276,13 @@ function balanceAccountAmounts(
    * is NULL — `category_not_in_report`, or `no_prior_trial_balance` where the prior report is absent —
    * and so is every figure built on it. An explicit line of 0.00 is a line: a stated zero.
    */
-  // Never answered → the reason says a confirmation is still possible; answered partial → it is not.
-  const unknownReason = (...states: Array<'complete' | 'partial' | 'unconfirmed' | undefined>): DataQualityMissing =>
-    states.some((s) => s === undefined || s === 'unconfirmed') ? 'report_completeness_unconfirmed' : 'category_not_in_report';
+  // Never answered → the reason says a confirmation is still possible; answered partial → it is not;
+  // answered complete but not balancing → says that (NF-6).
+  type State = 'complete' | 'partial' | 'unconfirmed' | 'unbalanced' | undefined;
+  const unknownReason = (...states: State[]): DataQualityMissing =>
+    states.some((s) => s === undefined || s === 'unconfirmed') ? 'report_completeness_unconfirmed'
+      : states.some((s) => s === 'unbalanced') ? 'trial_balance_not_balanced'
+        : 'category_not_in_report';
   const currentState = context.currentCompleteness ?? (context.currentComplete === true ? 'complete' : undefined);
   const priorState = context.priorCompleteness ?? (context.priorComplete === true ? 'complete' : undefined);
   const stated = new Set(out.map((a) => a.category));
@@ -290,9 +294,12 @@ function balanceAccountAmounts(
     } else if (!context.priorBatch) {
       missing = 'no_prior_trial_balance';
     } else {
+      // NF-6: when THIS month's report is complete and only the prior month's is not, say so — the
+      // reader confirmed this month and needs to know it is last month's report that is missing.
       missing = context.currentComplete === true && context.priorComplete === true
         ? null
-        : unknownReason(...[currentState, priorState].filter((s) => s !== 'complete'));
+        : context.currentComplete === true ? 'prior_report_not_complete'
+          : unknownReason(...[currentState, priorState].filter((s) => s !== 'complete'));
     }
     if (missing === null) continue;
     const home = homeAccountFor(accounts, category);
@@ -566,8 +573,20 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
         ? input.balancePnl.priorAssurance ?? null : null]
       .filter((a): a is AssuranceLevel => a !== null)
     : [];
-  const pnlBasis = reportCeiling.length === 0 ? chosenPnl
+  const ceilinged = reportCeiling.length === 0 ? chosenPnl
     : { ...chosenPnl, assurance: reportCeiling.reduce<AssuranceLevel>((a, b) => weakerAssurance(a, b), chosenPnl.assurance) };
+  /*
+   * NF-7: a category a complete report has no line for is zero because a PERSON said the report is
+   * complete, not because a record says so. Every P&L figure of such a month carries that, so the
+   * zero is never read as a stated one.
+   */
+  const zeroByCompleteness = chosenPnl.basis === 'period_balances' && input.balancePnl?.currentComplete === true
+    && PNL_CATEGORIES.some((category) => context.accounts.some((a) => a.standardCategory === category)
+      && !cells.some((c) => c.periodId === period.id && c.source === 'period_balances'
+        && c.balanceKind === chosenPnl.balanceKind && c.standardCategory === category));
+  const pnlBasis = zeroByCompleteness
+    ? { ...ceilinged, warnings: [...ceilinged.warnings, 'zero_by_completeness' as const] }
+    : ceilinged;
   const pnlSource = sourceForBasis(pnlBasis.basis);
 
   const byCounterparty = new Map(context.counterparties.map((c) => [c.id, c]));

@@ -40,6 +40,8 @@ export interface CompletenessAttestationView {
 
 export interface ReportCompletenessView {
   readonly scope: ReportScope;
+  /** NF-6: a year-to-date report — each month also rests on the PREVIOUS month's report. */
+  readonly cumulative?: boolean;
   readonly importAnswer: { readonly value: CompletenessAnswer; readonly at: string | null } | null;
   readonly months: readonly CompletenessMonth[];
   /** Every attestation, newest first: corrections never overwrite. */
@@ -51,11 +53,12 @@ export async function loadReportCompleteness(
   db: SupabaseClient, orgId: string, batchId: string,
 ): Promise<ReportCompletenessView | null> {
   const { data: batch, error } = await db.from('import_batches')
-    .select('import_type, target_table, status, confirmations, invoice_list_kind, period_start')
+    .select('import_type, target_table, status, confirmations, invoice_list_kind, period_start, balance_basis')
     .eq('organization_id', orgId).eq('id', batchId).maybeSingle();
   if (error) throw toMotionError(error);
   const b = batch as {
     import_type: string; target_table: string; status: string; invoice_list_kind: string | null; period_start: string | null;
+    balance_basis: string | null;
     confirmations: Record<string, { at?: string; value?: { report_complete?: string; opening?: string } }> | null;
   } | null;
   if (b === null || b.status !== 'committed') return null;
@@ -123,7 +126,11 @@ export async function loadReportCompleteness(
     };
   });
 
-  return { scope: b.import_type === 'trial_balance' ? 'all_accounts' : 'income_and_expense', importAnswer, months, history };
+  return {
+    scope: b.import_type === 'trial_balance' ? 'all_accounts' : 'income_and_expense',
+    cumulative: b.balance_basis === 'cumulative',
+    importAnswer, months, history,
+  };
 }
 
 /** R-2: the opening answer of a full invoice list, as one "month" — the month the list starts in. */

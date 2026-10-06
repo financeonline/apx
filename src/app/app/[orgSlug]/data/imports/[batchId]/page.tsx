@@ -56,8 +56,8 @@ const COMPLETENESS: Readonly<Record<'trial_balance' | 'pnl_report', { question: 
   },
   pnl_report: {
     question: 'Is this the full P&L report — every income and expense line for the period?',
-    help: 'Balance-sheet accounts are not expected here. Answer yes only if no income or expense line was removed (lines with nothing in them may be left out; grouped lines are fine if every amount is inside one). We will count any income or expense category with no line as zero. If this is part of a P&L — for example costs only — answer no: categories with no line will show as unknown, never as zero.',
-    complete: 'Yes — the full P&L (lines left out had nothing in them)',
+    help: 'Balance-sheet accounts are not expected here. Answer yes only if no income or expense line was removed (lines with nothing in them may be left out). We will count any income or expense category with no line as zero — so if your report groups several kinds of cost into one line (for example wages and marketing inside "Overheads"), answer no. If this is part of a P&L — for example costs only — answer no too: categories with no line will show as unknown, never as zero.',
+    complete: 'Yes — the full P&L, every kind of cost on its own line (lines left out had nothing in them)',
     partial: 'No — only part of the P&L',
   },
 };
@@ -200,6 +200,13 @@ export default async function ReviewBatchPage({
                 </Link>
                 {' '}to check it.
               </p>
+              {completeness.cumulative ? (
+                <p className="mt-2 text-sm text-ink-muted" data-testid="completeness-cumulative-note">
+                  These are year-to-date figures: each month is this month&apos;s report less the previous
+                  month&apos;s, so it counts a missing line as zero only when the previous month&apos;s report is
+                  confirmed as complete too.
+                </p>
+              ) : null}
               <ul className="mt-3 space-y-4">
                 {completeness.months.map((m) => {
                   const label = new Date(`${m.month}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });

@@ -20,7 +20,9 @@
  */
 
 import { Decimal, parseDecimalOrNull, toMoneyString } from '@/core/money';
-import { invoiceSideCoverage, winningBalanceBatch, type CoverageBatch, type InvoiceSide } from './coverage';
+import {
+  balanceReportCompleteness, invoiceSideCoverage, winningBalanceBatch, type CoverageBatch, type InvoiceSide,
+} from './coverage';
 import { ledgerAmount, naturalToReporting } from './sign';
 import {
   WORKING_CAPITAL_ASSETS, WORKING_CAPITAL_LIABILITIES,
@@ -140,14 +142,69 @@ function statementTotal(
   return { value: toMoneyString(total), accountIds: [...seen].sort() };
 }
 
+/**
+ * D-6 (owner decision; FU-5, ADR-027.3 (a)): a ledger with no opening journal effective by P still
+ * states a balance when a STATEMENT anchors it — the latest month A before P whose cumulative trial
+ * balance or balance sheet has a line for the category. The balance at P is that closing plus every
+ * ledger movement of the months after A up to P; every one of those months must carry ledger rows, or
+ * a month's movements would be missing and the balance with them. No anchor: NULL, as before.
+ */
+function anchoredLedger(
+  period: PeriodRef,
+  ledger: NonNullable<ReceivablesComposeInput['ledger']>,
+  accounts: ReadonlyMap<string, EngineContext['accounts'][number]>,
+): (NonNullable<CategoryBalanceFallback['ledger']> & {
+  periodIds: readonly string[]; entryDateFrom: null;
+  anchor: { readonly periodId: string; readonly kind: 'trial_balance' | 'balance_sheet' };
+}) | null {
+  const { periodStarts } = ledger;
+  const statementCells = ledger.cells.filter((c) => c.source === 'period_balances' && c.balanceBasis === 'cumulative'
+    && (c.balanceKind === 'trial_balance' || c.balanceKind === 'balance_sheet')
+    && c.accountId !== null && accounts.has(c.accountId));
+  const anchorStart = [...new Set(statementCells.map((c) => periodStarts.get(c.periodId)))]
+    .filter((s): s is string => s !== undefined && s < period.periodStart)
+    .sort()
+    .at(-1);
+  if (anchorStart === undefined) return null;
+  const inMonth = statementCells.filter((c) => periodStarts.get(c.periodId) === anchorStart);
+  const kind = inMonth.some((c) => c.balanceKind === 'trial_balance') ? 'trial_balance' : 'balance_sheet';
+  const anchorCells = inMonth.filter((c) => c.balanceKind === kind);
+  let opening = new Decimal(0);
+  for (const c of anchorCells) opening = opening.plus(naturalToReporting(accounts.get(c.accountId!)!.accountType, c.amount));
+
+  // Every month after the anchor up to P must have ledger rows; its movements are then known.
+  const monthsAfter = [...new Set([...periodStarts.entries()]
+    .filter(([, start]) => start > anchorStart && start <= period.periodStart).map(([id]) => id))];
+  const ledgerMonths = new Set(ledger.cells.filter((c) => c.source === 'ledger').map((c) => c.periodId));
+  if (monthsAfter.length === 0 || !monthsAfter.every((id) => ledgerMonths.has(id))) return null;
+
+  let movements = new Decimal(0);
+  for (const cell of ledger.cells) {
+    if (cell.source !== 'ledger' || cell.accountId === null || !monthsAfter.includes(cell.periodId)) continue;
+    const account = accounts.get(cell.accountId);
+    if (account === undefined) continue;
+    movements = movements.plus(ledgerAmount({ accountType: account.accountType, debit: cell.debit, credit: cell.credit }));
+  }
+  return {
+    openingBalance: toMoneyString(opening),
+    movements: toMoneyString(movements),
+    periodIds: [...monthsAfter].sort(),
+    entryDateFrom: null,
+    anchor: { periodId: anchorCells[0]!.periodId, kind },
+  };
+}
+
 function ledgerFallback(
   ctx: EngineContext,
   period: PeriodRef,
   coverage: PeriodCoverage,
   ledger: ReceivablesComposeInput['ledger'],
   category: 'receivables' | 'payables',
-): CategoryBalanceFallback['ledger'] & { periodIds: readonly string[]; entryDateFrom: string | null } | null {
-  if (ledger === null || ledger.openingJournal === null) return null;
+): CategoryBalanceFallback['ledger'] & {
+  periodIds: readonly string[]; entryDateFrom: string | null;
+  anchor?: { readonly periodId: string; readonly kind: 'trial_balance' | 'balance_sheet' };
+} | null {
+  if (ledger === null) return null;
   // A declared GL range must span P: a month the export only partly reaches (`partial_month`) has no
   // balance at its end that anybody stated.
   const ledgerCoverage = coverage.bySource.ledger;
@@ -167,13 +224,13 @@ function ledgerFallback(
    * journal's figures. Taking the journal's month as its start counted them again: 6,000 for a true
    * 5,000.
    */
-  const journalDate = ledger.openingJournal
+  const journalDate = (ledger.openingJournal ?? [])
     .map((line) => line.entryDate)
     .filter((date) => date <= period.periodEnd)
     .sort()
     .at(-1);
-  if (journalDate === undefined) return null;
-  const journalLines = ledger.openingJournal.filter((line) => line.entryDate === journalDate);
+  if (journalDate === undefined) return anchoredLedger(period, ledger, accounts);
+  const journalLines = (ledger.openingJournal ?? []).filter((line) => line.entryDate === journalDate);
   const journalStart = periodStarts.get(journalLines[0]!.periodId);
   if (journalStart === undefined) return null;
 
@@ -247,7 +304,22 @@ function resolveSide(
   const types = side === 'sales' ? SALES : PURCHASES;
   const invoices = sideCoverage.covers ? input.invoices.filter((i) => types.has(i.invoiceType)) : null;
 
-  const fromStatement = statement === null ? null : statementTotal(statement.cells, ctx, [category]);
+  /*
+   * NF-2 (the balance-sheet side of N-1): a trial balance's absent receivables or payables line is a
+   * zero only when the trial balance is complete for P (answered complete and balancing). Otherwise
+   * it is unknown: the next source states it (ledger), else NULL with the completeness reason. A
+   * balance sheet is never asked the question, and its absent lines stay zero (product decision).
+   */
+  let fromStatement = statement === null ? null : statementTotal(statement.cells, ctx, [category]);
+  let statementGap: DataQualityMissing | null = null;
+  if (statement?.kind === 'trial_balance' && fromStatement !== null && fromStatement.accountIds.length === 0) {
+    const completeness = balanceReportCompleteness(input.batches, cells, period, 'trial_balance');
+    if (completeness !== 'complete') {
+      statementGap = completeness === 'unconfirmed' ? 'report_completeness_unconfirmed'
+        : completeness === 'unbalanced' ? 'trial_balance_not_balanced' : 'category_not_in_report';
+      fromStatement = null;
+    }
+  }
   const ledger = fromStatement === null ? ledgerFallback(ctx, period, coverage, input.ledger, category) : null;
 
   const fallback: CategoryBalanceFallback = {
@@ -259,10 +331,12 @@ function resolveSide(
     ledger: ledger === null ? null : { openingBalance: ledger.openingBalance, movements: ledger.movements },
     ledgerPeriodIds: ledger?.periodIds,
     ...(ledger?.entryDateFrom ? { ledgerEntryDateFrom: ledger.entryDateFrom } : {}),
+    ...(ledger?.anchor ? { ledgerAnchor: ledger.anchor } : {}),
   };
 
   const unavailableReason: DataQualityMissing | undefined = sideCoverage.openingUnconfirmed
     ? 'opening_invoices_unconfirmed'
+    : statementGap !== null ? statementGap
     : sideCoverage.anyBatch
     ? 'stale_invoice_data'
     : ledgerRowsExist(ctx, cells, period, category) ? 'no_opening_balance' : 'no_source_covers_period';
@@ -329,7 +403,11 @@ export function denominatorInputsFor(
   const costOfSales = resultValue(results, 'cost_of_sales');
   const costOfSalesResult = results.find((r) => r.key === 'cost_of_sales' && r.dimensionType === 'none');
   let payablesExpenseBase: string | null = null;
-  if (costOfSales !== null) {
+  // NF-1: a category the P&L WROTE as NULL (a report that does not establish it — N-1) is unknown,
+  // not zero; one it wrote no snapshot for at all is the known zero above. Unknown → no base.
+  const categoryUnknown = (category: string): boolean => results.some((r) => r.key === 'expense_by_category'
+    && r.dimensionKey === category && r.value === null);
+  if (costOfSales !== null && !categoryUnknown('operating_expense') && !categoryUnknown('marketing')) {
     const opex = resultValue(results, 'expense_by_category', 'operating_expense') ?? '0';
     const marketing = resultValue(results, 'expense_by_category', 'marketing') ?? '0';
     payablesExpenseBase = toMoneyString(new Decimal(costOfSales).plus(opex).plus(marketing));
@@ -382,8 +460,13 @@ export function receivablesPeriodInput(
 
   const balanceSheetClosings: Partial<Record<StandardCategory, BalanceSheetTerm>> = {};
   if (statement !== null) {
+    // NF-2: on an incomplete trial balance an absent working-capital line is unknown — left out, so
+    // working capital says it is partial (`partial_working_capital`), never counts it as zero.
+    const tbIncomplete = statement.kind === 'trial_balance'
+      && balanceReportCompleteness(input.batches, cells, period, 'trial_balance') !== 'complete';
     for (const category of [...WORKING_CAPITAL_ASSETS, ...WORKING_CAPITAL_LIABILITIES]) {
       const term = statementTotal(statement.cells, ctx, [category]);
+      if (tbIncomplete && term.accountIds.length === 0) continue;
       balanceSheetClosings[category] = { value: term.value, basis: 'period_balances', accountIds: term.accountIds };
     }
   }

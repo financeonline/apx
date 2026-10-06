@@ -325,7 +325,8 @@ describe('N-1 · report completeness decides what an absent category means, and 
   it('cash-only trial balance attested but NOT balancing: still incomplete — balancing is required too', () => {
     const r = run(JUL, [tb(JUL, CASH, '500')], julTb(true));
     expect(v(r, 'revenue')).toBeNull();
-    expect(fig(r, 'revenue').dataQuality.missing).toContain('category_not_in_report');
+    // NF-6: the reason says what is wrong — answered complete, but the lines do not balance.
+    expect(fig(r, 'revenue').dataQuality.missing).toContain('trial_balance_not_balanced');
   });
 
   it('expenses-only P&L report, not attested: cost of sales 400 stated; revenue NULL, not 0; net profit NULL', () => {
@@ -369,7 +370,8 @@ describe('N-1 · report completeness decides what an absent category means, and 
     // July not attested: August's absent marketing cannot be differenced against a July that may omit it.
     const julPartial = run(AUG, [...july, ...aug], [{ ...both[0]!, reportComplete: false }, both[1]!]);
     expect(v(julPartial, 'operating_expenses')).toBeNull();
-    expect(fig(julPartial, 'operating_expenses').dataQuality.missing.some((m) => m === 'category_not_in_report' || m === 'account_absent_unconfirmed')).toBe(true);
+    // NF-6: August is complete; the reason names last month's report as the one that is not.
+    expect(fig(julPartial, 'operating_expenses').dataQuality.missing.some((m) => m === 'prior_report_not_complete' || m === 'account_absent_unconfirmed')).toBe(true);
   });
 
   it('missing accounts between cumulative periods: marketing stated in July only — −50 in August only when both are complete', () => {
@@ -453,5 +455,43 @@ describe('report completeness per month, and completeness is not accuracy', () =
     const r = run(JUL, cells, [b(JUN, 'inferred'), b(JUL, 'verified')]);
     expect(v(r, 'revenue')).toBe('1100.00');
     expect(fig(r, 'revenue').assurance).toBe('inferred');
+  });
+});
+
+/**
+ * NF-4 (review of 6a551de, CUMMIX): a cumulative July over a PARTIAL June is unknown, so a ledger
+ * covering July states it — the pass-over judged only July's report and left July NULL.
+ */
+describe('NF-4 · a cumulative month is only as complete as the prior month\'s report', () => {
+  const cum = (p: PeriodRef, complete: boolean): CoverageBatch => ({
+    ...batch(`c-${p.label}`, 'trial_balance', 'cumulative', p.periodStart, p.periodEnd, null, [p.periodStart]), reportComplete: complete });
+  const cells = [bal(JUN, 'trial_balance', 'cumulative', REV, '-1000'), bal(JUN, 'trial_balance', 'cumulative', CASH, '1000'),
+    bal(JUL, 'trial_balance', 'cumulative', REV, '-2100'), bal(JUL, 'trial_balance', 'cumulative', CASH, '2100')];
+  const gl = batch('gl', 'general_ledger', null, '2026-06-01', '2026-08-31');
+  const coverage = (juneComplete: boolean) => computeCoverage({ period: JUL, batches: [cum(JUN, juneComplete), cum(JUL, true), gl],
+    bankAccounts: [], rowCounts: { period_balances: 2, ledger: 4 }, asOf: '2026-09-15',
+    balanceRowsByKind: balanceRowsByKind(cells, JUL.id), balanceCells: cells, prior: JUN, organisationFiscalYearStartMonth: 1 });
+
+  it('June partial, July complete, a ledger covering July → the ledger states July', () => {
+    expect(choosePrecedence(coverage(false), 'pnl').basis).toBe('ledger');
+    expect(choosePrecedence(coverage(false), 'pnl').warnings).toContain('balance_report_incomplete');
+  });
+
+  it('both complete → the report states July (control)', () => {
+    expect(choosePrecedence(coverage(true), 'pnl').basis).toBe('period_balances');
+  });
+});
+
+describe('NF-7 · a zero that rests on a completeness confirmation says so', () => {
+  it('a complete report with categories it has no line for: every P&L figure carries zero_by_completeness', () => {
+    const r = run(JUL, withEquity(MOVEMENT), attested('tbm', 'trial_balance', 'movement'));
+    for (const key of ['revenue', 'operating_expenses', 'net_profit']) {
+      expect(fig(r, key).dataQuality.warnings, key).toContain('zero_by_completeness');
+    }
+  });
+
+  it('a report not confirmed complete carries no such warning (its gaps are NULL instead)', () => {
+    const r = run(JUL, MOVEMENT, monthly('tbm', 'trial_balance', 'movement'));
+    expect(fig(r, 'revenue').dataQuality.warnings).not.toContain('zero_by_completeness');
   });
 });

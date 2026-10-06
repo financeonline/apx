@@ -187,7 +187,9 @@ async function walk(state: WalkState, snapshot: Row): Promise<void> {
     for (const term of evidenceQuery.terms) {
       if (term.descriptor === null) continue;
       const termPeriod = term.period_id === null ? null : await periodLabel(ctx.db, orgId, term.period_id);
-      const role = term.sign === 1 ? 'year to date' : 'less: year to date';
+      const role = term.name === 'opening_balance' ? 'opening balance'
+        : term.name === 'movements' ? 'movements since'
+        : term.sign === 1 ? 'year to date' : 'less: year to date';
       state.items.push({
         item_type: 'query',
         query_descriptor: term.descriptor,

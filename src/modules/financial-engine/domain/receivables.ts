@@ -47,6 +47,7 @@ import type {
   DataQualityWarning,
   EngineContext,
   EvidenceQuery,
+  LeafDescriptor,
   MetricBasis,
   MetricResult,
   PeriodRef,
@@ -117,6 +118,8 @@ export interface CategoryBalanceFallback {
   readonly ledgerPeriodIds?: readonly string[];
   /** The opening journal's date when it falls inside a month: the drill-down's first day (ADR-124 D-4). */
   readonly ledgerEntryDateFrom?: string;
+  /** D-6 (FU-5): the statement month that anchors a ledger with no opening journal, and its kind. */
+  readonly ledgerAnchor?: { readonly periodId: string; readonly kind: 'trial_balance' | 'balance_sheet' };
 }
 
 /** One balance-sheet term of `working_capital`, as `closing(P)` in reporting sign. */
@@ -385,11 +388,36 @@ function fromBalances(
         opening_balance: toMoneyString(ledger.openingBalance),
         movements: toMoneyString(ledger.movements),
       },
-      evidence: leafEvidence(ctx, 'ledger_entries', {
-        ...descriptorFilters,
-        period_ids: [...(fallback.ledgerPeriodIds ?? [period.id])].sort(),
-        ...(fallback.ledgerEntryDateFrom ? { entry_date_from: fallback.ledgerEntryDateFrom } : {}),
-      }),
+      evidence: fallback.ledgerAnchor !== undefined
+        // D-6 (FU-5): two selections — the anchoring statement's lines, and the ledger rows since —
+        // whose totals add to the figure; each reconciles to its own part, then the sum.
+        ? {
+          kind: 'difference',
+          formula: 'opening_balance + movements',
+          terms: [
+            {
+              name: 'opening_balance', sign: 1, period_id: fallback.ledgerAnchor.periodId, unavailable: null,
+              expected: toMoneyString(ledger.openingBalance),
+              descriptor: (leafEvidence(ctx, 'period_balances', {
+                period_ids: [fallback.ledgerAnchor.periodId], ...(accountIds.length > 0 ? { account_ids: accountIds } : {}),
+                balance_kind: fallback.ledgerAnchor.kind,
+              }) as { descriptor: LeafDescriptor }).descriptor,
+            },
+            {
+              name: 'movements', sign: 1, period_id: null, unavailable: null,
+              expected: toMoneyString(ledger.movements),
+              descriptor: (leafEvidence(ctx, 'ledger_entries', {
+                ...descriptorFilters,
+                period_ids: [...(fallback.ledgerPeriodIds ?? [period.id])].sort(),
+              }) as { descriptor: LeafDescriptor }).descriptor,
+            },
+          ],
+        }
+        : leafEvidence(ctx, 'ledger_entries', {
+          ...descriptorFilters,
+          period_ids: [...(fallback.ledgerPeriodIds ?? [period.id])].sort(),
+          ...(fallback.ledgerEntryDateFrom ? { entry_date_from: fallback.ledgerEntryDateFrom } : {}),
+        }),
     };
   }
 

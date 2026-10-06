@@ -258,8 +258,8 @@ Thresholds (APPROVED, applied once the dependency is met):
 | Rule | Input | Bands | Zero / negative / unavailable |
 |---|---|---|---|
 | **F5.1** Days to get paid | `receivables_days`(P) | `(−∞, 30]` +15 · `(30, 60]` 0 · `(60, 90]` −10 · `(90, ∞)` −20 — EXISTING Q3 | NULL → unavailable |
-| **F5.2** Receivables overdue share | `receivables_overdue / receivables`(P) | `[0, 0.30)` +10 · `[0.30, 0.50)` −10 · `[0.50, ∞)` −20 (0.30 / 0.50 EXISTING `receivables.deterioration`) | receivables **usable** and ≤ 0 → +10 `nothing_outstanding`; receivables NULL → unavailable; overdue NULL (no ageing) → unavailable `aging_unavailable` |
-| **F5.3** Payables overdue share | `payables_overdue / payables`(P) | `[0, 0.30)` +10 · `[0.30, 0.50)` −10 · `[0.50, ∞)` −20 (EXISTING `payables.deterioration`) | as F5.2 for payables |
+| **F5.2** Receivables overdue share | **gross** share (owner decision, ADR-140): overdue open invoices ÷ GROSS open invoices for P — credits stated separately, never netted into the denominator — exactly the EXISTING `receivables.deterioration` share (ADR-124 D-5, `open_credits`); never above 100% | `[0, 0.30)` +10 · `[0.30, 0.50)` −10 · `[0.50, 1]` −20 (0.30 / 0.50 EXISTING `receivables.deterioration`) | no gross open invoices → +10 `nothing_outstanding` (net credits alone never score "nothing outstanding" while invoices are overdue); receivables NULL → unavailable (incl. `opening_invoices_unconfirmed`, R-2); overdue NULL (no ageing) → unavailable `aging_unavailable`; an `estimated` receivables (R-3, undated payments) takes the cap of §4 |
+| **F5.3** Payables overdue share | the same gross share for payables (ADR-140) | `[0, 0.30)` +10 · `[0.30, 0.50)` −10 · `[0.50, ∞)` −20 (EXISTING `payables.deterioration`) | as F5.2 for payables |
 
 - **Range:** 0–85.
 

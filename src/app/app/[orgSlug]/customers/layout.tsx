@@ -13,6 +13,8 @@ const TABS = [
   { slug: 'products', label: 'Products' },
   { slug: 'sales', label: 'Sales' },
   { slug: 'marketing', label: 'Marketing' },
+  // D-5: names held for a decision after the Unicode identity change.
+  { slug: 'held', label: 'Name decisions' },
 ] as const;
 
 export default async function CommercialLayout({

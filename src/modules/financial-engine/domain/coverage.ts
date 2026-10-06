@@ -78,7 +78,7 @@ export interface CoverageBatch {
 }
 
 /** What is known about whether a report lists every account for a month (N-1). */
-export type ReportCompleteness = 'complete' | 'partial' | 'unconfirmed';
+export type ReportCompleteness = 'complete' | 'partial' | 'unconfirmed' | 'unbalanced';
 
 export interface CoverageInput {
   readonly period: PeriodRef;
@@ -97,6 +97,12 @@ export interface CoverageInput {
    * test (an attested trial balance must balance). Omitted: no report can be shown complete.
    */
   readonly balanceCells?: readonly AggregateCell[];
+  /**
+   * NF-4: the calendar month before P, and the organisation's fiscal year start — a CUMULATIVE month
+   * is the difference of two reports, so it is only as complete as the less complete of the two.
+   */
+  readonly prior?: PeriodRef;
+  readonly organisationFiscalYearStartMonth?: number;
   /**
    * Today, to tell the CURRENT period (the one containing it) for the invoices source's revenue-to-date
    * rule (FU-1). Explicit, never read from a clock (§1.1).
@@ -282,7 +288,8 @@ export function balanceReportCompleteness(
   const rows = (cells ?? []).filter((c) => c.periodId === period.id && c.source === 'period_balances' && c.balanceKind === kind);
   if (rows.length === 0) return 'partial';
   const sum = rows.reduce((t, c) => t.plus(parseDecimalOrNull(c.amount) ?? new Decimal(0)), new Decimal(0));
-  return sum.abs().lessThanOrEqualTo('0.01') ? 'complete' : 'partial';
+  // NF-6: answered complete, but the file contradicts it — its own state, so the reason says so.
+  return sum.abs().lessThanOrEqualTo('0.01') ? 'complete' : 'unbalanced';
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -631,8 +638,21 @@ export function computeCoverage(input: CoverageInput): PeriodCoverage {
    * cash PROXY, weaker than any report, so it never displaces one. With no accrual source below, the
    * incomplete report is still used, and the categories it has no line for are NULL (compose).
    */
-  const reportIncomplete = pnlBalance !== null
+  let reportIncomplete = pnlBalance !== null
     && !balanceReportComplete(batches, input.balanceCells, period, pnlBalance.kind);
+  // NF-4: a cumulative month (not its fiscal year's first) rests on the prior month's report too. If
+  // that one is incomplete, the month is as unknown as if P's were — so a covering ledger states it.
+  // (No prior report at all is §3's NULL `no_prior_trial_balance`, ADR-138 policy 1: no fallback.)
+  if (pnlBalance !== null && !reportIncomplete && input.prior !== undefined
+    && (pnlBalance.batch.balanceBasis ?? 'movement') === 'cumulative') {
+    const fyStart = pnlBalance.batch.fiscalYearStartMonthAtCommit ?? input.organisationFiscalYearStartMonth ?? 1;
+    const priorWinning = winningBalanceBatch(batches, input.prior, pnlBalance.kind);
+    if (Number(period.periodStart.slice(5, 7)) !== fyStart && priorWinning !== null
+      && (priorWinning.balanceBasis ?? 'movement') === 'cumulative'
+      && !balanceReportComplete(batches, input.balanceCells, input.prior, pnlBalance.kind)) {
+      reportIncomplete = true;
+    }
+  }
   const passOver = reportIncomplete && (ledger.covers || invoices.covers);
   const balancesFinal: SourceCoverage = passOver
     ? NO_COVERAGE

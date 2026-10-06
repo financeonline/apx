@@ -190,9 +190,10 @@ export const EvidenceQuerySchema = z.discriminatedUnion('kind', [
    */
   z.strictObject({
     kind: z.literal('difference'),
-    formula: z.literal('year_to_date - prior_year_to_date'),
+    // D-6: a statement-anchored ledger balance is the other two-selection figure.
+    formula: z.enum(['year_to_date - prior_year_to_date', 'opening_balance + movements']),
     terms: z.array(z.strictObject({
-      name: z.enum(['year_to_date', 'prior_year_to_date']),
+      name: z.enum(['year_to_date', 'prior_year_to_date', 'opening_balance', 'movements']),
       sign: z.union([z.literal(1), z.literal(-1)]),
       period_id: uuid.nullable(),
       descriptor: QueryDescriptorV1Schema.nullable(),

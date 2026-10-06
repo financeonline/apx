@@ -157,7 +157,20 @@
  *     `verified`, and its components state the range it could be in (`range_low`/`range_high`, and
  *     the overdue range).
  */
-export const ENGINE_VERSION = '13.0.0';
+/**
+ * 14.0.0 (re-review of 6a551de: NF-1, NF-2, NF-4, NF-6, NF-7; owner decision D-6): MAJOR. 13.0.0 was
+ * never released.
+ *   - NF-1: the payables expense base is NULL when a category in it is unknown (was read as zero).
+ *   - NF-2: a trial balance's absent receivables/payables (or working-capital) line is unknown unless
+ *     the trial balance is complete for P; never a 0.00 from a partial or unconfirmed one.
+ *   - NF-4: a cumulative month over an incomplete prior report yields to a covering ledger.
+ *   - NF-6: reasons `prior_report_not_complete` and `trial_balance_not_balanced`.
+ *   - NF-7: P&L figures whose zeros rest on a completeness confirmation carry `zero_by_completeness`.
+ *   - D-6 (FU-5): a ledger with no opening journal is anchored by the latest earlier cumulative balance
+ *     sheet or trial balance stating the category; evidence `opening_balance + movements`.
+ * The golden corpus has none of these shapes, so its hash does not move; the bump is the rule (§6).
+ */
+export const ENGINE_VERSION = '14.0.0';
 
 /** Bumped independently of the engine (§6). */
 /**

@@ -167,7 +167,7 @@ describe('confirming an existing import', () => {
     expect(metric(o.id, '2026-07', 'net_profit').startsWith('NULL|')).toBe(true);
     expect(metric(o.id, '2026-07', 'net_profit')).toContain('report_completeness_unconfirmed');
     expect(metric(o.id, '2026-08', 'net_profit').startsWith('NULL|')).toBe(true);
-    expect(metric(o.id, '2026-08', 'net_profit')).toContain('category_not_in_report');
+    expect(metric(o.id, '2026-08', 'net_profit')).toContain('trial_balance_not_balanced'); // NF-6: says why
   }, 300_000);
 
   it('completeness is not accuracy: an AI-read report confirmed complete stays inferred — its zeros too', async () => {

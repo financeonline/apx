@@ -177,3 +177,41 @@ describe('customers in five scripts, through the wizard and commit', () => {
     expect(one(`select count(*) from public.counterparties where organization_id = '${orgId}' and normalized_name = 'izmir ltd'`)).toBe('0');
   });
 });
+
+/**
+ * D-5 (owner decision): the decisions the "Name decisions" screen makes, through the same audited
+ * `api.*` functions. Two records held under one name (as the migration leaves a collision).
+ */
+describe('D-5 · resolving a held name', () => {
+  const held = (a: string, b: string, key: string): [string, string] => {
+    const ids = adminSql(`
+      insert into public.counterparties (organization_id, name, kind) values ('${orgId}', '${a}', 'customer'), ('${orgId}', '${b}', 'customer');
+      update public.counterparties set normalized_name = app.held_name_key('${key}', id)
+       where organization_id = '${orgId}' and name in ('${a}', '${b}');
+      select string_agg(id::text, ',' order by name) from public.counterparties where organization_id = '${orgId}' and name in ('${a}', '${b}');`)
+      .split('\n').pop()!.trim().split(',');
+    return [ids[0]!, ids[1]!];
+  };
+  const keyOf = (id: string) => one(`select normalized_name from public.counterparties where id = '${id}'`).trim();
+
+  it('"the same business": merge one into the other, re-save it — it takes the plain key, the other is merged, both audited', async () => {
+    const [keep, other] = held('Cafe Rouge', 'CAFE ROUGE.', 'cafe rouge');
+    const merge = await ownerDb().schema('api').rpc('merge_counterparties', { p_from: other, p_into: keep });
+    expect(merge.error, merge.error?.message).toBeNull();
+    const resave = await ownerDb().schema('api').rpc('update_counterparty', { p_counterparty: keep, p_patch: { name: 'Cafe Rouge' } });
+    expect(resave.error, resave.error?.message).toBeNull();
+    expect(keyOf(keep)).toBe('cafe rouge');
+    expect(one(`select merged_into_id::text from public.counterparties where id = '${other}'`).trim()).toBe(keep);
+    expect(Number(one(`select count(*) from public.audit_events where organization_id = '${orgId}' and target_id in ('${keep}', '${other}')`).trim()))
+      .toBeGreaterThanOrEqual(2);
+  });
+
+  it('"different businesses": rename one, re-save the other — two names, nothing held', async () => {
+    const [a, b] = held('Nord Ltd', 'NORD LTD', 'nord ltd');
+    // While another held record of the name remains, the name cannot be taken: refused, not decided.
+    expect((await ownerDb().schema('api').rpc('update_counterparty', { p_counterparty: a, p_patch: { name: 'Nord Ltd' } })).error).not.toBeNull();
+    expect((await ownerDb().schema('api').rpc('update_counterparty', { p_counterparty: b, p_patch: { name: 'Nord Ltd (Leeds)' } })).error).toBeNull();
+    expect((await ownerDb().schema('api').rpc('update_counterparty', { p_counterparty: a, p_patch: { name: 'Nord Ltd' } })).error).toBeNull();
+    expect([keyOf(a), keyOf(b)]).toEqual(['nord ltd', 'nord ltd leeds']);
+  });
+});

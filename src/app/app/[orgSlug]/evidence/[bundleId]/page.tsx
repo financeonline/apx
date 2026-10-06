@@ -452,17 +452,22 @@ function DifferencePanel({ difference, currency, label }: {
   const money = (value: string | null) => formatValue({ value, unit: 'money', currency }, { showMinorUnits: true });
   const missing = difference.terms.some((t) => t.total === null);
   const [current, prior] = difference.terms;
+  // D-6: the other two-selection figure is a SUM — an anchoring statement plus ledger movements.
+  const sum = difference.formula === 'opening_balance + movements';
+  const op = prior?.sign === 1 ? '+' : '−';
   return (
     <div className="mt-3 rounded-md border border-line px-3 py-2 text-sm text-ink" data-testid="difference-panel">
       <p>
-        {label ? `${label}: ` : ''}this month is worked out from a year-to-date report — this report&apos;s year to
-        date, less the previous month&apos;s.
+        {label ? `${label}: ` : ''}{sum
+          ? 'this balance is the opening a balance sheet states, plus every ledger movement since.'
+          : 'this month is worked out from a year-to-date report — this report’s year to date, less the previous month’s.'}
       </p>
       <ul className="mt-1 space-y-1">
         {difference.terms.map((term) => (
           <li key={term.name} className="[overflow-wrap:anywhere]">
-            {term.sign === 1 ? 'Year to date' : 'Less: year to date'}
-            {term.periodLabel ? ` to ${term.periodLabel}` : ''}
+            {term.name === 'opening_balance' ? 'Opening balance' : term.name === 'movements' ? 'Plus: movements since'
+              : term.sign === 1 ? 'Year to date' : 'Less: year to date'}
+            {term.periodLabel ? (term.name === 'opening_balance' ? ` at the end of ${term.periodLabel}` : ` to ${term.periodLabel}`) : ''}
             {': '}
             {term.total === null
               ? `not available (${missingReasonText([term.unavailable ?? ''])})`
@@ -492,8 +497,8 @@ function DifferencePanel({ difference, currency, label }: {
         {missing || current === undefined || prior === undefined
           ? 'One side of the subtraction is missing, so this figure cannot be worked out.'
           : difference.formulaReconciles === false
-            ? `${money(current.total)} − ${money(prior.total)} = ${money(difference.recordsResult)}, which does not match the figure of ${money(difference.figure)}. Please tell us — a figure that does not reconcile is a fault.`
-            : `${money(current.total)} − ${money(prior.total)} = ${money(difference.recordsResult)}, which is this month’s figure.`}
+            ? `${money(current.total)} ${op} ${money(prior.total)} = ${money(difference.recordsResult)}, which does not match the figure of ${money(difference.figure)}. Please tell us — a figure that does not reconcile is a fault.`
+            : `${money(current.total)} ${op} ${money(prior.total)} = ${money(difference.recordsResult)}, which is ${sum ? 'the balance' : 'this month’s figure'}.`}
       </p>
       {difference.arithmeticReconciles === false ? (
         <p className="mt-1 text-warn">
