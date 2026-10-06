@@ -78,9 +78,9 @@ beforeAll(async () => {
   inv('purchase', s1, 'PV', '7777.00', 'void');
   adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event) select organization_id,'invoices',id,'accepted' from public.invoices where organization_id='${iOrg}'`);
   const idoc = one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind) values ('${iOrg}','${iOrg}/i.csv','i.csv','text/csv',10,digest('${iOrg}i','sha256'),'ready','invoice') returning id`);
-  adminSql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind) values ('${iOrg}','${idoc}','sales_invoices','invoices','committed','csv','2026-08-01','2026-08-31',now(),'full')`);
+  adminSql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind, confirmations) values ('${iOrg}','${idoc}','sales_invoices','invoices','committed','csv','2026-08-01','2026-08-31',now(),'full', '{"IMP-INV-013": {"by": null, "at": "2026-09-01T00:00:00Z", "value": {"opening": "complete"}}}'::jsonb)`);
   // FU-12: costs need a full purchase list (ADR-126).
-  adminSql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind) values ('${iOrg}','${idoc}','purchase_invoices','invoices','committed','csv','2026-08-01','2026-08-31',now(),'full')`);
+  adminSql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind, confirmations) values ('${iOrg}','${idoc}','purchase_invoices','invoices','committed','csv','2026-08-01','2026-08-31',now(),'full', '{"IMP-INV-013": {"by": null, "at": "2026-09-01T00:00:00Z", "value": {"opening": "complete"}}}'::jsonb)`);
   await calc(iOrg);
 
   // ---------- LEDGER basis ----------

@@ -20,12 +20,9 @@ select is(
      ('punctuation and spacing', 'Acme & Co.', 'acme  co'),
      ('case, accented', 'Müller GmbH', 'MÜLLER GMBH'),
      ('combining accent', 'Müller', 'Mu' || chr(776) || 'ller'),
-     ('full-width', 'Ａｃｍｅ', 'Acme'),
-     ('ligature', 'ﬁnance', 'finance'),
-     ('half-width katakana', 'ｶﾌﾞｼｷｶﾞｲｼｬ', 'カブシキガイシャ'),
      ('Greek, final sigma', 'ΟΔΟΣ Α.Ε.', 'οδος α.ε.'),
      ('Cyrillic', 'ООО «Ромашка»', 'ооо ромашка'),
-     ('dotted capital I', 'İzmir', 'izmir'),
+     ('dotted capital I, its full lower case', 'İzmir', 'i' || chr(775) || 'zmir'),
      ('Japanese middle dot', 'Tokyo・Trading', 'Tokyo Trading')) v(rule, a, b)
     where app.normalize_name(a) <> app.normalize_name(b) or app.normalize_name(a) = ''),
   null, 'every pair that is ONE name has one non-empty key');
@@ -35,6 +32,10 @@ select is(
      ('different accented letter', 'Müller GmbH', 'Möller GmbH'),
      ('accent against none', 'Müller GmbH', 'Muller GmbH'),
      ('é against e', 'Café Sales', 'Cafe Sales'),
+     ('D-3: full-width against ASCII', 'Ａｃｍｅ', 'Acme'),
+     ('D-3: ligature against letters', 'ﬁnance', 'finance'),
+     ('D-3: half-width katakana', 'ｶﾌﾞｼｷｶﾞｲｼｬ', 'カブシキガイシャ'),
+     ('D-3: dotted capital I against plain I', 'İzmir Ltd', 'Izmir Ltd'),
      ('Cyrillic look-alike', 'Асме', 'Acme'),
      ('Japanese', '株式会社トヨタ', '株式会社ホンダ'),
      ('Arabic', 'شركة الأمل', 'شركة النور'),
@@ -95,7 +96,7 @@ select lives_ok($$
 -- ---- Held records: the state the migration leaves a collision in ------------------------------
 
 insert into public.counterparties (id, organization_id, name) values
-  ('c2100000-0000-0000-0000-000000000001', 'f2100000-0000-0000-0000-0000000000a1', 'İzmir Trading'),
+  ('c2100000-0000-0000-0000-000000000001', 'f2100000-0000-0000-0000-0000000000a1', 'Izmir Trading'),
   ('c2100000-0000-0000-0000-000000000002', 'f2100000-0000-0000-0000-0000000000a1', 'Izmir Trading Co');
 update public.counterparties set normalized_name = app.held_name_key('izmir trading', id)
  where id = 'c2100000-0000-0000-0000-000000000001';
@@ -122,7 +123,7 @@ select is((select normalized_name from public.counterparties where id = 'c210000
 
 -- A held record merged into another no longer blocks its name: the merge was the decision.
 insert into public.counterparties (id, organization_id, name) values
-  ('c2100000-0000-0000-0000-000000000011', 'f2100000-0000-0000-0000-0000000000a1', 'Ａｌｐｈａ'),
+  ('c2100000-0000-0000-0000-000000000011', 'f2100000-0000-0000-0000-0000000000a1', 'ALPHA'),
   ('c2100000-0000-0000-0000-000000000012', 'f2100000-0000-0000-0000-0000000000a1', 'Beta Holdings');
 update public.counterparties set normalized_name = app.held_name_key('alpha', id), merged_into_id = 'c2100000-0000-0000-0000-000000000012'
  where id = 'c2100000-0000-0000-0000-000000000011';

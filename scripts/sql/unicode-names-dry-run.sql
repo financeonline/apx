@@ -15,7 +15,7 @@ begin;
 create function pg_temp.name_key(p_name text)
 returns text language sql immutable strict parallel safe set search_path = '' as $$
   select btrim(regexp_replace(
-           replace(lower(normalize(p_name, nfkc) collate pg_catalog.pg_c_utf8), 'ς', 'σ'),
+           replace(lower(replace(normalize(p_name, nfc), 'İ', 'i' || chr(775)) collate pg_catalog.pg_c_utf8), 'ς', 'σ'),
            '[[:space:][:punct:][:cntrl:]]+', ' ', 'g'));
 $$;
 

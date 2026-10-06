@@ -27,12 +27,12 @@
 --
 -- Read-only collision report to run BEFORE this migration: scripts/sql/unicode-names-dry-run.sql.
 
+-- D-3 (owner decision after audit U-1): NFC, not NFKC — canonically equal text is one name, but a
+-- compatibility variant (full-width Ａｃｍｅ, the ﬁ ligature, half-width katakana) is a DIFFERENT name
+-- until a person merges it. And İ keeps its dot: lower-cased by its full mapping (i + U+0307), so
+-- "İzmir Ltd" and "Izmir Ltd" are two customers, never silently one.
 create or replace function app.normalize_name(p_name text)
 returns text language sql immutable strict parallel safe set search_path = '' as $$
-  -- D-3 (owner decision after audit U-1): NFC, not NFKC — canonically equal text is one name, but a
-  -- compatibility variant (full-width Ａｃｍｅ, the ﬁ ligature, half-width katakana) is a DIFFERENT
-  -- name until a person merges it. And İ keeps its dot: lower-cased by its full mapping (i + U+0307),
-  -- so "İzmir Ltd" and "Izmir Ltd" are two customers, never silently one.
   select btrim(regexp_replace(
            replace(lower(replace(normalize(p_name, nfc), 'İ', 'i' || chr(775)) collate pg_catalog.pg_c_utf8), 'ς', 'σ'),
            '[[:space:][:punct:][:cntrl:]]+', ' ', 'g'));

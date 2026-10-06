@@ -96,9 +96,10 @@ begin
     ('e9000000-0000-4000-8000-0000000000e3', 'Ελληνική Εταιρεία'),
     ('e9000000-0000-4000-8000-0000000000e4', 'АО «Василёк»');
   -- Renaming one record of a held group, then re-saving the other, resolves it.
-  update public.counterparties set name = 'Izmir Ltd (Ankara)' where id = 'e9c00000-0000-4000-8000-000000000005';
-  update public.counterparties set name = name where id = 'e9c00000-0000-4000-8000-000000000004';
-  if (select normalized_name from public.counterparties where id = 'e9c00000-0000-4000-8000-000000000004') <> 'izmir ltd' then
+  -- (D-3: the held pair is now the same words typed precomposed and decomposed — one name under NFC.)
+  update public.counterparties set name = 'Café Lumière (Paris)' where id = 'e9c00000-0000-4000-8000-000000000012';
+  update public.counterparties set name = name where id = 'e9c00000-0000-4000-8000-000000000010';
+  if (select normalized_name from public.counterparties where id = 'e9c00000-0000-4000-8000-000000000010') <> 'café lumière' then
     raise exception 'resolving a held group did not give the remaining record its key';
   end if;
 

@@ -39,8 +39,9 @@ beforeAll(async () => {
     const doc = one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
       values ('${org}', '${org}/${importType}.csv', '${importType}.csv', 'text/csv', 10, digest('${org}${importType}', 'sha256'), 'ready', 'invoice') returning id`);
     adminSql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
-        period_start, period_end, committed_at, invoice_list_kind)
-      values ('${org}', '${doc}', '${importType}', 'invoices', 'committed', 'csv', '2026-06-01', '2026-06-30', now(), 'full')`);
+        period_start, period_end, committed_at, invoice_list_kind, confirmations)
+      values ('${org}', '${doc}', '${importType}', 'invoices', 'committed', 'csv', '2026-06-01', '2026-06-30', now(), 'full',
+        '{"IMP-INV-013": {"by": null, "at": "2026-09-01T00:00:00Z", "value": {"opening": "complete"}}}'::jsonb)`); // R-2: a complete export
   };
   adminSql(`insert into public.counterparties (organization_id, name, kind)
               select '${org}', 'Customer ' || lpad(g::text, 4, '0'), 'customer' from generate_series(1, 1200) g`);
