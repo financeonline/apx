@@ -1,7 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createUserClient } from '@/core/db/user-client';
 import { PageHeader, Card, CardHeader, CardBody } from '@/components/ui/surfaces';
-import { ButtonLink } from '@/components/ui/button';
 import { ProfileForm } from './profile-form';
 import { BrandedScreen } from '@/components/dashboard/branded-screen';
 import { KeyRound } from 'lucide-react';
@@ -26,7 +25,8 @@ export default async function AccountPage() {
   const profile = (data as ProfileRow[] | null)?.[0];
 
   // ADR-157: the AI provider key is managed here, by a super admin only; nobody else's profile shows
-  // it. Its status is readable only at aal2 (two-step sign-in), as every platform action is.
+  // it. Its status is readable only when the platform counts this sign-in (aal2, or two-step switched
+  // off for platform staff — ADR-159). The two-step card was removed on the owner's request.
   const { data: roleRows } = await db.schema('api').rpc('my_platform_role');
   const role = (roleRows as Array<{ platform_role: string; status: string; has_aal2: boolean }> | null)?.[0];
   const superAdmin = role?.platform_role === 'super_admin' && role.status === 'active';
@@ -41,7 +41,7 @@ export default async function AccountPage() {
   return (
     <BrandedScreen width="2xl" panel={false}>
       <PageHeader
-        title="Your account" description="Your details and how you sign in."
+        title="Your account" description="Your details."
         action={<SignOutButton className="w-36 rounded-xl border border-line bg-surface" />}
       />
       <div className="mt-8 flex flex-col gap-6">
@@ -55,15 +55,6 @@ export default async function AccountPage() {
             />
           </CardBody>
         </Card>
-        <Card>
-          <CardHeader
-            title="Two-step sign-in"
-            description="An authenticator code in addition to your password. Required for MOTION staff accounts."
-          />
-          <CardBody>
-            <ButtonLink href="/account/mfa" tone="secondary">Set up two-step sign-in</ButtonLink>
-          </CardBody>
-        </Card>
         {superAdmin ? (
           <Card>
             <CardHeader
@@ -73,7 +64,7 @@ export default async function AccountPage() {
             <CardBody className="flex flex-col gap-4">
               {aiKey === null ? (
                 <p className="text-sm text-ink">
-                  Sign in with two-step sign-in to see or change the key. Set it up above, then sign out and back in with your code.
+                  Two-step sign-in is required for platform staff (Platform → Settings), so sign in with your code to see or change the key.
                 </p>
               ) : (
                 <>
