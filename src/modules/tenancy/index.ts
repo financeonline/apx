@@ -6,6 +6,7 @@ export { moduleOn, requireModule } from './services/modules';
 export type { ActorType, OrgStatus, MembershipRole } from './domain/types';
 export { resolveEffectiveRole, type ResolutionInput } from './domain/resolve';
 export { getAccessContext, getPlatformContext, resolveAccessFresh, resolvePlatformRole } from './services/resolve-access';
+export { confirmPassword } from './services/confirm-password';
 export {
   createOrganization,
   updateOrganization,

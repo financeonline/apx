@@ -9,7 +9,13 @@ import type { ActionResult } from '@/components/action-result';
 import { assertCan } from '@/core/permissions';
 import { clearAiKey, setAiKey } from '@/modules/platform';
 import { forgetAiKey } from '@/modules/ai';
-import { getPlatformContext } from '@/modules/tenancy';
+import { confirmPassword, getPlatformContext } from '@/modules/tenancy';
+
+/** The password as typed (never trimmed, never logged). */
+function password(form: FormData): string {
+  const value = form.get('current_password');
+  return typeof value === 'string' ? value : '';
+}
 
 export async function updateProfileAction(
   _previous: ActionResult | null,
@@ -40,6 +46,7 @@ export async function setAiKeyAction(_previous: ActionResult | null, form: FormD
   const ctx = await getPlatformContext();
   try {
     assertCan(ctx, 'system.manage');
+    await confirmPassword(ctx, password(form));
     const ending = await setAiKey(ctx, text(form, 'api_key'));
     forgetAiKey();
     revalidatePath('/account');
@@ -49,10 +56,11 @@ export async function setAiKeyAction(_previous: ActionResult | null, form: FormD
   }
 }
 
-export async function clearAiKeyAction(_previous: ActionResult | null, _form: FormData): Promise<ActionResult> {
+export async function clearAiKeyAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
   const ctx = await getPlatformContext();
   try {
     assertCan(ctx, 'system.manage');
+    await confirmPassword(ctx, password(form));
     const removed = await clearAiKey(ctx);
     forgetAiKey();
     revalidatePath('/account');
