@@ -27,70 +27,86 @@ const EFFORT_LABELS: Record<string, string> = {
 /** The value a model is sent as: "provider:model" (ADR-164). */
 const valueOf = (o: { provider: string; id: string }) => `${o.provider}:${o.id}`;
 
-export function AiModelForm({ options, chosenModel, chosenEffort, defaultModel }: {
+/**
+ * One provider's models and effort (ADR-163, ADR-164): the Anthropic card lists Claude models (with
+ * "Default"), the OpenAI card lists OpenAI models. Each provider remembers its own choice; which one
+ * the AI uses is the active provider (ADR-165). With `unavailable` set, the choices are shown but
+ * cannot be used yet.
+ */
+export function AiModelForm({ provider, options, chosenModel, chosenEffort, defaultModel, unavailable }: {
+  provider: 'anthropic' | 'openai';
   options: readonly ModelChoiceOption[];
-  /** "provider:model", or null for the default. */
+  /** "provider:model" of the model in use, or null for the default. */
   chosenModel: string | null;
   chosenEffort: string | null;
   defaultModel: string;
+  /** Why the choices cannot be used yet (no key stored), or null. */
+  unavailable?: string | null;
 }) {
+  const openAi = provider === 'openai';
+  const mine = options.filter((o) => o.provider === provider);
+  const inThisCard = chosenModel !== null && chosenModel.startsWith(`${provider}:`);
   const [state, save] = useActionState(setAiModelAction, null);
-  const [model, setModel] = useState(chosenModel ?? '');
-  const [effort, setEffort] = useState(chosenEffort ?? '');
+  const [model, setModel] = useState(inThisCard ? chosenModel! : '');
+  const [effort, setEffort] = useState(inThisCard ? (chosenEffort ?? '') : '');
   const defaultName = options.find((o) => o.provider === 'anthropic' && o.id === defaultModel)?.name ?? defaultModel;
-  const current = options.find((o) => valueOf(o) === (model || `anthropic:${defaultModel}`));
-  const anthropic = options.filter((o) => o.provider === 'anthropic');
-  const openAi = options.filter((o) => o.provider === 'openai');
+  const current = mine.find((o) => valueOf(o) === (model || (openAi ? '' : `anthropic:${defaultModel}`)));
   const efforts = current?.efforts ?? [];
-  const effortDisabled = efforts.length === 0;
+  const effortDisabled = Boolean(unavailable) || efforts.length === 0;
+  const effortHint = unavailable
+    ? 'Choose a model first.'
+    : openAi && !current
+      ? 'Choose a model first. Only OpenAI reasoning models (the o-series and GPT-5) have an effort setting.'
+      : efforts.length === 0
+        ? `${current?.name ?? 'This model'} has no effort setting.${openAi ? ' Only OpenAI reasoning models (the o-series and GPT-5) have one.' : ' To set effort, choose Claude Sonnet 4.6 or a Claude Opus 4 model.'}`
+        : 'How hard the model works on each answer. Higher is slower and costs more.';
 
   return (
     <form action={save} className="flex flex-col gap-3">
       <label className="flex flex-col gap-1 text-sm">
-        <span className="text-ink">AI model</span>
-        <span className="text-xs text-ink-muted">The models your keys can use. Haiku is fastest and cheapest; Sonnet and Opus are more capable. OpenAI models appear once an OpenAI key is stored.</span>
+        <span className="text-ink">{openAi ? 'OpenAI model' : 'AI model'}</span>
+        <span className="text-xs text-ink-muted">
+          {unavailable ?? (openAi
+            ? 'The OpenAI models your key can use. It is used once OpenAI is made active above.'
+            : 'The Claude models your key can use. Haiku is fastest and cheapest; Sonnet and Opus are more capable.')}
+        </span>
         <NativeSelect
-          name="ai_model" value={model} className="mt-1"
+          name="ai_model" value={model} className="mt-1" disabled={Boolean(unavailable)} required={openAi}
           onChange={(e) => {
             setModel(e.target.value);
-            const next = options.find((o) => valueOf(o) === (e.target.value || `anthropic:${defaultModel}`))?.efforts ?? [];
-            if (!next.includes(effort)) setEffort('');
+            const next = mine.find((o) => valueOf(o) === (e.target.value || (openAi ? '' : `anthropic:${defaultModel}`)))?.efforts ?? [];
+            if (!next.includes(effort as never)) setEffort('');
           }}
         >
-          <option value="">Default ({defaultName})</option>
-          {anthropic.length > 0 ? (
-            <optgroup label="Anthropic">
-              {anthropic.map((o) => <option key={valueOf(o)} value={valueOf(o)}>{o.name}</option>)}
-            </optgroup>
-          ) : null}
-          {openAi.length > 0 ? (
-            <optgroup label="OpenAI">
-              {openAi.map((o) => <option key={valueOf(o)} value={valueOf(o)}>{o.name}</option>)}
-            </optgroup>
-          ) : null}
+          {openAi
+            ? <option value="" disabled>{unavailable ? 'Store an OpenAI key first' : 'Choose an OpenAI model'}</option>
+            : <option value="">Default ({defaultName})</option>}
+          {mine.map((o) => <option key={valueOf(o)} value={valueOf(o)}>{o.name}</option>)}
         </NativeSelect>
       </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink">Effort</span>
-        <span className={effortDisabled ? 'text-xs text-ink' : 'text-xs text-ink-muted'}>
-          {effortDisabled
-            ? `${current?.name ?? 'This model'} has no effort setting. To set effort, choose Claude Sonnet 4.6, a Claude Opus 4 model, or an OpenAI reasoning model (o-series or GPT-5).`
-            : 'How hard the model works on each answer. Higher is slower and costs more.'}
-        </span>
+        <span className={effortDisabled && !unavailable ? 'text-xs text-ink' : 'text-xs text-ink-muted'}>{effortHint}</span>
         <NativeSelect name="ai_effort" value={effortDisabled ? '' : effort} disabled={effortDisabled} onChange={(e) => setEffort(e.target.value)} className="mt-1">
           <option value="">Model default</option>
           {efforts.map((level) => <option key={level} value={level}>{EFFORT_LABELS[level] ?? level}</option>)}
         </NativeSelect>
       </label>
-      <label className="flex flex-col gap-1 text-sm">
-        <span className="text-ink">Your password</span>
-        <span className="text-xs text-ink-muted">To confirm it is you.</span>
-        <Input name="current_password" type="password" required autoComplete="current-password" className="mt-1" />
-      </label>
-      <div className="flex flex-wrap items-center gap-3">
-        <SubmitButton pendingLabel="Checking with Anthropic…">Save model</SubmitButton>
-        <ActionMessage state={state} />
-      </div>
+      {unavailable ? null : (
+        <>
+          <label className="flex flex-col gap-1 text-sm">
+            <span className="text-ink">Your password</span>
+            <span className="text-xs text-ink-muted">To confirm it is you.</span>
+            <Input name="current_password" type="password" required autoComplete="current-password" className="mt-1" />
+          </label>
+          <div className="flex flex-wrap items-center gap-3">
+            <SubmitButton pendingLabel={openAi ? 'Checking with OpenAI…' : 'Checking with Anthropic…'}>
+              {openAi ? 'Save OpenAI model' : 'Save model'}
+            </SubmitButton>
+            <ActionMessage state={state} />
+          </div>
+        </>
+      )}
     </form>
   );
 }

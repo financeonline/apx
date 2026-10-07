@@ -7,6 +7,7 @@ import { KeyRound } from 'lucide-react';
 import { formatDateTime } from '@/components/labels';
 import { AiKeyForm } from './ai-key-form';
 import { AiModelForm } from './ai-model-form';
+import { ProviderActivation } from './provider-activation';
 import { timeZoneOptions } from '@/components/time-zones';
 import { getPlatformContext } from '@/modules/tenancy';
 import { loadAiModelSettings, loadOpenAiKeyStatus, type AiModelSettings } from '@/modules/platform';
@@ -46,6 +47,16 @@ export default async function AccountPage() {
   // ADR-164: the OpenAI key, beside the Anthropic one.
   const openAiKey = platformCtx ? await loadOpenAiKeyStatus(platformCtx) : null;
 
+  // Each provider card says its own model; the active badge says which one the AI uses (ADR-165).
+  const nameOf = (provider: 'anthropic' | 'openai', id: string) =>
+    aiModel?.options.find((o) => o.provider === provider && o.id === id)?.name ?? (provider === 'openai' ? `OpenAI ${id}` : id);
+  const modelLine = (provider: 'anthropic' | 'openai') => {
+    const slot = provider === 'openai' ? aiModel?.openai : aiModel?.anthropic;
+    if (slot) return <>Model: <span className="font-medium">{nameOf(provider, slot.model)}</span>{slot.effort ? `, ${slot.effort} effort` : ', its default effort'}.</>;
+    if (provider === 'anthropic' && aiModel) return <>Model: the default, <span className="font-medium">{nameOf('anthropic', aiModel.defaultModel)}</span>.</>;
+    return <>No OpenAI model chosen yet.</>;
+  };
+
   return (
     <BrandedScreen width={superAdmin ? '6xl' : '2xl'} panel={false}>
       <PageHeader
@@ -69,16 +80,37 @@ export default async function AccountPage() {
           {openAiKey ? (
             <Card>
               <CardHeader
-                icon={<KeyRound />} tint="violet" title="OpenAI key (optional)"
+                icon={<KeyRound />} tint="violet" title="OpenAI key"
                 description="Store an OpenAI key to choose an OpenAI model for the AI. Only super admins see this."
               />
               <CardBody className="flex flex-col gap-4">
-                <p className="text-sm text-ink" data-testid="openai-key-status">
+                {aiModel ? (
+                <ProviderActivation
+                  provider="openai" active={aiModel.active === 'openai'} otherName="Anthropic"
+                  blockedReason={!openAiKey.configured
+                    ? 'Store an OpenAI key and choose a model below to make OpenAI active.'
+                    : !aiModel.openai ? 'Choose an OpenAI model below to make OpenAI active.' : null}
+                />
+              ) : null}
+              <p className="text-sm text-ink" data-testid="openai-key-status">
                   {openAiKey.configured
                     ? <>A key ending <span className="font-mono">…{openAiKey.ending}</span> is stored{openAiKey.updatedAt ? `, set ${formatDateTime(openAiKey.updatedAt)}` : ''}.</>
                     : 'No OpenAI key is stored. The AI uses Anthropic.'}
                 </p>
                 <AiKeyForm configured={openAiKey.configured} provider="openai" />
+              {aiModel ? (
+                <div className="flex flex-col gap-3 border-t border-line pt-4">
+                  <p className="text-sm text-ink" data-testid="openai-model-status">{modelLine('openai')}</p>
+                  <AiModelForm
+                    provider="openai" options={aiModel.options}
+                    chosenModel={aiModel.openai ? `openai:${aiModel.openai.model}` : null}
+                    chosenEffort={aiModel.openai?.effort ?? null} defaultModel={aiModel.defaultModel}
+                    unavailable={!openAiKey.configured
+                      ? 'Store an OpenAI key above, then choose its model and effort here.'
+                      : aiModel.options.some((o) => o.provider === 'openai') ? null : 'The list of OpenAI models could not be read just now. Refresh to try again.'}
+                  />
+                </div>
+              ) : null}
               </CardBody>
             </Card>
           ) : null}
@@ -93,6 +125,9 @@ export default async function AccountPage() {
               <CardBody className="flex flex-col gap-4">
                 {aiKey === null ? null : (
                   <>
+                    {aiModel ? (
+                      <ProviderActivation provider="anthropic" active={aiModel.active === 'anthropic'} otherName="OpenAI" blockedReason={null} />
+                    ) : null}
                     <p className="text-sm text-ink" data-testid="ai-key-status">
                       {aiKey.configured
                         ? <>A key ending <span className="font-mono">…{aiKey.ending}</span> is stored{aiKey.updatedAt ? `, set ${formatDateTime(aiKey.updatedAt)}` : ''}.</>
@@ -103,18 +138,15 @@ export default async function AccountPage() {
                     <AiKeyForm configured={aiKey.configured} />
                     {aiModel ? (
                       <div className="flex flex-col gap-3 border-t border-line pt-4">
-                        <p className="text-sm text-ink" data-testid="ai-model-status">
-                          {aiModel.chosen
-                            ? <>In use: <span className="font-medium">{aiModel.options.find((o) => o.provider === aiModel.chosen!.provider && o.id === aiModel.chosen!.model)?.name ?? `${aiModel.chosen.provider === 'openai' ? 'OpenAI ' : ''}${aiModel.chosen.model}`}</span>{aiModel.chosen.effort ? `, ${aiModel.chosen.effort} effort` : ', its default effort'}.</>
-                            : <>In use: the default, <span className="font-medium">{aiModel.options.find((o) => o.id === aiModel.defaultModel)?.name ?? aiModel.defaultModel}</span>.</>}
-                        </p>
-                        {aiModel.options.length === 0 ? (
-                          <p className="text-sm text-ink-muted">The list of models could not be read from Anthropic just now. Refresh to try again.</p>
-                        ) : (
+                        <p className="text-sm text-ink" data-testid="ai-model-status">{modelLine('anthropic')}</p>
+                        {aiModel.options.some((o) => o.provider === 'anthropic') ? (
                           <AiModelForm
-                            options={aiModel.options} chosenModel={aiModel.chosen ? `${aiModel.chosen.provider}:${aiModel.chosen.model}` : null}
-                            chosenEffort={aiModel.chosen?.effort ?? null} defaultModel={aiModel.defaultModel}
+                            provider="anthropic" options={aiModel.options}
+                            chosenModel={aiModel.anthropic ? `anthropic:${aiModel.anthropic.model}` : null}
+                            chosenEffort={aiModel.anthropic?.effort ?? null} defaultModel={aiModel.defaultModel}
                           />
+                        ) : (
+                          <p className="text-sm text-ink-muted">The list of models could not be read from Anthropic just now. Refresh to try again.</p>
                         )}
                       </div>
                     ) : null}

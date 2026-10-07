@@ -7,7 +7,7 @@ import { newRequestId } from '@/core/logging';
 import { fail, done, text } from '@/app/_lib/server-action';
 import type { ActionResult } from '@/components/action-result';
 import { assertCan } from '@/core/permissions';
-import { clearAiKey, clearOpenAiKey, setAiKey, setAiModel, setOpenAiKey } from '@/modules/platform';
+import { clearAiKey, clearOpenAiKey, setActiveAiProvider, setAiKey, setAiModel, setOpenAiKey } from '@/modules/platform';
 import { forgetAiKey } from '@/modules/ai';
 import { confirmPassword, getPlatformContext } from '@/modules/tenancy';
 
@@ -79,9 +79,10 @@ export async function setAiModelAction(_previous: ActionResult | null, form: For
     const saved = await setAiModel(ctx, text(form, 'ai_model'), text(form, 'ai_effort'));
     forgetAiKey();
     revalidatePath('/account');
+    const label = saved.provider === 'openai' ? 'OpenAI' : 'Anthropic';
     return done(saved.model
-      ? `Saved. The AI now uses ${saved.provider === 'openai' ? 'OpenAI ' : ''}${saved.model}${saved.effort ? ` at ${saved.effort} effort` : ''}.`
-      : 'Saved. The AI uses the default model.');
+      ? `Saved. ${label} will use ${saved.model}${saved.effort ? ` at ${saved.effort} effort` : ''} whenever it is active.`
+      : 'Saved. Anthropic will use the default model whenever it is active.');
   } catch (error) {
     return fail(error, { requestId: ctx.requestId, action: 'platform.setAiModel' });
   }
@@ -113,6 +114,21 @@ export async function clearOpenAiKeyAction(_previous: ActionResult | null, form:
     return done(removed ? 'Removed. If an OpenAI model was chosen, choose another model.' : 'There was no stored key to remove.');
   } catch (error) {
     return fail(error, { requestId: ctx.requestId, action: 'platform.clearOpenAiKey' });
+  }
+}
+
+/** Make one provider active and the other inactive (ADR-165). Password confirmed. */
+export async function setActiveAiProviderAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const ctx = await getPlatformContext();
+  try {
+    assertCan(ctx, 'system.manage');
+    await confirmPassword(ctx, password(form));
+    const active = await setActiveAiProvider(ctx, text(form, 'provider'));
+    forgetAiKey();
+    revalidatePath('/account');
+    return done(active === 'openai' ? 'OpenAI is now active; Anthropic is inactive.' : 'Anthropic is now active; OpenAI is inactive.');
+  } catch (error) {
+    return fail(error, { requestId: ctx.requestId, action: 'platform.setActiveAiProvider' });
   }
 }
 

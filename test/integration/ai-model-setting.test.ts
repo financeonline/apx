@@ -32,23 +32,27 @@ afterAll(() => {
 
 describe('api.set_ai_model', () => {
   it('stores a model and effort, and the server reads them', async () => {
+    adminSql(`delete from public.platform_settings where key = 'ai_model'`);
     expect((await asAdmin({ p_model: 'claude-sonnet-4-6', p_effort: 'low' })).error).toBeNull();
     const server = await serviceClientScoped().schema('api_server').rpc('ai_model');
     expect(server.data).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6', effort: 'low' });
   });
 
-  it('stores an OpenAI model with its provider (ADR-164), and refuses an effort OpenAI does not take', async () => {
+  it('remembers an OpenAI model without making it active (ADR-165), and refuses an effort OpenAI does not take', async () => {
     expect((await asAdmin({ p_model: 'gpt-4.1', p_effort: null, p_provider: 'openai' })).error).toBeNull();
     const server = await serviceClientScoped().schema('api_server').rpc('ai_model');
-    expect(server.data).toEqual({ provider: 'openai', model: 'gpt-4.1', effort: null });
+    expect(server.data).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6', effort: 'low' });
+    expect(JSON.parse(adminSql(`select value::text from public.platform_settings where key = 'ai_model'`)))
+      .toEqual({ active: 'anthropic', anthropic: { model: 'claude-sonnet-4-6', effort: 'low' }, openai: { model: 'gpt-4.1', effort: null } });
     expect(sqlstate((await asAdmin({ p_model: 'o3', p_effort: 'max', p_provider: 'openai' })).error)).toBe('22023');
     expect(sqlstate((await asAdmin({ p_model: 'gpt-4.1', p_effort: null, p_provider: 'mistral' })).error)).toBe('22023');
     expect(sqlstate((await asAdmin({ p_model: 'gpt-4.1', p_effort: null, p_provider: 'anthropic' })).error)).toBe('22023');
   });
 
-  it('clears the choice back to the default', async () => {
+  it('clears Anthropic back to the default model, keeping OpenAI\'s choice', async () => {
     expect((await asAdmin({ p_model: null, p_effort: null })).error).toBeNull();
-    expect(adminSql(`select count(*) from public.platform_settings where key = 'ai_model'`)).toBe('0');
+    expect((await serviceClientScoped().schema('api_server').rpc('ai_model')).data).toBeNull();
+    expect(adminSql(`select value -> 'openai' ->> 'model' from public.platform_settings where key = 'ai_model'`)).toBe('gpt-4.1');
   });
 
   it('refuses a malformed model, an unknown effort, and an effort without a model', async () => {
@@ -107,6 +111,49 @@ describe('the OpenAI key (ADR-164)', () => {
     expect(sqlstate((await stale.schema('api').rpc('clear_openai_api_key')).error)).toBe('42501');
     expect((await api.rpc('clear_openai_api_key')).data).toBe(true);
     expect(adminSql(`select count(*) from vault.secrets where name = 'openai_api_key'`)).toBe('0');
+  });
+});
+
+describe('one provider is active (ADR-165)', () => {
+  const KEY = `sk-proj-${'r'.repeat(40)}WXYZ`;
+  const activate = (provider: string) => clientFor(adminId).schema('api').rpc('set_ai_active_provider', { p_provider: provider });
+  let savedKey: string | null = null;
+
+  beforeAll(() => {
+    savedKey = adminSql(`select coalesce((select decrypted_secret from vault.decrypted_secrets where name = 'openai_api_key'), '')`) || null;
+    adminSql(`delete from vault.secrets where name = 'openai_api_key'; delete from public.platform_settings where key = 'ai_model';`);
+  });
+
+  afterAll(() => {
+    adminSql(`delete from vault.secrets where name = 'openai_api_key'`);
+    if (savedKey) adminSql(`select vault.create_secret('${savedKey.replace(/'/g, "''")}', 'openai_api_key', 'ending ${savedKey.slice(-4)}')`);
+  });
+
+  it('refuses OpenAI without its key, then without a model', async () => {
+    expect(sqlstate((await activate('openai')).error)).toBe('22023');
+    expect((await clientFor(adminId).schema('api').rpc('set_openai_api_key', { p_key: KEY })).error).toBeNull();
+    expect(sqlstate((await activate('openai')).error)).toBe('22023');
+  });
+
+  it('makes OpenAI active and Anthropic inactive, and back', async () => {
+    expect((await asAdmin({ p_model: 'gpt-4.1', p_effort: null, p_provider: 'openai' })).error).toBeNull();
+    expect((await activate('openai')).error).toBeNull();
+    expect((await serviceClientScoped().schema('api_server').rpc('ai_model')).data).toEqual({ provider: 'openai', model: 'gpt-4.1', effort: null });
+    expect(sqlstate((await asAdmin({ p_model: null, p_effort: null, p_provider: 'openai' })).error)).toBe('23505');
+    expect((await activate('anthropic')).error).toBeNull();
+    expect((await serviceClientScoped().schema('api_server').rpc('ai_model')).data).toBeNull();
+  });
+
+  it('falls back to Anthropic when the OpenAI key is removed while OpenAI is active', async () => {
+    expect((await activate('openai')).error).toBeNull();
+    expect((await clientFor(adminId).schema('api').rpc('clear_openai_api_key')).data).toBe(true);
+    expect(adminSql(`select value ->> 'active' from public.platform_settings where key = 'ai_model'`)).toBe('anthropic');
+  });
+
+  it('refuses an owner and a stale sign-in', async () => {
+    expect(sqlstate((await clientFor(ownerId).schema('api').rpc('set_ai_active_provider', { p_provider: 'anthropic' })).error)).toBe('42501');
+    const stale = clientFor(adminId, { amrTimestamp: Math.floor(Date.now() / 1000) - 3600 });
+    expect(sqlstate((await stale.schema('api').rpc('set_ai_active_provider', { p_provider: 'anthropic' })).error)).toBe('42501');
   });
 });
 

@@ -424,12 +424,20 @@ export interface AiModelOption {
   readonly efforts: readonly AiEffortLevel[];
 }
 
+export interface AiProviderChoice {
+  readonly model: string;
+  readonly effort: AiEffortLevel | null;
+}
+
 export interface AiModelSettings {
   /** The models the stored keys are offered; a provider that could not be reached lists none. */
   readonly options: readonly AiModelOption[];
-  /** The super admin's choice, or null when the default applies. */
-  readonly chosen: { readonly provider: AiProvider; readonly model: string; readonly effort: AiEffortLevel | null } | null;
-  /** The model used when nothing is chosen (Anthropic). */
+  /** The provider the AI uses now (ADR-165); the other is inactive. */
+  readonly active: AiProvider;
+  /** Each provider's own model and effort; Anthropic's null means the default model. */
+  readonly anthropic: AiProviderChoice | null;
+  readonly openai: AiProviderChoice | null;
+  /** The model used when Anthropic has no choice. */
   readonly defaultModel: string;
 }
 
@@ -479,20 +487,24 @@ export async function loadAiModelSettings(ctx: AccessContext): Promise<AiModelSe
   assertCan(ctx, 'system.manage');
   const { data, error } = await ctx.db.from('platform_settings').select('value').eq('key', 'ai_model').maybeSingle();
   if (error) throw toMotionError(error, ctx.requestId);
-  const value = (data?.value ?? null) as { provider?: unknown; model?: unknown; effort?: unknown } | null;
-  const chosen = value && typeof value.model === 'string'
-    ? {
-      provider: (value.provider === 'openai' ? 'openai' : 'anthropic') as AiProvider,
-      model: value.model,
-      effort: (AI_EFFORTS as readonly string[]).includes(String(value.effort)) ? value.effort as AiEffortLevel : null,
-    }
-    : null;
+  const value = (data?.value ?? null) as { active?: unknown; anthropic?: unknown; openai?: unknown } | null;
+  const slot = (raw: unknown): AiProviderChoice | null => {
+    const v = raw as { model?: unknown; effort?: unknown } | null | undefined;
+    if (!v || typeof v.model !== 'string') return null;
+    return { model: v.model, effort: (AI_EFFORTS as readonly string[]).includes(String(v.effort)) ? v.effort as AiEffortLevel : null };
+  };
   const [anthropicKey, openAiKey] = await Promise.all([anthropicKeyInUse(), openAiKeyInUse()]);
   const [fromAnthropic, fromOpenAi] = await Promise.all([
     anthropicKey ? anthropicModels(anthropicKey).catch(() => []) : Promise.resolve([]),
     openAiKey ? openAiModels(openAiKey).catch(() => []) : Promise.resolve([]),
   ]);
-  return { options: [...fromAnthropic, ...fromOpenAi], chosen, defaultModel: DEFAULT_ANALYST_MODEL };
+  return {
+    options: [...fromAnthropic, ...fromOpenAi],
+    active: value?.active === 'openai' ? 'openai' : 'anthropic',
+    anthropic: slot(value?.anthropic),
+    openai: slot(value?.openai),
+    defaultModel: DEFAULT_ANALYST_MODEL,
+  };
 }
 
 /** The tool MOTION requires a model to call — what the analyst's answer, document reading and the briefing depend on. */
@@ -530,21 +542,21 @@ async function trialRefusal(provider: AiProvider, key: string, model: string, ef
 }
 
 /**
- * Choose the provider, model and effort. The model must be one that provider offers the stored key
- * and the effort one it supports; one tiny call with a required tool proves the choice works before
- * it is stored, so a choice can never leave every analyst question failing. An empty model goes back
- * to the default.
+ * Choose one provider's model and effort (it does not change which provider is active, ADR-165). The
+ * model must be one that provider offers the stored key and the effort one it supports; one tiny call
+ * with a required tool proves the choice works before it is stored, so a choice can never leave every
+ * analyst question failing. An empty Anthropic model goes back to the default.
  */
 export async function setAiModel(
   ctx: AccessContext, choice: string, effort: string,
-): Promise<{ provider: AiProvider | null; model: string | null; effort: string | null }> {
+): Promise<{ provider: AiProvider; model: string | null; effort: string | null }> {
   assertCan(ctx, 'system.manage');
   const wantedEffort = effort.trim() || null;
   // The form sends "provider:model"; "Default" with an effort means the default model, named explicitly.
   const raw = choice.trim() || (wantedEffort ? `anthropic:${DEFAULT_ANALYST_MODEL}` : '');
   if (!raw) {
     await callApi(ctx.db, 'set_ai_model', { p_model: null, p_effort: null, p_provider: 'anthropic' }, ctx.requestId);
-    return { provider: null, model: null, effort: null };
+    return { provider: 'anthropic', model: null, effort: null };
   }
   const split = raw.indexOf(':');
   const provider: AiProvider = split > 0 && raw.slice(0, split) === 'openai' ? 'openai' : 'anthropic';
@@ -612,3 +624,12 @@ export async function clearOpenAiKey(ctx: AccessContext): Promise<boolean> {
   assertCan(ctx, 'system.manage');
   return await callApi<boolean>(ctx.db, 'clear_openai_api_key', {}, ctx.requestId);
 }
+
+/** Make one provider active; the other becomes inactive (ADR-165). OpenAI needs its key and a model. */
+export async function setActiveAiProvider(ctx: AccessContext, provider: string): Promise<AiProvider> {
+  assertCan(ctx, 'system.manage');
+  if (provider !== 'anthropic' && provider !== 'openai') throw new ValidationError('Choose Anthropic or OpenAI.');
+  await callApi(ctx.db, 'set_ai_active_provider', { p_provider: provider }, ctx.requestId);
+  return provider;
+}
+
