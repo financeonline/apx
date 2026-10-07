@@ -383,6 +383,20 @@ describe('a removed sentence cannot reappear carrying its figure (§7.8, R2-C-04
     }))).toMatch(/contains a digit/);
   });
 
+  it('accepts a period name — a month or quarter with its year — but no other digit', () => {
+    const topic = (t: string) => unsupportedTopicsClean(answer(statement(), { unsupported: [{ topic: t, reason: 'unverified' }] }));
+    expect(topic('Profit movement in Jun 2026')).toBeNull();
+    expect(topic('Marketing spend for September 2026')).toBeNull();
+    expect(topic('Revenue in Q2 2026')).toBeNull();
+    expect(topic('The £4,800 contract in Jun 2026')).toMatch(/contains a digit/);
+    expect(topic('Jun 2026 spend of 12 hires')).toMatch(/contains a digit/);
+    expect(topic('Revenue in 2026')).toMatch(/contains a digit/);
+    expect(topic('Jun 20265 orders')).toMatch(/contains a digit/);
+    // A word that merely starts like a month is not one.
+    expect(topic('the marketing 4800 contract')).toMatch(/contains a digit/);
+    expect(topic('Mayfair 2026 lease')).toMatch(/contains a digit/);
+  });
+
   it('accepts a topic that names the subject without the number', () => {
     expect(unsupportedTopicsClean(answer(statement(), {
       unsupported: [{ topic: 'marketing spend for the month', reason: 'unverified' }],

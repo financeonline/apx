@@ -514,14 +514,25 @@ export function modeAdmissible(answer: SubmitAnswer, context: GroundingContext):
 }
 
 /**
- * §7.2 and §5: `unsupported[].topic` is rejected if it contains any digit.
+ * A month or quarter with its year — "Jun 2026", "June 2026", "Q2 2026" — names a period, not an
+ * amount, so it cannot carry a figure. Only these exact shapes; any other digit still counts.
+ */
+const MONTH_NAMES = [
+  'jan', 'january', 'feb', 'february', 'mar', 'march', 'apr', 'april', 'may', 'jun', 'june', 'jul', 'july',
+  'aug', 'august', 'sep', 'sept', 'september', 'oct', 'october', 'nov', 'november', 'dec', 'december',
+];
+const PERIOD_NAME = new RegExp(`\\b(?:${MONTH_NAMES.join('|')}|q[1-4])\\s+\\d{4}\\b`, 'giu');
+
+/**
+ * §7.2 and §5: `unsupported[].topic` is rejected if it contains any digit outside a period name.
  *
  * The topics are server-generated on degradation (§7.8) precisely so a removed fabricated sentence
  * cannot reappear as a "Not covered" line carrying its figure (R2-C-04). A model-written topic is
- * held to the same rule.
+ * held to the same rule. A period name is allowed (2026-10-07: "Profit movement in Jun 2026" failed
+ * a whole custom-report answer).
  */
 export function unsupportedTopicsClean(answer: SubmitAnswer): string | null {
-  const offender = answer.unsupported.find((entry) => /\d/.test(entry.topic));
+  const offender = answer.unsupported.find((entry) => /\d/.test(entry.topic.replace(PERIOD_NAME, '')));
   return offender === undefined ? null : `"${offender.topic}" contains a digit`;
 }
 

@@ -25,6 +25,8 @@ import { Button, NativeSelect, Textarea } from '@/components/ui/shadcn';
  */
 
 export const FALLBACK_TITLE = "The analyst isn't available right now";
+/** An answer was written but did not pass the checks (§7): withheld, not "unavailable". */
+export const WITHHELD_TITLE = "The analyst's answer didn't pass MOTION's checks";
 
 type Statement = SubmitAnswer['direct_answer'];
 
@@ -58,7 +60,7 @@ export function AnswerView({
   if (!answer || message.groundingStatus === 'failed') {
     return (
       <div className="flex flex-col gap-3">
-        <Unavailable facts={facts} />
+        <Unavailable facts={facts} withheld={message.groundingStatus === 'failed'} />
         <div className="flex justify-end text-sm"><FeedbackControls orgSlug={orgSlug} messageId={message.id} /></div>
       </div>
     );
@@ -279,11 +281,13 @@ function FeedbackControls({ orgSlug, messageId }: { orgSlug: string; messageId: 
 }
 
 /** §7.2: the fallback, and the figures the reader can still have. */
-function Unavailable({ facts }: { facts: ReactNode }) {
+function Unavailable({ facts, withheld }: { facts: ReactNode; withheld: boolean }) {
   return (
     <div className="flex flex-col gap-4">
-      <Banner tone="warn" title={FALLBACK_TITLE}>
-        Your data and dashboard are unaffected.
+      <Banner tone="warn" title={withheld ? WITHHELD_TITLE : FALLBACK_TITLE}>
+        {withheld
+          ? 'It could not show where every figure came from, so it is not shown. Asking again usually works. Your data and dashboard are unaffected.'
+          : 'Your data and dashboard are unaffected.'}
       </Banner>
       {facts}
     </div>
