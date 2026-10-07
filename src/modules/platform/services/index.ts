@@ -6,7 +6,7 @@ import { ConflictError, NotFound, ValidationError, isMotionError, toMotionError 
 import { assertCan } from '@/core/permissions';
 import { MODULES, type AccessContext } from '@/modules/tenancy';
 import {
-  AddPlatformUserInput, CreateCompanyInput, parseInput,
+  AddPlatformUserInput, CreateCompanyInput, EditCompanyInput, parseInput,
 } from '../domain/inputs';
 
 /**
@@ -631,5 +631,48 @@ export async function setActiveAiProvider(ctx: AccessContext, provider: string):
   if (provider !== 'anthropic' && provider !== 'openai') throw new ValidationError('Choose Anthropic or OpenAI.');
   await callApi(ctx.db, 'set_ai_active_provider', { p_provider: provider }, ctx.requestId);
   return provider;
+}
+
+/**
+ * Edit a company from the list (ADR-166): name, legal name, financial year start and plan through
+ * `api.update_organization` (the super admin's patch); country and currency through
+ * `api.set_currency_and_country`, which refuses a currency change once the company holds records
+ * (amounts are never converted). Only what changed is sent.
+ */
+export async function editCompanyAsPlatform(ctx: AccessContext, orgId: string, input: unknown): Promise<void> {
+  assertCan(ctx, 'platform.orgs.manage');
+  const value = parseInput(EditCompanyInput, input);
+  const { data, error } = await ctx.db.from('organizations')
+    .select('name, legal_name, country_code, base_currency, fiscal_year_start_month, plan').eq('id', orgId).maybeSingle();
+  if (error) throw toMotionError(error, ctx.requestId);
+  if (!data) throw new NotFound();
+  const before = data as { name: string; legal_name: string | null; country_code: string | null; base_currency: string; fiscal_year_start_month: number; plan: string };
+
+  const patch: Record<string, unknown> = {};
+  if (value.name !== before.name) patch.name = value.name;
+  if (value.legalName !== (before.legal_name ?? '')) patch.legal_name = value.legalName;
+  if (value.fiscalYearStartMonth !== Number(before.fiscal_year_start_month)) patch.fiscal_year_start_month = value.fiscalYearStartMonth;
+  if (value.plan !== before.plan) patch.plan = value.plan;
+  if (Object.keys(patch).length > 0) await callApi(ctx.db, 'update_organization', { p_org: orgId, p_patch: patch }, ctx.requestId);
+
+  if (value.countryCode !== before.country_code || value.baseCurrency !== before.base_currency) {
+    await callApi(ctx.db, 'set_currency_and_country', { p_org: orgId, p_currency: value.baseCurrency, p_country: value.countryCode }, ctx.requestId);
+  }
+}
+
+/**
+ * Delete a company (ADR-166): the existing deletion path, `api.request_deletion` — the company leaves
+ * use at once and its data is erased for good thirty days later by `org.purge`; until then it can be
+ * restored. Nothing is erased on the spot.
+ */
+export async function deleteCompanyAsPlatform(ctx: AccessContext, orgId: string): Promise<void> {
+  assertCan(ctx, 'platform.orgs.manage');
+  await callApi(ctx.db, 'request_deletion', { p_org: orgId }, ctx.requestId);
+}
+
+/** Undo a scheduled deletion within the thirty days (`api.cancel_deletion`). */
+export async function restoreCompanyAsPlatform(ctx: AccessContext, orgId: string): Promise<void> {
+  assertCan(ctx, 'platform.orgs.manage');
+  await callApi(ctx.db, 'cancel_deletion', { p_org: orgId }, ctx.requestId);
 }
 

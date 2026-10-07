@@ -10,6 +10,7 @@ import { Input } from '@/components/ui/field';
 import { Button } from '@/components/ui/button';
 import { CreateCompanyForm } from './create-org-form';
 import { OrgStatusRowControl } from './[orgId]/org-controls';
+import { CompanyRowActions } from './company-row-actions';
 
 export const dynamic = 'force-dynamic';
 
@@ -35,7 +36,8 @@ export default async function PlatformOrganizationsPage({
   const q = searchTerm((await searchParams).q);
   let query = ctx.db
     .from('organizations')
-    .select('id, slug, name, status, plan, created_at')
+    .select('id, slug, name, legal_name, country_code, base_currency, fiscal_year_start_month, status, plan, created_at')
+    .neq('status', 'deleted')
     .order('created_at', { ascending: false })
     .limit(100);
   // Name, slug or legal name containing the words, in any case.
@@ -77,7 +79,7 @@ export default async function PlatformOrganizationsPage({
               )
             ) : (
               <TableWrap>
-                <THead columns={mayCreate ? ['Name', 'Slug', 'Plan', 'Status', 'Created', 'Active?'] : ['Name', 'Slug', 'Plan', 'Status', 'Created']} />
+                <THead columns={mayCreate ? ['Name', 'Slug', 'Plan', 'Status', 'Created', 'Active?', 'Manage'] : ['Name', 'Slug', 'Plan', 'Status', 'Created']} />
                 <TBody>
                   {organizations.map((organization) => (
                     <TR key={organization.id}>
@@ -94,6 +96,16 @@ export default async function PlatformOrganizationsPage({
                       <TD>{new Date(organization.created_at).toLocaleDateString('en-GB')}</TD>
                       {mayCreate ? (
                         <TD><OrgStatusRowControl orgId={organization.id} name={organization.name} status={organization.status} /></TD>
+                      ) : null}
+                      {mayCreate ? (
+                        <TD>
+                          <CompanyRowActions company={{
+                            id: organization.id, name: organization.name, legalName: organization.legal_name,
+                            countryCode: organization.country_code, baseCurrency: organization.base_currency,
+                            fiscalYearStartMonth: Number(organization.fiscal_year_start_month), plan: organization.plan,
+                            status: organization.status,
+                          }} />
+                        </TD>
                       ) : null}
                     </TR>
                   ))}

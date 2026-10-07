@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { assertCan } from '@/core/permissions';
-import { createCompanyAsPlatform } from '@/modules/platform';
+import { createCompanyAsPlatform, deleteCompanyAsPlatform, editCompanyAsPlatform, restoreCompanyAsPlatform } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { done, fail, text } from '@/app/_lib/server-action';
 import { requestOrigin } from '@/app/_lib/request-origin';
@@ -36,3 +36,51 @@ export async function createCompanyAction(_previous: ActionResult | null, form: 
     return fail(error, { requestId: ctx.requestId, action: 'platform.createCompany' });
   }
 }
+
+/** Edit a company from the list (ADR-166). */
+export async function editCompanyAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const ctx = await getPlatformContext();
+  try {
+    assertCan(ctx, 'platform.orgs.manage');
+    const orgId = text(form, 'org_id');
+    await editCompanyAsPlatform(ctx, orgId, {
+      name: text(form, 'name'),
+      legalName: text(form, 'legal_name'),
+      countryCode: text(form, 'country_code'),
+      baseCurrency: text(form, 'base_currency'),
+      fiscalYearStartMonth: text(form, 'fiscal_year_start_month'),
+      plan: text(form, 'plan'),
+    });
+    revalidatePath('/platform/organizations');
+    revalidatePath(`/platform/organizations/${orgId}`);
+    return done('Saved.');
+  } catch (error) {
+    return fail(error, { requestId: ctx.requestId, action: 'platform.editCompany' });
+  }
+}
+
+/** Delete a company (ADR-166): scheduled, erased for good after thirty days, restorable until then. */
+export async function deleteCompanyAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const ctx = await getPlatformContext();
+  try {
+    assertCan(ctx, 'platform.orgs.manage');
+    await deleteCompanyAsPlatform(ctx, text(form, 'org_id'));
+    revalidatePath('/platform/organizations');
+    return done('Deleted. Its data is erased for good in 30 days; until then you can restore it.');
+  } catch (error) {
+    return fail(error, { requestId: ctx.requestId, action: 'platform.deleteCompany' });
+  }
+}
+
+export async function restoreCompanyAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const ctx = await getPlatformContext();
+  try {
+    assertCan(ctx, 'platform.orgs.manage');
+    await restoreCompanyAsPlatform(ctx, text(form, 'org_id'));
+    revalidatePath('/platform/organizations');
+    return done('Restored.');
+  } catch (error) {
+    return fail(error, { requestId: ctx.requestId, action: 'platform.restoreCompany' });
+  }
+}
+

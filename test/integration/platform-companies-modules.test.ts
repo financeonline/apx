@@ -123,3 +123,38 @@ describe('the owner of a company the super admin created (ADR-160)', () => {
     expect(sqlstate(error)).toBe('42501');
   });
 });
+
+describe('editing and deleting a company from the list (ADR-166)', () => {
+  it('lets the super admin edit, delete (scheduled, purge queued) and restore a company', async () => {
+    const { data } = await asAdmin('platform_create_organization', {
+      p_name: 'ITest Edit Delete Co', p_country_code: 'GB', p_base_currency: 'GBP',
+      p_fiscal_year_start_month: 1, p_timezone: '', p_owner_email: `ed@${DOMAIN}`,
+    });
+    const org = (data as Array<{ organization_id: string }>)[0]!.organization_id;
+
+    expect((await asAdmin('update_organization', { p_org: org, p_patch: { name: 'ITest Edited Co', plan: 'professional', fiscal_year_start_month: 4 } })).error).toBeNull();
+    expect((await asAdmin('set_currency_and_country', { p_org: org, p_currency: 'AED', p_country: 'AE' })).error).toBeNull();
+    expect(JSON.parse(adminSql(`select json_build_object('n', name, 'p', plan, 'f', fiscal_year_start_month, 'c', base_currency, 'k', country_code)::text from public.organizations where id = '${org}'`)))
+      .toEqual({ n: 'ITest Edited Co', p: 'professional', f: 4, c: 'AED', k: 'AE' });
+
+    expect((await asAdmin('request_deletion', { p_org: org })).error).toBeNull();
+    expect(adminSql(`select status from public.organizations where id = '${org}'`)).toBe('pending_deletion');
+    expect(adminSql(`select count(*) from public.jobs where organization_id = '${org}' and job_type = 'org.purge' and status = 'queued'`)).toBe('1');
+
+    expect((await asAdmin('cancel_deletion', { p_org: org })).error).toBeNull();
+    expect(adminSql(`select status from public.organizations where id = '${org}'`)).toBe('active');
+    expect(adminSql(`select count(*) from public.jobs where organization_id = '${org}' and job_type = 'org.purge' and status = 'queued'`)).toBe('0');
+  });
+
+  it('refuses deletion to anyone but the super admin and the owner', async () => {
+    const stranger = clientFor(ownerId).schema('api');
+    const { data } = await asAdmin('platform_create_organization', {
+      p_name: 'ITest Not Yours Co', p_country_code: 'GB', p_base_currency: 'GBP',
+      p_fiscal_year_start_month: 1, p_timezone: '', p_owner_email: `ny@${DOMAIN}`,
+    });
+    const org = (data as Array<{ organization_id: string }>)[0]!.organization_id;
+    const refused = await stranger.rpc('request_deletion', { p_org: org });
+    expect(refused.error).not.toBeNull();
+    expect(adminSql(`select status from public.organizations where id = '${org}'`)).toBe('active');
+  });
+});

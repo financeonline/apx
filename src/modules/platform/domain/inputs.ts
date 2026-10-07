@@ -31,6 +31,19 @@ export const CreateCompanyInput = z.object({
 });
 export type CreateCompanyInput = z.infer<typeof CreateCompanyInput>;
 
+export const COMPANY_PLANS = ['trial', 'starter', 'professional', 'enterprise'] as const;
+
+/** ADR-166: what the super admin may edit about a company from the list. */
+export const EditCompanyInput = z.object({
+  name: z.string().trim().min(1, 'Enter the company name').max(200, 'Keep the name under 200 characters'),
+  legalName: z.string().trim().max(200, 'Keep the legal name under 200 characters').default(''),
+  countryCode: z.enum(COMPANY_COUNTRIES, 'Choose a country'),
+  baseCurrency: z.enum(COMPANY_CURRENCIES, 'Choose a currency'),
+  fiscalYearStartMonth: z.coerce.number().int().min(1, 'Choose a month').max(12, 'Choose a month'),
+  plan: z.enum(COMPANY_PLANS, 'Choose a plan'),
+});
+export type EditCompanyInput = z.infer<typeof EditCompanyInput>;
+
 /** ADR-159: one super admin, so anyone added is staff. */
 export const PLATFORM_ROLES = ['employee'] as const;
 export type PlatformRole = (typeof PLATFORM_ROLES)[number];
