@@ -32,8 +32,8 @@ export function WidgetCards({
         maxColumns={3}
         cellSize={240}
         rowHeight={rowHeight}
-        // The reference's tiles: very rounded, as every card (`rounded-card`, 28px; ADR-154).
-        radius={28}
+        // As every card (`rounded-card`, 16px; ADR-155).
+        radius={16}
         gap={16}
         renderItem={(item) => byId.get(item.id)?.node}
       />

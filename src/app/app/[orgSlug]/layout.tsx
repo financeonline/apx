@@ -1,5 +1,6 @@
-import Link from 'next/link';
-import { DataMenu, PrimaryNav } from '@/components/dashboard/nav';
+import { dataLinks, sectionLinks } from '@/components/dashboard/nav';
+import type { SidebarGroup, SidebarIcon } from '@/components/dashboard/sidebar';
+import { AppShell } from '@/components/dashboard/app-shell';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { can, isSuperAdmin } from '@/core/permissions';
@@ -59,42 +60,41 @@ export default async function OrgLayout({
   // Phase 16 (U-5): the Funding link exists only while the flag is on, for those with `reports.view`.
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
 
-  return (
-    <div className="min-h-dvh">
-      <header className="glass mx-3 mt-3 rounded-card sm:mx-4 lg:mx-auto lg:max-w-5xl">
-        <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3">
-          <Link href={`/app/${orgSlug}/home`} className="text-sm font-semibold tracking-widest uppercase">
-            MOTION
-          </Link>
-          <PrimaryNav ctx={ctx} orgSlug={orgSlug} />
-          {showFunding ? (
-            <Link href={`/app/${orgSlug}/funding`} className="text-sm text-ink-muted transition-colors hover:text-ink">Funding</Link>
-          ) : null}
-          <div className="ml-auto flex flex-wrap items-center justify-end gap-3 text-sm">
-            <DataMenu ctx={ctx} orgSlug={orgSlug} />
-            {unread === null ? null : (
-              <Link href={`/app/${orgSlug}/notifications`} className="text-ink-muted hover:text-ink">
-                Notifications{unread > 0 ? <span className="ml-1 rounded-full bg-accent px-1.5 text-xs text-white">{unread}</span> : null}
-                {unread > 0 ? <span className="sr-only"> ({unread} unread)</span> : null}
-              </Link>
-            )}
-            {showSettings && (
-              <Link href={`/app/${orgSlug}/settings`} className="text-ink-muted hover:text-ink">
-                Settings
-              </Link>
-            )}
-            <Badge tone="neutral">{ROLE_LABELS[ctx.effectiveRole]}</Badge>
-            {/* The roles that hold assignments.view are exactly the roles with a Command Centre (ADR-112). */}
-            {can(ctx, 'assignments.view') && (
-              <Link href="/portfolio" className="text-ink-muted hover:text-ink">Command Centre</Link>
-            )}
-            <Link href="/select-organization" className="text-ink-muted hover:text-ink">Switch</Link>
-            <Link href="/account" className="text-ink-muted hover:text-ink">Account</Link>
-          </div>
-        </div>
-      </header>
+  const base = `/app/${orgSlug}`;
+  const DATA_ICONS: Readonly<Record<string, SidebarIcon>> = {
+    'data/imports/new': 'add-data', 'data/imports': 'imports', 'data/documents': 'documents', 'data/accounts': 'accounts',
+  };
+  const groups: SidebarGroup[] = [
+    {
+      label: 'Sections',
+      links: [
+        ...sectionLinks(ctx).map((l) => ({ label: l.label, href: `${base}/${l.path}`, hint: l.hint, icon: l.path as SidebarIcon })),
+        ...(showFunding ? [{ label: 'Funding', href: `${base}/funding`, icon: 'funding' as const }] : []),
+      ],
+    },
+    ...(dataLinks(ctx).length === 0 ? [] : [{
+      label: 'Data',
+      links: dataLinks(ctx).map((l) => ({ label: l.label, href: `${base}/${l.path}`, icon: DATA_ICONS[l.path] ?? 'imports' })),
+    }]),
+    {
+      label: 'You',
+      links: [
+        ...(unread === null ? [] : [{
+          label: 'Notifications', href: `${base}/notifications`, icon: 'notifications' as const,
+          count: { value: unread, srText: `${unread} unread` },
+        }]),
+        ...(showSettings ? [{ label: 'Settings', href: `${base}/settings`, icon: 'settings' as const }] : []),
+        // The roles that hold assignments.view are exactly the roles with a Command Centre (ADR-112).
+        ...(can(ctx, 'assignments.view') ? [{ label: 'Command Centre', href: '/portfolio', icon: 'portfolio' as const }] : []),
+        { label: 'Switch', href: '/select-organization', icon: 'switch' as const },
+        { label: 'Account', href: '/account', icon: 'account' as const },
+      ],
+    },
+  ];
+  const role = <Badge tone="accent">{ROLE_LABELS[ctx.effectiveRole]}</Badge>;
 
-      <main className="mx-auto w-full max-w-5xl px-6 py-8">
+  return (
+    <AppShell homeHref={`${base}/home`} groups={groups} footer={role}>
         <div className="mb-6 flex flex-col gap-3 empty:mb-0">
           {isSuperAdmin(ctx) && (
             <Banner tone="warn" title="You are viewing this organisation as MOTION staff">
@@ -113,7 +113,6 @@ export default async function OrgLayout({
           )}
         </div>
         {children}
-      </main>
-    </div>
+    </AppShell>
   );
 }

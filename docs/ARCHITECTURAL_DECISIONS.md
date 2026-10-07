@@ -2886,3 +2886,15 @@ Decision:
 3. **Content unchanged:** the same cards, figures, links and order; only colour, shape and spacing.
 
 Consequences: the accessibility sweep, the Home journeys and the sample walkthrough pass (light scheme).
+
+### ADR-155 · The owner's reference dashboard: violet, white cards, a sidebar
+Status: **built locally on 2026-10-07 on the owner's instruction (a reference dashboard image: "this is the Exact dashboard color scheme, card templates, button style, text styles"; scope chosen: everything — design system, sidebar layout, and the Departments page rebuilt as the hub, with real status only). Not reviewed, merged or deployed.** Supersedes ADR-153/154's glass and sky.
+
+Decision:
+1. **Colour:** white cards on the faintest lavender (`#faf9ff`) with a faint violet/pink glow and translucent petal artwork in the corners; a vivid violet brand (`#7c3aed`, white on it 5.7:1), pink as the second colour for icon tiles; near-black text (`#110d1f`) and grey-violet secondary text (`#5e5873`); status dots green/amber, status text green-700/amber-700/rose-700. Every text colour measured at WCAG AA on white, the page and the soft violet panel. Dark scheme keeps the roles.
+2. **Type:** one sans throughout; headings bold (700) and tight. `--font-serif` now names the display face (a sans) so existing headings follow.
+3. **Components:** `panel` (white, hairline, soft violet shadow, 16px radius) for every card; buttons with 12px corners — solid violet primary with a violet glow, violet-outline secondary, outline-rose destructive; badges as soft pills; section sub-navigation as a segmented control with the current tab a violet pill (`SectionTabs`).
+4. **Layout:** `AppShell` — a white sidebar with the flower mark, an icon per section, the current item a solid violet pill, and the account links, from `lg`; a top bar with a menu below it. Used by the tenant app, the Command Centre and the platform area. Which links exist is still decided by `nav.tsx`/the layouts (RBAC §5); the shell only draws them.
+5. **Departments page as the hub:** one reference-style card per department (icon tile, title, what it covers, the department tile's own headline and lines, quick-link pills within the section, a status dot from the tile's tone, "Open"), plus Accountant/CFO (with Command Centre access), Funding Readiness (when switched on) and Team & Clients (team size), a data-capture row, report shortcuts and the system overview. Every status and figure comes from `modules/departments` or a permission/flag check; no status is shown where MOTION has none.
+
+Consequences: new dependency `lucide-react`. The accessibility sweep (all viewports, contrast, no sideways scroll), the journeys touching the shell and the sample walkthrough pass, light scheme.

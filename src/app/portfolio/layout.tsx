@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { AppShell } from '@/components/dashboard/app-shell';
 import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { getPortfolioContext } from '@/modules/portfolio';
@@ -19,26 +19,31 @@ export default async function PortfolioLayout({ children }: { children: React.Re
   }
 
   return (
-    <div className="min-h-dvh bg-canvas-alt">
-      <header className="glass mx-3 mt-3 rounded-card sm:mx-4 lg:mx-auto lg:max-w-6xl">
-        <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
-          <Link href="/portfolio" className="text-sm font-semibold tracking-widest uppercase">
-            MOTION · Command Centre
-          </Link>
-          <nav aria-label="Command Centre" className="flex flex-wrap items-center gap-4 text-sm">
-            <Link href="/portfolio" className="text-ink-muted hover:text-ink">Overview</Link>
-            <Link href="/portfolio/alerts" className="text-ink-muted hover:text-ink">Alerts</Link>
-            <Link href="/portfolio/actions" className="text-ink-muted hover:text-ink">Actions</Link>
-            <Link href="/portfolio/analyst" className="text-ink-muted hover:text-ink">Adviser analyst</Link>
-            <Link href="/portfolio/report" className="text-ink-muted hover:text-ink">Report</Link>
-          </nav>
-          <div className="ml-auto flex items-center gap-4 text-sm">
-            <Link href="/select-organization" className="text-ink-muted hover:text-ink">Organisations</Link>
-            <Link href="/account" className="text-ink-muted hover:text-ink">Account</Link>
-          </div>
-        </div>
-      </header>
-      <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">{children}</main>
-    </div>
+    <AppShell
+      homeHref="/portfolio"
+      homeLabel="Command Centre home"
+      tagline="Command Centre"
+      groups={[
+        {
+          label: 'Command Centre',
+          links: [
+            { label: 'Overview', href: '/portfolio', icon: 'home' },
+            { label: 'Alerts', href: '/portfolio/alerts', icon: 'alerts' },
+            { label: 'Actions', href: '/portfolio/actions', icon: 'actions' },
+            { label: 'Adviser analyst', href: '/portfolio/analyst', icon: 'analyst' },
+            { label: 'Report', href: '/portfolio/report', icon: 'reports' },
+          ],
+        },
+        {
+          label: 'You',
+          links: [
+            { label: 'Organisations', href: '/select-organization', icon: 'switch' },
+            { label: 'Account', href: '/account', icon: 'account' },
+          ],
+        },
+      ]}
+    >
+      {children}
+    </AppShell>
   );
 }

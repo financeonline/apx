@@ -7,7 +7,7 @@ import {
 
 /* MOTION's surfaces, on shadcn/ui (SOW §6; ADR-151): the same names and props as before. */
 
-/** A liquid glass surface over the page's colour wash (ADR-153). */
+/** A white panel with a soft violet shadow (ADR-155). */
 export function Card({ children, className = '', id }: { children: ReactNode; className?: string; id?: string }) {
   return <ShadcnCard id={id} className={className}>{children}</ShadcnCard>;
 }
@@ -51,13 +51,13 @@ export function PageHeader({
     <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
         {eyebrow ? (
-          <p className="mb-1 text-xs font-medium uppercase tracking-[0.12em] text-ink-faint">
+          <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-accent">
             {eyebrow}
           </p>
         ) : null}
-        <h1 className="text-2xl md:text-3xl">{title}</h1>
+        <h1 className="text-3xl md:text-4xl">{title}</h1>
         {description ? (
-          <p className="mt-2 max-w-2xl text-sm text-ink-muted">{description}</p>
+          <p className="mt-2 max-w-2xl text-base text-ink-muted md:text-lg">{description}</p>
         ) : null}
       </div>
       {action ? <div className="shrink-0">{action}</div> : null}

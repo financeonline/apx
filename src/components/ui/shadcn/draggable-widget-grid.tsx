@@ -11,9 +11,9 @@
  *   still be scrolled.
  * - Keyboard: focus a widget, hold Alt and use the arrow keys.
  * - Set `editable={false}` for the template's look without dragging.
- * - The template's design (24px radius, soft resting shadow, staggered
- *   entrance) on MOTION's liquid glass surface (ADR-153), so it follows the
- *   light and dark themes (SOW §6;
+ * - The template's design (soft resting shadow, staggered entrance) on
+ *   MOTION's card surface (`panel`, ADR-155), so it follows the light and
+ *   dark themes (SOW §6;
  *   ADR-151, ADR-152). Owned source, as shadcn/ui intends. Additions: an
  *   optional fixed `rowHeight` (MOTION's cards are wide and short, not
  *   square), `appear` (the entrance can be switched off), and a remount, not
@@ -643,7 +643,7 @@ const Widget = memo(function Widget({
                     bounce: 0.12,
                     delay,
                 }}
-                className={`relative isolate flex h-full w-full flex-col overflow-hidden rounded-[var(--widget-radius)] glass text-ink ring-inset transition-shadow duration-300 [clip-path:inset(0_round_var(--widget-radius))] ${
+                className={`relative isolate flex h-full w-full flex-col overflow-hidden rounded-[var(--widget-radius)] panel text-ink ring-inset transition-shadow duration-300 [clip-path:inset(0_round_var(--widget-radius))] ${
                     landed ? 'ring-2 ring-accent/50' : ''
                 }`}>
                 {renderItem?.(item as never, sizeOf(w, h))}

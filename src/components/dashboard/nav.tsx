@@ -139,6 +139,18 @@ export function DataMenu({ ctx, orgSlug }: { ctx: AccessContext; orgSlug: string
   );
 }
 
+/** The sections a role may open, as plain data for the sidebar (ADR-155). Same filter as PrimaryNav. */
+export function sectionLinks(ctx: AccessContext): ReadonlyArray<{ label: string; path: string; hint: string }> {
+  return PRIMARY.filter((item) => item.built && can(ctx, item.permission))
+    .map(({ label, path, hint }) => ({ label, path, hint }));
+}
+
+/** The Data menu's pages, for roles with `imports.review` only (§3.1). */
+export function dataLinks(ctx: AccessContext): ReadonlyArray<{ label: string; path: string }> {
+  if (!can(ctx, 'imports.review')) return [];
+  return DATA_MENU.filter((item) => item.built).map(({ label, path }) => ({ label, path }));
+}
+
 /** Exported for tests: which items a role sees is a permission decision worth asserting. */
 export function visibleNavItems(ctx: AccessContext): string[] {
   return PRIMARY.filter((item) => item.built && can(ctx, item.permission)).map((item) => item.label);

@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { SectionTabs } from '@/components/dashboard/section-tabs';
 import { getAccessContext } from '@/modules/tenancy';
 
 /**
@@ -28,13 +28,10 @@ export default async function CommercialLayout({
   await getAccessContext(orgSlug);
   return (
     <>
-      <nav aria-label="Commercial" className="mb-8 flex flex-wrap gap-4 border-b border-line pb-3 text-sm">
-        {TABS.map((tab) => (
-          <Link key={tab.slug} href={`/app/${orgSlug}/customers${tab.slug ? `/${tab.slug}` : ''}`} className="text-ink-muted hover:text-ink">
-            {tab.label}
-          </Link>
-        ))}
-      </nav>
+      <SectionTabs
+        label="Commercial"
+        tabs={TABS.map((tab) => ({ label: tab.label, href: `/app/${orgSlug}/customers${tab.slug ? `/${tab.slug}` : ''}` }))}
+      />
       {children}
     </>
   );

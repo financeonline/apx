@@ -1,4 +1,4 @@
-import Link from 'next/link';
+import { SectionTabs } from '@/components/dashboard/section-tabs';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 
@@ -30,20 +30,13 @@ export default async function MoneyLayout({
 
   return (
     <>
-      <nav aria-label="Money" className="mb-8 flex flex-wrap gap-4 border-b border-line pb-3 text-sm">
-        <Link href={`/app/${orgSlug}/money`} className="text-ink-muted hover:text-ink">
-          Overview
-        </Link>
-        {visible.map((tab) => (
-          <Link
-            key={tab.slug}
-            href={`/app/${orgSlug}/money/${tab.slug}`}
-            className="text-ink-muted hover:text-ink"
-          >
-            {tab.label}
-          </Link>
-        ))}
-      </nav>
+      <SectionTabs
+        label="Money"
+        tabs={[
+          { label: 'Overview', href: `/app/${orgSlug}/money` },
+          ...visible.map((tab) => ({ label: tab.label, href: `/app/${orgSlug}/money/${tab.slug}` })),
+        ]}
+      />
       {children}
     </>
   );

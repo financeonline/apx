@@ -6,81 +6,79 @@
  * (bg-paper, text-ink, border-line, font-serif …) and never a literal hex value.
  */
 @theme {
-  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial,
-    sans-serif;
-  --font-serif: "Iowan Old Style", "Palatino Linotype", Palatino, "Book Antiqua", Georgia, ui-serif,
-    serif;
+  /*
+   * Type (ADR-155): one clean sans throughout, bold and tight for headings, as the owner's
+   * reference. `--font-serif` is kept as the DISPLAY face's name so existing `font-serif` headings
+   * follow; it is no longer a serif.
+   */
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "SF Pro Text", "Segoe UI", Inter, Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --font-serif: ui-sans-serif, system-ui, -apple-system, "SF Pro Display", "Segoe UI", Inter, Roboto,
+    "Helvetica Neue", Arial, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
   /*
-   * Colour scheme: the owner's reference (ADR-154) — a sky ground (dusty blue to lavender, a warm
-   * glow low down), near-white frosted tiles, deep navy text and a deep indigo accent; status
-   * colours as before. Every text colour was measured at WCAG AA on the darkest part of the sky.
+   * Colour (ADR-155): the owner's reference dashboard — white cards on the faintest lavender, a
+   * vivid violet brand, pink and violet icon tiles, near-black text with grey-violet secondary text.
+   * Every text colour measured at WCAG AA on white, the page and the soft violet panel.
    */
 
-  /* Ground — the sky itself is the body's background image (below). */
-  --color-paper: #d3daee;
-  --color-surface: rgb(255 255 255 / 0.78);
-  --color-surface-sunken: rgb(27 35 64 / 0.06);
+  /* Ground */
+  --color-paper: #faf9ff;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f6f4fd;
 
   /* Text */
-  --color-ink: #1b2340;
-  --color-ink-muted: #434c69;
-  --color-ink-faint: #434c69;
+  --color-ink: #110d1f;
+  --color-ink-muted: #5e5873;
+  --color-ink-faint: #5e5873;
 
   /* Rules */
-  --color-line: rgb(27 35 64 / 0.1);
-  --color-line-strong: rgb(27 35 64 / 0.18);
+  --color-line: #eeebf6;
+  --color-line-strong: #ddd7ee;
 
-  /* Accent — deep indigo. */
-  --color-accent: #2e2f7f;
-  --color-accent-hover: #25266a;
-  --color-accent-soft: rgb(46 47 127 / 0.09);
+  /* Accent — violet. */
+  --color-accent: #7c3aed;
+  --color-accent-hover: #6d28d9;
+  --color-accent-soft: #f3eeff;
   --color-on-accent: #ffffff;
 
+  /* The second brand colour — pink, for icon tiles. */
+  --color-pink: #be185d;
+  --color-pink-icon: #db2777;
+  --color-pink-soft: #fdf0f6;
+
   /* Status */
-  --color-good: #064e3b;
-  --color-good-soft: #e7f6ef;
-  --color-warn: #78350f;
-  --color-warn-soft: #fdf3e3;
-  --color-danger: #9f1239;
-  --color-danger-soft: #fdecef;
+  --color-good: #15803d;
+  --color-good-dot: #22c55e;
+  --color-good-soft: #ecfdf3;
+  --color-warn: #b45309;
+  --color-warn-dot: #f59e0b;
+  --color-warn-soft: #fffbeb;
+  --color-danger: #be123c;
+  --color-danger-soft: #fff1f2;
 
   /* Platform shell identity (UX_ARCHITECTURE.md §9.5) */
-  --color-platform: #1b2340;
-  --color-platform-accent: #6366f1;
+  --color-platform: #110d1f;
+  --color-platform-accent: #a78bfa;
 
   /* Chart palette — six categorical series, ordered for use */
-  --color-chart-1: #4f46e5;
-  --color-chart-2: #0284c7;
-  --color-chart-3: #d97706;
-  --color-chart-4: #059669;
-  --color-chart-5: #e11d48;
+  --color-chart-1: #7c3aed;
+  --color-chart-2: #db2777;
+  --color-chart-3: #0ea5e9;
+  --color-chart-4: #f59e0b;
+  --color-chart-5: #10b981;
   --color-chart-6: #64748b;
 
-  --radius-card: 1.75rem;
+  --radius-card: 1rem;
 }
 
-/*
- * Liquid glass (ADR-153, ADR-154): bright frosted tiles over the sky. Not theme colours, so
- * outside @theme; the dark scheme swaps them below.
- */
+/* Elevation and the page's glow (ADR-155). Not theme colours; the dark scheme swaps them. */
 :root {
-  --glass-bg: rgb(255 255 255 / 0.62);
-  --glass-bg-strong: rgb(255 255 255 / 0.8);
-  --glass-blur: 24px;
-  --glass-border: rgb(255 255 255 / 0.9);
-  --glass-edge: rgb(27 35 64 / 0.06);
-  --glass-highlight: rgb(255 255 255 / 1);
-  --glass-glow: rgb(255 255 255 / 0.5);
-  --glass-sheen: linear-gradient(150deg, rgb(255 255 255 / 0.6) 0%, rgb(255 255 255 / 0.15) 40%,
-    rgb(255 255 255 / 0) 65%, rgb(255 255 255 / 0.25) 100%);
-  --glass-shadow: 0 2px 6px rgb(27 35 64 / 0.06), 0 24px 48px -18px rgb(27 35 64 / 0.3);
-  --sky: linear-gradient(180deg, #bfcbe7 0%, #ccd5ee 40%, #e3e0ee 75%, #ece2e6 100%);
-  --sky-glow: rgb(255 255 255 / 0.45);
-  --sky-warm: rgb(251 191 146 / 0.35);
+  --panel-shadow: 0 1px 2px rgb(76 29 149 / 0.04), 0 12px 32px -16px rgb(76 29 149 / 0.16);
+  --page-glow-1: rgb(167 139 250 / 0.14);
+  --page-glow-2: rgb(244 114 182 / 0.08);
 }
-
 
 /*
  * The dark scheme keeps every token's role and swaps only its value, so no component needs a
@@ -88,52 +86,48 @@
  */
 @media (prefers-color-scheme: dark) {
   :root {
-    /* A night sky: deep navy to dusk violet. */
-    --color-paper: #10153a;
-    --color-surface: rgb(30 36 74 / 0.7);
-    --color-surface-sunken: rgb(255 255 255 / 0.06);
+    --color-paper: #0d0b17;
+    --color-surface: #16131f;
+    --color-surface-sunken: #1e1a2b;
 
-    --color-ink: #eef1fb;
-    --color-ink-muted: #b4bbd6;
-    --color-ink-faint: #b4bbd6;
+    --color-ink: #f5f3ff;
+    --color-ink-muted: #b3abc9;
+    --color-ink-faint: #b3abc9;
 
-    --color-line: rgb(255 255 255 / 0.1);
-    --color-line-strong: rgb(255 255 255 / 0.18);
+    --color-line: #2a2540;
+    --color-line-strong: #3a3354;
 
-    --color-accent: #a9adff;
-    --color-accent-hover: #c3c6ff;
-    --color-accent-soft: rgb(169 173 255 / 0.12);
-    --color-on-accent: #10153a;
+    --color-accent: #a78bfa;
+    --color-accent-hover: #c4b5fd;
+    --color-accent-soft: rgb(167 139 250 / 0.12);
+    --color-on-accent: #120d1f;
 
-    --color-good: #34d399;
-    --color-good-soft: #062d22;
+    --color-pink: #f472b6;
+    --color-pink-icon: #f472b6;
+    --color-pink-soft: rgb(244 114 182 / 0.12);
+
+    --color-good: #4ade80;
+    --color-good-dot: #4ade80;
+    --color-good-soft: rgb(74 222 128 / 0.1);
     --color-warn: #fbbf24;
-    --color-warn-soft: #2d2208;
+    --color-warn-dot: #fbbf24;
+    --color-warn-soft: rgb(251 191 36 / 0.1);
     --color-danger: #fb7185;
-    --color-danger-soft: #2e0b16;
+    --color-danger-soft: rgb(251 113 133 / 0.1);
 
-    --color-platform: #0b0f2a;
-    --color-platform-accent: #818cf8;
+    --color-platform: #0d0b17;
+    --color-platform-accent: #c4b5fd;
 
-    --color-chart-1: #a5b4fc;
-    --color-chart-2: #7dd3fc;
-    --color-chart-3: #fbbf24;
-    --color-chart-4: #34d399;
-    --color-chart-5: #fb7185;
+    --color-chart-1: #a78bfa;
+    --color-chart-2: #f472b6;
+    --color-chart-3: #38bdf8;
+    --color-chart-4: #fbbf24;
+    --color-chart-5: #34d399;
     --color-chart-6: #94a3b8;
 
-    --glass-bg: rgb(30 36 74 / 0.42);
-    --glass-bg-strong: rgb(30 36 74 / 0.62);
-    --glass-border: rgb(255 255 255 / 0.14);
-    --glass-edge: rgb(255 255 255 / 0.06);
-    --glass-highlight: rgb(255 255 255 / 0.22);
-    --glass-glow: rgb(255 255 255 / 0.05);
-    --glass-sheen: linear-gradient(150deg, rgb(255 255 255 / 0.12) 0%, rgb(255 255 255 / 0.03) 40%,
-      rgb(255 255 255 / 0) 65%, rgb(255 255 255 / 0.06) 100%);
-    --glass-shadow: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 48px -18px rgb(0 0 0 / 0.8);
-    --sky: linear-gradient(180deg, #0e1330 0%, #171d48 45%, #241f45 80%, #2a2140 100%);
-    --sky-glow: rgb(129 140 248 / 0.12);
-    --sky-warm: rgb(251 146 60 / 0.12);
+    --panel-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -16px rgb(0 0 0 / 0.7);
+    --page-glow-1: rgb(167 139 250 / 0.1);
+    --page-glow-2: rgb(244 114 182 / 0.06);
   }
 }
 
@@ -145,11 +139,10 @@
 
   body {
     background-color: var(--color-paper);
-    /* The sky behind the glass (ADR-154); fixed, so it stays put while the tiles scroll over it. */
+    /* A faint violet glow top right, a hint of pink low left (ADR-155). */
     background-image:
-      radial-gradient(45rem 30rem at 8% 0%, var(--sky-glow), transparent 70%),
-      radial-gradient(42rem 30rem at 88% 100%, var(--sky-warm), transparent 70%),
-      var(--sky);
+      radial-gradient(48rem 32rem at 100% 0%, var(--page-glow-1), transparent 70%),
+      radial-gradient(40rem 30rem at 0% 100%, var(--page-glow-2), transparent 70%);
     background-attachment: fixed;
     min-height: 100vh;
     color: var(--color-ink);
@@ -163,8 +156,8 @@
   h2,
   h3 {
     font-family: var(--font-serif);
-    font-weight: 600;
-    letter-spacing: -0.01em;
+    font-weight: 700;
+    letter-spacing: -0.02em;
     line-height: 1.2;
     text-wrap: balance;
   }
@@ -206,34 +199,13 @@
 
 @layer components {
   /*
-   * Liquid glass (ADR-153). In the components layer so a utility on the same element (a different
-   * background, a radius) wins. `glass` is a surface — cards, panels, the top bar; `glass-control`
-   * is a lighter version for buttons and other controls.
+   * The card surface (ADR-155): white, one soft violet-tinted shadow, a faint hairline. In the
+   * components layer so a utility on the same element (a background, a radius) wins.
    */
-  .glass {
-    background-color: var(--glass-bg);
-    background-image: var(--glass-sheen);
-    -webkit-backdrop-filter: blur(var(--glass-blur, 28px)) saturate(200%);
-    backdrop-filter: blur(var(--glass-blur, 28px)) saturate(200%);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 1px var(--glass-edge),
-      inset 0 1.5px 0 var(--glass-highlight),
-      inset 0 0 24px var(--glass-glow),
-      inset 0 -1px 0 var(--glass-glow),
-      var(--glass-shadow);
-  }
-
-  .glass-control {
-    background-color: var(--glass-bg-strong);
-    background-image: var(--glass-sheen);
-    -webkit-backdrop-filter: blur(16px) saturate(200%);
-    backdrop-filter: blur(16px) saturate(200%);
-    border: 1px solid var(--glass-border);
-    box-shadow:
-      0 0 0 1px var(--glass-edge),
-      inset 0 1px 0 var(--glass-highlight),
-      0 1px 2px rgb(15 23 42 / 0.08);
+  .panel {
+    background-color: var(--color-surface);
+    border: 1px solid var(--color-line);
+    box-shadow: var(--panel-shadow);
   }
 
   /* Skeletons hold the exact space of the content they stand in for (UX_ARCHITECTURE.md §7.1). */
