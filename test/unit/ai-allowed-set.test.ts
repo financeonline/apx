@@ -150,3 +150,27 @@ describe('each entry carries what the rest of §7 binds against', () => {
     expect(entry.periodIds).toEqual(['p-march']);
   });
 });
+
+describe('a reference to a number\'s display text names that number (2026-10-07)', () => {
+  it('resolves `value.display` to the `value` entry, and nothing else', () => {
+    const entries = allowedSet([metricResult]);
+    expect(entryAt(entries, 1, 'value.display')).toBe(entryAt(entries, 1, 'value'));
+    expect(entryAt(entries, 1, 'variance.prev_period.pct_change.display')).toBe(entryAt(entries, 1, 'variance.prev_period.pct_change'));
+    expect(entryAt(entries, 1, 'value.value')).toBe(entryAt(entries, 1, 'value'));
+    expect(entryAt(entries, 1, 'variance.prev_period.value.value')).toBe(entryAt(entries, 1, 'variance.prev_period.value'));
+    expect(entryAt(entries, 1, 'value.amount')).toBeNull();
+    expect(entryAt(entries, 1, 'nothing.display')).toBeNull();
+    expect(entryAt(entries, 2, 'value.display')).toBeNull();
+    // A leading `data.` names the same object the paths are relative to.
+    expect(entryAt(entries, 1, 'data.value')).toBe(entryAt(entries, 1, 'value'));
+    expect(entryAt(entries, 1, 'data.value.display')).toBe(entryAt(entries, 1, 'value'));
+  });
+
+  it('reads an array index written with a dot as the bracketed index', () => {
+    const rows = allowedSet([{
+      ...metricResult,
+      data: { rows: [{ subject: { type: 'counterparty', id: 'cp-a', name: 'A' }, revenue: numeric('10.00', '£10', 'money'), snapshot_id: 's-a' }] },
+    } as ToolResult]);
+    expect(entryAt(rows, 1, 'rows.0.revenue')).toBe(entryAt(rows, 1, 'rows[0].revenue'));
+  });
+});

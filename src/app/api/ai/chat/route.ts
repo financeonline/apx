@@ -26,11 +26,11 @@ import { getAccessContext, resolveAccessFresh } from '@/modules/tenancy';
  * uncached before every tool (§4, F-C-17), which is why `resolveAccessFresh` and not the
  * per-request memo is handed down.
  *
- * Node runtime: the turn holds a connection open for up to 45 s.
+ * Node runtime: the turn holds a connection open for up to 120 s (the turn budget; ADR-157).
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+export const maxDuration = 150;
 
 /** §9: the question is wrapped before the model sees it; here it is only bounded. */
 export const MAX_MESSAGE_CHARS = 2_000;

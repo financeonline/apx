@@ -17,6 +17,7 @@ export {
   pruneRateLimits,
   purgeOrganization,
   recordAccessEvent,
+  anthropicApiKeyFromVault,
   revokeUserSessions,
   recordReportFile,
   finishFunding,

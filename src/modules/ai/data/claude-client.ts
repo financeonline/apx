@@ -5,6 +5,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/messages';
 import { UpstreamError } from '@/core/errors';
 import { log } from '@/core/logging';
+import { anthropicApiKeyFromVault } from '@/core/db';
 
 /**
  * The one file that imports the Anthropic SDK (AI_ARCHITECTURE.md §1.2, §11; ADR-023).
@@ -21,17 +22,27 @@ import { log } from '@/core/logging';
  * the route are exercised end to end against recorded responses with no network and no key.
  */
 
-/** §11: a Sonnet-class default; overridable by configuration, never by the browser. */
-export const DEFAULT_ANALYST_MODEL = 'claude-sonnet-4-5';
+/**
+ * §11: a Sonnet-class default; overridable by configuration (`ANTHROPIC_MODEL`), never by the
+ * browser. 2026-10-07: claude-sonnet-4-5 is no longer offered to the owner's key. claude-sonnet-4-6
+ * is the default: its answers pass grounding (§7) with the fewest rejections; claude-sonnet-5-5 works
+ * but more of its statements are withheld until the prompt is tuned for it.
+ */
+export const DEFAULT_ANALYST_MODEL = process.env.ANTHROPIC_MODEL?.trim() || 'claude-sonnet-4-6';
 
-/** §11: `temperature = 0`, `max_tokens = 1500` for answers. */
-export const ANALYST_MAX_TOKENS = 1500;
+/**
+ * §11: `max_tokens = 4000` for answers (1500 until 2026-10-07: the current model's structured answers
+ * ran past it and arrived cut off, failing validation). `temperature = 0` was dropped on 2026-10-07: current models
+ * refuse the parameter ("`temperature` is deprecated for this model"). The answer's shape is still
+ * forced (the submit tool) and every figure in it is grounded against the tool results (§5).
+ */
+export const ANALYST_MAX_TOKENS = 4000;
 
-/** §2: the model call uses a 30 s timeout with one retry on transient errors. */
-const MODEL_TIMEOUT_MS = 30_000;
+/** §2: the model call uses a 90 s timeout (30 s until 2026-10-07) with one retry on transient errors. */
+const MODEL_TIMEOUT_MS = 90_000;
 
 /** Bumped whenever the system prompt, the tool schemas or the model changes (§11, §12). */
-export const PROMPT_VERSION = 'analyst-v3.6';
+export const PROMPT_VERSION = 'analyst-v3.7';
 
 export interface ModelCall {
   readonly system: readonly { readonly text: string; readonly cached: boolean }[];
@@ -53,17 +64,43 @@ export interface ModelResponse {
 /** The seam a test replaces: one function, one response. */
 export type ModelTransport = (call: ModelCall) => Promise<ModelResponse>;
 
-let cached: Anthropic | null = null;
+let cached: { readonly key: string; readonly client: Anthropic } | null = null;
+let keyRead: { readonly key: string | null; readonly at: number } | null = null;
+/** How long a key read from the Vault is reused before it is read again (a changed key takes effect within it). */
+const KEY_TTL_MS = 60_000;
 
-function client(): Anthropic {
-  if (cached) return cached;
-  const apiKey = process.env.ANTHROPIC_API_KEY;
+/**
+ * The key the model is called with (ADR-157): the one the app's owner stored in Platform → Settings
+ * (encrypted in Vault), else the deployment's ANTHROPIC_API_KEY. Read at most once a minute.
+ */
+async function currentKey(): Promise<string | null> {
+  if (keyRead && Date.now() - keyRead.at < KEY_TTL_MS) return keyRead.key ?? process.env.ANTHROPIC_API_KEY ?? null;
+  let stored: string | null = null;
+  try {
+    stored = await anthropicApiKeyFromVault();
+  } catch (error) {
+    // The Vault being unreachable must not take the analyst down when the server has its own key.
+    log.warn('the stored AI key could not be read; using the server setting', { service: 'ai.claude-client', error: String(error) });
+  }
+  keyRead = { key: stored, at: Date.now() };
+  return stored ?? process.env.ANTHROPIC_API_KEY ?? null;
+}
+
+/** Called after the owner changes the key, so this server uses the new one at once. */
+export function forgetAiKey(): void {
+  keyRead = null;
+  cached = null;
+}
+
+async function client(): Promise<Anthropic> {
+  const apiKey = await currentKey();
   if (!apiKey) {
     // Fail closed and loudly: an unconfigured key must never look like a model that said nothing.
     throw new UpstreamError('The analyst is not configured on this deployment.');
   }
-  cached = new Anthropic({ apiKey, timeout: MODEL_TIMEOUT_MS, maxRetries: 0 });
-  return cached;
+  if (cached && cached.key === apiKey) return cached.client;
+  cached = { key: apiKey, client: new Anthropic({ apiKey, timeout: MODEL_TIMEOUT_MS, maxRetries: 0 }) };
+  return cached.client;
 }
 
 function usageOf(usage: Usage): ModelResponse['usage'] {
@@ -84,10 +121,9 @@ function isTransient(error: unknown): boolean {
 /** The real transport: prompt caching on the stable prefix (§9, §11), one retry on a transient error. */
 export const liveTransport: ModelTransport = async (call) => {
   const attempt = async (): Promise<ModelResponse> => {
-    const response = await client().messages.create({
+    const response = await (await client()).messages.create({
       model: call.model ?? DEFAULT_ANALYST_MODEL,
       max_tokens: call.maxTokens ?? ANALYST_MAX_TOKENS,
-      temperature: 0,
       system: call.system.map((part) => ({
         type: 'text' as const,
         text: part.text,

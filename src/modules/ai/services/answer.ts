@@ -60,8 +60,11 @@ export interface AnswerOutput {
 /** §10: the fallback the user sees when the analyst cannot answer. */
 export const FALLBACK_MESSAGE = 'The analyst is unavailable right now. Your data and dashboard are unaffected.';
 
-/** §2: the whole turn's budget. */
-const TURN_BUDGET_MS = 45_000;
+/**
+ * §2: the whole turn's budget. 45 s until 2026-10-07: current models, with 4,000-token answers over a
+ * large context, take 25–45 s on a plain question, so turns timed out.
+ */
+const TURN_BUDGET_MS = 120_000;
 
 const STATUS_LABELS: Readonly<Record<string, string>> = {
   get_business_summary: 'looking at the overall picture',
@@ -286,9 +289,11 @@ async function runLoop(
       state.persisted.push(ran.persisted);
       replies.push({
         type: 'tool_result', tool_use_id: use.id, is_error: !ran.result.ok,
+        // `seq` is the number a NumberRef's `tool_call_seq` must carry (§7.2). It was never shown to
+        // the model, which had to count the calls itself and got it wrong (2026-10-07).
         content: JSON.stringify(ran.result.ok
-          ? { ok: true, data: ran.result.data, meta: ran.result.meta }
-          : { ok: false, error: ran.result.data }),
+          ? { ok: true, seq, data: ran.result.data, meta: ran.result.meta }
+          : { ok: false, seq, error: ran.result.data }),
       });
     }
     state.messages.push({ role: 'user', content: replies });

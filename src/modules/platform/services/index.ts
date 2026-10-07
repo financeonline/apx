@@ -1,6 +1,6 @@
 import 'server-only';
 import { callApi } from '@/core/db/api-rpc';
-import { NotFound, toMotionError } from '@/core/errors';
+import { NotFound, ValidationError, toMotionError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
 
@@ -185,6 +185,63 @@ export async function loadPlatformSettings(ctx: AccessContext): Promise<Platform
 export async function updatePlatformSetting(ctx: AccessContext, key: string, value: unknown): Promise<void> {
   assertCan(ctx, 'system.manage');
   await callApi(ctx.db, 'update_platform_settings', { p_key: key, p_value: value }, ctx.requestId);
+}
+
+/**
+ * The AI provider key (ADR-157): set by the app's owner, stored encrypted in Vault, shown only as
+ * its last four characters. A new key is tried against the provider before it is stored, so a
+ * mistyped key is refused here rather than discovered when every analyst question fails.
+ */
+export interface AiKeyStatus {
+  readonly configured: boolean;
+  readonly ending: string | null;
+  readonly updatedAt: string | null;
+  /** True when no key is stored but the server has its own ANTHROPIC_API_KEY. */
+  readonly serverFallback: boolean;
+}
+
+export async function loadAiKeyStatus(ctx: AccessContext): Promise<AiKeyStatus> {
+  assertCan(ctx, 'system.manage');
+  const rows = await callApi<Array<{ configured: boolean; ending: string | null; updated_at: string | null }>>(
+    ctx.db, 'ai_api_key_status', {}, ctx.requestId,
+  );
+  const row = (rows ?? [])[0];
+  return {
+    configured: row?.configured === true,
+    ending: row?.ending ?? null,
+    updatedAt: row?.updated_at ?? null,
+    serverFallback: !row?.configured && Boolean(process.env.ANTHROPIC_API_KEY),
+  };
+}
+
+/** Does the provider accept this key? A read-only call (the model list); nothing is generated. */
+async function providerAccepts(key: string): Promise<boolean> {
+  const response = await fetch('https://api.anthropic.com/v1/models?limit=1', {
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  return response.ok;
+}
+
+export async function setAiKey(ctx: AccessContext, key: string): Promise<string> {
+  assertCan(ctx, 'system.manage');
+  const trimmed = key.trim();
+  if (!/^sk-ant-[A-Za-z0-9_-]{20,}$/.test(trimmed)) {
+    throw new ValidationError('That does not look like an Anthropic API key (it starts sk-ant-).');
+  }
+  let accepted: boolean;
+  try {
+    accepted = await providerAccepts(trimmed);
+  } catch {
+    throw new ValidationError('Anthropic could not be reached to check the key. Try again in a moment.');
+  }
+  if (!accepted) throw new ValidationError('Anthropic did not accept that key. Check it and try again.');
+  return await callApi<string>(ctx.db, 'set_ai_api_key', { p_key: trimmed }, ctx.requestId);
+}
+
+export async function clearAiKey(ctx: AccessContext): Promise<boolean> {
+  assertCan(ctx, 'system.manage');
+  return await callApi<boolean>(ctx.db, 'clear_ai_api_key', {}, ctx.requestId);
 }
 
 export async function updateOrgQuotas(ctx: AccessContext, orgId: string, patch: Record<string, unknown>): Promise<void> {

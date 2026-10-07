@@ -949,3 +949,13 @@ export async function finishFunding(organizationId: string, assessments: unknown
 export async function enqueueFundingBackstop(): Promise<number> {
   return serverRpc<number>('enqueue_funding_backstop', {});
 }
+
+/**
+ * The AI provider key stored by the app's owner in Platform → Settings (ADR-157), in clear, for the
+ * server's model calls; null when none is stored. Never logged, never returned to a browser.
+ */
+export async function anthropicApiKeyFromVault(): Promise<string | null> {
+  const { data, error } = await serverClient().schema('api_server').rpc('anthropic_api_key');
+  if (error) throw toMotionError(error);
+  return typeof data === 'string' && data.length > 0 ? data : null;
+}

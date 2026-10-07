@@ -120,6 +120,7 @@ export {
   liveTransport,
   ANALYST_MAX_TOKENS,
   DEFAULT_ANALYST_MODEL,
+  forgetAiKey,
   PROMPT_VERSION,
   type ModelCall,
   type ModelResponse,

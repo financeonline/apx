@@ -206,5 +206,23 @@ export function allowedSet(results: readonly ToolResult[]): AllowedEntry[] {
 export function entryAt(
   entries: readonly AllowedEntry[], toolCallSeq: number, path: string,
 ): AllowedEntry | null {
-  return entries.find((e) => e.toolCallSeq === toolCallSeq && e.path === path) ?? null;
+  // Paths are relative to the result's `data`; a reference that names `data.` in front points into
+  // the same object.
+  if (path.startsWith('data.')) path = path.slice('data.'.length);
+  // `rows.0.revenue` and `rows[0].revenue` name the same element.
+  path = path.replace(/\.(\d+)(?=\.|$)/g, '[$1]');
+  const exact = entries.find((e) => e.toolCallSeq === toolCallSeq && e.path === path);
+  if (exact) return exact;
+  // A numeric node is recorded at its own path (`value`) with its formatted text attached. A
+  // reference to that text (`value.display`) names the same number in the same result — current
+  // models cite it that way (2026-10-07) — so it resolves to the node. Nothing else does: any other
+  // path still has to name a number the tool returned.
+  // Likewise its raw `value` field (`data.value.value`): a numeric node is `{ value, display, … }`,
+  // and both fields are that one number.
+  const field = /\.(display|value)$/.exec(path);
+  if (field) {
+    const node = path.slice(0, field.index);
+    return entries.find((e) => e.toolCallSeq === toolCallSeq && e.path === node) ?? null;
+  }
+  return null;
 }
