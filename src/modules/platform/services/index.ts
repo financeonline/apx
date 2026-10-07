@@ -473,8 +473,9 @@ export async function loadAiModelSettings(ctx: AccessContext): Promise<AiModelSe
  */
 export async function setAiModel(ctx: AccessContext, model: string, effort: string): Promise<{ model: string | null; effort: string | null }> {
   assertCan(ctx, 'system.manage');
-  const wantedModel = model.trim();
   const wantedEffort = effort.trim() || null;
+  // "Default" with an effort means the default model at that effort, named explicitly.
+  const wantedModel = model.trim() || (wantedEffort ? DEFAULT_ANALYST_MODEL : '');
   if (!wantedModel) {
     await callApi(ctx.db, 'set_ai_model', { p_model: null, p_effort: null }, ctx.requestId);
     return { model: null, effort: null };

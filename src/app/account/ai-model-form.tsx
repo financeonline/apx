@@ -33,8 +33,9 @@ export function AiModelForm({ options, chosenModel, chosenEffort, defaultModel }
   const [model, setModel] = useState(chosenModel ?? '');
   const [effort, setEffort] = useState(chosenEffort ?? '');
   const defaultName = options.find((o) => o.id === defaultModel)?.name ?? defaultModel;
-  const efforts = options.find((o) => o.id === (model || defaultModel))?.efforts ?? [];
-  const effortDisabled = !model || efforts.length === 0;
+  const current = options.find((o) => o.id === (model || defaultModel));
+  const efforts = current?.efforts ?? [];
+  const effortDisabled = efforts.length === 0;
 
   return (
     <form action={save} className="flex flex-col gap-3">
@@ -55,9 +56,9 @@ export function AiModelForm({ options, chosenModel, chosenEffort, defaultModel }
       </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink">Effort</span>
-        <span className="text-xs text-ink-muted">
-          {effortDisabled && model
-            ? 'This model has no effort setting.'
+        <span className={effortDisabled ? 'text-xs text-ink' : 'text-xs text-ink-muted'}>
+          {effortDisabled
+            ? `${current?.name ?? 'This model'} has no effort setting. To set effort, choose Claude Sonnet 4.6 or a Claude Opus 4 model above.`
             : 'How hard the model works on each answer. Higher is slower and costs more.'}
         </span>
         <NativeSelect name="ai_effort" value={effortDisabled ? '' : effort} disabled={effortDisabled} onChange={(e) => setEffort(e.target.value)} className="mt-1">
