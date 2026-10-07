@@ -5,7 +5,7 @@ import {
   updateOrganizationAsPlatform, updatePlatformSetting,
 } from '@/modules/platform';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { adminSql, clientFor, createAuthUser, withPlatformMfaRequired } from './setup';
 
 /**
  * The platform pages' reads and writes (ROUTE_ARCHITECTURE.md §150, §155, §156; ADR-088).
@@ -118,7 +118,9 @@ describe('the global audit trail', () => {
   it('is refused to an owner, to an assigned employee, and to a super admin without a second factor', async () => {
     await expect(searchAudit(orgContext(ownerId, 'owner'))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
     await expect(searchAudit(platformContext(employeeId, 'employee'))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
-    await expect(searchAudit(platformContext(adminId, 'super_admin', 'aal1'))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    await withPlatformMfaRequired(true, async () => {
+      await expect(searchAudit(platformContext(adminId, 'super_admin', 'aal1'))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+    });
   });
 });
 

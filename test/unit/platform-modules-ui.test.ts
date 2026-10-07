@@ -21,8 +21,8 @@ describe('platform form inputs (ADR-158)', () => {
     }
   });
 
-  it('accepts only the two platform roles', () => {
-    expect(parseInput(AddPlatformUserInput, { email: 'a@b.co', role: 'super_admin' }).role).toBe('super_admin');
+  it('adds staff only: there is one super admin', () => {
+    expect(() => parseInput(AddPlatformUserInput, { email: 'a@b.co', role: 'super_admin' })).toThrow(ValidationError);
     expect(parseInput(AddPlatformUserInput, { email: 'a@b.co', role: 'employee' }).role).toBe('employee');
     expect(() => parseInput(AddPlatformUserInput, { email: 'a@b.co', role: 'owner' })).toThrow(ValidationError);
     expect(() => parseInput(AddPlatformUserInput, { email: 'not an email', role: 'employee' })).toThrow(ValidationError);

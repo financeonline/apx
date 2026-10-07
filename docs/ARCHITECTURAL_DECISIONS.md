@@ -2939,3 +2939,13 @@ Decision:
 5. **Platform staff added by email**: the super admin invites an email (a new account receives a set-password email) and grants the role through `api.grant_platform_role` in their own session; staff are listed with emails (`api.platform_users_list`). An account that belongs to a company is refused by the existing exclusivity rule — staff need their own login.
 
 Consequences: migration `20261018000003`; the entitlement is enforced in the application and the AI layer, while the database still serves a company's own data to its members under RLS (switching a system off hides it; it does not delete or withhold data the company already holds). Tests: `org-modules` (unit), `platform-companies-modules` (integration).
+
+### ADR-159 · Two-step sign-in for platform staff is a setting; there is one super admin
+Status: **built locally on 2026-10-07 on the owner's instruction ("remove the two-step verification and the authenticator app"; "make this ID a super admin shaukinsv@gmail.com"; "there will be only one super admin"). Not reviewed, merged or deployed.**
+
+Decision:
+1. **Two-step for platform staff is `platform_settings.platform_mfa_required`** (Platform → Settings, "Two-step sign-in required for platform staff"; changed only by a super admin with a recent sign-in, audited). ABSENT or true keeps ADR-044.1 unchanged (a platform user counts only at aal2); false lets a platform user count with a password sign-in. `app.is_platform_user`, `app.actor_has_aal2` and `api.my_platform_role` read it through `app.platform_mfa_required()` (migration `20261018000004`). The recent-sign-in requirement for sensitive super-admin actions is unchanged. Locally the setting is false and TOTP enrolment and verification are off in `supabase/config.toml`. A deployment that never sets it keeps two-step required.
+2. **One super admin**: `api.grant_platform_role` refuses a second active super admin and refuses demoting the super admin; `api.revoke_platform_role` refuses removing the super admin (migration `20261018000005`; both are the only user paths to `platform_users`). "Add a platform admin" adds staff only; the super admin's row has no Revoke.
+3. **The super admin is `shaukinsv@gmail.com`** (password sign-in). Because a platform user may not be a company member, the companies that login owned were moved to `shaukinsv+admin@gmail.com` (owner's choice: swap the two accounts).
+
+Consequences: weaker sign-in protection for platform staff wherever the setting is false — the owner's decision, to be revisited before any deployment. Tests that assert the two-step default pin the setting (`withPlatformMfaRequired`) and restore the local value; `single-super-admin` (integration) covers the one-super-admin rule.

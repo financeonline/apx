@@ -2,7 +2,7 @@
 
 import { useActionState } from 'react';
 import { addPlatformUserAction, revokePlatformRoleAction } from '../actions';
-import { Field, Input, Select } from '@/components/ui/field';
+import { Field, Input } from '@/components/ui/field';
 import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 import { TR, TD } from '@/components/ui/table';
 import { Badge } from '@/components/ui/surfaces';
@@ -15,12 +15,9 @@ export function AddPlatformUserForm() {
       <Field label="Email" htmlFor="email" hint="A new address is sent an invitation. An account that belongs to a company cannot be used.">
         <Input id="email" name="email" type="email" required />
       </Field>
-      <Field label="Role" htmlFor="platform_role">
-        <Select id="platform_role" name="platform_role" defaultValue="employee">
-          <option value="employee">Staff</option>
-          <option value="super_admin">Super admin</option>
-        </Select>
-      </Field>
+      {/* ADR-159: there is one super admin; everyone added here is staff. */}
+      <input type="hidden" name="platform_role" value="employee" />
+      <p className="text-sm text-ink-muted">They are added as staff. There is one super admin.</p>
       <ActionMessage state={state} />
       <SubmitButton pendingLabel="Adding…">Add platform admin</SubmitButton>
     </form>
@@ -44,11 +41,17 @@ export function PlatformUserRow(props: {
       <TD>{props.status}</TD>
       <TD>{props.twoStep ? <Badge tone="accent">Set up</Badge> : <Badge tone="warn">Not set up</Badge>}</TD>
       <TD>
-        <form action={action}>
-          <input type="hidden" name="user_id" value={props.userId} />
-          <SubmitButton pendingLabel="…" tone="danger">Revoke</SubmitButton>
-        </form>
-        <ActionMessage state={state} />
+        {props.platformRole === 'super_admin' ? (
+          <span className="text-xs text-ink-muted">The super admin</span>
+        ) : (
+          <>
+            <form action={action}>
+              <input type="hidden" name="user_id" value={props.userId} />
+              <SubmitButton pendingLabel="…" tone="danger">Revoke</SubmitButton>
+            </form>
+            <ActionMessage state={state} />
+          </>
+        )}
       </TD>
     </TR>
   );

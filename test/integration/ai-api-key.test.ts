@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { adminSql, clientFor, createAuthUser, resetFixtures, serviceClientScoped, sqlstate } from './setup';
+import { adminSql, clientFor, createAuthUser, resetFixtures, serviceClientScoped, sqlstate, withPlatformMfaRequired } from './setup';
 
 /**
  * ADR-157 over the real wire: the AI provider key is set and removed only by a super admin at aal2
@@ -80,7 +80,22 @@ describe('api.set_ai_api_key / ai_api_key_status / clear_ai_api_key', () => {
     expect(sqlstate((await owner.rpc('ai_api_key_status')).error)).toBe('42501');
     expect(sqlstate((await owner.rpc('clear_ai_api_key')).error)).toBe('42501');
     const aal1 = clientFor(adminId, { aal: 'aal1' }).schema('api');
-    expect(sqlstate((await aal1.rpc('set_ai_api_key', { p_key: KEY_A })).error)).toBe('42501');
+    await withPlatformMfaRequired(true, async () => {
+      expect(sqlstate((await aal1.rpc('set_ai_api_key', { p_key: KEY_A })).error)).toBe('42501');
+    });
+  });
+
+  it('accepts a password-only super admin when two-step is switched off for platform staff (ADR-159)', async () => {
+    const aal1 = clientFor(adminId, { aal: 'aal1' }).schema('api');
+    await withPlatformMfaRequired(false, async () => {
+      const { data, error } = await aal1.rpc('ai_api_key_status');
+      expect(error).toBeNull();
+      expect(data).toBeDefined();
+    });
+    // The owner never gains it, whatever the setting.
+    await withPlatformMfaRequired(false, async () => {
+      expect(sqlstate((await clientFor(ownerId).schema('api').rpc('ai_api_key_status')).error)).toBe('42501');
+    });
   });
 
   it('records the change in the audit log without the key', () => {

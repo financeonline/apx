@@ -23,7 +23,8 @@ export const CreateCompanyInput = z.object({
 });
 export type CreateCompanyInput = z.infer<typeof CreateCompanyInput>;
 
-export const PLATFORM_ROLES = ['super_admin', 'employee'] as const;
+/** ADR-159: one super admin, so anyone added is staff. */
+export const PLATFORM_ROLES = ['employee'] as const;
 export type PlatformRole = (typeof PLATFORM_ROLES)[number];
 
 export const AddPlatformUserInput = z.object({

@@ -30,6 +30,10 @@ const KNOWN: Readonly<Record<string, { label: string; hint: string; numeric: boo
     label: 'Pages read by AI a day', numeric: true,
     hint: 'Charged per model call, so a page that fails and is retried costs each attempt.',
   },
+  platform_mfa_required: {
+    label: 'Two-step sign-in required for platform staff', numeric: false,
+    hint: 'true or false. true (the default when unset) requires an authenticator code for every platform account; false lets them sign in with a password. Keep true in production.',
+  },
   taxable_categories: {
     label: 'Categories counted as taxable', numeric: false,
     hint: 'A JSON list of standard categories. Read by the engine; changing it changes future figures, not past ones.',
