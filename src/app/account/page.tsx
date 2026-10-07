@@ -6,6 +6,10 @@ import { BrandedScreen } from '@/components/dashboard/branded-screen';
 import { KeyRound } from 'lucide-react';
 import { formatDateTime } from '@/components/labels';
 import { AiKeyForm } from './ai-key-form';
+import { AiModelForm } from './ai-model-form';
+import { timeZoneOptions } from '@/components/time-zones';
+import { getPlatformContext } from '@/modules/tenancy';
+import { loadAiModelSettings, type AiModelSettings } from '@/modules/platform';
 import { SignOutButton } from '@/components/dashboard/sign-out-button';
 
 export const dynamic = 'force-dynamic';
@@ -36,6 +40,8 @@ export default async function AccountPage() {
     aiKey = { configured: row?.configured === true, ending: row?.ending ?? null, updatedAt: row?.updated_at ?? null };
   }
   const serverFallback = Boolean(process.env.ANTHROPIC_API_KEY);
+  // ADR-163: the model and effort, offered from the provider's list for the key in use.
+  const aiModel: AiModelSettings | null = superAdmin ? await loadAiModelSettings(await getPlatformContext()) : null;
 
   return (
     <BrandedScreen width={superAdmin ? '6xl' : '2xl'} panel={false}>
@@ -51,6 +57,7 @@ export default async function AccountPage() {
               fullName={profile?.full_name ?? ''}
               email={profile?.email ?? session.user.email ?? ''}
               timezone={profile?.timezone ?? 'Europe/London'}
+              timeZones={timeZoneOptions(profile?.timezone ?? 'Europe/London')}
             />
           </CardBody>
         </Card>
@@ -71,6 +78,23 @@ export default async function AccountPage() {
                         : 'No key is set, so the AI is switched off until one is added.'}
                   </p>
                   <AiKeyForm configured={aiKey.configured} />
+                  {aiModel ? (
+                    <div className="flex flex-col gap-3 border-t border-line pt-4">
+                      <p className="text-sm text-ink" data-testid="ai-model-status">
+                        {aiModel.chosen
+                          ? <>In use: <span className="font-medium">{aiModel.options.find((o) => o.id === aiModel.chosen!.model)?.name ?? aiModel.chosen.model}</span>{aiModel.chosen.effort ? `, ${aiModel.chosen.effort} effort` : ', its default effort'}.</>
+                          : <>In use: the default, <span className="font-medium">{aiModel.options.find((o) => o.id === aiModel.defaultModel)?.name ?? aiModel.defaultModel}</span>.</>}
+                      </p>
+                      {aiModel.options.length === 0 ? (
+                        <p className="text-sm text-ink-muted">The list of models could not be read from Anthropic just now. Refresh to try again.</p>
+                      ) : (
+                        <AiModelForm
+                          options={aiModel.options} chosenModel={aiModel.chosen?.model ?? null}
+                          chosenEffort={aiModel.chosen?.effort ?? null} defaultModel={aiModel.defaultModel}
+                        />
+                      )}
+                    </div>
+                  ) : null}
                 </>
               )}
             </CardBody>

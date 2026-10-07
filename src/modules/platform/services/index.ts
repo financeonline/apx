@@ -1,5 +1,6 @@
 import 'server-only';
-import { createServiceClient } from '@/core/db';
+import { anthropicApiKeyFromVault, createServiceClient } from '@/core/db';
+import { DEFAULT_ANALYST_MODEL } from '@/modules/ai';
 import { callApi } from '@/core/db/api-rpc';
 import { ConflictError, NotFound, ValidationError, isMotionError, toMotionError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
@@ -405,3 +406,116 @@ export async function addPlatformUser(
   }
   return { userId, invited };
 }
+
+/**
+ * The AI model and its effort (ADR-163), chosen by the super admin on Account. The models offered
+ * are the ones the provider lists for the key in use, with the effort levels each one supports.
+ */
+export const AI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
+export type AiEffortLevel = (typeof AI_EFFORTS)[number];
+
+export interface AiModelOption {
+  readonly id: string;
+  readonly name: string;
+  /** The effort levels this model accepts; empty when it has no effort setting. */
+  readonly efforts: readonly AiEffortLevel[];
+}
+
+export interface AiModelSettings {
+  /** The models the key is offered, newest first; empty when the provider could not be reached. */
+  readonly options: readonly AiModelOption[];
+  /** The super admin's choice, or null when the default applies. */
+  readonly chosen: { readonly model: string; readonly effort: AiEffortLevel | null } | null;
+  /** The model used when nothing is chosen. */
+  readonly defaultModel: string;
+}
+
+async function keyInUse(): Promise<string | null> {
+  return (await anthropicApiKeyFromVault().catch(() => null)) ?? process.env.ANTHROPIC_API_KEY ?? null;
+}
+
+async function offeredModels(key: string): Promise<AiModelOption[]> {
+  const response = await fetch('https://api.anthropic.com/v1/models?limit=100', {
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`model list ${response.status}`);
+  const body = (await response.json()) as {
+    data?: Array<{ id: string; display_name?: string; capabilities?: { effort?: Record<string, unknown> } | null }>;
+  };
+  return (body.data ?? []).map((m) => {
+    const effort = m.capabilities?.effort as ({ supported?: boolean } & Record<string, { supported?: boolean } | boolean | undefined>) | undefined;
+    const efforts = effort?.supported
+      ? AI_EFFORTS.filter((level) => (effort[level] as { supported?: boolean } | undefined)?.supported === true)
+      : [];
+    return { id: m.id, name: m.display_name ?? m.id, efforts };
+  });
+}
+
+export async function loadAiModelSettings(ctx: AccessContext): Promise<AiModelSettings> {
+  assertCan(ctx, 'system.manage');
+  const { data, error } = await ctx.db.from('platform_settings').select('value').eq('key', 'ai_model').maybeSingle();
+  if (error) throw toMotionError(error, ctx.requestId);
+  const value = (data?.value ?? null) as { model?: unknown; effort?: unknown } | null;
+  const chosen = value && typeof value.model === 'string'
+    ? { model: value.model, effort: (AI_EFFORTS as readonly string[]).includes(String(value.effort)) ? value.effort as AiEffortLevel : null }
+    : null;
+  const key = await keyInUse();
+  let options: AiModelOption[] = [];
+  if (key) options = await offeredModels(key).catch(() => []);
+  return { options, chosen, defaultModel: DEFAULT_ANALYST_MODEL };
+}
+
+/**
+ * Choose the model and effort. The model must be one the key is offered and the effort one it
+ * supports; one tiny call proves the pair works before it is stored, so a choice can never leave
+ * every analyst question failing. An empty model goes back to the default.
+ */
+export async function setAiModel(ctx: AccessContext, model: string, effort: string): Promise<{ model: string | null; effort: string | null }> {
+  assertCan(ctx, 'system.manage');
+  const wantedModel = model.trim();
+  const wantedEffort = effort.trim() || null;
+  if (!wantedModel) {
+    await callApi(ctx.db, 'set_ai_model', { p_model: null, p_effort: null }, ctx.requestId);
+    return { model: null, effort: null };
+  }
+  const key = await keyInUse();
+  if (!key) throw new ValidationError('Add an AI provider key first.');
+  let options: AiModelOption[];
+  try {
+    options = await offeredModels(key);
+  } catch {
+    throw new ValidationError('Anthropic could not be reached to check the model. Try again in a moment.');
+  }
+  const option = options.find((o) => o.id === wantedModel);
+  if (!option) throw new ValidationError('Your key is not offered that model.');
+  if (wantedEffort && !(option.efforts as readonly string[]).includes(wantedEffort)) {
+    throw new ValidationError(option.efforts.length === 0
+      ? `${option.name} has no effort setting. Choose "Model default".`
+      : `${option.name} does not support ${wantedEffort} effort.`);
+  }
+  const trial = await fetch('https://api.anthropic.com/v1/messages', {
+    method: 'POST',
+    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+    // The trial uses what MOTION depends on: a tool the model is REQUIRED to call (the analyst's final
+    // answer, document reading and the adviser briefing all do). Some models refuse that (2026-10-07:
+    // the Claude 5 family), and would otherwise fail those features after being chosen.
+    body: JSON.stringify({
+      model: wantedModel, max_tokens: 64, messages: [{ role: 'user', content: 'Submit the word OK.' }],
+      tools: [{ name: 'submit', description: 'Submit the word.', input_schema: { type: 'object', properties: { word: { type: 'string' } }, required: ['word'] } }],
+      tool_choice: { type: 'tool', name: 'submit' },
+      ...(wantedEffort ? { output_config: { effort: wantedEffort } } : {}),
+    }),
+    signal: AbortSignal.timeout(30_000),
+  }).catch(() => null);
+  if (!trial || !trial.ok) {
+    const detail = trial ? ((await trial.json().catch(() => null)) as { error?: { message?: string } } | null)?.error?.message : null;
+    if (detail && /tool_choice/i.test(detail)) {
+      throw new ValidationError(`${option.name} cannot give MOTION the structured answers it needs yet, so it cannot be used. Choose another model.`);
+    }
+    throw new ValidationError(`Anthropic refused that choice${detail ? `: ${detail}` : '. Try again in a moment.'}`);
+  }
+  await callApi(ctx.db, 'set_ai_model', { p_model: wantedModel, p_effort: wantedEffort }, ctx.requestId);
+  return { model: wantedModel, effort: wantedEffort };
+}
+

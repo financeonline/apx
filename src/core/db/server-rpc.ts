@@ -959,3 +959,15 @@ export async function anthropicApiKeyFromVault(): Promise<string | null> {
   if (error) throw toMotionError(error);
   return typeof data === 'string' && data.length > 0 ? data : null;
 }
+
+/**
+ * The super admin's model choice (ADR-163): `{ model, effort }`, or null when none is set and the
+ * server's configuration applies. Read by the server that calls the model, never by a browser.
+ */
+export async function aiModelChoice(): Promise<{ model: string; effort: string | null } | null> {
+  const { data, error } = await serverClient().schema('api_server').rpc('ai_model');
+  if (error) throw toMotionError(error);
+  const value = data as { model?: unknown; effort?: unknown } | null;
+  if (!value || typeof value.model !== 'string' || value.model.length === 0) return null;
+  return { model: value.model, effort: typeof value.effort === 'string' ? value.effort : null };
+}

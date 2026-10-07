@@ -5,7 +5,7 @@ import type {
 } from '@anthropic-ai/sdk/resources/messages';
 import { UpstreamError } from '@/core/errors';
 import { log } from '@/core/logging';
-import { anthropicApiKeyFromVault } from '@/core/db';
+import { aiModelChoice, anthropicApiKeyFromVault } from '@/core/db';
 
 /**
  * The one file that imports the Anthropic SDK (AI_ARCHITECTURE.md §1.2, §11; ADR-023).
@@ -88,11 +88,36 @@ async function currentKey(): Promise<string | null> {
   return stored ?? process.env.ANTHROPIC_API_KEY ?? null;
 }
 
-/** Called after the owner changes the key, so this server uses the new one at once. */
+let modelRead: { readonly choice: { model: string; effort: string | null } | null; readonly at: number } | null = null;
+
+/**
+ * The model and effort the super admin chose (ADR-163), else the configured default at the model's
+ * own effort. Read at most once a minute, like the key.
+ */
+async function currentModel(): Promise<{ model: string; effort: string | null }> {
+  if (!modelRead || Date.now() - modelRead.at >= KEY_TTL_MS) {
+    let choice: { model: string; effort: string | null } | null = null;
+    try {
+      choice = await aiModelChoice();
+    } catch (error) {
+      log.warn('the chosen AI model could not be read; using the default', { service: 'ai.claude-client', error: String(error) });
+    }
+    modelRead = { choice, at: Date.now() };
+  }
+  return modelRead.choice ?? { model: DEFAULT_ANALYST_MODEL, effort: null };
+}
+
+/** Called after the owner changes the key or the model, so this server uses the new one at once. */
 export function forgetAiKey(): void {
   keyRead = null;
   cached = null;
+  modelRead = null;
 }
+
+/** The effort levels the API accepts (ADR-163). */
+export type AiEffort = 'low' | 'medium' | 'high' | 'xhigh' | 'max';
+const EFFORTS: readonly string[] = ['low', 'medium', 'high', 'xhigh', 'max'];
+const isEffort = (value: string | null): value is AiEffort => value !== null && EFFORTS.includes(value);
 
 async function client(): Promise<Anthropic> {
   const apiKey = await currentKey();
@@ -122,10 +147,14 @@ function isTransient(error: unknown): boolean {
 
 /** The real transport: prompt caching on the stable prefix (§9, §11), one retry on a transient error. */
 export const liveTransport: ModelTransport = async (call) => {
+  // A caller naming its own model (the evaluation) gets that model at its default effort.
+  const chosen = call.model ? { model: call.model, effort: null } : await currentModel();
+  const effort = isEffort(chosen.effort) ? chosen.effort : null;
   const attempt = async (): Promise<ModelResponse> => {
     const response = await (await client()).messages.create({
-      model: call.model ?? DEFAULT_ANALYST_MODEL,
+      model: chosen.model,
       max_tokens: call.maxTokens ?? ANALYST_MAX_TOKENS,
+      ...(effort ? { output_config: { effort } } : {}),
       system: call.system.map((part) => ({
         type: 'text' as const,
         text: part.text,

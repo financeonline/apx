@@ -7,7 +7,7 @@ import { newRequestId } from '@/core/logging';
 import { fail, done, text } from '@/app/_lib/server-action';
 import type { ActionResult } from '@/components/action-result';
 import { assertCan } from '@/core/permissions';
-import { clearAiKey, setAiKey } from '@/modules/platform';
+import { clearAiKey, setAiKey, setAiModel } from '@/modules/platform';
 import { forgetAiKey } from '@/modules/ai';
 import { confirmPassword, getPlatformContext } from '@/modules/tenancy';
 
@@ -69,3 +69,21 @@ export async function clearAiKeyAction(_previous: ActionResult | null, form: For
     return fail(error, { requestId: ctx.requestId, action: 'platform.clearAiKey' });
   }
 }
+
+/** The AI model and effort (ADR-163). Needs the super admin's password, like the key. */
+export async function setAiModelAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const ctx = await getPlatformContext();
+  try {
+    assertCan(ctx, 'system.manage');
+    await confirmPassword(ctx, password(form));
+    const saved = await setAiModel(ctx, text(form, 'ai_model'), text(form, 'ai_effort'));
+    forgetAiKey();
+    revalidatePath('/account');
+    return done(saved.model
+      ? `Saved. The AI now uses ${saved.model}${saved.effort ? ` at ${saved.effort} effort` : ''}.`
+      : 'Saved. The AI uses the default model.');
+  } catch (error) {
+    return fail(error, { requestId: ctx.requestId, action: 'platform.setAiModel' });
+  }
+}
+

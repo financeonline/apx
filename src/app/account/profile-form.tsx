@@ -2,10 +2,14 @@
 
 import { useActionState } from 'react';
 import { updateProfileAction } from './actions';
-import { Field, Input } from '@/components/ui/field';
+import { Field, Input, Select } from '@/components/ui/field';
+import type { TimeZoneOption } from '@/components/time-zones';
 import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 
-export function ProfileForm(props: { fullName: string; email: string; timezone: string }) {
+export function ProfileForm(props: {
+  fullName: string; email: string; timezone: string;
+  timeZones: { first: readonly TimeZoneOption[]; rest: readonly TimeZoneOption[] };
+}) {
   const [state, action] = useActionState(updateProfileAction, null);
   return (
     <form action={action} className="flex flex-col gap-5">
@@ -20,7 +24,14 @@ export function ProfileForm(props: { fullName: string; email: string; timezone: 
         <Input id="email" name="email" defaultValue={props.email} disabled readOnly />
       </Field>
       <Field label="Time zone" htmlFor="timezone">
-        <Input id="timezone" name="timezone" defaultValue={props.timezone} />
+        <Select id="timezone" name="timezone" defaultValue={props.timezone}>
+          <optgroup label="Common">
+            {props.timeZones.first.map((z) => <option key={z.value} value={z.value}>{z.label}</option>)}
+          </optgroup>
+          <optgroup label="All time zones">
+            {props.timeZones.rest.map((z) => <option key={z.value} value={z.value}>{z.label}</option>)}
+          </optgroup>
+        </Select>
       </Field>
       <ActionMessage state={state} />
       <SubmitButton pendingLabel="Saving…">Save changes</SubmitButton>

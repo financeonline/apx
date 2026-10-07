@@ -2978,3 +2978,13 @@ Consequences: a stolen super-admin password is now enough to reach every company
 Status: **changed locally on 2026-10-07 on the owner's instruction ("i want haiku model"; "set this default"). Amends ADR-157.2. Not reviewed, merged or deployed.**
 
 `DEFAULT_ANALYST_MODEL` is `claude-haiku-4-5-20251001` (the owner's key offers it); `ANTHROPIC_MODEL` still overrides it. Haiku is faster and cheaper; in the earlier trials Sonnet 4.6 had the fewest grounding rejections, so more Haiku answers may be withheld or degraded — the checks are unchanged.
+
+### ADR-163 · The super admin chooses the AI model and its effort; time zone is a drop-down
+Status: **built locally on 2026-10-07 on the owner's instruction ("add option to select AI models here", "and effort also", "add drop down to select time zone"). Not reviewed, merged or deployed.**
+
+Decision:
+1. **Model and effort** on Account (the AI provider key card): the models are the provider's list for the key in use (`GET /v1/models`), and the effort drop-down offers only the levels that model reports (`capabilities.effort`); a model without effort (Haiku 4.5) offers only its default. Stored as `platform_settings.ai_model = {model, effort}` through `api.set_ai_model` (super admin, recent sign-in, password confirmed, audited, shapes checked) and read by the server through `api_server.ai_model` (service role), refreshed each minute and at once on this server after a change. Precedence: the choice, else `ANTHROPIC_MODEL`, else the default (ADR-162). Effort is sent as `output_config.effort`. Migration `20261018000008`.
+2. **A choice is proven before it is stored**: one small call with that model and effort and a REQUIRED tool call — what the analyst's final answer, document reading and the adviser briefing depend on. On 2026-10-07 the Claude 5 family (Sonnet 5.5, Opus 5.5, …) refuses a required tool call (`tool_choice` "tool"/"any" not supported), so they are listed but refused with a plain reason; making MOTION work with them is separate work.
+3. **Time zone** on Account is a drop-down of the runtime's IANA zones with today's offset ("GMT+4 · Asia/Dubai"), the UK, UAE, India and Ireland first; a saved zone the list lacks is kept. The database still validates the name.
+
+Tests: `ai-model-setting` (integration). The earlier recorded evaluation is unaffected (the eval names its own model and runs at that model's default effort).

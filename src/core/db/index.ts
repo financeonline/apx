@@ -18,6 +18,7 @@ export {
   purgeOrganization,
   recordAccessEvent,
   anthropicApiKeyFromVault,
+  aiModelChoice,
   revokeUserSessions,
   recordReportFile,
   finishFunding,
