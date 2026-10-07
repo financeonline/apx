@@ -29,12 +29,14 @@ const STATUS_TEXT: Readonly<Record<CardStatus, string>> = {
   quiet: 'text-ink-muted',
 };
 
-export function IconTile({ tint, children, size = 'lg' }: { tint: CardTint; children: ReactNode; size?: 'lg' | 'sm' }) {
+export function IconTile({ tint, children, size = 'lg' }: { tint: CardTint; children: ReactNode; size?: 'lg' | 'md' | 'sm' }) {
   return (
     <span
       aria-hidden="true"
       className={`flex shrink-0 items-center justify-center ${TINT[tint]} ${
-        size === 'lg' ? 'size-14 rounded-2xl [&_svg]:size-7' : 'size-10 rounded-xl [&_svg]:size-5'
+        size === 'lg' ? 'size-14 rounded-2xl [&_svg]:size-7'
+          : size === 'md' ? 'size-11 rounded-xl [&_svg]:size-6'
+            : 'size-10 rounded-xl [&_svg]:size-5'
       }`}
     >
       {children}
@@ -75,49 +77,54 @@ export function DepartmentCard({
   /** The reference's highlighted card: a soft pink wash. */
   featured?: boolean;
 }) {
+  // A compact rectangle (owner, 2026-10-07): icon beside the text, figures in one paragraph, and
+  // status, pills and Open on one footer row.
   return (
     <section
       aria-label={title}
-      className={`panel flex h-full flex-col rounded-card p-5 ${featured ? 'bg-linear-to-br from-pink-soft to-surface' : ''}`}
+      className={`panel flex h-full flex-col rounded-card p-4 ${featured ? 'bg-linear-to-br from-pink-soft to-surface' : ''}`}
     >
-      <div className="flex gap-4">
-        <IconTile tint={tint}>{icon}</IconTile>
-        <div className="min-w-0">
-          <h3 className="text-lg text-ink">{title}</h3>
-          <p className="mt-1 text-sm text-ink-muted">
+      <div className="flex gap-3.5">
+        <IconTile tint={tint} size="md">{icon}</IconTile>
+        <div className="min-w-0 flex-1">
+          <h3 className="text-base text-ink">{title}</h3>
+          <p className="text-xs text-ink-muted">
             {description.map((part, i) => (
               <span key={part}>
-                {i > 0 ? <span aria-hidden="true" className="mx-1.5">•</span> : null}
+                {i > 0 ? <span aria-hidden="true" className="mx-1">•</span> : null}
                 {part}
               </span>
             ))}
           </p>
-          {headline ? <p className="mt-2 text-sm font-medium text-ink">{headline}</p> : null}
-          {lines.map((line) => <p key={line} className="mt-0.5 text-sm text-ink-muted">{line}</p>)}
+          {headline || lines.length > 0 ? (
+            <p className="mt-1.5 text-sm text-ink-muted">
+              {headline ? <span className="font-medium text-ink">{headline}</span> : null}
+              {lines.map((line) => <span key={line}> {line}</span>)}
+            </p>
+          ) : null}
         </div>
       </div>
 
-      {pills.length > 0 ? (
-        <ul className="mt-4 flex flex-wrap gap-2 sm:pl-[4.5rem]">
-          {pills.map((pill) => (
-            <li key={pill.href}>
-              <Link
-                href={pill.href}
-                className="inline-flex rounded-full bg-surface-sunken px-3 py-1 text-xs font-medium text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
-              >
-                {pill.label}
-              </Link>
-            </li>
-          ))}
-        </ul>
-      ) : null}
-
-      <div className="mt-auto flex items-center justify-between gap-3 pt-5">
-        {status ? <StatusDot status={status.tone} label={status.label} /> : <span />}
+      <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-2 pt-3">
+        {status ? <StatusDot status={status.tone} label={status.label} /> : null}
+        {pills.length > 0 ? (
+          <ul className="flex flex-wrap gap-1.5">
+            {pills.map((pill) => (
+              <li key={pill.href}>
+                <Link
+                  href={pill.href}
+                  className="inline-flex rounded-full bg-surface-sunken px-2.5 py-0.5 text-xs font-medium text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
+                >
+                  {pill.label}
+                </Link>
+              </li>
+            ))}
+          </ul>
+        ) : null}
         <Link
           href={href}
           aria-label={`Open ${title}`}
-          className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3.5 py-1.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
+          className="ml-auto inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
         >
           Open <ChevronRight aria-hidden="true" className="size-4" />
         </Link>

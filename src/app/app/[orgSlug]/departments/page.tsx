@@ -159,7 +159,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
 
       <section aria-labelledby="departments-heading">
         <h2 id="departments-heading" className="sr-only">Business departments</h2>
-        <ul className="grid grid-cols-1 gap-5 md:grid-cols-2 xl:grid-cols-3">
+        <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 min-[1440px]:grid-cols-3 min-[2200px]:grid-cols-4">
           {ordered.map(tileCard)}
 
           {can(ctx, 'assignments.view') ? (
@@ -197,7 +197,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
         </ul>
       </section>
 
-      <div className="mt-6 grid grid-cols-1 gap-5 2xl:grid-cols-[3fr_2fr]">
+      <div className="mt-4 grid grid-cols-1 gap-4 min-[1440px]:grid-cols-[3fr_2fr]">
         {canImport ? (
           <section aria-labelledby="capture-heading" className="panel rounded-card p-5">
             <div className="flex flex-wrap items-start justify-between gap-3">
@@ -237,7 +237,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
         ) : null}
       </div>
 
-      <Card className="mt-6" id="system">
+      <Card className="mt-4" id="system">
         <CardBody>
           <h2 className="text-lg text-ink">How MOTION is running</h2>
           <ul className="mt-3 flex flex-col gap-1 text-sm text-ink">
