@@ -10,6 +10,11 @@ import { ChevronRight } from 'lucide-react';
  */
 
 export type CardTint = 'violet' | 'pink';
+
+/** The hover/focus glow on a clickable card: a violet edge and a soft violet halo. */
+const GLOW =
+  'hover:border-accent/70 hover:shadow-[0_0_0_2px_rgb(106_69_229/0.5),0_0_36px_2px_rgb(106_69_229/0.4),0_0_80px_-10px_rgb(219_39_119/0.3)] ' +
+  'focus-within:border-accent/70 focus-within:shadow-[0_0_0_2px_rgb(106_69_229/0.65),0_0_36px_2px_rgb(106_69_229/0.4)]';
 export type CardStatus = 'good' | 'attention' | 'quiet';
 
 const TINT: Readonly<Record<CardTint, string>> = {
@@ -78,11 +83,14 @@ export function DepartmentCard({
   featured?: boolean;
 }) {
   // A compact rectangle (owner, 2026-10-07): icon beside the text, figures in one paragraph, and
-  // status, pills and Open on one footer row.
+  // status, pills and Open on one footer row. The whole card opens the department (owner,
+  // 2026-10-07): "Open" stretches over the card, so there is still one link per card for assistive
+  // technology; the pills sit above it and keep their own targets. Hover or keyboard focus makes the
+  // edges glow.
   return (
     <section
       aria-label={title}
-      className={`panel flex h-full flex-col rounded-card p-4 ${featured ? 'bg-linear-to-br from-pink-soft to-surface' : ''}`}
+      className={`panel group relative flex h-full flex-col rounded-card p-4 transition-[box-shadow,border-color] duration-200 ${GLOW} ${featured ? 'bg-linear-to-br from-pink-soft to-surface' : ''}`}
     >
       <div className="flex gap-3.5">
         <IconTile tint={tint} size="md">{icon}</IconTile>
@@ -113,7 +121,7 @@ export function DepartmentCard({
               <li key={pill.href}>
                 <Link
                   href={pill.href}
-                  className="inline-flex rounded-full bg-surface-sunken px-2.5 py-0.5 text-xs font-medium text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
+                  className="relative z-10 inline-flex rounded-full bg-surface-sunken px-2.5 py-0.5 text-xs font-medium text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
                 >
                   {pill.label}
                 </Link>
@@ -124,7 +132,7 @@ export function DepartmentCard({
         <Link
           href={href}
           aria-label={`Open ${title}`}
-          className="ml-auto inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
+          className="ml-auto inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors outline-none group-hover:border-accent group-hover:bg-accent-soft after:absolute after:inset-0 after:rounded-card after:content-['']"
         >
           Open <ChevronRight aria-hidden="true" className="size-4" />
         </Link>
@@ -136,7 +144,7 @@ export function DepartmentCard({
 /** A quick link with an icon tile, title and one line, as the reference's "Data capture" row. */
 export function QuickLink({ href, title, line, icon, tint }: { href: string; title: string; line: string; icon: ReactNode; tint: CardTint }) {
   return (
-    <Link href={href} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3 transition-colors hover:border-accent/45 hover:bg-accent-soft/40">
+    <Link href={href} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3 transition-[box-shadow,border-color,background-color] duration-200 hover:border-accent/60 hover:bg-accent-soft/40 hover:shadow-[0_0_0_1px_rgb(106_69_229/0.4),0_0_20px_-4px_rgb(106_69_229/0.45)]">
       <IconTile tint={tint} size="sm">{icon}</IconTile>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-ink">{title}</span>
@@ -150,7 +158,7 @@ export function QuickLink({ href, title, line, icon, tint }: { href: string; tit
 /** A small icon button-link, as the reference's report shortcuts. */
 export function ShortcutLink({ href, label, icon }: { href: string; label: string; icon: ReactNode }) {
   return (
-    <Link href={href} className="flex items-center gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm font-medium whitespace-nowrap text-ink transition-colors hover:border-accent/45 hover:bg-accent-soft hover:text-accent [&_svg]:size-4 [&_svg]:text-accent">
+    <Link href={href} className="flex items-center gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm font-medium whitespace-nowrap text-ink transition-[box-shadow,border-color,background-color] duration-200 hover:border-accent/60 hover:bg-accent-soft hover:text-accent hover:shadow-[0_0_0_1px_rgb(106_69_229/0.4),0_0_20px_-4px_rgb(106_69_229/0.45)] [&_svg]:size-4 [&_svg]:text-accent">
       {icon}
       {label}
     </Link>
