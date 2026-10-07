@@ -23,12 +23,12 @@ import { anthropicApiKeyFromVault } from '@/core/db';
  */
 
 /**
- * §11: a Sonnet-class default; overridable by configuration (`ANTHROPIC_MODEL`), never by the
- * browser. 2026-10-07: claude-sonnet-4-5 is no longer offered to the owner's key. claude-sonnet-4-6
- * is the default: its answers pass grounding (§7) with the fewest rejections; claude-sonnet-5-5 works
- * but more of its statements are withheld until the prompt is tuned for it.
+ * §11: the default model; overridable by configuration (`ANTHROPIC_MODEL`), never by the browser.
+ * 2026-10-07: claude-sonnet-4-5 is no longer offered to the owner's key. The owner chose Claude
+ * Haiku 4.5 as the default (faster, cheaper). claude-sonnet-4-6 had the fewest grounding (§7)
+ * rejections in trials and claude-sonnet-5-5 also works; either is one setting away.
  */
-export const DEFAULT_ANALYST_MODEL = process.env.ANTHROPIC_MODEL?.trim() || 'claude-sonnet-4-6';
+export const DEFAULT_ANALYST_MODEL = process.env.ANTHROPIC_MODEL?.trim() || 'claude-haiku-4-5-20251001';
 
 /**
  * §11: `max_tokens = 8000` for answers (1500, then 4000, until 2026-10-07: the current model's

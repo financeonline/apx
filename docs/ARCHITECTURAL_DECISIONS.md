@@ -2973,3 +2973,8 @@ Decision: MOTION has no two-step sign-in. A platform account (the one super admi
 Tests: the assertions that a platform account WITHOUT two-step is refused tested the removed rule and were removed — the resolution fixtures' six "aal1" platform scenarios (each identical to its kept twin apart from the factor, verified by script), and the "at aal1 sees nothing" cases in rls-isolation, ai-tools, alerts-persist, forecast, scenarios, portfolio, portfolio-transport, portfolio-ai (the adviser's own aal1 read), receivables-recovery and platform-pages. The AI key test now proves a stale sign-in is refused and a password sign-in is enough. The test JWT no longer carries an `aal` claim.
 
 Consequences: a stolen super-admin password is now enough to reach every company; the owner accepted this. Re-introducing two-step later means a new decision, not a setting.
+
+### ADR-162 · Claude Haiku 4.5 is the default AI model
+Status: **changed locally on 2026-10-07 on the owner's instruction ("i want haiku model"; "set this default"). Amends ADR-157.2. Not reviewed, merged or deployed.**
+
+`DEFAULT_ANALYST_MODEL` is `claude-haiku-4-5-20251001` (the owner's key offers it); `ANTHROPIC_MODEL` still overrides it. Haiku is faster and cheaper; in the earlier trials Sonnet 4.6 had the fewest grounding rejections, so more Haiku answers may be withheld or degraded — the checks are unchanged.
