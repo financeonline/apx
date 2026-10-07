@@ -62,7 +62,7 @@ export function AppShell({
           </p>
         </div>
         {/* The reference's foot: a sprig behind the sidebar's last lines. */}
-        <SidebarSprig className="absolute bottom-0 left-0 -z-10 w-full" />
+        <SidebarSprig className="absolute bottom-0 left-0 -z-10 w-full opacity-60" />
       </aside>
 
       <header className="panel sticky top-0 z-20 flex items-center justify-between gap-3 border-x-0 border-t-0 px-4 py-3 lg:hidden">
@@ -79,7 +79,7 @@ export function AppShell({
         </details>
       </header>
 
-      <CornerSprig className="fixed top-0 right-0 -z-10 hidden w-[30rem] max-w-[50vw] md:block xl:right-40" />
+      <CornerSprig className="fixed top-0 right-0 -z-10 hidden w-[34rem] max-w-[55vw] opacity-80 md:block xl:right-24" />
 
       <main className="mx-auto w-full min-w-0 max-w-[100rem] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
     </div>
