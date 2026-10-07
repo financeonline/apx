@@ -2,6 +2,8 @@ import { AppShell } from '@/components/dashboard/app-shell';
 import { notFound } from 'next/navigation';
 import { getPlatformContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
+import { ROLE_LABELS } from '@/components/labels';
+import { shellUser } from '@/app/_lib/shell-user';
 import { ConfirmItsYou } from './confirm-its-you';
 
 export const dynamic = 'force-dynamic';
@@ -10,12 +12,14 @@ export const dynamic = 'force-dynamic';
 export default async function PlatformLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getPlatformContext();
   if (!can(ctx, 'system.manage')) notFound();
+  const user = await shellUser(ctx.db, ROLE_LABELS[ctx.effectiveRole] ?? 'MOTION administrator', ctx.requestId);
 
   return (
     <AppShell
       homeHref="/platform"
       homeLabel="Platform home"
       area="Platform"
+      user={user}
       groups={[
         {
           label: 'Platform',

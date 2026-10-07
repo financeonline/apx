@@ -2,6 +2,9 @@ import { AppShell } from '@/components/dashboard/app-shell';
 import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { getPortfolioContext } from '@/modules/portfolio';
+import { resolvePlatformRole } from '@/modules/tenancy';
+import { ROLE_LABELS } from '@/components/labels';
+import { shellUser } from '@/app/_lib/shell-user';
 
 export const dynamic = 'force-dynamic';
 
@@ -11,18 +14,23 @@ export const dynamic = 'force-dynamic';
  * portfolio is never confirmed to someone who has none (SECURITY_MODEL.md §14).
  */
 export default async function PortfolioLayout({ children }: { children: React.ReactNode }) {
+  let ctx: Awaited<ReturnType<typeof getPortfolioContext>>;
   try {
-    await getPortfolioContext();
+    ctx = await getPortfolioContext();
   } catch (error) {
     if (isMotionError(error) && error.code === 'NOT_FOUND') notFound();
     throw error;
   }
+  // The person at the foot of the sidebar: platform staff by their platform role, owners as advisers.
+  const platformRole = await resolvePlatformRole(ctx.db, ctx.requestId).catch(() => 'none' as const);
+  const user = await shellUser(ctx.db, platformRole === 'none' ? 'Adviser' : ROLE_LABELS[platformRole] ?? 'Adviser', ctx.requestId);
 
   return (
     <AppShell
       homeHref="/portfolio"
       homeLabel="Command Centre home"
       area="Command Centre"
+      user={user}
       groups={[
         {
           label: 'Command Centre',
