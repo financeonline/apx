@@ -7,6 +7,7 @@ import { BrandedScreen } from '@/components/dashboard/branded-screen';
 import { KeyRound } from 'lucide-react';
 import { formatDateTime } from '@/components/labels';
 import { AiKeyForm } from './ai-key-form';
+import { SignOutButton } from '@/components/dashboard/sign-out-button';
 
 export const dynamic = 'force-dynamic';
 
@@ -39,7 +40,10 @@ export default async function AccountPage() {
 
   return (
     <BrandedScreen width="2xl" panel={false}>
-      <PageHeader title="Your account" description="Your details and how you sign in." />
+      <PageHeader
+        title="Your account" description="Your details and how you sign in."
+        action={<SignOutButton className="w-36 rounded-xl border border-line bg-surface" />}
+      />
       <div className="mt-8 flex flex-col gap-6">
         <Card>
           <CardHeader title="Your details" />

@@ -3,6 +3,7 @@ import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { CornerSprig, SidebarSprig, Wordmark } from './brand';
 import { SidebarNav, type SidebarGroup } from './sidebar';
+import { SignOutButton } from './sign-out-button';
 
 /**
  * The application shell (ADR-155), as the owner's reference: a white sidebar with the mark, the
@@ -55,6 +56,7 @@ export function AppShell({
         <div className="mt-auto flex flex-col gap-2 pt-6 pb-6">
           {person}
           {footer ? <div className="px-3">{footer}</div> : null}
+          <SignOutButton />
           <p className="mt-16 px-3 text-sm leading-snug font-medium text-brand-ink/80">
             Smarter finance
             <br />
@@ -75,6 +77,7 @@ export function AppShell({
             <SidebarNav groups={groups} />
             {person ? <div className="mt-4">{person}</div> : null}
             {footer ? <div className="mt-2 px-3">{footer}</div> : null}
+            <SignOutButton className="mt-2" />
           </div>
         </details>
       </header>
