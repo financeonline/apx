@@ -1,11 +1,10 @@
-import { KeyRound, SlidersHorizontal } from 'lucide-react';
+import { SlidersHorizontal } from 'lucide-react';
 import { assertCan } from '@/core/permissions';
-import { loadAiKeyStatus, loadPlatformSettings } from '@/modules/platform';
+import { loadPlatformSettings } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { Card, CardBody, CardHeader, PageHeader } from '@/components/ui/surfaces';
 import { formatDateTime } from '@/components/labels';
 import { SettingForm } from './setting-form';
-import { AiKeyForm } from './ai-key-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -40,29 +39,12 @@ const KNOWN: Readonly<Record<string, { label: string; hint: string; numeric: boo
 export default async function PlatformSettingsPage() {
   const ctx = await getPlatformContext();
   assertCan(ctx, 'system.manage');
-  const [settings, aiKey] = await Promise.all([loadPlatformSettings(ctx), loadAiKeyStatus(ctx)]);
+  const settings = await loadPlatformSettings(ctx);
 
   return (
     <>
       <PageHeader title="Platform settings" description="The defaults every organisation gets unless it has its own." />
-      <div className="mt-8 flex max-w-2xl flex-col gap-6">
-        {/* ADR-157: the AI provider key, set by the app's owner. */}
-        <Card>
-          <CardHeader
-            icon={<KeyRound />} tint="pink" title="AI provider key"
-            description="The Anthropic key every organisation's AI Analyst and document reading use."
-          />
-          <CardBody className="flex flex-col gap-4">
-            <p className="text-sm text-ink" data-testid="ai-key-status">
-              {aiKey.configured
-                ? <>A key ending <span className="font-mono">…{aiKey.ending}</span> is stored{aiKey.updatedAt ? `, set ${formatDateTime(aiKey.updatedAt)}` : ''}.</>
-                : aiKey.serverFallback
-                  ? 'No key is stored here; the AI is using the key in the server settings.'
-                  : 'No key is set, so the AI is switched off until one is added.'}
-            </p>
-            <AiKeyForm configured={aiKey.configured} />
-          </CardBody>
-        </Card>
+      <div className="mt-8 max-w-2xl">
         <Card>
           <CardHeader icon={<SlidersHorizontal />} tint="violet" title="Defaults" />
           <CardBody>
