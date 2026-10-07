@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { adminSql, clientFor, createAuthUser, resetFixtures, sqlstate } from './setup';
+import { drainJobs } from '@/modules/jobs';
+import { adminSql, clientFor, createAuthUser, drainUntilFinished, resetFixtures, sqlstate } from './setup';
 
 /**
  * ADR-158 over the real wire: only a super admin (recent sign-in) switches a company's systems,
@@ -199,3 +200,29 @@ describe("changing a company owner's login (ADR-167)", () => {
     expect(sqlstate((await clientFor(owner).schema('api').rpc('platform_company_owners', { p_orgs: [org] })).error)).toBe('42501');
   });
 });
+
+describe('deleting a company for good, now (ADR-168)', () => {
+  it('refuses a company that is not scheduled, then purges one that is — rows gone, status deleted', async () => {
+    const { data } = await asAdmin('platform_create_organization', {
+      p_name: 'ITest Purge Now Co', p_country_code: 'GB', p_base_currency: 'GBP',
+      p_fiscal_year_start_month: 1, p_timezone: '', p_owner_email: `purge@${DOMAIN}`,
+    });
+    const org = (data as Array<{ organization_id: string }>)[0]!.organization_id;
+    expect(Number(adminSql(`select count(*) from public.accounts where organization_id = '${org}'`))).toBeGreaterThan(0);
+
+    expect(sqlstate((await asAdmin('platform_purge_now', { p_org: org })).error)).toBe('23514');
+    expect((await asAdmin('request_deletion', { p_org: org })).error).toBeNull();
+
+    const stale = clientFor(adminId, { amrTimestamp: Math.floor(Date.now() / 1000) - 3600 });
+    expect(sqlstate((await stale.schema('api').rpc('platform_purge_now', { p_org: org })).error)).toBe('42501');
+    expect(sqlstate((await clientFor(ownerId).schema('api').rpc('platform_purge_now', { p_org: org })).error)).toBe('42501');
+
+    const { data: job, error } = await asAdmin('platform_purge_now', { p_org: org });
+    expect(error).toBeNull();
+    expect(await drainUntilFinished((max) => drainJobs(max), job as unknown as string)).toBe('succeeded');
+    expect(adminSql(`select status from public.organizations where id = '${org}'`)).toBe('deleted');
+    expect(adminSql(`select count(*) from public.accounts where organization_id = '${org}'`)).toBe('0');
+    expect(adminSql(`select count(*) from public.invitations where organization_id = '${org}'`)).toBe('0');
+  }, 120_000);
+});
+

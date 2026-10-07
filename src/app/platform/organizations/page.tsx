@@ -82,7 +82,7 @@ export default async function PlatformOrganizationsPage({
               )
             ) : (
               <TableWrap>
-                <THead columns={mayCreate ? ['Name', 'Slug', 'Plan', 'Status', 'Created', 'Active?', 'Manage'] : ['Name', 'Slug', 'Plan', 'Status', 'Created']} />
+                <THead columns={mayCreate ? ['Name', 'Slug', 'Plan', 'Status', 'Created', 'Manage'] : ['Name', 'Slug', 'Plan', 'Status', 'Created']} />
                 <TBody>
                   {organizations.map((organization) => (
                     <TR key={organization.id}>
@@ -98,16 +98,16 @@ export default async function PlatformOrganizationsPage({
                       </TD>
                       <TD>{new Date(organization.created_at).toLocaleDateString('en-GB')}</TD>
                       {mayCreate ? (
-                        <TD><OrgStatusRowControl orgId={organization.id} name={organization.name} status={organization.status} /></TD>
-                      ) : null}
-                      {mayCreate ? (
                         <TD>
+                          <div className="flex flex-wrap items-center gap-2">
+                          <OrgStatusRowControl orgId={organization.id} name={organization.name} status={organization.status} />
                           <CompanyRowActions company={{
                             id: organization.id, name: organization.name, legalName: organization.legal_name,
                             countryCode: organization.country_code, baseCurrency: organization.base_currency,
                             fiscalYearStartMonth: Number(organization.fiscal_year_start_month), plan: organization.plan,
                             status: organization.status, owner: owners.get(organization.id) ?? null,
                           }} />
+                          </div>
                         </TD>
                       ) : null}
                     </TR>

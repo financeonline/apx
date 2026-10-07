@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { assertCan } from '@/core/permissions';
-import { createCompanyAsPlatform, deleteCompanyAsPlatform, editCompanyAsPlatform, restoreCompanyAsPlatform, changeOwnerLoginAsPlatform } from '@/modules/platform';
+import { createCompanyAsPlatform, deleteCompanyAsPlatform, editCompanyAsPlatform, restoreCompanyAsPlatform, changeOwnerLoginAsPlatform, purgeCompanyNowAsPlatform } from '@/modules/platform';
 import { confirmPassword, getPlatformContext } from '@/modules/tenancy';
 import { done, fail, text } from '@/app/_lib/server-action';
 import { requestOrigin } from '@/app/_lib/request-origin';
@@ -90,6 +90,21 @@ export async function restoreCompanyAction(_previous: ActionResult | null, form:
     return done('Restored.');
   } catch (error) {
     return fail(error, { requestId: ctx.requestId, action: 'platform.restoreCompany' });
+  }
+}
+
+/** Delete a company for good, now (ADR-168). Asked "Are you sure?" first; needs the super admin's password. */
+export async function purgeCompanyNowAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const ctx = await getPlatformContext();
+  try {
+    assertCan(ctx, 'platform.orgs.manage');
+    const value = form.get('current_password');
+    await confirmPassword(ctx, typeof value === 'string' ? value : '');
+    await purgeCompanyNowAsPlatform(ctx, text(form, 'org_id'));
+    revalidatePath('/platform/organizations');
+    return done('Deleting for good now. It leaves this list within a minute.');
+  } catch (error) {
+    return fail(error, { requestId: ctx.requestId, action: 'platform.purgeCompanyNow' });
   }
 }
 

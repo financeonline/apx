@@ -4,7 +4,7 @@ import { useActionState, useEffect, useRef } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { Field, Input, Select } from '@/components/ui/field';
 import { Button } from '@/components/ui/button';
-import { deleteCompanyAction, editCompanyAction, restoreCompanyAction } from './actions';
+import { deleteCompanyAction, editCompanyAction, purgeCompanyNowAction, restoreCompanyAction } from './actions';
 
 const COUNTRIES = [['GB', 'United Kingdom'], ['AE', 'United Arab Emirates'], ['IE', 'Ireland'], ['IN', 'India']] as const;
 const CURRENCIES = ['GBP', 'AED', 'EUR', 'USD', 'INR'] as const;
@@ -45,13 +45,7 @@ export function CompanyRowActions({ company }: { company: CompanyRow }) {
   useEffect(() => { if (deleted?.ok) deleteRef.current?.close(); }, [deleted]);
 
   if (company.status === 'pending_deletion') {
-    return (
-      <form action={restore} className="flex flex-wrap items-center gap-2">
-        <input type="hidden" name="org_id" value={company.id} />
-        <SubmitButton tone="secondary" pendingLabel="Restoring…" className="h-8 px-3 text-xs" aria-label={`Restore ${company.name}`}>Restore</SubmitButton>
-        <ActionMessage state={restored} />
-      </form>
-    );
+    return <ScheduledActions company={company} restored={restored} restore={restore} />;
   }
 
   return (
@@ -146,3 +140,51 @@ export function CompanyRowActions({ company }: { company: CompanyRow }) {
     </div>
   );
 }
+
+/**
+ * A company whose deletion is requested (ADR-168): Restore, or Delete now — which asks "Are you sure
+ * you want to delete it permanently?" and does nothing unless the answer is yes.
+ */
+function ScheduledActions({ company, restored, restore }: {
+  company: CompanyRow;
+  restored: Parameters<typeof ActionMessage>[0]['state'];
+  restore: (form: FormData) => void;
+}) {
+  const purgeRef = useRef<HTMLDialogElement>(null);
+  const [purged, purge] = useActionState(purgeCompanyNowAction, null);
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <form action={restore}>
+        <input type="hidden" name="org_id" value={company.id} />
+        <SubmitButton tone="secondary" pendingLabel="Restoring…" className="h-8 px-3 text-xs" aria-label={`Restore ${company.name}`}>Restore</SubmitButton>
+      </form>
+      {purged?.ok ? (
+        <span className="text-xs text-ink-muted">Deleting…</span>
+      ) : (
+        <Button type="button" tone="danger" className="h-8 px-3 text-xs" aria-label={`Delete ${company.name} now`} onClick={() => purgeRef.current?.showModal()}>
+          Delete now
+        </Button>
+      )}
+      <ActionMessage state={restored} />
+
+      <dialog ref={purgeRef} className={DIALOG} aria-labelledby={`purge-${company.id}`} role="alertdialog">
+        <form action={purge} className="flex flex-col gap-4 p-6">
+          <h2 id={`purge-${company.id}`} className="text-lg font-bold">Are you sure you want to delete {company.name} permanently?</h2>
+          <p className="text-sm text-ink-muted">
+            Everything it holds — figures, documents, reports, its people&apos;s access — is erased now and cannot be restored.
+          </p>
+          <input type="hidden" name="org_id" value={company.id} />
+          <Field label="Your password" htmlFor={`purge-pw-${company.id}`} hint="To confirm it is you.">
+            <Input id={`purge-pw-${company.id}`} name="current_password" type="password" required autoComplete="current-password" />
+          </Field>
+          <ActionMessage state={purged} />
+          <div className="flex flex-wrap justify-end gap-3">
+            <Button type="button" tone="secondary" onClick={() => purgeRef.current?.close()} autoFocus>{purged?.ok ? 'Close' : 'No, keep it'}</Button>
+            {purged?.ok ? null : <SubmitButton tone="danger" pendingLabel="Deleting…">Yes, delete permanently</SubmitButton>}
+          </div>
+        </form>
+      </dialog>
+    </div>
+  );
+}
+

@@ -717,3 +717,13 @@ export async function changeOwnerLoginAsPlatform(
   await revokeUserSessions(owner.user_id);
   return owner.email;
 }
+
+/**
+ * Delete a company for good, now (ADR-168): for one already scheduled, skip the thirty days and run
+ * the existing `org.purge` job straight away (rows, audit redaction, stored files). Cannot be undone.
+ */
+export async function purgeCompanyNowAsPlatform(ctx: AccessContext, orgId: string): Promise<void> {
+  assertCan(ctx, 'platform.orgs.manage');
+  await callApi(ctx.db, 'platform_purge_now', { p_org: orgId }, ctx.requestId);
+}
+
