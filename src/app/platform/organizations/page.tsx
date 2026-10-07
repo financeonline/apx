@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { toMotionError } from '@/core/errors';
 import { getPlatformContext } from '@/modules/tenancy';
+import { listCompanyOwners } from '@/modules/platform';
 import { Building2 } from 'lucide-react';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardBody, CardHeader, EmptyState, Badge } from '@/components/ui/surfaces';
@@ -49,6 +50,8 @@ export default async function PlatformOrganizationsPage({
   if (error) throw toMotionError(error, ctx.requestId);
   const organizations = data ?? [];
   const mayCreate = can(ctx, 'platform.orgs.manage');
+  // ADR-167: whose login the Edit dialog changes.
+  const owners = mayCreate ? await listCompanyOwners(ctx, organizations.map((o) => o.id)) : new Map();
 
   return (
     <>
@@ -103,7 +106,7 @@ export default async function PlatformOrganizationsPage({
                             id: organization.id, name: organization.name, legalName: organization.legal_name,
                             countryCode: organization.country_code, baseCurrency: organization.base_currency,
                             fiscalYearStartMonth: Number(organization.fiscal_year_start_month), plan: organization.plan,
-                            status: organization.status,
+                            status: organization.status, owner: owners.get(organization.id) ?? null,
                           }} />
                         </TD>
                       ) : null}

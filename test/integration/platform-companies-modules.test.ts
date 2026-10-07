@@ -158,3 +158,44 @@ describe('editing and deleting a company from the list (ADR-166)', () => {
     expect(adminSql(`select status from public.organizations where id = '${org}'`)).toBe('active');
   });
 });
+
+describe("changing a company owner's login (ADR-167)", () => {
+  let org: string;
+  let owner: string;
+
+  beforeAll(async () => {
+    const { data } = await asAdmin('platform_create_organization', {
+      p_name: 'ITest Owner Login Co', p_country_code: 'GB', p_base_currency: 'GBP',
+      p_fiscal_year_start_month: 1, p_timezone: '', p_owner_email: `login-owner@${DOMAIN}`,
+    });
+    org = (data as Array<{ organization_id: string }>)[0]!.organization_id;
+    owner = createAuthUser(`login-owner@${DOMAIN}`);
+  });
+
+  it('refuses while the company has no owner yet', async () => {
+    expect(sqlstate((await asAdmin('platform_owner_login_change', { p_org: org, p_new_email: null, p_password: true })).error)).toBe('23514');
+  });
+
+  it('lists the owner, then authorises and records an email and password change', async () => {
+    expect((await asAdmin('platform_set_company_owner', { p_org: org, p_user: owner })).error).toBeNull();
+    const listed = (await asAdmin('platform_company_owners', { p_orgs: [org] })).data as Array<{ email: string }>;
+    expect(listed.map((r) => r.email)).toEqual([`login-owner@${DOMAIN}`]);
+
+    const { data, error } = await asAdmin('platform_owner_login_change', { p_org: org, p_new_email: ` New-Owner@${DOMAIN} `, p_password: true });
+    expect(error).toBeNull();
+    expect((data as Array<{ user_id: string; email: string }>)[0]).toEqual({ user_id: owner, email: `new-owner@${DOMAIN}` });
+    const audit = JSON.parse(adminSql(`select after::text from public.audit_events where action = 'platform.owner_login_changed' and organization_id = '${org}' order by created_at desc limit 1`));
+    expect(audit).toEqual({ email: `new-owner@${DOMAIN}`, password_changed: true });
+  });
+
+  it("refuses another login's email, a malformed one, nothing to change, a stale sign-in and anyone else", async () => {
+    createAuthUser(`taken@${DOMAIN}`);
+    expect(sqlstate((await asAdmin('platform_owner_login_change', { p_org: org, p_new_email: `taken@${DOMAIN}`, p_password: false })).error)).toBe('23505');
+    expect(sqlstate((await asAdmin('platform_owner_login_change', { p_org: org, p_new_email: 'not-an-email', p_password: false })).error)).toBe('22023');
+    expect(sqlstate((await asAdmin('platform_owner_login_change', { p_org: org, p_new_email: null, p_password: false })).error)).toBe('22023');
+    const stale = clientFor(adminId, { amrTimestamp: Math.floor(Date.now() / 1000) - 3600 });
+    expect(sqlstate((await stale.schema('api').rpc('platform_owner_login_change', { p_org: org, p_new_email: null, p_password: true })).error)).toBe('42501');
+    expect(sqlstate((await clientFor(owner).schema('api').rpc('platform_owner_login_change', { p_org: org, p_new_email: null, p_password: true })).error)).toBe('42501');
+    expect(sqlstate((await clientFor(owner).schema('api').rpc('platform_company_owners', { p_orgs: [org] })).error)).toBe('42501');
+  });
+});

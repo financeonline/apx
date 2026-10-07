@@ -2,8 +2,8 @@
 
 import { revalidatePath } from 'next/cache';
 import { assertCan } from '@/core/permissions';
-import { createCompanyAsPlatform, deleteCompanyAsPlatform, editCompanyAsPlatform, restoreCompanyAsPlatform } from '@/modules/platform';
-import { getPlatformContext } from '@/modules/tenancy';
+import { createCompanyAsPlatform, deleteCompanyAsPlatform, editCompanyAsPlatform, restoreCompanyAsPlatform, changeOwnerLoginAsPlatform } from '@/modules/platform';
+import { confirmPassword, getPlatformContext } from '@/modules/tenancy';
 import { done, fail, text } from '@/app/_lib/server-action';
 import { requestOrigin } from '@/app/_lib/request-origin';
 import type { ActionResult } from '@/components/action-result';
@@ -51,9 +51,18 @@ export async function editCompanyAction(_previous: ActionResult | null, form: Fo
       fiscalYearStartMonth: text(form, 'fiscal_year_start_month'),
       plan: text(form, 'plan'),
     });
+    // ADR-167: the owner's sign-in email and password, only when changed; it needs the super admin's own password.
+    const raw = (name: string) => { const v = form.get(name); return typeof v === 'string' ? v : ''; };
+    const newEmail = text(form, 'owner_email');
+    const emailChanged = newEmail !== '' && newEmail.toLowerCase() !== text(form, 'owner_email_before').toLowerCase();
+    let ownerEmail: string | null = null;
+    if (emailChanged || raw('owner_password')) {
+      await confirmPassword(ctx, raw('current_password'));
+      ownerEmail = await changeOwnerLoginAsPlatform(ctx, orgId, { email: emailChanged ? newEmail : '', password: raw('owner_password') });
+    }
     revalidatePath('/platform/organizations');
     revalidatePath(`/platform/organizations/${orgId}`);
-    return done('Saved.');
+    return done(ownerEmail ? `Saved. The owner now signs in as ${ownerEmail}${raw('owner_password') ? ' with the new password' : ''}; their open sessions were signed out.` : 'Saved.');
   } catch (error) {
     return fail(error, { requestId: ctx.requestId, action: 'platform.editCompany' });
   }

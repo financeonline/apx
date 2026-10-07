@@ -23,6 +23,8 @@ export interface CompanyRow {
   readonly fiscalYearStartMonth: number;
   readonly plan: string;
   readonly status: string;
+  /** The owner's login (ADR-167): their email and name, how many owners there are; null when none yet. */
+  readonly owner: { readonly email: string; readonly fullName: string | null; readonly count: number } | null;
 }
 
 const DIALOG = 'm-auto max-h-[calc(100dvh-2rem)] w-[min(36rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-black/40';
@@ -39,8 +41,7 @@ export function CompanyRowActions({ company }: { company: CompanyRow }) {
   const [deleted, remove] = useActionState(deleteCompanyAction, null);
   const [restored, restore] = useActionState(restoreCompanyAction, null);
 
-  // A successful save or delete closes its dialog; the list is refreshed by the server.
-  useEffect(() => { if (edited?.ok) editRef.current?.close(); }, [edited]);
+  // A successful delete closes its dialog; an edit stays open so its confirmation can be read.
   useEffect(() => { if (deleted?.ok) deleteRef.current?.close(); }, [deleted]);
 
   if (company.status === 'pending_deletion') {
@@ -94,9 +95,34 @@ export function CompanyRowActions({ company }: { company: CompanyRow }) {
               </Select>
             </Field>
           </div>
+          <fieldset className="flex flex-col gap-4 rounded-xl border border-line p-4">
+            <legend className="px-1 text-sm font-semibold">Owner login</legend>
+            {company.owner === null ? (
+              <p className="text-sm text-ink-muted">No owner has joined yet, so there is no login to change. They sign in once they accept the invitation.</p>
+            ) : company.owner.count > 1 ? (
+              <p className="text-sm text-ink-muted">This company has more than one owner, so their logins are not changed from here.</p>
+            ) : (
+              <>
+                <p className="text-sm text-ink-muted">
+                  {company.owner.fullName ? `${company.owner.fullName} signs in` : 'The owner signs in'} as <span className="font-medium text-ink">{company.owner.email}</span>.
+                  Changing either signs them out everywhere.
+                </p>
+                <input type="hidden" name="owner_email_before" value={company.owner.email} />
+                <Field label="Sign-in email (username)" htmlFor={`owner-email-${company.id}`}>
+                  <Input id={`owner-email-${company.id}`} name="owner_email" type="email" autoComplete="off" defaultValue={company.owner.email} />
+                </Field>
+                <Field label="New password (optional)" htmlFor={`owner-pw-${company.id}`} hint="At least 8 characters. Leave empty to keep their password.">
+                  <Input id={`owner-pw-${company.id}`} name="owner_password" type="password" minLength={8} maxLength={72} autoComplete="new-password" />
+                </Field>
+                <Field label="Your password" htmlFor={`me-pw-${company.id}`} hint="Needed only when you change the owner's email or password.">
+                  <Input id={`me-pw-${company.id}`} name="current_password" type="password" autoComplete="current-password" />
+                </Field>
+              </>
+            )}
+          </fieldset>
           <ActionMessage state={edited} />
           <div className="flex flex-wrap justify-end gap-3">
-            <Button type="button" tone="secondary" onClick={() => editRef.current?.close()}>Cancel</Button>
+            <Button type="button" tone="secondary" onClick={() => editRef.current?.close()}>{edited?.ok ? 'Close' : 'Cancel'}</Button>
             <SubmitButton pendingLabel="Saving…">Save changes</SubmitButton>
           </div>
         </form>

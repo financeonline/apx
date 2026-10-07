@@ -1,5 +1,5 @@
 import 'server-only';
-import { anthropicApiKeyFromVault, createServiceClient, openAiApiKeyFromVault } from '@/core/db';
+import { anthropicApiKeyFromVault, createServiceClient, openAiApiKeyFromVault, revokeUserSessions } from '@/core/db';
 import { DEFAULT_ANALYST_MODEL, OPENAI_EFFORTS, isOpenAiChatModel, isOpenAiReasoningModel } from '@/modules/ai';
 import { callApi } from '@/core/db/api-rpc';
 import { ConflictError, NotFound, ValidationError, isMotionError, toMotionError } from '@/core/errors';
@@ -676,3 +676,44 @@ export async function restoreCompanyAsPlatform(ctx: AccessContext, orgId: string
   await callApi(ctx.db, 'cancel_deletion', { p_org: orgId }, ctx.requestId);
 }
 
+/** The owner login of each listed company (ADR-167): the email the owner signs in with, and their name. */
+export async function listCompanyOwners(ctx: AccessContext, orgIds: readonly string[]): Promise<Map<string, { email: string; fullName: string | null; count: number }>> {
+  assertCan(ctx, 'platform.orgs.manage');
+  const out = new Map<string, { email: string; fullName: string | null; count: number }>();
+  if (orgIds.length === 0) return out;
+  const rows = await callApi<Array<{ organization_id: string; email: string; full_name: string | null }>>(
+    ctx.db, 'platform_company_owners', { p_orgs: orgIds }, ctx.requestId,
+  );
+  for (const r of rows ?? []) {
+    const seen = out.get(r.organization_id);
+    out.set(r.organization_id, seen ? { ...seen, count: seen.count + 1 } : { email: r.email, fullName: r.full_name, count: 1 });
+  }
+  return out;
+}
+
+/**
+ * Change a company owner's sign-in email and/or password (ADR-167). `api.platform_owner_login_change`
+ * authorises it (the super admin, recent sign-in, the single active owner, never a platform account,
+ * an email no other login uses) and records it; the Auth admin API then makes the change, and the
+ * owner's sessions are ended so the old details stop working everywhere at once. Returns the email
+ * the owner now signs in with.
+ */
+export async function changeOwnerLoginAsPlatform(
+  ctx: AccessContext, orgId: string, change: { readonly email: string; readonly password: string },
+): Promise<string | null> {
+  assertCan(ctx, 'platform.orgs.manage');
+  const password = change.password;
+  if (password && password.length < 8) throw new ValidationError('Use at least 8 characters for the owner\'s password.');
+  if (password.length > 72) throw new ValidationError('Keep the owner\'s password under 72 characters.');
+  const rows = await callApi<Array<{ user_id: string; email: string }>>(
+    ctx.db, 'platform_owner_login_change', { p_org: orgId, p_new_email: change.email.trim(), p_password: Boolean(password) }, ctx.requestId,
+  );
+  const owner = (rows ?? [])[0];
+  if (!owner) throw new NotFound();
+  const { error } = await createServiceClient().auth.admin.updateUserById(owner.user_id, {
+    email: owner.email, email_confirm: true, ...(password ? { password } : {}),
+  });
+  if (error) throw new ValidationError(`The owner's login was not changed: ${error.message}`);
+  await revokeUserSessions(owner.user_id);
+  return owner.email;
+}
