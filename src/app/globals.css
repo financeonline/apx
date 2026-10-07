@@ -39,11 +39,11 @@
   --color-on-accent: #fafafa;
 
   /* Status — good news is emerald, apart from the accent (the template's "ok"). */
-  --color-good: #047857;
+  --color-good: #065f46;
   --color-good-soft: #ecfdf5;
-  --color-warn: #b45309;
+  --color-warn: #78350f;
   --color-warn-soft: #fffbeb;
-  --color-danger: #be123c;
+  --color-danger: #9f1239;
   --color-danger-soft: #fff1f2;
 
   /* Platform shell identity (UX_ARCHITECTURE.md §9.5) */
@@ -66,15 +66,23 @@
  * Not theme colours, so outside @theme; the dark scheme swaps them below.
  */
 :root {
-  --glass-bg: rgb(255 255 255 / 0.62);
-  --glass-bg-strong: rgb(255 255 255 / 0.8);
-  --glass-border: rgb(255 255 255 / 0.7);
-  --glass-edge: rgb(24 24 27 / 0.08);
-  --glass-highlight: rgb(255 255 255 / 0.95);
-  --glass-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 10px 30px -12px rgb(15 23 42 / 0.22);
-  --wash-1: rgb(59 130 246 / 0.18);
-  --wash-2: rgb(139 92 246 / 0.15);
-  --wash-3: rgb(16 185 129 / 0.13);
+  /*
+   * The strongest glass that keeps text at WCAG AA: the wash and the status colours were measured
+   * together, where two wash colours overlap under bare page text (ADR-153).
+   */
+  --glass-bg: rgb(255 255 255 / 0.4);
+  --glass-bg-strong: rgb(255 255 255 / 0.58);
+  --glass-blur: 28px;
+  --glass-border: rgb(255 255 255 / 0.85);
+  --glass-edge: rgb(24 24 27 / 0.07);
+  --glass-highlight: rgb(255 255 255 / 1);
+  --glass-glow: rgb(255 255 255 / 0.45);
+  --glass-sheen: linear-gradient(135deg, rgb(255 255 255 / 0.55) 0%, rgb(255 255 255 / 0.12) 38%,
+    rgb(255 255 255 / 0) 62%, rgb(255 255 255 / 0.22) 100%);
+  --glass-shadow: 0 2px 4px rgb(15 23 42 / 0.05), 0 18px 40px -14px rgb(15 23 42 / 0.3);
+  --wash-1: rgb(59 130 246 / 0.22);
+  --wash-2: rgb(139 92 246 / 0.18);
+  --wash-3: rgb(16 185 129 / 0.16);
 }
 
 
@@ -117,15 +125,18 @@
     --color-chart-5: #fb7185;
     --color-chart-6: #a1a1aa;
 
-    --glass-bg: rgb(39 39 42 / 0.45);
-    --glass-bg-strong: rgb(39 39 42 / 0.7);
-    --glass-border: rgb(255 255 255 / 0.1);
+    --glass-bg: rgb(39 39 42 / 0.32);
+    --glass-bg-strong: rgb(39 39 42 / 0.55);
+    --glass-border: rgb(255 255 255 / 0.14);
     --glass-edge: rgb(255 255 255 / 0.06);
-    --glass-highlight: rgb(255 255 255 / 0.12);
-    --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -12px rgb(0 0 0 / 0.7);
-    --wash-1: rgb(59 130 246 / 0.2);
-    --wash-2: rgb(139 92 246 / 0.16);
-    --wash-3: rgb(16 185 129 / 0.1);
+    --glass-highlight: rgb(255 255 255 / 0.22);
+    --glass-glow: rgb(255 255 255 / 0.05);
+    --glass-sheen: linear-gradient(135deg, rgb(255 255 255 / 0.12) 0%, rgb(255 255 255 / 0.03) 38%,
+      rgb(255 255 255 / 0) 62%, rgb(255 255 255 / 0.06) 100%);
+    --glass-shadow: 0 2px 4px rgb(0 0 0 / 0.4), 0 18px 40px -14px rgb(0 0 0 / 0.8);
+    --wash-1: rgb(59 130 246 / 0.26);
+    --wash-2: rgb(139 92 246 / 0.2);
+    --wash-3: rgb(16 185 129 / 0.14);
   }
 }
 
@@ -139,9 +150,9 @@
     background-color: var(--color-paper);
     /* The wash behind the glass (ADR-153); fixed, so it stays put while the glass scrolls over it. */
     background-image:
-      radial-gradient(60rem 40rem at 0% -10%, var(--wash-1), transparent 65%),
-      radial-gradient(55rem 45rem at 100% 10%, var(--wash-2), transparent 65%),
-      radial-gradient(70rem 50rem at 40% 110%, var(--wash-3), transparent 65%);
+      radial-gradient(50rem 36rem at 0% 0%, var(--wash-1), transparent 70%),
+      radial-gradient(46rem 40rem at 100% 25%, var(--wash-2), transparent 70%),
+      radial-gradient(60rem 42rem at 30% 105%, var(--wash-3), transparent 70%);
     background-attachment: fixed;
     min-height: 100vh;
     color: var(--color-ink);
@@ -204,19 +215,23 @@
    */
   .glass {
     background-color: var(--glass-bg);
-    -webkit-backdrop-filter: blur(20px) saturate(180%);
-    backdrop-filter: blur(20px) saturate(180%);
+    background-image: var(--glass-sheen);
+    -webkit-backdrop-filter: blur(var(--glass-blur, 28px)) saturate(200%);
+    backdrop-filter: blur(var(--glass-blur, 28px)) saturate(200%);
     border: 1px solid var(--glass-border);
     box-shadow:
       0 0 0 1px var(--glass-edge),
-      inset 0 1px 0 var(--glass-highlight),
+      inset 0 1.5px 0 var(--glass-highlight),
+      inset 0 0 24px var(--glass-glow),
+      inset 0 -1px 0 var(--glass-glow),
       var(--glass-shadow);
   }
 
   .glass-control {
     background-color: var(--glass-bg-strong);
-    -webkit-backdrop-filter: blur(12px) saturate(180%);
-    backdrop-filter: blur(12px) saturate(180%);
+    background-image: var(--glass-sheen);
+    -webkit-backdrop-filter: blur(16px) saturate(200%);
+    backdrop-filter: blur(16px) saturate(200%);
     border: 1px solid var(--glass-border);
     box-shadow:
       0 0 0 1px var(--glass-edge),
