@@ -256,3 +256,15 @@ describe('the untrusted wrapper (§9, R2-C-08)', () => {
     expect(replayed.numbers, 'numbers are not text and are left alone').toEqual([1, 2]);
   });
 });
+
+describe('period labels are compared with the month written in full or short (2026-10-07)', () => {
+  it('reads "August 2026" as "Aug 2026", and nothing looser', async () => {
+    const { canonicalPeriodLabel, periodIdFor } = await import('@/modules/ai/domain/grounding');
+    expect(canonicalPeriodLabel('August 2026')).toBe(canonicalPeriodLabel('Aug 2026'));
+    expect(canonicalPeriodLabel('Sept 2026')).toBe(canonicalPeriodLabel('Sep 2026'));
+    expect(canonicalPeriodLabel('August 2026')).not.toBe(canonicalPeriodLabel('Aug 2025'));
+    expect(canonicalPeriodLabel('May 2026')).toBe('may 2026');
+    expect(periodIdFor({ 'Aug 2026': 'p-aug' }, 'August 2026')).toBe('p-aug');
+    expect(periodIdFor({ 'Aug 2026': 'p-aug' }, 'September 2026')).toBeUndefined();
+  });
+});

@@ -174,3 +174,15 @@ describe('a reference to a number\'s display text names that number (2026-10-07)
     expect(entryAt(rows, 1, 'rows.0.revenue')).toBe(entryAt(rows, 1, 'rows[0].revenue'));
   });
 });
+
+describe('citing a wrapped figure names the number it wraps (2026-10-07)', () => {
+  it('resolves `periods[0].closing_cash` to `periods[0].closing_cash.value`, and nothing else', () => {
+    const entries = allowedSet([{
+      ...metricResult,
+      data: { periods: [{ period: { id: 'p1', label: 'Sep 2026' }, closing_cash: { metric_key: 'closing_cash', value: numeric('100.00', '£100', 'money'), snapshot_id: 's1' } }] },
+    } as ToolResult]);
+    expect(entryAt(entries, 1, 'periods[0].closing_cash')).toBe(entryAt(entries, 1, 'periods[0].closing_cash.value'));
+    expect(entryAt(entries, 1, 'periods[0].closing_cash')).not.toBeNull();
+    expect(entryAt(entries, 1, 'periods[0].opening_cash')).toBeNull();
+  });
+});

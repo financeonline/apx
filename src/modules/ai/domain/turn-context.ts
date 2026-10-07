@@ -1,7 +1,7 @@
 import { METRIC_LABELS } from '@/modules/financials';
 import { allowedSet, type AllowedEntry, type ToolResult } from './allowed-set';
 import { statementsOf, type EvidenceRef, type Statement, type StatementKind, type SubmitAnswer } from './contract';
-import type { GroundingContext, GroundingResult, Mismatch } from './grounding';
+import { canonicalPeriodLabel, periodIdFor, type GroundingContext, type GroundingResult, type Mismatch } from './grounding';
 import type { PeriodContext, PeriodRef } from './periods';
 
 /**
@@ -174,7 +174,8 @@ export function topicFor(statement: Statement, context: GroundingContext): strin
       : statement.kind === 'inference' ? 'an explanation' : 'a figure');
   }
   const known = statement.period !== null
-    && (context.periodIdByLabel[statement.period] !== undefined || context.comparisonLabels.includes(statement.period));
+    && (periodIdFor(context.periodIdByLabel, statement.period) !== undefined
+      || context.comparisonLabels.some((l) => canonicalPeriodLabel(l) === canonicalPeriodLabel(statement.period!)));
   const period = known ? ` for ${statement.period}` : '';
   return `${parts.join(', ')}${period}`.replace(/\d/g, '').replace(/\s+/g, ' ').trim();
 }

@@ -125,6 +125,29 @@ function fold(text: string): string {
     .replace(/[^\p{L}\p{N}%]+$/u, '');
 }
 
+const LONG_MONTHS: ReadonlyArray<readonly [RegExp, string]> = [
+  'january', 'february', 'march', 'april', 'may', 'june', 'july', 'august', 'september', 'october', 'november', 'december',
+].map((m) => [new RegExp(`\\b${m}\\b`, 'u'), m.slice(0, 3)] as const);
+
+/**
+ * A period label compared with another (§7.4): folded, with a month's full name read as its short
+ * one — "August 2026" is the period "Aug 2026" (current models write the long form; 2026-10-07).
+ * Nothing else is loosened: a different month or year is still a different period.
+ */
+export function canonicalPeriodLabel(text: string): string {
+  let out = fold(text).replace(/\bsept\b/u, 'sep');
+  for (const [long, short] of LONG_MONTHS) out = out.replace(long, short);
+  return out;
+}
+
+/** The period id a statement's label names, read with `canonicalPeriodLabel`. */
+export function periodIdFor(byLabel: Readonly<Record<string, string>>, label: string): string | undefined {
+  if (byLabel[label] !== undefined) return byLabel[label];
+  const wanted = canonicalPeriodLabel(label);
+  const hit = Object.keys(byLabel).find((l) => canonicalPeriodLabel(l) === wanted);
+  return hit === undefined ? undefined : byLabel[hit];
+}
+
 // -----------------------------------------------------------------------------------------------
 // §7.3 path–value comparison
 // -----------------------------------------------------------------------------------------------
@@ -175,10 +198,65 @@ function valueMatches(claim: Claim, entry: AllowedEntry): boolean {
 // -----------------------------------------------------------------------------------------------
 
 /** The words a reader would use for a metric — both registers (§8.1, ADR-037). */
+/**
+ * Everyday words for a metric that name it unambiguously (2026-10-07: current models write "overdue",
+ * "turnover", "70% of spend"). Words that could name more than one metric — "profit", "margin" — are
+ * deliberately absent: those still need the metric's own name.
+ */
+const METRIC_SYNONYMS: Readonly<Record<string, readonly string[]>> = {
+  revenue: ['sales', 'turnover'],
+  gross_profit: ['gross profit', 'profit after direct costs'],
+  operating_profit: ['operating profit'],
+  net_profit: ['net profit', 'profit after interest and tax', 'profit after tax'],
+  receivables: ['owed to you', 'owed to the business', 'customers owe', 'debtors'],
+  receivables_overdue: ['overdue'],
+  payables: ['you owe', 'owed to suppliers', 'creditors'],
+  payables_overdue: ['overdue to suppliers'],
+  closing_cash: ['cash balance', 'in the bank'],
+  cash_inflows: ['money in'],
+  cash_outflows: ['money out'],
+  net_cash_movement: ['change in cash'],
+  supplier_concentration_top1: ['spend', 'largest supplier'],
+  customer_concentration_top1: ['largest customer'],
+};
+
 function labelsFor(metricKey: string): string[] {
   const labels = METRIC_LABELS[metricKey];
   const base = metricKey.replace(/_/g, ' ');
-  return [...new Set([base, labels?.plain ?? base, labels?.technical ?? base].map((l) => l.toLowerCase()))];
+  return [...new Set([base, labels?.plain ?? base, labels?.technical ?? base, ...(METRIC_SYNONYMS[metricKey] ?? [])]
+    .map((l) => l.toLowerCase()))];
+}
+
+function phraseAt(tokens: readonly Token[], i: number, phrase: readonly string[]): boolean {
+  return phrase.every((word, k) => fold(tokens[i + k]?.text ?? '') === word);
+}
+
+/** The sentence a token sits in, as token indexes: bounded by a token ending `.`, `!`, `?` or `;`. */
+function sentenceAround(tokens: readonly Token[], index: number): { lo: number; hi: number } {
+  let lo = index;
+  while (lo > 0 && !/[.!?;]$/.test(tokens[lo - 1]!.text)) lo -= 1;
+  let hi = index;
+  while (hi < tokens.length - 1 && !/[.!?;]$/.test(tokens[hi]!.text)) hi += 1;
+  return { lo, hi };
+}
+
+/**
+ * §7.4, widened (2026-10-07): the metric's noun anywhere in the claim's SENTENCE binds the claim,
+ * provided no other metric is named in that sentence. "Revenue in Aug 2026 was £51,206, which was up
+ * £1,690" names one metric, so £1,690 can only be revenue's; "costs rose while revenue was £5,000"
+ * names two, so the strict six-token window still decides — the swapped-metric trap (R2-C-01) stays
+ * caught.
+ */
+function metricNounInSentence(tokens: readonly Token[], claimIndex: number, metricKey: string): boolean {
+  const { lo, hi } = sentenceAround(tokens, claimIndex);
+  const named = (key: string) => labelsFor(key).some((label) => {
+    const phrase = label.split(/\s+/).map(fold);
+    for (let i = lo; i + phrase.length - 1 <= hi; i += 1) if (phraseAt(tokens, i, phrase)) return true;
+    return false;
+  });
+  if (!named(metricKey)) return false;
+  return !Object.keys(METRIC_LABELS).some((key) => key !== metricKey && named(key)
+    && !labelsFor(key).every((l) => labelsFor(metricKey).some((m) => m.includes(l))));
 }
 
 function metricNounNear(tokens: readonly Token[], claimIndex: number, metricKey: string): boolean {
@@ -265,8 +343,8 @@ function checkStatement(
 
   // §7.4: every period token in the prose must be the statement's period or a comparison label.
   for (const span of extraction.periodSpans) {
-    const allowed = fold(span.label) === fold(statement.period ?? '')
-      || context.comparisonLabels.some((label) => fold(label) === fold(span.label));
+    const allowed = canonicalPeriodLabel(span.label) === canonicalPeriodLabel(statement.period ?? '')
+      || context.comparisonLabels.some((label) => canonicalPeriodLabel(label) === canonicalPeriodLabel(span.label));
     if (!allowed) {
       return { reason: `mentions the period "${span.label}", which is not this statement's period`, kind, derived };
     }
@@ -284,7 +362,7 @@ function checkStatement(
   if (statement.period === null) {
     return { reason: 'contains a number but names no period', kind, derived };
   }
-  const statementPeriodId = context.periodIdByLabel[statement.period];
+  const statementPeriodId = periodIdFor(context.periodIdByLabel, statement.period);
   if (statementPeriodId === undefined) {
     return { reason: `names the period "${statement.period}", which this turn does not know`, kind, derived };
   }
@@ -319,7 +397,8 @@ function checkStatement(
         kind, derived,
       };
     }
-    if (entry.metricKey !== null && !metricNounNear(tokens, claimIndex, entry.metricKey)) {
+    if (entry.metricKey !== null && !metricNounNear(tokens, claimIndex, entry.metricKey)
+        && !metricNounInSentence(tokens, claimIndex, entry.metricKey)) {
       return { reason: `states "${claim.text}" without naming ${entry.metricKey} beside it`, kind, derived };
     }
 

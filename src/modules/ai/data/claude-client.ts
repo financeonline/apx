@@ -31,18 +31,18 @@ import { anthropicApiKeyFromVault } from '@/core/db';
 export const DEFAULT_ANALYST_MODEL = process.env.ANTHROPIC_MODEL?.trim() || 'claude-sonnet-4-6';
 
 /**
- * §11: `max_tokens = 4000` for answers (1500 until 2026-10-07: the current model's structured answers
- * ran past it and arrived cut off, failing validation). `temperature = 0` was dropped on 2026-10-07: current models
+ * §11: `max_tokens = 8000` for answers (1500, then 4000, until 2026-10-07: the current model's
+ * structured answers to broad questions ran past both and arrived cut off, failing validation). `temperature = 0` was dropped on 2026-10-07: current models
  * refuse the parameter ("`temperature` is deprecated for this model"). The answer's shape is still
  * forced (the submit tool) and every figure in it is grounded against the tool results (§5).
  */
-export const ANALYST_MAX_TOKENS = 4000;
+export const ANALYST_MAX_TOKENS = 8000;
 
 /** §2: the model call uses a 90 s timeout (30 s until 2026-10-07) with one retry on transient errors. */
 const MODEL_TIMEOUT_MS = 90_000;
 
 /** Bumped whenever the system prompt, the tool schemas or the model changes (§11, §12). */
-export const PROMPT_VERSION = 'analyst-v3.7';
+export const PROMPT_VERSION = 'analyst-v3.8';
 
 export interface ModelCall {
   readonly system: readonly { readonly text: string; readonly cached: boolean }[];

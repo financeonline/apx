@@ -213,6 +213,10 @@ export function entryAt(
   path = path.replace(/\.(\d+)(?=\.|$)/g, '[$1]');
   const exact = entries.find((e) => e.toolCallSeq === toolCallSeq && e.path === path);
   if (exact) return exact;
+  // A figure wrapped with its metric and source (`periods[0].closing_cash` = { metric_key, value, … })
+  // carries its number at `.value`; citing the wrapper names that number (2026-10-07).
+  const wrapped = entries.find((e) => e.toolCallSeq === toolCallSeq && e.path === `${path}.value`);
+  if (wrapped) return wrapped;
   // A numeric node is recorded at its own path (`value`) with its formatted text attached. A
   // reference to that text (`value.display`) names the same number in the same result — current
   // models cite it that way (2026-10-07) — so it resolves to the node. Nothing else does: any other

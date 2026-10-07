@@ -1,3 +1,4 @@
+import { STANDARD_CATEGORIES } from '@/modules/financials';
 import { z } from 'zod';
 
 /**
@@ -58,11 +59,25 @@ export const EvidenceRefSchema = z.strictObject({
 );
 export type EvidenceRef = z.infer<typeof EvidenceRefSchema>;
 
+/**
+ * An entity's id as the tools return it: a UUID for a counterparty, account or bank account; the
+ * category KEY for a standard category (`cost_of_sales`), which has no UUID. Until 2026-10-07 every
+ * id had to be a UUID, so an answer that named an expense category exactly as the tool did was
+ * rejected as invalid.
+ */
+const EntityId = z.string().refine(
+  (v) => Uuid.safeParse(v).success || (STANDARD_CATEGORIES as readonly string[]).includes(v),
+  { message: 'Invalid entity id (a UUID, or a standard category key)' },
+);
+
 export const EntityRefSchema = z.strictObject({
   type: z.enum(ENTITY_REF_TYPES),
-  id: Uuid,
+  id: EntityId,
   name: z.string().min(1),
-});
+}).refine(
+  (ref) => (ref.type === 'standard_category') === (STANDARD_CATEGORIES as readonly string[]).includes(ref.id),
+  { message: 'a standard_category ref carries a category key; every other ref a UUID' },
+);
 export type EntityRef = z.infer<typeof EntityRefSchema>;
 
 /**
@@ -77,7 +92,7 @@ export const NumberRefSchema = z.strictObject({
   tool_call_seq: z.number().int().nonnegative(),
   path: z.string().min(1),
   metric_key: z.string().min(1).nullable(),
-  entity_id: Uuid.nullable(),
+  entity_id: EntityId.nullable(),
 });
 export type NumberRef = z.infer<typeof NumberRefSchema>;
 

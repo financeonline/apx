@@ -299,8 +299,10 @@ max_enrolled_factors = 10
 
 # Control MFA via App Authenticator (TOTP)
 [auth.mfa.totp]
-enroll_enabled = false
-verify_enabled = false
+# On (owner, 2026-10-07): platform pages need a super admin at aal2. Only enrolled accounts are asked
+# for a code; everyone else signs in with a password as before.
+enroll_enabled = true
+verify_enabled = true
 
 # Configure MFA via Phone Messaging
 [auth.mfa.phone]
