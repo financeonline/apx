@@ -3,7 +3,10 @@ import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { FUNDING_DISCLAIMER, getFundingView, type FactorResult } from '@/modules/funding';
 import { getAccessContext } from '@/modules/tenancy';
-import { Badge, Banner, Card, CardBody, EmptyState, PageHeader } from '@/components/ui/surfaces';
+import {
+  ChevronRight, CircleHelp, Gauge, Lightbulb, ListChecks, ThumbsUp, TriangleAlert,
+} from 'lucide-react';
+import { Badge, Banner, Card, CardBody, EmptyState, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
@@ -21,7 +24,7 @@ function FactorCard({ factor }: { factor: FactorResult }) {
       <CardBody>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="font-serif text-lg text-ink">{factor.name}</h3>
-          <span className="font-serif text-xl text-ink">{factor.score === null ? '—' : factor.score}</span>
+          <span className="rounded-xl bg-accent-soft px-2.5 py-0.5 font-mono text-xl tabular-nums text-accent">{factor.score === null ? '—' : factor.score}</span>
         </div>
         <p className="mt-1 text-xs text-ink-faint">
           Weight {factor.weight}{factor.status === 'scored' ? ` · applied ${factor.appliedWeight}` : ' · not scored'}
@@ -74,15 +77,19 @@ export default async function FundingPage({
       ) : (
         <>
           {view.months.length > 1 ? (
-            <nav aria-label="Months" className="mt-6 flex flex-wrap gap-3 text-sm">
+            <nav aria-label="Months" className="mt-6 flex flex-wrap gap-2 text-sm">
               {view.months.map((m) => (
                 <Link key={m.periodId} href={`/app/${orgSlug}/funding?period=${m.periodId}`} aria-current={m.periodId === a.periodId ? 'page' : undefined}
-                  className={m.periodId === a.periodId ? 'font-medium text-ink' : 'text-accent underline underline-offset-2'}>{m.label}</Link>
+                  className={m.periodId === a.periodId
+                    ? 'rounded-full bg-accent-soft px-3 py-1 font-medium text-accent'
+                    : 'rounded-full px-3 py-1 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}>{m.label}</Link>
               ))}
             </nav>
           ) : null}
 
-          <Card className="mt-6"><CardBody>
+          <Card className="mt-6"><CardBody className="flex min-w-0 items-start gap-4">
+            <IconBadge tint="violet" size="lg"><Gauge /></IconBadge>
+            <div className="min-w-0">
             <p className="text-sm text-ink-muted">{a.periodLabel}</p>
             {a.status === 'scored' ? (
               <p className="mt-1 flex flex-wrap items-baseline gap-3">
@@ -97,18 +104,27 @@ export default async function FundingPage({
               Data coverage {a.dataCoveragePercent}% · {a.factorsUsed} of 7 factors scored.
               {a.status === 'insufficient_data' ? ' A score needs revenue and profitability, cash flow, and at least three of the other four substantive factors.' : ''}
             </p>
+            </div>
           </CardBody></Card>
 
           <section aria-labelledby="factors" className="mt-6">
-            <h2 id="factors" className="font-serif text-lg text-ink">The seven factors</h2>
-            <ul className="mt-3 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="pink" size="sm"><ListChecks /></IconBadge>
+              <h2 id="factors" className="min-w-0 font-serif text-lg text-ink">The seven factors</h2>
+            </div>
+            <ul className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {a.factors.map((f) => <li key={f.key}><FactorCard factor={f} /></li>)}
             </ul>
           </section>
 
           {[['What helps', a.factors.flatMap((f) => f.positives)], ['What holds it back', a.factors.flatMap((f) => f.negatives)]].map(([title, list]) => (
             <Card key={title as string} className="mt-6"><CardBody>
-              <h2 className="font-serif text-lg text-ink">{title as string}</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint={title === 'What helps' ? 'violet' : 'pink'} size="sm">
+                  {title === 'What helps' ? <ThumbsUp /> : <TriangleAlert />}
+                </IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">{title as string}</h2>
+              </div>
               {(list as FactorResult['positives']).length === 0 ? <p className="mt-2 text-sm text-ink-muted">Nothing here.</p> : (
                 <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-sm text-ink">
                   {(list as FactorResult['positives']).map((s) => <li key={`${s.rule}:${s.text}`}>{s.text}</li>)}
@@ -118,7 +134,10 @@ export default async function FundingPage({
           ))}
 
           <Card className="mt-6"><CardBody>
-            <h2 className="font-serif text-lg text-ink">Missing information</h2>
+            <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="violet" size="sm"><CircleHelp /></IconBadge>
+              <h2 className="min-w-0 font-serif text-lg text-ink">Missing information</h2>
+            </div>
             {a.factors.flatMap((f) => f.missing).length === 0 ? <p className="mt-2 text-sm text-ink-muted">Nothing is missing.</p> : (
               <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-sm text-ink">
                 {a.factors.flatMap((f) => f.missing.map((m) => <li key={`${f.key}:${m.rule ?? ''}:${m.reason}:${m.text}`}>{f.name}: {m.text}</li>))}
@@ -127,7 +146,10 @@ export default async function FundingPage({
           </CardBody></Card>
 
           <Card className="mt-6"><CardBody>
-            <h2 className="font-serif text-lg text-ink">What would improve readiness</h2>
+            <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="pink" size="sm"><Lightbulb /></IconBadge>
+              <h2 className="min-w-0 font-serif text-lg text-ink">What would improve readiness</h2>
+            </div>
             {a.actions.length === 0 ? <p className="mt-2 text-sm text-ink-muted">Nothing to suggest.</p> : (
               <ol className="mt-2 flex flex-col gap-2 text-sm">
                 {a.actions.map((x) => (
@@ -143,7 +165,7 @@ export default async function FundingPage({
 
           <p className="mt-6 text-sm">
             {a.evidenceBundleId === null ? null : (
-              <Link href={`/app/${orgSlug}/evidence/${a.evidenceBundleId}`} className="text-accent underline underline-offset-2">See the figures behind this assessment</Link>
+              <Link href={`/app/${orgSlug}/evidence/${a.evidenceBundleId}`} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">See the figures behind this assessment<ChevronRight aria-hidden="true" className="size-4" /></Link>
             )}
           </p>
           <p className="mt-2 text-xs text-ink-faint">

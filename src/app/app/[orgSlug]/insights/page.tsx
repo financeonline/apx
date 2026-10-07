@@ -1,8 +1,9 @@
 import Link from 'next/link';
+import { BellRing, CalendarDays, ChartColumn, ChevronRight, CircleAlert, TrendingUp } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { loadAlertsPage, loadInsights, type MovementView } from '@/modules/dashboard';
-import { PageHeader, Card, CardBody, EmptyState } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardBody, EmptyState, IconBadge } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
 import {
   AlertCard, NO_ALERTS_BODY, NO_ALERTS_FILTERED_BODY, NO_ALERTS_FILTERED_TITLE, NO_ALERTS_TITLE,
@@ -45,7 +46,7 @@ function MovementRow({ movement }: { movement: MovementView }) {
         </p>
       </div>
 
-      <div className="flex items-baseline gap-3">
+      <div className="flex flex-wrap items-baseline gap-3">
         <span className={`font-mono tabular-nums ${tone}`}>{movement.change}</span>
         {movement.basisDiffers ? (
           // ADR-030: the two months came from different sources, so a percentage would compare two
@@ -54,8 +55,12 @@ function MovementRow({ movement }: { movement: MovementView }) {
         ) : movement.percent ? (
           <span className={`text-sm ${tone}`}>{movement.percent}</span>
         ) : null}
-        <Link href={movement.whyHref} className="text-sm text-accent underline underline-offset-2">
+        <Link
+          href={movement.whyHref}
+          className="inline-flex items-center gap-0.5 self-center rounded-xl border border-accent/45 bg-surface px-2.5 py-0.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
+        >
           Why?
+          <ChevronRight aria-hidden="true" className="size-4" />
         </Link>
       </div>
     </li>
@@ -89,8 +94,9 @@ export default async function InsightsPage({
         <div className="mt-8">
           <Card>
             <CardBody className="p-8">
+              <IconBadge tint="violet" size="lg"><ChartColumn /></IconBadge>
               {/* §6, exact copy. */}
-              <h2 className="font-serif text-2xl text-ink">
+              <h2 className="mt-4 font-serif text-2xl text-ink">
                 We need two months to show what changed.
               </h2>
               <p className="mt-3 max-w-prose text-ink-muted">
@@ -124,10 +130,13 @@ export default async function InsightsPage({
 
       <div className="mt-8 flex flex-col gap-6">
         <section aria-labelledby="alerts-heading">
-          <div className="flex flex-wrap items-baseline justify-between gap-3">
-            <h2 id="alerts-heading" className="font-serif text-lg text-ink">
-              Alerts{alerts.openCount > 0 ? ` (${alerts.openCount} open)` : null}
-            </h2>
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="violet" size="sm"><BellRing /></IconBadge>
+              <h2 id="alerts-heading" className="font-serif text-lg text-ink">
+                Alerts{alerts.openCount > 0 ? ` (${alerts.openCount} open)` : null}
+              </h2>
+            </div>
             <AlertFilters orgSlug={orgSlug} active={filters} />
           </div>
 
@@ -162,21 +171,27 @@ export default async function InsightsPage({
         {/* §6 "no adjacent month": say so, rather than presenting a two-month change as one. */}
         {view.comparison && !view.comparisonIsAdjacent ? (
           <Card>
-            <CardBody className="p-4">
-              <p className="text-ink">
-                Comparing {view.period.label} with {view.comparison.label}.
-              </p>
-              <p className="mt-1 text-sm text-ink-muted">
-                We don’t have the month in between yet, so changes are shown against the nearest
-                earlier month we do have. Add it to compare month to month.
-              </p>
+            <CardBody className="flex min-w-0 gap-3.5 p-4">
+              <IconBadge tint="pink" size="sm"><CalendarDays /></IconBadge>
+              <div className="min-w-0">
+                <p className="text-ink">
+                  Comparing {view.period.label} with {view.comparison.label}.
+                </p>
+                <p className="mt-1 text-sm text-ink-muted">
+                  We don’t have the month in between yet, so changes are shown against the nearest
+                  earlier month we do have. Add it to compare month to month.
+                </p>
+              </div>
             </CardBody>
           </Card>
         ) : null}
 
         <Card>
           <CardBody className="p-4">
-            <h2 className="font-serif text-lg text-ink">What needs attention</h2>
+            <div className="flex items-center gap-3">
+              <IconBadge tint="pink" size="sm"><CircleAlert /></IconBadge>
+              <h2 className="font-serif text-lg text-ink">What needs attention</h2>
+            </div>
             {view.unfavourable.length === 0 ? (
               <p className="mt-3 text-ink-muted">Nothing moved against you this month.</p>
             ) : (
@@ -194,7 +209,10 @@ export default async function InsightsPage({
 
         <Card>
           <CardBody className="p-4">
-            <h2 className="font-serif text-lg text-ink">What went well</h2>
+            <div className="flex items-center gap-3">
+              <IconBadge tint="violet" size="sm"><TrendingUp /></IconBadge>
+              <h2 className="font-serif text-lg text-ink">What went well</h2>
+            </div>
             {view.favourable.length === 0 ? (
               <p className="mt-3 text-ink-muted">Nothing moved in your favour this month.</p>
             ) : (

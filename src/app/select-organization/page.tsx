@@ -6,6 +6,7 @@ import { adviserOrganisations } from '@/modules/portfolio';
 import { Card, CardBody, Badge } from '@/components/ui/surfaces';
 import { ORG_STATUS_LABELS, ROLE_LABELS } from '@/components/labels';
 import type { EffectiveRole } from '@/core/permissions';
+import { BrandedScreen } from '@/components/dashboard/branded-screen';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,8 +22,8 @@ export default async function SelectOrganizationPage() {
   const advises = adviserOrganisations(organizations).length > 0;
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col justify-center gap-6 px-6 py-12">
-      <h1 className="text-2xl font-semibold tracking-tight">Choose an organisation</h1>
+    <BrandedScreen width="lg" panel={false}>
+      <h1 className="text-3xl">Choose an organisation</h1>
       {advises ? (
         <Link href="/portfolio" className="block">
           <Card className="border-line-strong transition-colors hover:border-accent">
@@ -57,6 +58,6 @@ export default async function SelectOrganizationPage() {
           </li>
         ))}
       </ul>
-    </main>
+    </BrandedScreen>
   );
 }

@@ -72,7 +72,7 @@ export default async function PlatformAuditPage({
         {FAMILIES.map((family) => (
           <Link key={family.label} href={href({ action: family.prefix, page: null })}
             aria-current={(family.prefix ?? null) === prefix ? 'page' : undefined}
-            className={(family.prefix ?? null) === prefix ? 'rounded-md bg-accent-soft px-3 py-1.5 text-accent' : 'rounded-md px-3 py-1.5 text-ink-muted hover:text-ink'}>
+            className={(family.prefix ?? null) === prefix ? 'rounded-xl border border-accent/45 bg-accent-soft px-3 py-1.5 font-medium text-accent' : 'rounded-xl border border-line bg-surface px-3 py-1.5 text-ink-muted transition-colors hover:border-accent/45 hover:text-ink'}>
             {family.label}
           </Link>
         ))}
@@ -131,9 +131,9 @@ export default async function PlatformAuditPage({
         </Card>
       </div>
 
-      <div className="mt-4 flex items-center gap-4 text-sm">
-        {pageNumber > 1 ? <Link className="underline" href={href({ page: pageNumber === 2 ? null : String(pageNumber - 1) })}>Newer</Link> : null}
-        {events.length === PAGE_SIZE ? <Link className="underline" href={href({ page: String(pageNumber + 1) })}>Older</Link> : null}
+      <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
+        {pageNumber > 1 ? <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={href({ page: pageNumber === 2 ? null : String(pageNumber - 1) })}>Newer</Link> : null}
+        {events.length === PAGE_SIZE ? <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={href({ page: String(pageNumber + 1) })}>Older</Link> : null}
       </div>
     </>
   );

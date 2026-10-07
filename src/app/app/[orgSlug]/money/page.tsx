@@ -1,13 +1,24 @@
+import type { ReactNode } from 'react';
 import Link from 'next/link';
+import { ArrowLeftRight, ChartColumn, HandCoins, Landmark, Receipt, Sparkles, TrendingUp, Wallet } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
-import { PageHeader, Card, CardBody, EmptyState } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardBody, EmptyState, IconBadge, type IconTint } from '@/components/ui/surfaces';
 import { PeriodPicker, StatusBadgeView } from '@/components/dashboard';
 import { loadMoneyIndex, loadPeriodScope } from '@/modules/dashboard';
 import { WhyLink } from './_components/figures';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
+
+/** Each sub-page's icon tile, as the Departments cards (ADR-155). Decorative; keyed by route slug. */
+const PAGE_ICON: Readonly<Record<string, { icon: ReactNode; tint: IconTint }>> = {
+  'profit-and-loss': { icon: <ChartColumn />, tint: 'violet' },
+  cash: { icon: <Wallet />, tint: 'pink' },
+  banking: { icon: <Landmark />, tint: 'violet' },
+  receivables: { icon: <HandCoins />, tint: 'pink' },
+  payables: { icon: <Receipt />, tint: 'violet' },
+};
 
 /**
  * The Money section index (UX_ARCHITECTURE.md §3.1: "Profit and loss, cash, bank activity, who owes
@@ -73,16 +84,19 @@ export default async function MoneyPage({
         * — the same precedent `/evidence` and `/home/health` already set.
         */}
       <Card className="mb-4">
-        <CardBody>
-          <h2 className="text-base">
-            <Link href={`/app/${orgSlug}/forecast`} className="underline underline-offset-2">
-              What is expected
-            </Link>
-          </h2>
-          <p className="mt-1 text-sm text-ink-muted">
-            What your finished months suggest the next three will look like. Expectations, not
-            results.
-          </p>
+        <CardBody className="flex min-w-0 gap-3.5">
+          <IconBadge tint="violet"><TrendingUp /></IconBadge>
+          <div className="min-w-0">
+            <h2 className="text-base">
+              <Link href={`/app/${orgSlug}/forecast`} className="underline underline-offset-2">
+                What is expected
+              </Link>
+            </h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              What your finished months suggest the next three will look like. Expectations, not
+              results.
+            </p>
+          </div>
         </CardBody>
       </Card>
 
@@ -92,59 +106,68 @@ export default async function MoneyPage({
         * rest of Money is about.
         */}
       <Card className="mb-4">
-        <CardBody>
-          <h2 className="text-base">
-            <Link href={`/app/${orgSlug}/what-if`} className="underline underline-offset-2">
-              What if things change?
-            </Link>
-          </h2>
-          <p className="mt-1 text-sm text-ink-muted">
-            Change one thing — sales, wages, a new hire, a loan — and see what it would do to your
-            profit and your cash.
-          </p>
+        <CardBody className="flex min-w-0 gap-3.5">
+          <IconBadge tint="pink"><Sparkles /></IconBadge>
+          <div className="min-w-0">
+            <h2 className="text-base">
+              <Link href={`/app/${orgSlug}/what-if`} className="underline underline-offset-2">
+                What if things change?
+              </Link>
+            </h2>
+            <p className="mt-1 text-sm text-ink-muted">
+              Change one thing — sales, wages, a new hire, a loan — and see what it would do to your
+              profit and your cash.
+            </p>
+          </div>
         </CardBody>
       </Card>
 
-      <ul className="flex flex-col gap-4">
-        {links.map((link) => (
-          <li key={link.href}>
-            <Card>
-              <CardBody className="flex flex-wrap items-start justify-between gap-4">
-                <div className="min-w-0">
-                  <h2 className="text-base">
-                    <Link href={`${link.href}?period=${scope.period.id}`} className="underline underline-offset-2">
-                      {link.title}
-                    </Link>
-                  </h2>
-                  <p className="mt-1 text-sm text-ink-muted">{link.description}</p>
-                </div>
-                {link.figure ? (
-                  <div className="shrink-0 text-right">
-                    <p
-                      className={`tabular text-xl ${
-                        link.figure.status.kind === 'not_available' ? 'text-ink-faint' : ''
-                      }`.trim()}
-                      title={
-                        link.figure.status.kind === 'not_available'
-                          ? link.figure.status.tooltip
-                          : undefined
-                      }
-                    >
-                      {link.figure.value}
-                    </p>
-                    <p className="text-xs text-ink-muted">{link.figure.label}</p>
-                    <p className="mt-1 flex items-center justify-end gap-2 text-sm">
-                      {link.figure.status.kind === 'not_available' ? null : (
-                        <StatusBadgeView status={link.figure.status} size="sm" />
-                      )}
-                      <WhyLink row={link.figure} />
-                    </p>
+      <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {links.map((link) => {
+          const look = PAGE_ICON[link.href.split('/').pop() ?? ''] ?? { icon: <ArrowLeftRight />, tint: 'violet' as const };
+          return (
+            <li key={link.href}>
+              <Card className="h-full">
+                <CardBody className="flex flex-wrap items-start justify-between gap-4">
+                  <div className="flex min-w-0 flex-1 gap-3.5">
+                    <IconBadge tint={look.tint}>{look.icon}</IconBadge>
+                    <div className="min-w-0">
+                      <h2 className="text-base">
+                        <Link href={`${link.href}?period=${scope.period.id}`} className="underline underline-offset-2">
+                          {link.title}
+                        </Link>
+                      </h2>
+                      <p className="mt-1 text-sm text-ink-muted">{link.description}</p>
+                    </div>
                   </div>
-                ) : null}
-              </CardBody>
-            </Card>
-          </li>
-        ))}
+                  {link.figure ? (
+                    <div className="shrink-0 text-right">
+                      <p
+                        className={`font-mono tabular text-2xl ${
+                          link.figure.status.kind === 'not_available' ? 'text-ink-faint' : ''
+                        }`.trim()}
+                        title={
+                          link.figure.status.kind === 'not_available'
+                            ? link.figure.status.tooltip
+                            : undefined
+                        }
+                      >
+                        {link.figure.value}
+                      </p>
+                      <p className="text-xs text-ink-muted">{link.figure.label}</p>
+                      <p className="mt-1 flex items-center justify-end gap-2 text-sm">
+                        {link.figure.status.kind === 'not_available' ? null : (
+                          <StatusBadgeView status={link.figure.status} size="sm" />
+                        )}
+                        <WhyLink row={link.figure} />
+                      </p>
+                    </div>
+                  ) : null}
+                </CardBody>
+              </Card>
+            </li>
+          );
+        })}
       </ul>
     </>
   );

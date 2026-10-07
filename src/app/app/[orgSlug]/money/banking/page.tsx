@@ -1,7 +1,10 @@
 import Link from 'next/link';
+import {
+  ArrowLeftRight, ChevronRight, CircleAlert, Gauge, Landmark, ChartPie, Plus, Repeat, Scale,
+} from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
-import { PageHeader, Card, CardHeader, CardBody, EmptyState, Badge, Banner, DetailList } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardHeader, CardBody, EmptyState, Badge, Banner, DetailList, IconBadge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { formatDate } from '@/components/labels';
 import { MetricCard, DATA_QUALITY_NOTE_TEXT, StatusBadgeView } from '@/components/dashboard';
@@ -63,7 +66,7 @@ export default async function BankingPage({
         {mayAddAccount ? (
           <div className="mt-6">
             <Card>
-              <CardHeader title="Add a bank account" description="Statements are matched to an account, so the account comes first." />
+              <CardHeader title="Add a bank account" description="Statements are matched to an account, so the account comes first." icon={<Plus />} />
               <CardBody><AddAccountForm orgSlug={orgSlug} currency={currency} /></CardBody>
             </Card>
           </div>
@@ -110,8 +113,11 @@ export default async function BankingPage({
 
         {/* Level 2 — this month */}
         <section aria-labelledby="month-heading">
-          <h2 id="month-heading" className="font-serif text-lg text-ink">This month</h2>
-          <div className="mt-3 grid gap-4 sm:grid-cols-3" data-testid="banking-month">
+          <div className="flex items-center gap-3">
+            <IconBadge tint="violet" size="sm"><ArrowLeftRight /></IconBadge>
+            <h2 id="month-heading" className="font-serif text-lg text-ink">This month</h2>
+          </div>
+          <div className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-3" data-testid="banking-month">
             {[moneyIn, moneyOut, net].map((figure, i) => figure
               ? <MetricCard key={figure.metricKey} card={figure} variant="compact" />
               : <Card key={i}><CardBody><p className="text-sm text-ink-muted">Not available</p></CardBody></Card>)}
@@ -120,7 +126,7 @@ export default async function BankingPage({
 
         {/* Level 3 — things to notice */}
         <Card>
-          <CardHeader title="Things to notice" description={view.notices.length === 0 ? undefined : 'Worked out from your statements by MOTION’s rules — nothing here was guessed.'} />
+          <CardHeader title="Things to notice" description={view.notices.length === 0 ? undefined : 'Worked out from your statements by MOTION’s rules — nothing here was guessed.'} icon={<CircleAlert />} tint="pink" />
           <CardBody>
             {view.notices.length === 0 ? (
               <p className="text-sm text-ink-muted">Nothing unusual in {scope.period.label}.</p>
@@ -137,13 +143,14 @@ export default async function BankingPage({
           <CardHeader
             title="Accounts"
             description="Balances are the ones printed on your statements; money in and out leave transfers between your own accounts out, the same way your cash figures do."
-            action={<Link href={txHref} className="text-sm text-ink-muted hover:text-ink">All transactions ({view.counts.transactions})</Link>}
+            action={<Link href={txHref} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">All transactions ({view.counts.transactions}) <ChevronRight aria-hidden="true" className="size-4" /></Link>}
+            icon={<Landmark />}
           />
           <CardBody>
             {view.accounts.length === 0 ? (
               <p className="text-sm text-ink-muted">No bank accounts yet.</p>
             ) : (
-              <ul className="grid gap-4 md:grid-cols-2" data-testid="banking-accounts">
+              <ul className="grid grid-cols-1 gap-4 md:grid-cols-2" data-testid="banking-accounts">
                 {view.accounts.map((account) => <AccountCard key={account.id} account={account} />)}
               </ul>
             )}
@@ -151,15 +158,16 @@ export default async function BankingPage({
         </Card>
 
         {mayAddAccount ? (
-          <details className="rounded-card border border-line bg-surface">
-            <summary className="cursor-pointer px-5 py-4 font-serif text-lg text-ink">Add a bank account</summary>
+          <details className="panel rounded-card">
+            <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 font-serif text-lg text-ink"><IconBadge tint="violet" size="sm"><Plus /></IconBadge>Add a bank account</summary>
             <div className="border-t border-line px-5 py-5"><AddAccountForm orgSlug={orgSlug} currency={currency} /></div>
           </details>
         ) : null}
 
         {/* Progressive disclosure */}
-        <details className="rounded-card border border-line bg-surface" data-testid="banking-recurring">
-          <summary className="cursor-pointer px-5 py-4 font-serif text-lg text-ink">
+        <details className="panel rounded-card" data-testid="banking-recurring">
+          <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 font-serif text-lg text-ink">
+            <IconBadge tint="pink" size="sm"><Repeat /></IconBadge>
             Regular payments{view.recurring.length > 0 ? ` (${view.recurring.length})` : ''}
           </summary>
           <div className="border-t border-line">
@@ -188,8 +196,8 @@ export default async function BankingPage({
           </div>
         </details>
 
-        <details className="rounded-card border border-line bg-surface" data-testid="banking-categories">
-          <summary className="cursor-pointer px-5 py-4 font-serif text-lg text-ink">Where the money went</summary>
+        <details className="panel rounded-card" data-testid="banking-categories">
+          <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 font-serif text-lg text-ink"><IconBadge tint="violet" size="sm"><ChartPie /></IconBadge>Where the money went</summary>
           <div className="border-t border-line">
             <p className="px-5 pt-4 text-sm text-ink-muted">Money out by category, from your bank statements. This is what left the bank, not a profit and loss: transfers between your own accounts and card repayments are left out.</p>
             {view.categories.length === 0 ? (
@@ -213,8 +221,8 @@ export default async function BankingPage({
           </div>
         </details>
 
-        <details className="rounded-card border border-line bg-surface" data-testid="banking-liquidity">
-          <summary className="cursor-pointer px-5 py-4 font-serif text-lg text-ink">How liquid are we?</summary>
+        <details className="panel rounded-card" data-testid="banking-liquidity">
+          <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 font-serif text-lg text-ink"><IconBadge tint="pink" size="sm"><Gauge /></IconBadge>How liquid are we?</summary>
           <div className="border-t border-line px-5 py-5">
             <DetailList items={[
               { label: 'Cash available', value: view.liquidity.cashAvailable ? <span className="tabular">{view.liquidity.cashAvailable.value} <StatusBadgeView status={view.liquidity.cashAvailable.status} size="sm" /> <WhyLink row={view.liquidity.cashAvailable} /></span> : <span className="text-ink-muted">Not available — an opening balance is needed</span> },
@@ -226,8 +234,8 @@ export default async function BankingPage({
           </div>
         </details>
 
-        <details className="rounded-card border border-line bg-surface" data-testid="banking-reconciliation">
-          <summary className="cursor-pointer px-5 py-4 font-serif text-lg text-ink">Do the statements and MOTION agree?</summary>
+        <details className="panel rounded-card" data-testid="banking-reconciliation">
+          <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 font-serif text-lg text-ink"><IconBadge tint="violet" size="sm"><Scale /></IconBadge>Do the statements and MOTION agree?</summary>
           <div className="border-t border-line px-5 py-5 flex flex-col gap-4 text-sm">
             <p>{view.reconciliation.sentence}</p>
             {view.reconciliation.statementClosing ? (
@@ -272,11 +280,14 @@ function NoticeItem({ notice }: { notice: NoticeView }) {
 
 function AccountCard({ account }: { account: BankAccountCardView }) {
   return (
-    <li className="rounded-md border border-line p-4">
-      <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <div>
-          <h3 className="font-serif text-lg text-ink">{account.name}</h3>
-          <p className="text-xs text-ink-muted">{account.bankName} · {account.reference} · {account.typeLabel}</p>
+    <li className="rounded-2xl border border-line bg-surface p-4">
+      <div className="flex flex-wrap items-start justify-between gap-2">
+        <div className="flex min-w-0 gap-3">
+          <IconBadge tint="pink" size="sm"><Landmark /></IconBadge>
+          <div className="min-w-0">
+            <h3 className="font-serif text-lg text-ink">{account.name}</h3>
+            <p className="text-xs text-ink-muted">{account.bankName} · {account.reference} · {account.typeLabel}</p>
+          </div>
         </div>
         <Badge tone={RECONCILIATION_TONE[account.reconciliation.status]}>{account.reconciliation.label}</Badge>
       </div>
@@ -288,7 +299,7 @@ function AccountCard({ account }: { account: BankAccountCardView }) {
           ? `Balance on the statement at ${formatDate(account.statementBalance.asAt)}`
           : account.freshness ? 'The statement carries no running balance' : 'No statement for this month'}
       </p>
-      <dl className="mt-3 grid grid-cols-3 gap-2 text-sm">
+      <dl className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-surface-sunken p-3 text-sm">
         <div><dt className="text-xs uppercase tracking-wide text-ink-faint">In</dt><dd className="tabular">{account.moneyIn}</dd></div>
         <div><dt className="text-xs uppercase tracking-wide text-ink-faint">Out</dt><dd className="tabular">{account.moneyOut}</dd></div>
         <div><dt className="text-xs uppercase tracking-wide text-ink-faint">Net</dt><dd className="tabular">{account.net}</dd></div>

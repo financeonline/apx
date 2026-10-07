@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { CircleCheck, FileText, Receipt, Upload } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { formatMoney } from '@/core/money';
@@ -58,9 +59,9 @@ export default async function RecordProvenancePage({
       />
 
       <Card>
-        <CardHeader title="This record" />
+        <CardHeader title="This record" icon={<Receipt />} />
         <CardBody>
-          <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+          <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
             <Field label="What it is" value={record.kindLabel} />
             <Field label="Date" value={record.date ? formatDate(record.date) : '—'} />
             <Field
@@ -75,7 +76,7 @@ export default async function RecordProvenancePage({
       </Card>
 
       <Card>
-        <CardHeader title="Is it counted?" />
+        <CardHeader title="Is it counted?" icon={<CircleCheck />} tint="pink" />
         <CardBody>
           <div className="flex flex-col gap-3">
             <p className="flex items-center gap-2 text-sm text-ink">
@@ -108,7 +109,7 @@ export default async function RecordProvenancePage({
       </Card>
 
       <Card>
-        <CardHeader title="How it got here" />
+        <CardHeader title="How it got here" icon={<Upload />} />
         <CardBody>
           {record.importedBy === null ? (
             <p className="text-sm text-ink-muted">
@@ -118,7 +119,7 @@ export default async function RecordProvenancePage({
             </p>
           ) : (
             <div className="flex flex-col gap-3">
-              <dl className="grid gap-x-6 gap-y-3 sm:grid-cols-2">
+              <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field
                   label="Added"
                   value={record.importedBy.committedAt ? formatDate(record.importedBy.committedAt) : 'Not yet committed'}
@@ -145,14 +146,14 @@ export default async function RecordProvenancePage({
 
       {record.document === null ? (
         <Card>
-          <CardHeader title="Source document" />
+          <CardHeader title="Source document" icon={<FileText />} tint="pink" />
           <CardBody>
             <p className="text-sm text-ink-muted">There is no source file behind this record.</p>
           </CardBody>
         </Card>
       ) : (
         <Card>
-          <CardHeader title="Source document" />
+          <CardHeader title="Source document" icon={<FileText />} tint="pink" />
           <CardBody>
             <DocumentPanel
               orgSlug={orgSlug}
@@ -170,9 +171,9 @@ export default async function RecordProvenancePage({
 
 function Field({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <dt className="text-xs uppercase tracking-wide text-ink-faint">{label}</dt>
-      <dd className="text-sm text-ink">{value}</dd>
+    <div className="min-w-0 rounded-xl bg-surface-sunken px-3.5 py-2.5">
+      <dt className="text-xs font-medium uppercase tracking-[0.1em] text-ink-muted">{label}</dt>
+      <dd className="mt-0.5 text-sm text-ink">{value}</dd>
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ChartColumn, ChevronRight, Megaphone, Package, Target, Users, UsersRound } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, Badge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
@@ -9,6 +10,10 @@ import { FigureTable, WhyLink } from '../money/_components/figures';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
+
+/** An outlined pill for a card's "see all" link, as the Departments cards' "Open" (ADR-155). */
+const PILL = 'inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft';
+const CHEVRON = <ChevronRight aria-hidden="true" className="size-4" />;
 
 /**
  * Commercial (Phase 14, ADR-102; UX brief §20) on top of "Who the business depends on".
@@ -55,9 +60,9 @@ export default async function CustomersPage({
       <div className="flex flex-col gap-6">
         {commercial.revenue ? <section data-testid="commercial-revenue"><MetricCard card={commercial.revenue} /></section> : null}
 
-        <div className="grid gap-6 md:grid-cols-2 [&>*]:min-w-0">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 [&>*]:min-w-0">
           <Card>
-            <CardHeader title="Top customers" description="Revenue this month, biggest first." action={<Link href={`${base}#customers`} className="text-sm text-ink-muted hover:text-ink">All customers</Link>} />
+            <CardHeader title="Top customers" description="Revenue this month, biggest first." icon={<Users />} action={<Link href={`${base}#customers`} className={PILL}>All customers {CHEVRON}</Link>} />
             <CardBody>
               {commercial.topCustomers.length === 0 ? <p className="text-sm text-ink-muted">No customer revenue for {scope.period.label}.</p> : (
                 <ul className="flex flex-col gap-2 text-sm" data-testid="commercial-top-customers">
@@ -80,7 +85,7 @@ export default async function CustomersPage({
           </Card>
 
           <Card>
-            <CardHeader title="Top products and services" description="Revenue attributed by invoice lines this month." action={<Link href={`${base}/products`} className="text-sm text-ink-muted hover:text-ink">All products</Link>} />
+            <CardHeader title="Top products and services" description="Revenue attributed by invoice lines this month." icon={<Package />} tint="pink" action={<Link href={`${base}/products`} className={PILL}>All products {CHEVRON}</Link>} />
             <CardBody>
               {commercial.topProducts.length === 0 ? (
                 <p className="text-sm text-ink-muted">No products or services recorded yet. Add them under Products, then split invoices into lines to see what each contributes.</p>
@@ -101,7 +106,7 @@ export default async function CustomersPage({
           </Card>
 
           <Card>
-            <CardHeader title="Marketing" description="Spend and revenue credited through won opportunities, last twelve months." action={<Link href={`${base}/marketing`} className="text-sm text-ink-muted hover:text-ink">All campaigns</Link>} />
+            <CardHeader title="Marketing" description="Spend and revenue credited through won opportunities, last twelve months." icon={<Megaphone />} tint="pink" action={<Link href={`${base}/marketing`} className={PILL}>All campaigns {CHEVRON}</Link>} />
             <CardBody>
               {commercial.topCampaigns.length === 0 ? <p className="text-sm text-ink-muted">No campaigns recorded yet.</p> : (
                 <ul className="flex flex-col gap-2 text-sm" data-testid="commercial-marketing">
@@ -117,7 +122,7 @@ export default async function CustomersPage({
           </Card>
 
           <Card>
-            <CardHeader title="Pipeline" action={<Link href={`${base}/sales`} className="text-sm text-ink-muted hover:text-ink">Sales</Link>} />
+            <CardHeader title="Pipeline" icon={<Target />} action={<Link href={`${base}/sales`} className={PILL}>Sales {CHEVRON}</Link>} />
             <CardBody>
               <p className="text-sm" data-testid="commercial-pipeline">
                 <span className="font-mono text-xl tabular-nums text-ink">{commercial.pipeline.openValue}</span>
@@ -132,7 +137,7 @@ export default async function CustomersPage({
 
         {view.concentration.length > 0 ? (
           <Card>
-            <CardHeader title="How much you rely on your top customers" description="The measurement, for you to weigh — a high share is not a verdict." />
+            <CardHeader title="How much you rely on your top customers" description="The measurement, for you to weigh — a high share is not a verdict." icon={<UsersRound />} />
             <CardBody className="px-0 py-0">
               <FigureTable rows={view.concentration} caption={`Customer concentration for ${scope.period.label}`} comparisonLabel={scope.previous?.label ?? 'the previous month'} />
               {commercial.concentrationTrend.some((p) => p.top5Text !== null) ? (
@@ -145,7 +150,7 @@ export default async function CustomersPage({
         ) : null}
 
         <Card>
-          <CardHeader title="Revenue by customer" />
+          <CardHeader title="Revenue by customer" icon={<ChartColumn />} tint="pink" />
           <CardBody className="px-0 py-0">
             <div id="customers" />
             {view.customers.length === 0 ? <p className="px-5 py-4 text-sm text-ink-muted">No customer revenue for {scope.period.label}.</p> : (

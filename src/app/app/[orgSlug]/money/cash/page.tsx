@@ -1,3 +1,4 @@
+import { Landmark, PencilLine, Wallet } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState, DetailList, Banner } from '@/components/ui/surfaces';
@@ -56,6 +57,7 @@ export default async function CashPage({
               <CardHeader
                 title="Enter an opening balance"
                 description="A statement says what moved, not what was there to begin with."
+                icon={<PencilLine />}
               />
               <CardBody>
                 <OpeningBalanceForm orgSlug={orgSlug} accounts={waiting} currency={currency} />
@@ -92,7 +94,7 @@ export default async function CashPage({
         ) : null}
 
         <Card>
-          <CardHeader title="This month" />
+          <CardHeader title="This month" icon={<Wallet />} />
           <CardBody className="px-0 py-0">
             <FigureTable
               rows={view.figures}
@@ -106,6 +108,8 @@ export default async function CashPage({
           <CardHeader
             title="Your accounts"
             description="A balance for one account on its own is not a figure we calculate yet; the totals above cover every account together."
+            icon={<Landmark />}
+            tint="pink"
           />
           <CardBody>
             {view.accounts.length === 0 ? (
@@ -140,6 +144,7 @@ export default async function CashPage({
             <CardHeader
               title="Enter an opening balance"
               description="Until we have it, your cash balance stays unknown rather than wrong."
+              icon={<PencilLine />}
             />
             <CardBody>
               <OpeningBalanceForm orgSlug={orgSlug} accounts={waiting} currency={currency} />

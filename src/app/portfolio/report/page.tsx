@@ -1,6 +1,9 @@
 import Link from 'next/link';
+import {
+  Building2, CircleCheck, CircleDashed, ClipboardCheck, Download, Lightbulb, Siren, TriangleAlert,
+} from 'lucide-react';
 import { getPortfolioContext, hrefs, loadPortfolioReport } from '@/modules/portfolio';
-import { Badge, Card, CardBody, EmptyState, PageHeader } from '@/components/ui/surfaces';
+import { Badge, Card, CardBody, EmptyState, IconBadge, PageHeader, StatTile } from '@/components/ui/surfaces';
 import { Disclaimer } from '@/components/dashboard';
 
 export const dynamic = 'force-dynamic';
@@ -30,19 +33,17 @@ export default async function PortfolioReportPage() {
         eyebrow="Command Centre"
         title="Portfolio Report"
         description={`${report.today} · ${c.clients} ${c.clients === 1 ? 'client' : 'clients'} · from the figures current now.`}
-        action={<a href="/portfolio/report/pdf" className="text-sm text-accent underline underline-offset-2">Download the PDF</a>}
+        action={<a href="/portfolio/report/pdf" className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"><Download aria-hidden="true" className="size-4" />Download the PDF</a>}
       />
 
-      <Card className="mb-8"><CardBody>
-        <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-3">
-          <div><dt className="text-ink-muted">Needing attention</dt><dd className="font-serif text-2xl tabular-nums">{c.needingAttention}</dd></div>
-          <div><dt className="text-ink-muted">Stable or Strong</dt><dd className="font-serif text-2xl tabular-nums">{c.healthy}</dd></div>
-          <div><dt className="text-ink-muted">Not yet scored</dt><dd className="font-serif text-2xl tabular-nums">{c.unscored}</dd></div>
-          <div><dt className="text-ink-muted">With opportunities</dt><dd className="font-serif text-2xl tabular-nums">{report.clientsWithOpportunities}</dd></div>
-          <div><dt className="text-ink-muted">Critical / high alerts</dt><dd className="font-serif text-2xl tabular-nums">{c.criticalAlerts} / {c.highAlerts}</dd></div>
-          <div><dt className="text-ink-muted">Open actions (overdue)</dt><dd className="font-serif text-2xl tabular-nums">{c.openActions} ({c.overdueActions})</dd></div>
-        </dl>
-      </CardBody></Card>
+      <div className="mb-8 grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 lg:grid-cols-3">
+        <StatTile label="Needing attention" value={c.needingAttention} icon={<TriangleAlert />} tint="violet" />
+        <StatTile label="Stable or Strong" value={c.healthy} icon={<CircleCheck />} tint="pink" />
+        <StatTile label="Not yet scored" value={c.unscored} icon={<CircleDashed />} tint="violet" />
+        <StatTile label="With opportunities" value={report.clientsWithOpportunities} icon={<Lightbulb />} tint="pink" />
+        <StatTile label="Critical / high alerts" value={<>{c.criticalAlerts} / {c.highAlerts}</>} icon={<Siren />} tint="violet" />
+        <StatTile label="Open actions (overdue)" value={<>{c.openActions} ({c.overdueActions})</>} icon={<ClipboardCheck />} tint="pink" />
+      </div>
 
       <ol className="flex flex-col gap-4">
         {report.clients.map((client) => {
@@ -50,11 +51,14 @@ export default async function PortfolioReportPage() {
           return (
             <li key={client.organizationId}>
               <Card><CardBody>
-                <div className="flex flex-wrap items-baseline justify-between gap-2">
-                  <h2 className="font-serif text-lg text-ink">
-                    {org === undefined ? client.name : <Link href={hrefs(org).client} className="underline-offset-2 hover:underline">{client.name}</Link>}
-                    {client.suspended ? <span className="ml-2 text-sm text-ink-muted">(suspended)</span> : null}
-                  </h2>
+                <div className="flex flex-wrap items-center justify-between gap-2">
+                  <div className="flex min-w-0 items-center gap-3">
+                    <IconBadge tint="violet" size="sm"><Building2 /></IconBadge>
+                    <h2 className="min-w-0 font-serif text-lg text-ink [overflow-wrap:anywhere]">
+                      {org === undefined ? client.name : <Link href={hrefs(org).client} className="underline-offset-2 hover:underline">{client.name}</Link>}
+                      {client.suspended ? <span className="ml-2 text-sm text-ink-muted">(suspended)</span> : null}
+                    </h2>
+                  </div>
                   <span className="text-sm text-ink">
                     {client.health === null ? 'Not yet scored'
                       : client.health.score === null ? `Not enough data · ${client.health.periodLabel}`

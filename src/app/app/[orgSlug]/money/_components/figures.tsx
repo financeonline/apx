@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ChevronRight } from 'lucide-react';
 import { StatusBadgeView } from '@/components/dashboard';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import type { MetricCardView } from '@/modules/dashboard';
@@ -83,9 +84,10 @@ export function WhyLink({ row }: { row: MetricCardView }) {
   return (
     <Link
       href={row.whyHref}
-      className="text-accent underline underline-offset-2 transition-colors duration-100 hover:text-accent-hover"
+      className="inline-flex items-center gap-0.5 rounded-xl border border-accent/45 bg-surface px-2.5 py-0.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
     >
       Why?
+      <ChevronRight aria-hidden="true" className="size-4" />
       <span className="sr-only">
         {' '}
         See the evidence behind {row.label} for {row.period.label}

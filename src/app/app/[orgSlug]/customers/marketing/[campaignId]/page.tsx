@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { CalendarDays, Funnel, Handshake, PencilLine, Users, Wallet } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
@@ -32,7 +33,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
       <PeriodHeading eyebrow={view.channelName ? `Campaign · ${view.channelName}` : 'Campaign'} title={view.campaign.name} description={`Figures cover the ${view.window.months} months to ${view.window.to.label}.`} scope={scope} hrefFor={(id) => `/app/${orgSlug}/customers/marketing/${campaignId}?period=${id}`} />
       <div className="flex flex-col gap-6">
         <Card>
-          <CardHeader title="What it cost and what it brought in" />
+          <CardHeader title="What it cost and what it brought in" icon={<Wallet />} />
           <CardBody>
             <DetailList items={[
               { label: 'Spend', value: <span className="tabular">{r.spend}</span> },
@@ -46,7 +47,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
         </Card>
 
         <Card>
-          <CardHeader title="Month by month" />
+          <CardHeader title="Month by month" icon={<CalendarDays />} tint="pink" />
           <CardBody className="px-0 py-0">
             <TableWrap>
               <caption className="sr-only">Spend and credited revenue by month</caption>
@@ -56,9 +57,9 @@ export default async function CampaignPage({ params, searchParams }: { params: P
           </CardBody>
         </Card>
 
-        <div className="grid gap-6 md:grid-cols-2 [&>*]:min-w-0">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 [&>*]:min-w-0">
           <Card>
-            <CardHeader title="Customers won through it" />
+            <CardHeader title="Customers won through it" icon={<Users />} />
             <CardBody>
               {view.customers.length === 0 ? <p className="text-sm text-ink-muted">None yet. Mark an opportunity as won and name this campaign to credit revenue here.</p> : (
                 <ul className="flex flex-col gap-2 text-sm">
@@ -68,7 +69,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
             </CardBody>
           </Card>
           <Card>
-            <CardHeader title="How its opportunities converted" description={`Opportunities created between ${view.window.from.label} and ${view.window.to.label}.`} />
+            <CardHeader title="How its opportunities converted" description={`Opportunities created between ${view.window.from.label} and ${view.window.to.label}.`} icon={<Funnel />} tint="pink" />
             <CardBody>
               <DetailList items={[
                 { label: 'Created', value: conv.leadsCreated },
@@ -83,7 +84,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
         </div>
 
         <Card>
-          <CardHeader title="Opportunities naming this campaign" />
+          <CardHeader title="Opportunities naming this campaign" icon={<Handshake />} />
           <CardBody className="px-0 py-0">
             {view.opportunities.length === 0 ? <p className="px-5 py-4 text-sm text-ink-muted">None.</p> : (
               <TableWrap>
@@ -97,7 +98,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
 
         {mayEdit ? (
           <Card>
-            <CardHeader title="Record spend" description="One figure per month. Recording a month again replaces the earlier figure." />
+            <CardHeader title="Record spend" description="One figure per month. Recording a month again replaces the earlier figure." icon={<PencilLine />} tint="pink" />
             <CardBody><SpendForm orgSlug={orgSlug} campaignId={campaignId} periods={view.periods.map((p) => ({ id: p.id, label: p.label }))} currency={view.currency} /></CardBody>
           </Card>
         ) : null}

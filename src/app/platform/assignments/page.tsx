@@ -1,3 +1,4 @@
+import { Briefcase, UserPlus } from 'lucide-react';
 import { toMotionError } from '@/core/errors';
 import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState } from '@/components/ui/surfaces';
@@ -36,7 +37,7 @@ export default async function PlatformAssignmentsPage() {
       />
       <div className="mt-8 flex flex-col gap-6">
         <Card>
-          <CardHeader title="Active assignments" />
+          <CardHeader icon={<Briefcase />} tint="violet" title="Active assignments" />
           <CardBody>
             {assignments.length === 0 ? (
               <EmptyState title="No active assignments">Assign an adviser to a client organisation below.</EmptyState>
@@ -59,7 +60,7 @@ export default async function PlatformAssignmentsPage() {
           </CardBody>
         </Card>
         <Card>
-          <CardHeader title="Assign an adviser" description="Requires a recent re-authentication." />
+          <CardHeader icon={<UserPlus />} tint="pink" title="Assign an adviser" description="Requires a recent re-authentication." />
           <CardBody><CreateAssignmentForm /></CardBody>
         </Card>
       </div>

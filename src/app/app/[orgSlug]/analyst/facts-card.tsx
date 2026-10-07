@@ -1,5 +1,6 @@
 import { MetricCard } from '@/components/dashboard/metric-card';
-import { Card, CardBody } from '@/components/ui/surfaces';
+import { ChartColumn } from 'lucide-react';
+import { Card, CardBody, IconBadge } from '@/components/ui/surfaces';
 import type { HomeView } from '@/modules/dashboard';
 
 /**
@@ -17,9 +18,14 @@ export function FactsCard({ view }: { view: HomeView }) {
   return (
     <Card>
       <CardBody className="p-4">
-        <h3 className="text-sm font-medium text-ink">{FACTS_TITLE}</h3>
-        <p className="mt-1 text-xs text-ink-muted">From your current figures for {view.period.label}, without the analyst.</p>
-        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+        <div className="flex min-w-0 items-start gap-3">
+          <IconBadge tint="pink" size="sm"><ChartColumn /></IconBadge>
+          <div className="min-w-0">
+            <h3 className="text-sm font-medium text-ink">{FACTS_TITLE}</h3>
+            <p className="mt-1 text-xs text-ink-muted">From your current figures for {view.period.label}, without the analyst.</p>
+          </div>
+        </div>
+        <div className="mt-3 grid grid-cols-1 gap-3 sm:grid-cols-2">
           {view.cards.map((card) => <MetricCard key={card.metricKey} card={card} variant="compact" />)}
         </div>
       </CardBody>

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ChevronRight, Megaphone, Plus, Share2 } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, Badge } from '@/components/ui/surfaces';
@@ -32,7 +33,7 @@ export default async function MarketingPage({ params, searchParams }: { params: 
       <div className="flex flex-col gap-6">
         {view ? (
           <Card>
-            <CardHeader title="Campaigns" description={view.note} />
+            <CardHeader title="Campaigns" description={view.note} icon={<Megaphone />} />
             <CardBody className="px-0 py-0">
               {view.campaigns.length === 0 ? (
                 <p className="px-5 py-4 text-sm text-ink-muted">No campaigns yet{mayEdit ? ' — add one below' : ''}. A campaign earns revenue here only when an opportunity marked as won names it.</p>
@@ -49,7 +50,7 @@ export default async function MarketingPage({ params, searchParams }: { params: 
                         <TD className="whitespace-nowrap text-right tabular">{c.customersWon}</TD>
                         <TD className="whitespace-nowrap text-right tabular">{c.attributionStatus === 'attributed_via_won_opportunities' ? c.attributedRevenue : <span className="text-xs text-ink-muted">{c.attributionText}</span>}</TD>
                         <TD className="whitespace-nowrap text-right tabular">{c.cac ?? <span className="text-xs text-ink-muted" title={c.cacNote ?? undefined}>—</span>}</TD>
-                        <TD className="text-right text-sm"><Link href={c.href} className="text-ink-muted underline hover:text-ink">Detail</Link></TD>
+                        <TD className="text-right text-sm"><Link href={c.href} className="inline-flex items-center gap-0.5 rounded-xl border border-accent/45 bg-surface px-2.5 py-0.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">Detail <ChevronRight aria-hidden="true" className="size-4" /></Link></TD>
                       </TR>
                     ))}
                   </TBody>
@@ -65,7 +66,7 @@ export default async function MarketingPage({ params, searchParams }: { params: 
         ) : null}
 
         <Card>
-          <CardHeader title="Channels" description="Where customers come from, in your words." />
+          <CardHeader title="Channels" description="Where customers come from, in your words." icon={<Share2 />} tint="pink" />
           <CardBody>
             {view && view.channels.length > 0 ? (
               <ul className="flex flex-wrap gap-2 text-sm" data-testid="marketing-channels">
@@ -76,9 +77,9 @@ export default async function MarketingPage({ params, searchParams }: { params: 
         </Card>
 
         {mayEdit ? (
-          <div className="grid gap-6 md:grid-cols-2 [&>*]:min-w-0">
-            <Card><CardHeader title="Add a channel" /><CardBody><ChannelForm orgSlug={orgSlug} /></CardBody></Card>
-            <Card><CardHeader title="Add a campaign" description="Spend is recorded month by month on the campaign’s own page." /><CardBody><CampaignForm orgSlug={orgSlug} channels={view?.channels ?? []} /></CardBody></Card>
+          <div className="grid grid-cols-1 gap-6 md:grid-cols-2 [&>*]:min-w-0">
+            <Card><CardHeader title="Add a channel" icon={<Plus />} /><CardBody><ChannelForm orgSlug={orgSlug} /></CardBody></Card>
+            <Card><CardHeader title="Add a campaign" description="Spend is recorded month by month on the campaign’s own page." icon={<Plus />} tint="pink" /><CardBody><CampaignForm orgSlug={orgSlug} channels={view?.channels ?? []} /></CardBody></Card>
           </div>
         ) : null}
       </div>

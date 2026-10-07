@@ -85,14 +85,14 @@ export default async function AuditPage({
         </Card>
 
         {(pageIndex > 0 || hasOlder) && (
-          <nav className="mt-4 flex items-center justify-between text-sm" aria-label="Audit log pages">
+          <nav className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm" aria-label="Audit log pages">
             {pageIndex > 0
-              ? <a className="underline" href={href(pageIndex - 1)}>← Newer</a>
-              : <span className="text-ink-faint">← Newer</span>}
+              ? <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={href(pageIndex - 1)}>← Newer</a>
+              : <span className="px-3 py-1 text-ink-faint">← Newer</span>}
             <span className="text-ink-muted">Page {pageIndex + 1}</span>
             {hasOlder
-              ? <a className="underline" href={href(pageIndex + 1)}>Older →</a>
-              : <span className="text-ink-faint">Older →</span>}
+              ? <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={href(pageIndex + 1)}>Older →</a>
+              : <span className="px-3 py-1 text-ink-faint">Older →</span>}
           </nav>
         )}
       </div>

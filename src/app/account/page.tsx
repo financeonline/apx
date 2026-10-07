@@ -3,6 +3,7 @@ import { createUserClient } from '@/core/db/user-client';
 import { PageHeader, Card, CardHeader, CardBody } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
 import { ProfileForm } from './profile-form';
+import { BrandedScreen } from '@/components/dashboard/branded-screen';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,7 +22,7 @@ export default async function AccountPage() {
   const profile = (data as ProfileRow[] | null)?.[0];
 
   return (
-    <main className="mx-auto w-full max-w-2xl px-6 py-12">
+    <BrandedScreen width="2xl" panel={false}>
       <PageHeader title="Your account" description="Your details and how you sign in." />
       <div className="mt-8 flex flex-col gap-6">
         <Card>
@@ -44,6 +45,6 @@ export default async function AccountPage() {
           </CardBody>
         </Card>
       </div>
-    </main>
+    </BrandedScreen>
   );
 }

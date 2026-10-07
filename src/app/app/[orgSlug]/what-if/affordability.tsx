@@ -3,6 +3,7 @@ import {
   AFFORDABILITY_RULE_TEXT, AFFORDABILITY_UNAVAILABLE_TEXT, AFFORDABILITY_VERDICT_LABEL, AFFORDABILITY_VERDICT_TEXT,
   type AffordabilityCheck,
 } from '@/modules/scenarios';
+import { Calculator } from 'lucide-react';
 import { Badge, Card, CardBody, CardHeader } from '@/components/ui/surfaces';
 import { Button, Input, NativeSelect, Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 
@@ -25,6 +26,8 @@ export function AffordabilityCard({
     <Card className="mt-6">
       <CardHeader
         title="Can we afford it?"
+        icon={<Calculator />}
+        tint="pink"
         description="Enter a spend you are thinking about. MOTION checks it against the cash it expects over the forecast months."
       />
       <CardBody>

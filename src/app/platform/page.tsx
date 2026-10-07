@@ -1,6 +1,7 @@
+import { Activity, Building2, Clock, KeyRound, MessageSquareText } from 'lucide-react';
 import { countOpenFeedback } from '@/modules/ai';
 import { getPlatformContext } from '@/modules/tenancy';
-import { PageHeader, Card, CardHeader, CardBody, DetailList } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardHeader, CardBody, StatTile } from '@/components/ui/surfaces';
 
 export const dynamic = 'force-dynamic';
 
@@ -19,16 +20,14 @@ export default async function PlatformOverviewPage() {
       <PageHeader title="Platform" description="Operating MOTION itself." />
       <div className="mt-8">
         <Card>
-          <CardHeader title="At a glance" />
+          <CardHeader icon={<Activity />} tint="violet" title="At a glance" />
           <CardBody>
-            <DetailList
-              items={[
-                { label: 'Organisations', value: organizations ?? 0 },
-                { label: 'Platform accounts', value: platformUsers ?? 0 },
-                { label: 'Jobs waiting', value: jobs ?? 0 },
-                { label: 'Open AI feedback', value: openFeedback },
-              ]}
-            />
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 lg:grid-cols-4">
+              <StatTile label="Organisations" value={organizations ?? 0} icon={<Building2 />} tint="violet" />
+              <StatTile label="Platform accounts" value={platformUsers ?? 0} icon={<KeyRound />} tint="pink" />
+              <StatTile label="Jobs waiting" value={jobs ?? 0} icon={<Clock />} tint="violet" />
+              <StatTile label="Open AI feedback" value={openFeedback} icon={<MessageSquareText />} tint="pink" />
+            </div>
           </CardBody>
         </Card>
       </div>

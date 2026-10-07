@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ClipboardCheck, MessageSquareText, ShieldCheck, Sparkles, Wrench } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
@@ -51,14 +52,14 @@ export default async function AiFeedbackItemPage({ params }: { params: Promise<{
         description={`${item.organizationName} · reported ${formatDateTime(item.createdAt)}`}
       />
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <div className="flex flex-col gap-6">
           {item.comment ? (
-            <Card><CardHeader title="What the reporter said" /><CardBody><p className="text-sm">{item.comment}</p></CardBody></Card>
+            <Card><CardHeader icon={<MessageSquareText />} tint="violet" title="What the reporter said" /><CardBody><p className="text-sm">{item.comment}</p></CardBody></Card>
           ) : null}
 
           <Card>
-            <CardHeader title="The answer" />
+            <CardHeader icon={<Sparkles />} tint="pink" title="The answer" />
             <CardBody>
               {answer ? (
                 <div className="flex flex-col gap-3 text-sm">
@@ -82,7 +83,7 @@ export default async function AiFeedbackItemPage({ params }: { params: Promise<{
           </Card>
 
           <Card>
-            <CardHeader title="Grounding report" />
+            <CardHeader icon={<ShieldCheck />} tint="violet" title="Grounding report" />
             <CardBody>
               {report?.mismatches && report.mismatches.length > 0 ? (
                 <TableWrap>
@@ -100,7 +101,7 @@ export default async function AiFeedbackItemPage({ params }: { params: Promise<{
           </Card>
 
           <Card>
-            <CardHeader title="Tool calls" />
+            <CardHeader icon={<Wrench />} tint="pink" title="Tool calls" />
             <CardBody>
               {item.toolCalls.length === 0 ? <p className="text-sm text-ink-muted">No tools were called.</p> : (
                 <TableWrap>
@@ -124,7 +125,7 @@ export default async function AiFeedbackItemPage({ params }: { params: Promise<{
 
         <div className="flex flex-col gap-6">
           <Card>
-            <CardHeader title="Review" />
+            <CardHeader icon={<ClipboardCheck />} tint="violet" title="Review" />
             <CardBody>
               <DetailList items={[
                 { label: 'Status', value: <Badge tone={STATUS_TONES[item.status]}>{STATUS_LABELS[item.status]}</Badge> },

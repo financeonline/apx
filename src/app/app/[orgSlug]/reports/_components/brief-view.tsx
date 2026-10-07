@@ -5,7 +5,9 @@ import {
   notShown, resolveHref, windowLabel,
   type BriefActionLine, type BriefAlertLine, type BriefComparisonRow, type BriefContent, type BriefMonth, type Capped,
 } from '@/modules/reporting';
-import { Badge, Card, CardBody } from '@/components/ui/surfaces';
+import type { ReactNode } from 'react';
+import { Bell, ChartColumn, ClipboardCheck, Lightbulb, TrendingUp, TriangleAlert } from 'lucide-react';
+import { Badge, Card, CardBody, IconBadge, type IconTint } from '@/components/ui/surfaces';
 
 /**
  * A Daily Executive Brief or Weekly Intelligence Report on screen (Phase 17).
@@ -14,12 +16,17 @@ import { Badge, Card, CardBody } from '@/components/ui/surfaces';
  * is a value the interim calculator or the monthly engine produced, formatted once.
  */
 
-function Section({ title, children }: { title: string; children: React.ReactNode }) {
+function Section({
+  title, icon, tint = 'violet', children,
+}: { title: string; icon?: ReactNode; tint?: IconTint; children: ReactNode }) {
   return (
     <Card>
       <CardBody>
-        <h2 className="font-serif text-lg text-ink">{title}</h2>
-        <div className="mt-4">{children}</div>
+        <div className="flex min-w-0 items-center gap-3">
+          {icon ? <IconBadge tint={tint} size="sm">{icon}</IconBadge> : null}
+          <h2 className="min-w-0 font-serif text-lg text-ink">{title}</h2>
+        </div>
+        <div className="mt-4 min-w-0">{children}</div>
       </CardBody>
     </Card>
   );
@@ -124,7 +131,7 @@ function FigureRow({ row, currency, orgSlug, period }: { row: BriefComparisonRow
 
 export function MonthSection({ month, orgSlug, title }: { month: BriefMonth; orgSlug: string; title: string }) {
   return (
-    <Section title={title}>
+    <Section title={title} icon={<ChartColumn />} tint="violet">
       <p className="text-sm text-ink-muted">{month.basisLine}</p>
       {month.health === null ? null : (
         <p className="mt-3 text-sm text-ink">
@@ -179,7 +186,7 @@ export function BriefView({ content, orgSlug }: { content: BriefContent; orgSlug
     <div className="flex flex-col gap-6">
       <p className="text-xs text-ink-faint">{INTERIM_DISCLAIMER}</p>
 
-      <Section title={daily ? 'Key movements' : 'Financial changes this week'}>
+      <Section title={daily ? 'Key movements' : 'Financial changes this week'} icon={<TrendingUp />} tint="violet">
         {content.comparison.length === 0 ? (
           <p className="text-sm text-ink-muted">No day or week figures are available for this period.</p>
         ) : (
@@ -196,7 +203,7 @@ export function BriefView({ content, orgSlug }: { content: BriefContent; orgSlug
         )}
       </Section>
 
-      <Section title={daily ? 'Risks' : 'Causes'}>
+      <Section title={daily ? 'Risks' : 'Causes'} icon={<TriangleAlert />} tint="pink">
         <AlertList list={content.events.alertsRaised} orgSlug={orgSlug}
           empty={daily ? 'No new alerts were raised.' : 'No new alerts were raised this week.'} />
         {!daily && content.latestMonth !== null && content.latestMonth.adverse.length > 0 ? (
@@ -207,7 +214,7 @@ export function BriefView({ content, orgSlug }: { content: BriefContent; orgSlug
       </Section>
 
       {daily ? (
-        <Section title="Opportunities">
+        <Section title="Opportunities" icon={<Lightbulb />} tint="violet">
           {collected !== null && collected.recordCount > 0 ? (
             <p className="text-sm text-ink">
               {formatMoney(collected.value, { currency: content.currency, showMinorUnits: true })} collected from customers
@@ -231,7 +238,7 @@ export function BriefView({ content, orgSlug }: { content: BriefContent; orgSlug
         </Section>
       ) : null}
 
-      <Section title={daily ? 'What needs attention today' : 'Unresolved issues'}>
+      <Section title={daily ? 'What needs attention today' : 'Unresolved issues'} icon={<Bell />} tint="pink">
         <p className="text-sm text-ink">
           Open alerts: {sev.critical} critical, {sev.high} high, {sev.medium} medium, {sev.low} low.
         </p>
@@ -245,7 +252,7 @@ export function BriefView({ content, orgSlug }: { content: BriefContent; orgSlug
         <p className="mt-4 text-xs text-ink-faint">As at {content.composedAt.slice(0, 16).replace('T', ' ')} UTC, when this was produced.</p>
       </Section>
 
-      <Section title="Actions">
+      <Section title="Actions" icon={<ClipboardCheck />} tint="violet">
         <p className="text-sm text-ink">
           {content.events.actionsCompleted.total} completed, {content.events.actionsCreated.total} created,{' '}
           {content.events.alertsResolved.total} alert{content.events.alertsResolved.total === 1 ? '' : 's'} resolved.

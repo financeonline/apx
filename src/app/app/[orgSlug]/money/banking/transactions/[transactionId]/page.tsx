@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ArrowLeftRight, FileSearch, Receipt, Tags } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
@@ -49,7 +50,7 @@ export default async function BankTransactionPage({
       />
 
       <Card>
-        <CardHeader title="This transaction" />
+        <CardHeader title="This transaction" icon={<Receipt />} />
         <CardBody>
           <p className="font-mono text-2xl tabular-nums text-ink" data-testid="txn-amount">{view.amount}</p>
           <div className="mt-4">
@@ -71,7 +72,7 @@ export default async function BankTransactionPage({
       </Card>
 
       <Card>
-        <CardHeader title="Source" description={view.source} />
+        <CardHeader title="Source" description={view.source} icon={<FileSearch />} tint="pink" />
         <CardBody>
           <p className="text-sm">
             <Link href={recordHref} className="underline">Where this line came from</Link>
@@ -84,11 +85,11 @@ export default async function BankTransactionPage({
       {mayEdit ? (
         <>
           <Card>
-            <CardHeader title="Change the category" description="Changing it here changes your figures; MOTION’s rules never overwrite your choice." />
+            <CardHeader title="Change the category" description="Changing it here changes your figures; MOTION’s rules never overwrite your choice." icon={<Tags />} />
             <CardBody><CategoryForm orgSlug={orgSlug} transactionId={view.id} current={view.category.accountId} options={view.categoryOptions} /></CardBody>
           </Card>
           <Card>
-            <CardHeader title={view.transfer ? 'Marked as a transfer' : 'Is this a transfer between your own accounts?'} description="Money moved between your own accounts is left out of your cash figures. Card and loan repayments stay in." />
+            <CardHeader title={view.transfer ? 'Marked as a transfer' : 'Is this a transfer between your own accounts?'} description="Money moved between your own accounts is left out of your cash figures. Card and loan repayments stay in." icon={<ArrowLeftRight />} tint="pink" />
             <CardBody><TransferControls orgSlug={orgSlug} transactionId={view.id} isTransfer={view.transfer !== null} candidates={view.transferCandidates} /></CardBody>
           </Card>
         </>

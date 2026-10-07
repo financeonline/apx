@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ChartColumn, Funnel, Handshake, Plus, Target } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, DetailList } from '@/components/ui/surfaces';
@@ -33,9 +34,9 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
       <div className="flex flex-col gap-6">
         {view ? (
           <>
-            <div className="grid gap-6 md:grid-cols-2 [&>*]:min-w-0">
+            <div className="grid grid-cols-1 gap-6 md:grid-cols-2 [&>*]:min-w-0">
               <Card>
-                <CardHeader title="Pipeline by stage" description="Estimated values are what you entered — not forecasts." />
+                <CardHeader title="Pipeline by stage" description="Estimated values are what you entered — not forecasts." icon={<Target />} />
                 <CardBody className="px-0 py-0">
                   <TableWrap>
                     <caption className="sr-only">Opportunities by stage</caption>
@@ -46,7 +47,7 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
                 </CardBody>
               </Card>
               <Card>
-                <CardHeader title="Conversion" description={`Opportunities created between ${view.conversionWindow.from.label} and ${view.conversionWindow.to.label}.`} />
+                <CardHeader title="Conversion" description={`Opportunities created between ${view.conversionWindow.from.label} and ${view.conversionWindow.to.label}.`} icon={<Funnel />} tint="pink" />
                 <CardBody>
                   <DetailList items={[
                     { label: 'Created', value: view.conversion.leadsCreated },
@@ -61,7 +62,7 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
             </div>
 
             <Card>
-              <CardHeader title="Won against revenue" description="What was marked won each month, next to the revenue the engine recorded for that month. They are different things: a win is a promise, revenue is an invoice." />
+              <CardHeader title="Won against revenue" description="What was marked won each month, next to the revenue the engine recorded for that month. They are different things: a win is a promise, revenue is an invoice." icon={<ChartColumn />} />
               <CardBody className="px-0 py-0">
                 <TableWrap>
                   <caption className="sr-only">Won opportunities and revenue by month</caption>
@@ -72,7 +73,7 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
             </Card>
 
             <Card>
-              <CardHeader title="Opportunities" description={view.total > SALES_LIST_LIMIT ? `Showing the latest ${SALES_LIST_LIMIT} of ${view.total}.` : undefined} />
+              <CardHeader title="Opportunities" description={view.total > SALES_LIST_LIMIT ? `Showing the latest ${SALES_LIST_LIMIT} of ${view.total}.` : undefined} icon={<Handshake />} tint="pink" />
               <CardBody className="px-0 py-0">
                 {view.opportunities.length === 0 ? <p className="px-5 py-4 text-sm text-ink-muted">Nothing recorded yet{mayEdit ? ' — add the first below' : ''}.</p> : (
                   <TableWrap>
@@ -99,7 +100,7 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
 
         {mayEdit && view ? (
           <Card>
-            <CardHeader title="Add an opportunity" description="A lead, an enquiry, a quote — whatever stage it is at now." />
+            <CardHeader title="Add an opportunity" description="A lead, an enquiry, a quote — whatever stage it is at now." icon={<Plus />} />
             <CardBody><NewOpportunityForm orgSlug={orgSlug} customers={view.customers} campaigns={view.campaigns} currency={view.currency} /></CardBody>
           </Card>
         ) : null}

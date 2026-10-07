@@ -16,16 +16,24 @@ export function CardHeader({
   title,
   description,
   action,
+  icon,
+  tint = 'violet',
 }: {
   title: string;
   description?: string;
   action?: ReactNode;
+  /** A tinted icon tile before the title, as the reference's cards (ADR-155). Decorative. */
+  icon?: ReactNode;
+  tint?: IconTint;
 }) {
   return (
     <ShadcnCardHeader>
-      <div className="min-w-0">
-        <CardTitle>{title}</CardTitle>
-        {description ? <CardDescription>{description}</CardDescription> : null}
+      <div className="flex min-w-0 gap-3.5">
+        {icon ? <IconBadge tint={tint}>{icon}</IconBadge> : null}
+        <div className="min-w-0">
+          <CardTitle>{title}</CardTitle>
+          {description ? <CardDescription>{description}</CardDescription> : null}
+        </div>
       </div>
       {action ? <CardAction>{action}</CardAction> : null}
     </ShadcnCardHeader>
@@ -36,6 +44,7 @@ export function CardBody({ children, className = '' }: { children: ReactNode; cl
   return <CardContent className={className}>{children}</CardContent>;
 }
 
+/** The page title band, as the reference's "Your departments" header (ADR-155). */
 export function PageHeader({
   eyebrow,
   title,
@@ -48,20 +57,54 @@ export function PageHeader({
   action?: ReactNode;
 }) {
   return (
-    <header className="mb-8 flex flex-wrap items-end justify-between gap-4">
+    <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
       <div className="min-w-0">
         {eyebrow ? (
-          <p className="mb-1 text-xs font-semibold uppercase tracking-[0.12em] text-accent">
+          <p className="mb-2 text-xs font-semibold uppercase tracking-[0.14em] text-accent">
             {eyebrow}
           </p>
         ) : null}
-        <h1 className="text-3xl md:text-4xl">{title}</h1>
+        <h1 className="text-4xl md:text-5xl">{title}</h1>
         {description ? (
-          <p className="mt-2 max-w-2xl text-base text-ink-muted md:text-lg">{description}</p>
+          <p className="mt-2 max-w-3xl text-lg text-ink-muted md:text-xl">{description}</p>
         ) : null}
       </div>
-      {action ? <div className="shrink-0">{action}</div> : null}
+      {action ? <div className="flex shrink-0 flex-wrap gap-3">{action}</div> : null}
     </header>
+  );
+}
+
+export type IconTint = 'violet' | 'pink';
+
+/** A tinted rounded tile holding an icon, as the reference's cards. Decorative. */
+export function IconBadge({ tint = 'violet', size = 'md', children }: { tint?: IconTint; size?: 'sm' | 'md' | 'lg'; children: ReactNode }) {
+  const tone = tint === 'pink' ? 'bg-pink-soft text-pink-icon' : 'bg-accent-soft text-accent';
+  const box = size === 'lg' ? 'size-14 rounded-2xl [&_svg]:size-7' : size === 'md' ? 'size-11 rounded-xl [&_svg]:size-6' : 'size-9 rounded-xl [&_svg]:size-5';
+  return <span aria-hidden="true" className={`flex shrink-0 items-center justify-center ${tone} ${box}`}>{children}</span>;
+}
+
+/** A figure in a white tile with its icon, as the reference's stat tiles (portfolio overview etc.). */
+export function StatTile({
+  label,
+  value,
+  icon,
+  tint = 'violet',
+  valueClassName = 'text-ink',
+}: {
+  label: string;
+  value: ReactNode;
+  icon?: ReactNode;
+  tint?: IconTint;
+  valueClassName?: string;
+}) {
+  return (
+    <div className="panel flex items-center gap-3.5 rounded-card p-4">
+      {icon ? <IconBadge tint={tint}>{icon}</IconBadge> : null}
+      <div className="min-w-0">
+        <p className="text-xs font-medium uppercase tracking-[0.1em] text-ink-muted">{label}</p>
+        <p className={`mt-0.5 font-mono text-2xl tabular-nums ${valueClassName}`}>{value}</p>
+      </div>
+    </div>
   );
 }
 

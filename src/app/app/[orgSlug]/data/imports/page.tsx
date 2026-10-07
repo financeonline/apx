@@ -1,8 +1,9 @@
 import Link from 'next/link';
+import { Download } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { loadImportHistory } from '@/modules/imports';
-import { PageHeader, Card, CardBody, Badge, EmptyState } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardBody, Badge, EmptyState, IconBadge } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
 import { THead, TBody, TR, TD } from '@/components/ui/table';
 import { Table } from '@/components/ui/shadcn';
@@ -91,14 +92,19 @@ export default async function ImportsPage({ params }: { params: Promise<{ orgSlu
         <div className="mt-6">
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">Export your data</h2>
-              <p className="mt-1 text-sm text-ink-muted">
-                A CSV of what your figures rest on. Bank lines carry the masked description only; every export is recorded.
-              </p>
+              <div className="flex min-w-0 gap-3.5">
+                <IconBadge tint="pink"><Download /></IconBadge>
+                <div className="min-w-0">
+                  <h2 className="font-serif text-lg text-ink">Export your data</h2>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    A CSV of what your figures rest on. Bank lines carry the masked description only; every export is recorded.
+                  </p>
+                </div>
+              </div>
               <ul className="mt-3 flex flex-wrap gap-2 text-sm">
                 {([['ledger', 'Ledger'], ['bank_transactions', 'Bank transactions'], ['invoices', 'Invoices'], ['metrics', 'Metrics']] as const).map(([kind, label]) => (
                   <li key={kind}>
-                    <a className="rounded-md border border-line px-3 py-1.5 text-ink hover:bg-surface-sunken" href={`/api/exports/${kind}?org=${orgSlug}`} download>
+                    <a className="inline-flex items-center rounded-xl border border-line bg-surface px-3 py-1.5 font-medium text-ink transition-colors hover:border-accent/45 hover:bg-accent-soft hover:text-accent" href={`/api/exports/${kind}?org=${orgSlug}`} download>
                       {label} (CSV)
                     </a>
                   </li>

@@ -2,7 +2,8 @@
 
 import { useActionState } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
-import { Card, CardBody } from '@/components/ui/surfaces';
+import { UserRoundCheck } from 'lucide-react';
+import { Card, CardBody, IconBadge } from '@/components/ui/surfaces';
 import { assignActionAction } from '../actions';
 import { NativeSelect } from '@/components/ui/shadcn';
 
@@ -29,7 +30,10 @@ export function AssignControl({
   return (
     <Card>
       <CardBody>
-        <h2 className="font-serif text-lg text-ink">Who is doing it</h2>
+        <div className="flex min-w-0 items-center gap-3">
+          <IconBadge tint="pink" size="sm"><UserRoundCheck /></IconBadge>
+          <h2 className="min-w-0 font-serif text-lg text-ink">Who is doing it</h2>
+        </div>
         <form action={submit} className="mt-3 flex flex-wrap items-end gap-3">
           <input type="hidden" name="org_slug" value={orgSlug} />
           <input type="hidden" name="action_id" value={actionId} />

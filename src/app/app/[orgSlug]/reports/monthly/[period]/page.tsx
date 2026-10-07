@@ -4,7 +4,8 @@ import { can } from '@/core/permissions';
 import { getMonthlyReport, listAvailable } from '@/modules/reporting';
 import { getAccessContext } from '@/modules/tenancy';
 import { HealthScoreInline, StatusBadgeView } from '@/components/dashboard';
-import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
+import { ChartColumn, ClipboardCheck, FileText, TriangleAlert } from 'lucide-react';
+import { Badge, Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { PdfControl } from './pdf-control';
 import { requirePermission } from '@/app/_lib/authz';
 
@@ -64,7 +65,10 @@ export default async function MonthlyReportPage({
       <div className="mt-8 flex flex-col gap-6">
         <Card>
           <CardBody>
-            <h2 className="font-serif text-lg text-ink">{report.summary}</h2>
+            <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="violet" size="sm"><FileText /></IconBadge>
+              <h2 className="min-w-0 font-serif text-lg text-ink">{report.summary}</h2>
+            </div>
             {report.health === null || report.health.score === null ? null : (
               <div className="mt-3">
                 <HealthScoreInline
@@ -80,7 +84,10 @@ export default async function MonthlyReportPage({
 
         <Card>
           <CardBody>
-            <h2 className="font-serif text-lg text-ink">The headline numbers</h2>
+            <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="pink" size="sm"><ChartColumn /></IconBadge>
+              <h2 className="min-w-0 font-serif text-lg text-ink">The headline numbers</h2>
+            </div>
             <dl className="mt-4 grid gap-4 sm:grid-cols-2">
               {report.cards.map((card) => (
                 <div key={card.metricKey} className="border-b border-line pb-3">
@@ -102,7 +109,10 @@ export default async function MonthlyReportPage({
         {report.alerts.length === 0 ? null : (
           <Card>
             <CardBody>
-              <h2 className="font-serif text-lg text-ink">What needs attention</h2>
+              <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="violet" size="sm"><TriangleAlert /></IconBadge>
+              <h2 className="min-w-0 font-serif text-lg text-ink">What needs attention</h2>
+            </div>
               <ul className="mt-4 flex flex-col gap-4">
                 {report.alerts.map((alert) => (
                   <li key={alert.id} className="border-b border-line pb-3 last:border-0">
@@ -126,7 +136,10 @@ export default async function MonthlyReportPage({
         {report.openActions.length === 0 ? null : (
           <Card>
             <CardBody>
-              <h2 className="font-serif text-lg text-ink">What we are doing about it</h2>
+              <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="pink" size="sm"><ClipboardCheck /></IconBadge>
+              <h2 className="min-w-0 font-serif text-lg text-ink">What we are doing about it</h2>
+            </div>
               <ul className="mt-4 flex flex-col gap-2">
                 {report.openActions.map((action) => (
                   <li key={action.id} className="flex flex-wrap justify-between gap-2 text-sm">

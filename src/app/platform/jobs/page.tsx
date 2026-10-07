@@ -72,8 +72,8 @@ export default async function PlatformJobsPage({
       />
       <p className="mt-2 text-sm text-ink-muted">
         {showAll
-          ? <a className="underline" href="/platform/jobs">Show only jobs needing attention</a>
-          : <a className="underline" href="/platform/jobs?status=all">Show all recent jobs</a>}
+          ? <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href="/platform/jobs">Show only jobs needing attention</a>
+          : <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href="/platform/jobs?status=all">Show all recent jobs</a>}
       </p>
       <div className="mt-8">
         <Card>

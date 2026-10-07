@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { Badge, Card, CardBody } from '@/components/ui/surfaces';
+import { ChevronRight, CircleAlert, Info, ShieldAlert } from 'lucide-react';
+import { Badge, Card, CardBody, IconBadge } from '@/components/ui/surfaces';
 import type { AlertView } from '@/modules/dashboard';
 import { reasonText, severityLabel, severityTone } from './alert-presentation';
 
@@ -14,6 +15,9 @@ import { reasonText, severityLabel, severityTone } from './alert-presentation';
  * Two variants and no others (§5): `compact` for Home's top-risks band, `full` for Insights.
  */
 export type AlertCardVariant = 'compact' | 'full';
+
+/** The reference's outlined link-button (ADR-155). */
+const PILL = 'inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft';
 
 export function AlertCard({
   alert,
@@ -32,7 +36,12 @@ export function AlertCard({
     <Card className="h-full">
       <CardBody className={compact ? 'px-4 py-3' : ''}>
         <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
+          {/* The reference's icon tile (ADR-155): pink for the serious ones. Decorative. */}
+          <IconBadge tint={alert.severity === 'critical' || alert.severity === 'high' ? 'pink' : 'violet'} size="sm">
+            {alert.severity === 'critical' || alert.severity === 'high' ? <ShieldAlert />
+              : alert.severity === 'info' ? <Info /> : <CircleAlert />}
+          </IconBadge>
+          <div className="min-w-0 flex-1">
             <h3 className={`text-ink ${compact ? 'text-sm' : ''}`}>{alert.title}</h3>
             <p className="mt-0.5 text-xs text-ink-faint">
               {alert.family} · {alert.periodLabel}
@@ -61,13 +70,13 @@ export function AlertCard({
 
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
           {alert.evidenceHref ? (
-            <Link href={alert.evidenceHref} className="text-accent underline underline-offset-2">
-              Why?
+            <Link href={alert.evidenceHref} className={PILL}>
+              Why? <ChevronRight aria-hidden="true" className="size-4" />
             </Link>
           ) : null}
           {alert.detailHref ? (
-            <Link href={alert.detailHref} className="text-accent underline underline-offset-2">
-              History
+            <Link href={alert.detailHref} className={PILL}>
+              History <ChevronRight aria-hidden="true" className="size-4" />
             </Link>
           ) : null}
           {actions}

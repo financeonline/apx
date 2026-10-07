@@ -1,5 +1,6 @@
 import { CUSTOM_DIMENSIONS, type CustomReportContent } from '@/modules/reporting';
-import { Card, CardBody } from '@/components/ui/surfaces';
+import { Sparkles } from 'lucide-react';
+import { Card, CardBody, IconBadge } from '@/components/ui/surfaces';
 import { AnswerView } from '../../analyst/answer-view';
 
 /**
@@ -25,7 +26,10 @@ export function CustomView({
       {content.entries.map((entry, index) => (
         <Card key={entry.messageId}>
           <CardBody>
-            <h2 className="font-serif text-lg text-ink">{index + 1}. {entry.asked}</h2>
+            <div className="flex min-w-0 items-start gap-3">
+              <IconBadge tint="violet" size="sm"><Sparkles /></IconBadge>
+              <h2 className="min-w-0 font-serif text-lg text-ink">{index + 1}. {entry.asked}</h2>
+            </div>
             <div className="mt-4">
               <AnswerView
                 orgSlug={orgSlug}

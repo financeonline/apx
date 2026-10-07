@@ -77,7 +77,7 @@ export function AlertFilters({
   active: AlertFilterState;
 }) {
   return (
-    <nav className="flex flex-wrap items-center gap-x-3 gap-y-1 text-sm" aria-label="Alert filters">
+    <nav className="flex flex-wrap items-center gap-1.5 text-sm" aria-label="Alert filters">
       {(Object.keys(STATUS_LABELS) as AlertStatusFilter[]).map((status) => (
         <FilterLink
           key={status}
@@ -87,7 +87,7 @@ export function AlertFilters({
           {STATUS_LABELS[status]}
         </FilterLink>
       ))}
-      <span className="text-ink-faint">·</span>
+      <span className="px-0.5 text-ink-faint">·</span>
       <FilterLink href={href(orgSlug, active.status, null)} current={active.severity === null}>
         Any severity
       </FilterLink>
@@ -113,7 +113,9 @@ function FilterLink({
     <Link
       href={to}
       aria-current={current ? 'true' : undefined}
-      className={current ? 'text-ink underline underline-offset-2' : 'text-ink-muted hover:text-ink'}
+      className={current
+        ? 'rounded-full bg-accent-soft px-2.5 py-0.5 font-medium text-accent'
+        : 'rounded-full bg-surface-sunken px-2.5 py-0.5 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}
     >
       {children}
     </Link>

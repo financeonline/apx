@@ -6,7 +6,11 @@ import { getActionsSummary, type ActionsSummary } from '@/modules/actions';
 import {
   loadHome, loadTopRisks, loadTrend, type AlertView, type HomeView, type MetricCardView,
 } from '@/modules/dashboard';
-import { PageHeader, Card, CardBody, Banner } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardBody, Banner, IconBadge, type IconTint } from '@/components/ui/surfaces';
+import type { ReactNode } from 'react';
+import {
+  ArrowDownLeft, ArrowLeftRight, ArrowUpRight, ChartColumn, ChevronRight, HandCoins, Percent, Receipt, TrendingUp, Wallet,
+} from 'lucide-react';
 import { ButtonLink } from '@/components/ui/button';
 import { AlertCard, WidgetCards, HealthScoreCard, NO_ALERTS_BODY, NO_ALERTS_TITLE } from '@/components/dashboard';
 import { requirePermission } from '@/app/_lib/authz';
@@ -75,17 +79,34 @@ function ChangeLine({ card }: { card: MetricCardView }) {
   return <p className={`mt-1 text-sm ${tone}`}>{card.change.text}</p>;
 }
 
+/** Each headline figure's icon tile, as the reference's cards (ADR-155). Decorative. */
+const METRIC_ICON: Readonly<Record<string, { icon: ReactNode; tint: IconTint }>> = {
+  revenue: { icon: <ChartColumn />, tint: 'violet' },
+  gross_profit: { icon: <Percent />, tint: 'pink' },
+  operating_profit: { icon: <TrendingUp />, tint: 'violet' },
+  closing_cash: { icon: <Wallet />, tint: 'pink' },
+  receivables: { icon: <HandCoins />, tint: 'violet' },
+  payables: { icon: <Receipt />, tint: 'pink' },
+  cash_inflows: { icon: <ArrowDownLeft />, tint: 'violet' },
+  cash_outflows: { icon: <ArrowUpRight />, tint: 'pink' },
+  net_cash_movement: { icon: <ArrowLeftRight />, tint: 'violet' },
+};
+
 /** A card's content. The widget grid supplies its surface, ring and shadow. */
 function MetricCard({ card }: { card: MetricCardView }) {
+  const look = METRIC_ICON[card.metricKey] ?? { icon: <ChartColumn />, tint: 'violet' as const };
   return (
-    <div className="h-full p-6">
+    <div className="h-full p-5">
       <div>
         <div className="flex items-start justify-between gap-2">
-          <h3 className="text-sm text-ink-muted" title={card.technicalLabel}>{card.label}</h3>
+          <div className="flex min-w-0 items-center gap-3">
+            <IconBadge tint={look.tint} size="sm">{look.icon}</IconBadge>
+            <h3 className="text-sm font-semibold text-ink" title={card.technicalLabel}>{card.label}</h3>
+          </div>
           <StatusBadge card={card} />
         </div>
 
-        <p className="mt-2 font-mono text-2xl text-ink tabular-nums" title={card.basisText}>
+        <p className="mt-3 font-mono text-3xl text-ink tabular-nums" title={card.basisText}>
           {card.value}
         </p>
 
@@ -101,9 +122,9 @@ function MetricCard({ card }: { card: MetricCardView }) {
         {/* Every number carries a "Why?" affordance opening the evidence drawer (§4). */}
         <Link
           href={card.whyHref}
-          className="mt-3 inline-block text-sm text-accent underline underline-offset-2"
+          className="mt-3 inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
         >
-          Why?
+          Why? <ChevronRight aria-hidden="true" className="size-4" />
         </Link>
       </div>
     </div>

@@ -1,3 +1,4 @@
+import { SlidersHorizontal } from 'lucide-react';
 import { assertCan } from '@/core/permissions';
 import { loadPlatformSettings } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
@@ -45,7 +46,7 @@ export default async function PlatformSettingsPage() {
       <PageHeader title="Platform settings" description="The defaults every organisation gets unless it has its own." />
       <div className="mt-8 max-w-2xl">
         <Card>
-          <CardHeader title="Defaults" />
+          <CardHeader icon={<SlidersHorizontal />} tint="violet" title="Defaults" />
           <CardBody>
             <div className="flex flex-col gap-4">
               {settings.map((setting) => {

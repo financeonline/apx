@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ArrowLeftRight } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState, Badge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
@@ -88,11 +89,12 @@ export default async function BankTransactionsPage({
       <Card>
         <CardHeader
           title={`${view.total} transaction${view.total === 1 ? '' : 's'}`}
+          icon={<ArrowLeftRight />}
           action={
-            <nav aria-label="Filter transactions" className="flex flex-wrap gap-3 text-sm">
+            <nav aria-label="Filter transactions" className="flex flex-wrap gap-2 text-sm">
               {FILTERS.map((f) => (
                 <Link key={f.key} href={href({ filter: f.key, page: 1 })} aria-current={view.filter === f.key ? 'page' : undefined}
-                  className={view.filter === f.key ? 'text-ink' : 'text-ink-muted hover:text-ink'}>
+                  className={view.filter === f.key ? 'rounded-full bg-accent-soft px-3 py-1 font-medium text-accent' : 'rounded-full bg-surface-sunken px-3 py-1 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}>
                   {f.label}
                 </Link>
               ))}

@@ -1,4 +1,8 @@
+import type { ReactNode } from 'react';
 import Link from 'next/link';
+import {
+  Building2, CalendarDays, CalendarRange, ChevronRight, FileText, HandCoins, Sparkles,
+} from 'lucide-react';
 import { can } from '@/core/permissions';
 import { addDays } from '@/core/periods';
 import {
@@ -8,7 +12,7 @@ import {
 import { fundingEnabled } from '@/modules/funding';
 import { getAccessContext } from '@/modules/tenancy';
 import { ReportsBeforeFirstMonthEmpty } from '@/components/dashboard';
-import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
+import { Badge, Card, CardBody, IconBadge, PageHeader, type IconTint } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
 import { ComposeForm } from './_components/report-controls';
 
@@ -24,6 +28,12 @@ export const dynamic = 'force-dynamic';
  * says so rather than hiding it, and the database hides any earlier such report (`reports_select`).
  */
 
+/** The row's main link, as the reference's outlined "Open ›" button (ADR-155). */
+const OPEN_PILL = 'inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft';
+
+/** A secondary link in a section, as a soft pill. */
+const SOFT_PILL = 'inline-flex w-fit items-center gap-1 rounded-full bg-accent-soft px-3 py-1 text-sm font-medium text-accent transition-colors hover:bg-accent/20';
+
 const DAYS_OFFERED = 14;
 const WEEKS_OFFERED = 8;
 
@@ -32,11 +42,11 @@ function StoredList({ orgSlug, reports, empty }: { orgSlug: string; reports: rea
   return (
     <ul className="flex flex-col divide-y divide-line">
       {reports.map((report) => (
-        <li key={report.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-          <Link href={`/app/${orgSlug}/reports/r/${report.id}`} className="text-ink underline-offset-2 hover:underline">
+        <li key={report.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
+          <Link href={`/app/${orgSlug}/reports/r/${report.id}`} className="min-w-0 font-medium text-ink underline-offset-2 hover:text-accent hover:underline">
             {windowLabel(report.windowStart, report.windowEnd)}
           </Link>
-          <span className="flex items-center gap-2 text-ink-muted">
+          <span className="flex flex-wrap items-center gap-2 text-ink-muted">
             {report.origin === 'scheduled' ? 'Produced on schedule' : 'Produced on request'}
             {report.versions > 1 ? <Badge>{report.versions} versions</Badge> : null}
           </span>
@@ -46,13 +56,21 @@ function StoredList({ orgSlug, reports, empty }: { orgSlug: string; reports: rea
   );
 }
 
-function Section({ title, description, children }: { title: string; description: string; children: React.ReactNode }) {
+function Section({
+  title, description, icon, tint, children,
+}: { title: string; description: string; icon: ReactNode; tint: IconTint; children: ReactNode }) {
   return (
     <Card>
       <CardBody>
-        <h2 className="font-serif text-lg text-ink">{title}</h2>
-        <p className="mt-1 text-sm text-ink-muted">{description}</p>
-        <div className="mt-4 flex flex-col gap-4">{children}</div>
+        {/* header/hgroup, not divs: the section stays the innermost div holding its heading. */}
+        <header className="flex min-w-0 items-start gap-3.5">
+          <IconBadge tint={tint}>{icon}</IconBadge>
+          <hgroup className="min-w-0">
+            <h2 className="font-serif text-lg text-ink">{title}</h2>
+            <p className="mt-1 text-sm text-ink-muted">{description}</p>
+          </hgroup>
+        </header>
+        <div className="mt-4 flex min-w-0 flex-col gap-4">{children}</div>
       </CardBody>
     </Card>
   );
@@ -89,9 +107,11 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
       <div className="flex flex-col gap-6">
         <Section
           title={KIND_LABELS.daily_brief}
+          icon={<CalendarDays />}
+          tint="violet"
           description="Key movements, risks, opportunities and actions for one day — with what needs attention today."
         >
-          <Link href={`/app/${orgSlug}/reports/preview/daily_brief`} className="text-sm text-accent underline underline-offset-2">
+          <Link href={`/app/${orgSlug}/reports/preview/daily_brief`} className={SOFT_PILL}>
             Today so far
           </Link>
           <StoredList orgSlug={orgSlug} reports={of('daily_brief', DAYS_OFFERED)}
@@ -101,9 +121,11 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
 
         <Section
           title={KIND_LABELS.weekly_intelligence}
+          icon={<CalendarRange />}
+          tint="pink"
           description="Financial changes, their causes and unresolved issues for a Monday-to-Sunday week, compared with the week before."
         >
-          <Link href={`/app/${orgSlug}/reports/preview/weekly_intelligence`} className="text-sm text-accent underline underline-offset-2">
+          <Link href={`/app/${orgSlug}/reports/preview/weekly_intelligence`} className={SOFT_PILL}>
             This week so far
           </Link>
           <StoredList orgSlug={orgSlug} reports={of('weekly_intelligence', WEEKS_OFFERED)}
@@ -111,15 +133,15 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
           {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="weekly_intelligence" label="Produce a weekly report" windows={weeks} /> : null}
         </Section>
 
-        <Section title="Monthly Management Report" description="One report a month, from the figures MOTION has already calculated.">
+        <Section title="Monthly Management Report" icon={<FileText />} tint="violet" description="One report a month, from the figures MOTION has already calculated.">
           {monthly.length === 0 ? (
             <ReportsBeforeFirstMonthEmpty addDataHref={`/app/${orgSlug}/data/imports/new`} />
           ) : (
             <ul className="flex flex-col divide-y divide-line">
               {monthly.map((report) => (
-                <li key={report.periodId} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
-                  <div>
-                    <p className="text-ink">{report.periodLabel}</p>
+                <li key={report.periodId} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
+                  <div className="min-w-0">
+                    <p className="font-medium text-ink">{report.periodLabel}</p>
                     <p className="mt-1 text-ink-muted">
                       {report.file === null
                         ? 'Ready to read on screen. A PDF can be produced from the report.'
@@ -127,9 +149,10 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
                     </p>
                   </div>
                   {/* The link text is the monthly report's since ADR-024; journeys and screen readers rely on it. */}
-                  <Link href={`/app/${orgSlug}/reports/monthly/${report.periodId}`} className="text-accent underline underline-offset-2">
+                  <Link href={`/app/${orgSlug}/reports/monthly/${report.periodId}`} className={OPEN_PILL}>
                     Open the report
                     <span className="sr-only"> for {report.periodLabel}</span>
+                    <ChevronRight aria-hidden="true" className="size-4" />
                   </Link>
                 </li>
               ))}
@@ -139,6 +162,8 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
 
         <Section
           title={KIND_LABELS.adviser}
+          icon={<Building2 />}
+          tint="pink"
           description="Adviser-ready intelligence on this business: the latest month, health area by area, what stands open, what was done, and how far the data goes."
         >
           <StoredList orgSlug={orgSlug} reports={of('adviser', 6)} empty="No Accountant/CFO Report yet." />
@@ -147,11 +172,13 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
 
         <Section
           title={KIND_LABELS.custom_ai}
+          icon={<Sparkles />}
+          tint="violet"
           description="Choose a month, the areas to look at and up to five questions; the AI Analyst answers each under its usual checks. Your custom reports are visible to you only."
         >
           <StoredList orgSlug={orgSlug} reports={of('custom_ai', 10)} empty="You have no custom reports yet." />
           {canAsk ? (
-            <Link href={`/app/${orgSlug}/reports/custom/new`} className="text-sm text-accent underline underline-offset-2">
+            <Link href={`/app/${orgSlug}/reports/custom/new`} className={SOFT_PILL}>
               Create a custom report
             </Link>
           ) : null}
@@ -159,6 +186,8 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
 
         <Section
           title={KIND_LABELS.funding_readiness}
+          icon={<HandCoins />}
+          tint="pink"
           description="The latest month's indicative Funding Readiness assessment, as it stood when the report was produced. Not a lending decision."
         >
           {funding ? (

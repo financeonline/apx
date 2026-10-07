@@ -1,9 +1,10 @@
 import Link from 'next/link';
+import { ClipboardCheck, History } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { loadAlertDetail } from '@/modules/dashboard';
-import { PageHeader, Card, CardBody, Badge } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardBody, Badge, IconBadge } from '@/components/ui/surfaces';
 import { AlertCard, severityLabel, severityTone } from '@/components/dashboard';
 import { AlertActions } from '../alert-actions';
 import { ConvertControl } from './convert-control';
@@ -57,7 +58,10 @@ export default async function AlertPage({
         {can(ctx, 'actions.create') ? (
           <Card>
             <CardBody>
-              <h2 className="font-serif text-lg text-ink">Do something about it</h2>
+              <div className="flex items-center gap-3">
+                <IconBadge tint="violet" size="sm"><ClipboardCheck /></IconBadge>
+                <h2 className="font-serif text-lg text-ink">Do something about it</h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 The action keeps the figures behind this alert exactly as they are now, even after
                 the alert is looked at again.
@@ -75,14 +79,17 @@ export default async function AlertPage({
 
         <Card>
           <CardBody>
-            <h2 className="font-serif text-lg text-ink">What this alert has said</h2>
+            <div className="flex items-center gap-3">
+              <IconBadge tint="pink" size="sm"><History /></IconBadge>
+              <h2 className="font-serif text-lg text-ink">What this alert has said</h2>
+            </div>
             <p className="mt-1 text-sm text-ink-muted">
               Every time your figures changed, we looked again. This is what we found each time.
             </p>
 
             <ol className="mt-4 space-y-4">
               {detail.revisions.map((revision) => (
-                <li key={revision.revisionNo} className="border-l-2 border-line pl-4">
+                <li key={revision.revisionNo} className="border-l-2 border-accent/40 pl-4">
                   <div className="flex flex-wrap items-baseline gap-2">
                     <Badge tone={severityTone(revision.severity)}>
                       {severityLabel(revision.severity)}

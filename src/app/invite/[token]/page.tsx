@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createUserClient } from '@/core/db/user-client';
 import { PageHeader } from '@/components/ui/surfaces';
 import { AcceptInvitation } from './accept-invitation';
+import { BrandedScreen } from '@/components/dashboard/branded-screen';
 
 export const dynamic = 'force-dynamic';
 
@@ -16,12 +17,12 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   if (!data.user) redirect(`/sign-in?next=/invite/${encodeURIComponent(token)}`);
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col justify-center gap-6 px-6 py-12">
+    <BrandedScreen width="lg">
       <PageHeader
         title="You have been invited to MOTION"
         description="Accepting adds your account to the organisation that invited you."
       />
       <AcceptInvitation token={token} />
-    </main>
+    </BrandedScreen>
   );
 }

@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { Badge, Card, CardBody, type BadgeTone } from '@/components/ui/surfaces';
+import { ClipboardCheck } from 'lucide-react';
+import { Badge, Card, CardBody, IconBadge, type BadgeTone } from '@/components/ui/surfaces';
 import { ownerLabel, type Action, type ActionPriority, type ActionStatus } from '@/modules/actions';
 
 /**
@@ -62,7 +63,9 @@ export function ActionCard({
     <Card>
       <CardBody>
         <div className="flex flex-wrap items-start justify-between gap-3">
-          <div className="min-w-0">
+          {/* The reference's icon tile (ADR-155). Decorative; pink while overdue. */}
+          <IconBadge tint={overdue ? 'pink' : 'violet'} size="sm"><ClipboardCheck /></IconBadge>
+          <div className="min-w-0 flex-1">
             <h3 className="text-ink">
               <Link href={href} className="underline-offset-2 hover:underline">
                 {action.title}

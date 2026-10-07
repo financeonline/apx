@@ -1,7 +1,8 @@
-import Link from 'next/link';
+import { Building2, Receipt, ScrollText, TriangleAlert, Users } from 'lucide-react';
 import { getAccessContext, vatStatusOf } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody } from '@/components/ui/surfaces';
+import { ShortcutLink } from '@/components/dashboard/department-card';
 import { OrganizationForm } from './organization-form';
 import { VatForm } from './vat-form';
 import { requirePermission } from '@/app/_lib/authz';
@@ -25,18 +26,18 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
         title="Settings"
         description="Details about this organisation and who can see it."
       />
-      <nav className="mt-4 flex gap-4 text-sm">
-        <Link href={`/app/${orgSlug}/settings/team`} className="underline">Team</Link>
+      <nav className="mt-4 flex flex-wrap gap-3 text-sm">
+        <ShortcutLink href={`/app/${orgSlug}/settings/team`} label="Team" icon={<Users aria-hidden="true" />} />
         {can(ctx, 'audit.view') && (
-          <Link href={`/app/${orgSlug}/settings/audit`} className="underline">Audit log</Link>
+          <ShortcutLink href={`/app/${orgSlug}/settings/audit`} label="Audit log" icon={<ScrollText aria-hidden="true" />} />
         )}
         {can(ctx, 'org.delete') && (
-          <Link href={`/app/${orgSlug}/settings/danger`} className="underline">Danger zone</Link>
+          <ShortcutLink href={`/app/${orgSlug}/settings/danger`} label="Danger zone" icon={<TriangleAlert aria-hidden="true" />} />
         )}
       </nav>
       <div className="mt-8">
         <Card>
-          <CardHeader title="Organisation" description="Currency cannot change once figures exist." />
+          <CardHeader icon={<Building2 />} tint="violet" title="Organisation" description="Currency cannot change once figures exist." />
           <CardBody>
             <OrganizationForm
               orgSlug={orgSlug}
@@ -50,7 +51,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
       </div>
       <div className="mt-8">
         <Card>
-          <CardHeader title="VAT" description="Whether your sales and costs are recorded with or without VAT." />
+          <CardHeader icon={<Receipt />} tint="pink" title="VAT" description="Whether your sales and costs are recorded with or without VAT." />
           <CardBody>
             <VatForm orgSlug={orgSlug} status={vatStatusOf(data?.settings)} />
           </CardBody>

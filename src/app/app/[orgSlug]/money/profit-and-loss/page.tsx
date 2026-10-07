@@ -1,3 +1,4 @@
+import { ChartColumn, Receipt, TrendingUp } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody } from '@/components/ui/table';
@@ -60,7 +61,7 @@ export default async function ProfitAndLossPage({
 
       <div className="flex flex-col gap-6">
         <Card>
-          <CardHeader title="Trading" description="What was earned, and what it cost to earn it." />
+          <CardHeader title="Trading" description="What was earned, and what it cost to earn it." icon={<ChartColumn />} />
           <CardBody className="px-0 py-0">
             <FigureTable
               rows={view.above}
@@ -74,6 +75,8 @@ export default async function ProfitAndLossPage({
           <CardHeader
             title="Spending by category"
             description="Each category as the engine recorded it for this month, biggest first."
+            icon={<Receipt />}
+            tint="pink"
           />
           <CardBody className="px-0 py-0">
             {view.spending.length === 0 && !view.spendingKnown ? (
@@ -106,6 +109,7 @@ export default async function ProfitAndLossPage({
           <CardHeader
             title="Profit"
             description="Running costs, then interest and tax, then what is left."
+            icon={<TrendingUp />}
           />
           <CardBody className="px-0 py-0">
             <FigureTable

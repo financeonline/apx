@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { CalendarDays, Calculator, ChartColumn, Database, FileText, Layers, ListChecks, ShieldCheck } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { formatValue, missingReasonText, statusFor, BASIS_TEXT } from '@/modules/dashboard';
@@ -9,7 +10,7 @@ import {
 } from '@/modules/evidence';
 import { getAccessContext } from '@/modules/tenancy';
 import { StatusBadgeView } from '@/components/dashboard';
-import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
+import { Badge, Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { TBody, TD, THead, TR } from '@/components/ui/table';
 import { Table } from '@/components/ui/shadcn';
 import { DocumentPanel } from './document-panel';
@@ -87,6 +88,7 @@ export default async function EvidenceBundlePage({
         <Card>
           <CardBody>
             <div className="flex flex-wrap items-center gap-2">
+              <IconBadge tint="violet" size="sm"><ShieldCheck /></IconBadge>
               <h2 className="font-serif text-lg text-ink">What this figure rests on</h2>
               {view.bundle.assurance === null ? null : (
                 <Badge tone="neutral">{assuranceLabel(view.bundle.assurance)}</Badge>
@@ -104,9 +106,12 @@ export default async function EvidenceBundlePage({
         {metric === null ? null : (
           <Card>
             <CardBody>
-              <h2 className="font-serif text-lg text-ink">The figure</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="pink" size="sm"><ChartColumn /></IconBadge>
+                <h2 className="font-serif text-lg text-ink">The figure</h2>
+              </div>
               <div className="mt-3 flex flex-wrap items-baseline gap-3">
-                <p className="font-serif text-3xl text-ink">
+                <p className="font-mono text-3xl tabular-nums text-ink">
                   {formatValue(
                     { value: metric.value, unit: metric.unit, currency: metric.currency },
                     { showMinorUnits: true },
@@ -189,7 +194,10 @@ export default async function EvidenceBundlePage({
         {view.components.length === 0 ? null : (
           <Card>
             <CardBody>
-              <h2 className="font-serif text-lg text-ink">How it was worked out</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="violet" size="sm"><Calculator /></IconBadge>
+                <h2 className="font-serif text-lg text-ink">How it was worked out</h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 {metric?.description ?? 'This figure is worked out from the figures below.'}
               </p>
@@ -229,7 +237,10 @@ export default async function EvidenceBundlePage({
         {view.relatedFigures.length === 0 ? null : (
           <Card>
             <CardBody>
-              <h2 className="font-serif text-lg text-ink">The other figures this rests on</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="pink" size="sm"><Layers /></IconBadge>
+                <h2 className="font-serif text-lg text-ink">The other figures this rests on</h2>
+              </div>
               <ul className="mt-4 space-y-3">
                 {view.relatedFigures.map((figure) => (
                   <li key={figure.snapshotId ?? figure.name} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-3 last:border-0">
@@ -269,7 +280,10 @@ export default async function EvidenceBundlePage({
         {view.pinned.length === 0 ? null : (
           <Card>
             <CardBody>
-              <h2 className="font-serif text-lg text-ink">The specific records behind this</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="violet" size="sm"><ListChecks /></IconBadge>
+                <h2 className="font-serif text-lg text-ink">The specific records behind this</h2>
+              </div>
               <ul className="mt-4 space-y-3">
                 {view.pinned.map((item) => (
                   <li key={item.itemId} className="border-b border-line pb-3 last:border-0">
@@ -309,7 +323,10 @@ export default async function EvidenceBundlePage({
         {view.subtractions.length === 0 ? null : (
           <Card>
             <CardBody>
-              <h2 className="font-serif text-lg text-ink">Worked out from year-to-date reports</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="pink" size="sm"><CalendarDays /></IconBadge>
+                <h2 className="font-serif text-lg text-ink">Worked out from year-to-date reports</h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 Each of these is this month&apos;s report total less the previous month&apos;s.
               </p>
@@ -324,7 +341,10 @@ export default async function EvidenceBundlePage({
         {view.records.map((block) => (
           <Card key={block.itemId} id={`records-${block.itemId}`}>
             <CardBody>
-              <h2 className="font-serif text-lg text-ink">{block.label}</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="violet" size="sm"><Database /></IconBadge>
+                <h2 className="font-serif text-lg text-ink">{block.label}</h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 {block.reconciliation}
               </p>
@@ -415,7 +435,10 @@ export default async function EvidenceBundlePage({
         {/* Level 4 — Document: only once a reader has picked a row to descend from. */}
         <Card>
           <CardBody>
-            <h2 className="font-serif text-lg text-ink">The source document</h2>
+            <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="pink" size="sm"><FileText /></IconBadge>
+              <h2 className="font-serif text-lg text-ink">The source document</h2>
+            </div>
             {document === null ? (
               <p className="mt-1 text-sm text-ink-muted">
                 Choose <span className="text-ink">Source</span> on any row above to see the file it

@@ -1,3 +1,4 @@
+import { Briefcase, MailPlus, Hourglass, UsersRound } from 'lucide-react';
 import { getAccessContext, listMembers, listInvitations, listAdvisers } from '@/modules/tenancy';
 import { can, canInviteRole, ceilingAllows } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, Badge, EmptyState } from '@/components/ui/surfaces';
@@ -31,7 +32,7 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
 
       <div className="mt-8 flex flex-col gap-6">
         <Card>
-          <CardHeader title="People" />
+          <CardHeader icon={<UsersRound />} tint="violet" title="People" />
           <CardBody>
             <TableWrap>
               <THead columns={['Name', 'Email', 'Role', 'Status', '']} />
@@ -58,6 +59,8 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
         {mayInvite && (
           <Card>
             <CardHeader
+              icon={<MailPlus />}
+              tint="pink"
               title="Invite someone"
               description="They will be asked to sign in with the address you enter here."
             />
@@ -69,7 +72,7 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
 
         {mayInvite && invitations.length > 0 && (
           <Card>
-            <CardHeader title="Waiting to be accepted" />
+            <CardHeader icon={<Hourglass />} tint="violet" title="Waiting to be accepted" />
             <CardBody>
               <TableWrap>
                 <THead columns={['Email', 'Role', 'Expires', '']} />
@@ -86,6 +89,8 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
         {can(ctx, 'assignments.view') && (
           <Card>
             <CardHeader
+              icon={<Briefcase />}
+              tint="pink"
               title="MOTION advisers"
               description="Staff assigned to help with this organisation. You can remove access at any time."
             />

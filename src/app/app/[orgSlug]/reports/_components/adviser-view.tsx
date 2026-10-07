@@ -3,7 +3,8 @@ import { formatMoney } from '@/core/money';
 import {
   REPORT_DIMENSION_LABELS, REPORT_EXCLUSION_TEXT, resolveHref, type AdviserContent,
 } from '@/modules/reporting';
-import { Card, CardBody } from '@/components/ui/surfaces';
+import { Building2, ClipboardCheck, Database, HeartPulse, TriangleAlert } from 'lucide-react';
+import { Card, CardBody, IconBadge } from '@/components/ui/surfaces';
 import { ActionList, AlertList, MonthSection } from './brief-view';
 
 /** The Accountant/CFO Report on screen (Phase 17, REQ-RP-04). Renders the stored content only. */
@@ -13,7 +14,10 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
     <div className="flex flex-col gap-6">
       <Card>
         <CardBody>
-          <h2 className="font-serif text-lg text-ink">Needs attention</h2>
+          <div className="flex min-w-0 items-center gap-3">
+            <IconBadge tint="pink" size="sm"><TriangleAlert /></IconBadge>
+            <h2 className="min-w-0 font-serif text-lg text-ink">Needs attention</h2>
+          </div>
           {content.attention.length === 0 ? (
             <p className="mt-3 text-sm text-ink-muted">Nothing in the Command Centre&apos;s rules flags this client.</p>
           ) : (
@@ -28,7 +32,10 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
 
       <Card>
         <CardBody>
-          <h2 className="font-serif text-lg text-ink">Health, area by area</h2>
+          <div className="flex min-w-0 items-center gap-3">
+            <IconBadge tint="pink" size="sm"><HeartPulse /></IconBadge>
+            <h2 className="min-w-0 font-serif text-lg text-ink">Health, area by area</h2>
+          </div>
           <dl className="mt-4 flex flex-col gap-3">
             {content.dimensions.map((d) => (
               <div key={d.key} className="border-b border-line pb-3 last:border-0">
@@ -55,7 +62,10 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
 
       <Card>
         <CardBody>
-          <h2 className="font-serif text-lg text-ink">Open alerts</h2>
+          <div className="flex min-w-0 items-center gap-3">
+            <IconBadge tint="violet" size="sm"><Building2 /></IconBadge>
+            <h2 className="min-w-0 font-serif text-lg text-ink">Open alerts</h2>
+          </div>
           <p className="mt-2 text-sm text-ink">{sev.critical} critical, {sev.high} high, {sev.medium} medium, {sev.low} low.</p>
           <div className="mt-4">
             <AlertList list={content.alerts.standing} orgSlug={orgSlug} empty="No critical, high or medium alerts are open." />
@@ -65,7 +75,10 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
 
       <Card>
         <CardBody>
-          <h2 className="font-serif text-lg text-ink">Actions</h2>
+          <div className="flex min-w-0 items-center gap-3">
+            <IconBadge tint="pink" size="sm"><ClipboardCheck /></IconBadge>
+            <h2 className="min-w-0 font-serif text-lg text-ink">Actions</h2>
+          </div>
           <p className="mt-2 text-sm text-ink">{content.actions.open} open.</p>
           <h3 className="mt-4 text-sm font-medium text-ink">Overdue</h3>
           <div className="mt-2"><ActionList list={content.actions.overdue} orgSlug={orgSlug} empty="Nothing is overdue." /></div>
@@ -92,7 +105,10 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
 
       <Card>
         <CardBody>
-          <h2 className="font-serif text-lg text-ink">How far the data goes</h2>
+          <div className="flex min-w-0 items-center gap-3">
+            <IconBadge tint="violet" size="sm"><Database /></IconBadge>
+            <h2 className="min-w-0 font-serif text-lg text-ink">How far the data goes</h2>
+          </div>
           <p className="mt-2 text-sm text-ink">
             {content.dataQuality.dataRefreshedAt === null ? 'No data has been added yet.' : `Data last added ${content.dataQuality.dataRefreshedAt.slice(0, 10)}.`}
           </p>

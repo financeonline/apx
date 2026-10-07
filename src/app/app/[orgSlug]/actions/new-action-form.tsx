@@ -28,7 +28,7 @@ export function NewActionForm({ orgSlug }: { orgSlug: string }) {
   }
 
   return (
-    <form action={submit} className="flex flex-col gap-3 rounded-md border border-line bg-surface p-4">
+    <form action={submit} className="panel flex min-w-0 flex-col gap-3 rounded-card p-4">
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink-muted">What needs doing?</span>
         <Input

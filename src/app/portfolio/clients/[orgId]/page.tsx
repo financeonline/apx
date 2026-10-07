@@ -1,13 +1,17 @@
 import Link from 'next/link';
+import {
+  BarChart3, ChevronRight, ClipboardCheck, FileText, HeartPulse, Landmark, Lightbulb, ShieldAlert, Siren, Sparkles,
+} from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getPortfolioContext, hrefs, loadOpportunities, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts } from '@/modules/portfolio';
 import { OpportunityList } from '../../_components/opportunities';
 import { bandLabel } from '@/modules/health';
-import { PageHeader, Card, CardBody, CardHeader, Badge } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardBody, CardHeader, Badge, IconBadge } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
 import { HealthScoreInline, Disclaimer } from '@/components/dashboard';
 import { ORG_STATUS_LABELS } from '@/components/labels';
 import { ActionsTable, AlertsTable } from '@/components/portfolio';
+import { ShortcutLink } from '@/components/dashboard/department-card';
 import { TREND_LABELS, reasonTone } from '@/modules/portfolio';
 
 export const dynamic = 'force-dynamic';
@@ -46,9 +50,9 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
         action={<ButtonLink href={links.home} tone="secondary">Open {organisation.name}</ButtonLink>}
       />
 
-      <div className="grid gap-4 md:grid-cols-2">
+      <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
         <Card>
-          <CardHeader title="Why this client is here" />
+          <CardHeader icon={<ShieldAlert />} tint="pink" title="Why this client is here" />
           <CardBody>
             {row.attention === null ? (
               <p className="text-sm text-ink-muted">Nothing needs attention: no serious alert, no overdue or urgent action, and health has not fallen.</p>
@@ -66,8 +70,10 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
 
         <Card>
           <CardHeader
+            icon={<HeartPulse />}
+            tint="violet"
             title="Health"
-            action={<Link href={links.home} className="text-sm text-accent underline underline-offset-2">See how it was scored</Link>}
+            action={<Link href={links.home} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">See how it was scored <ChevronRight aria-hidden="true" className="size-4" /></Link>}
           />
           <CardBody>
             {row.health === null ? (
@@ -93,26 +99,35 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
       </div>
 
       <section aria-labelledby="client-opportunities" className="mt-8">
-        <h2 id="client-opportunities" className="mb-3 font-serif text-lg">Advisory opportunities</h2>
+        <div className="mb-3 flex min-w-0 items-center gap-3">
+          <IconBadge tint="pink" size="sm"><Lightbulb /></IconBadge>
+          <h2 id="client-opportunities" className="min-w-0 font-serif text-lg">Advisory opportunities</h2>
+        </div>
         <OpportunityList entries={opportunities} organisations={[organisation]} withActions />
       </section>
 
       <section aria-labelledby="client-alerts" className="mt-8">
-        <h2 id="client-alerts" className="mb-3 font-serif text-lg">Alerts standing ({alerts.total.toLocaleString('en-GB')})</h2>
+        <div className="mb-3 flex min-w-0 items-center gap-3">
+          <IconBadge tint="violet" size="sm"><Siren /></IconBadge>
+          <h2 id="client-alerts" className="min-w-0 font-serif text-lg">Alerts standing ({alerts.total.toLocaleString('en-GB')})</h2>
+        </div>
         <AlertsTable list={alerts} organisations={[organisation]} now={ctx.now()} />
       </section>
 
       <section aria-labelledby="client-actions" className="mt-8">
-        <h2 id="client-actions" className="mb-3 font-serif text-lg">Open actions ({actions.total.toLocaleString('en-GB')})</h2>
+        <div className="mb-3 flex min-w-0 items-center gap-3">
+          <IconBadge tint="pink" size="sm"><ClipboardCheck /></IconBadge>
+          <h2 id="client-actions" className="min-w-0 font-serif text-lg">Open actions ({actions.total.toLocaleString('en-GB')})</h2>
+        </div>
         <ActionsTable list={actions} organisations={[organisation]} today={view.today} viewerUserId={ctx.userId} />
       </section>
 
-      <p className="mt-8 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        <Link href={`/app/${organisation.slug}/insights`} className="text-accent underline underline-offset-2">Insights</Link>
-        <Link href={`/app/${organisation.slug}/actions`} className="text-accent underline underline-offset-2">Action Centre</Link>
-        <Link href={`/app/${organisation.slug}/reports`} className="text-accent underline underline-offset-2">Reports</Link>
-        <Link href={`/app/${organisation.slug}/analyst`} className="text-accent underline underline-offset-2">Analyst</Link>
-        {fundingOn ? <Link href={`/app/${organisation.slug}/funding`} className="text-accent underline underline-offset-2">Funding Readiness</Link> : null}
+      <p className="mt-8 flex flex-wrap gap-3 text-sm">
+        <ShortcutLink href={`/app/${organisation.slug}/insights`} label="Insights" icon={<BarChart3 aria-hidden="true" />} />
+        <ShortcutLink href={`/app/${organisation.slug}/actions`} label="Action Centre" icon={<ClipboardCheck aria-hidden="true" />} />
+        <ShortcutLink href={`/app/${organisation.slug}/reports`} label="Reports" icon={<FileText aria-hidden="true" />} />
+        <ShortcutLink href={`/app/${organisation.slug}/analyst`} label="Analyst" icon={<Sparkles aria-hidden="true" />} />
+        {fundingOn ? <ShortcutLink href={`/app/${organisation.slug}/funding`} label="Funding Readiness" icon={<Landmark aria-hidden="true" />} /> : null}
       </p>
       <Disclaimer />
     </>

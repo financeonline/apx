@@ -8,6 +8,7 @@
 
 export { MetricCard, type MetricCardVariant } from './metric-card';
 export { WidgetCards, type WidgetCard } from './widget-cards';
+export { BrandedScreen } from "./branded-screen";
 export { AppShell } from "./app-shell";
 export { SectionTabs } from "./section-tabs";
 export { BrandMark, Petals, Wordmark } from "./brand";

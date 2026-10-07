@@ -1,5 +1,6 @@
 import Link from 'next/link';
-import { Badge, Card, CardBody, EmptyState } from '@/components/ui/surfaces';
+import { Building2, ChevronRight } from 'lucide-react';
+import { Badge, Card, CardBody, EmptyState, IconBadge } from '@/components/ui/surfaces';
 import { THead, TBody, TR, TD } from '@/components/ui/table';
 import { Table } from '@/components/ui/shadcn';
 import { HealthScoreInline } from '@/components/dashboard';
@@ -50,6 +51,10 @@ export function CountsStrip({ counts }: { counts: PortfolioCounts }) {
   );
 }
 
+/**
+ * The attention queue (ADR-112), as the reference's cards (ADR-155): an icon tile, the client's
+ * name and health, its reasons, and an outlined "Why, and what next" in the footer.
+ */
 export function AttentionQueue({ rows, today, now }: { rows: readonly ClientRow[]; today: string; now: Date }) {
   void today; void now;
   if (rows.length === 0) {
@@ -60,37 +65,45 @@ export function AttentionQueue({ rows, today, now }: { rows: readonly ClientRow[
     );
   }
   return (
-    <ul className="grid gap-3 md:grid-cols-2">
+    <ul className="grid grid-cols-1 gap-3 md:grid-cols-2">
       {rows.map((row) => {
         const links = hrefs(row.organisation);
         return (
-          <li key={row.organisation.id}>
-            <Card className="h-full">
-              <CardBody>
-                <div className="flex flex-wrap items-start justify-between gap-2">
-                  <Link href={links.client} className="font-medium text-ink underline-offset-2 hover:underline">
-                    {row.organisation.name}
-                  </Link>
-                  <HealthScoreInline
-                    score={row.health?.score ?? null}
-                    band={row.health?.band ?? null}
-                    dimensionsUsed={row.health?.dimensionsUsed ?? 0}
-                    dimensionsTotal={row.health?.dimensionsTotal ?? HEALTH_DIMENSION_KEYS.length}
-                  />
+          <li key={row.organisation.id} className="min-w-0">
+            <div className="panel flex h-full flex-col rounded-card p-4">
+              <div className="flex gap-3.5">
+                <IconBadge tint="violet"><Building2 /></IconBadge>
+                <div className="min-w-0 flex-1">
+                  <div className="flex flex-wrap items-start justify-between gap-2">
+                    <Link href={links.client} className="min-w-0 font-semibold text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline">
+                      {row.organisation.name}
+                    </Link>
+                    <HealthScoreInline
+                      score={row.health?.score ?? null}
+                      band={row.health?.band ?? null}
+                      dimensionsUsed={row.health?.dimensionsUsed ?? 0}
+                      dimensionsTotal={row.health?.dimensionsTotal ?? HEALTH_DIMENSION_KEYS.length}
+                    />
+                  </div>
+                  <ul className="mt-2 flex flex-wrap gap-2">
+                    {row.attention!.reasons.map((reason) => (
+                      <li key={reason.kind}>
+                        <Badge tone={reasonTone(reason.kind)}>{reason.label}</Badge>
+                      </li>
+                    ))}
+                  </ul>
                 </div>
-                <ul className="mt-3 flex flex-wrap gap-2">
-                  {row.attention!.reasons.map((reason) => (
-                    <li key={reason.kind}>
-                      <Badge tone={reasonTone(reason.kind)}>{reason.label}</Badge>
-                    </li>
-                  ))}
-                </ul>
-                <p className="mt-3 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-                  <Link href={links.client} className="text-accent underline underline-offset-2">Why, and what next</Link>
-                  <Link href={links.home} className="text-ink-muted hover:text-ink">Open {row.organisation.name}</Link>
-                </p>
-              </CardBody>
-            </Card>
+              </div>
+              <p className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-2 pt-3 text-sm">
+                <Link
+                  href={links.client}
+                  className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
+                >
+                  Why, and what next <ChevronRight aria-hidden="true" className="size-4" />
+                </Link>
+                <Link href={links.home} className="text-ink-muted [overflow-wrap:anywhere] hover:text-ink">Open {row.organisation.name}</Link>
+              </p>
+            </div>
           </li>
         );
       })}

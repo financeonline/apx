@@ -3,7 +3,8 @@ import { notFound } from 'next/navigation';
 import { can } from '@/core/permissions';
 import { ENGAGEMENT_STATUS_LABELS, getEngagementItem, type EngagementStatus } from '@/modules/engagement';
 import { getAccessContext } from '@/modules/tenancy';
-import { Badge, Card, CardBody, PageHeader } from '@/components/ui/surfaces';
+import { ArrowRightLeft, History } from 'lucide-react';
+import { Badge, Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { CommentForm, StatusForm } from '@/components/engagement/forms';
 import { requirePermission } from '@/app/_lib/authz';
 import { commentEngagementItemAction, updateEngagementStatusAction } from '../actions';
@@ -35,7 +36,10 @@ export default async function EngagementItemPage({ params }: { params: Promise<{
 
       {options.length === 0 ? null : (
         <Card className="mt-6"><CardBody>
-          <h2 className="font-serif text-lg text-ink">{team ? 'Move it along' : 'Withdraw your request'}</h2>
+          <div className="flex min-w-0 items-center gap-3">
+            <IconBadge tint="violet" size="sm"><ArrowRightLeft /></IconBadge>
+            <h2 className="min-w-0 font-serif text-lg text-ink">{team ? 'Move it along' : 'Withdraw your request'}</h2>
+          </div>
           <div className="mt-3">
             <StatusForm action={updateEngagementStatusAction} orgSlug={orgSlug} itemId={item.id}
               options={options.map((s) => ({ value: s, label: ENGAGEMENT_STATUS_LABELS[s] }))} />
@@ -44,7 +48,10 @@ export default async function EngagementItemPage({ params }: { params: Promise<{
       )}
 
       <Card className="mt-6"><CardBody>
-        <h2 className="font-serif text-lg text-ink">History</h2>
+        <div className="flex min-w-0 items-center gap-3">
+          <IconBadge tint="pink" size="sm"><History /></IconBadge>
+          <h2 className="min-w-0 font-serif text-lg text-ink">History</h2>
+        </div>
         <ol className="mt-3 flex flex-col gap-3 text-sm">
           {events.map((e) => (
             <li key={e.id} className="border-b border-line pb-2 last:border-0">

@@ -1,9 +1,10 @@
 import { notFound } from 'next/navigation';
+import { UsersRound } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { toMotionError } from '@/core/errors';
 import { heldNameKey } from '@/modules/imports';
-import { PageHeader, Card, CardBody } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardBody, IconBadge } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
 import { MergeHeldForm, RenameHeldForm } from './held-controls';
 
@@ -52,12 +53,17 @@ export default async function HeldNamesPage({ params }: { params: Promise<{ orgS
         ) : [...groups.entries()].map(([key, members]) => (
           <Card key={key}>
             <CardBody className="p-4" data-testid="held-group">
-              <h2 className="font-serif text-lg text-ink">{members.map((m) => `“${m.name}”`).join(' and ')}</h2>
-              <p className="mt-1 text-sm text-ink-muted">
-                {members.length === 1
-                  ? 'The other record of this name was renamed or merged. Save this one to release the name.'
-                  : 'These are read as one name. Are they the same business?'}
-              </p>
+              <div className="flex min-w-0 gap-3.5">
+                <IconBadge tint="pink" size="sm"><UsersRound /></IconBadge>
+                <div className="min-w-0">
+                  <h2 className="font-serif text-lg text-ink">{members.map((m) => `“${m.name}”`).join(' and ')}</h2>
+                  <p className="mt-1 text-sm text-ink-muted">
+                    {members.length === 1
+                      ? 'The other record of this name was renamed or merged. Save this one to release the name.'
+                      : 'These are read as one name. Are they the same business?'}
+                  </p>
+                </div>
+              </div>
               {canEdit ? (
                 <div className="mt-3 flex flex-col gap-4">
                   {members.length > 1 ? <MergeHeldForm orgSlug={orgSlug} members={members} /> : null}

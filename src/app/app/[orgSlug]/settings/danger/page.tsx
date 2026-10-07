@@ -1,3 +1,4 @@
+import { Trash2 } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody } from '@/components/ui/surfaces';
 import { DangerForms } from './danger-forms';
@@ -19,6 +20,8 @@ export default async function DangerPage({ params }: { params: Promise<{ orgSlug
       <div className="mt-8">
         <Card>
           <CardHeader
+            icon={<Trash2 />}
+            tint="pink"
             title={ctx.organizationStatus === 'pending_deletion' ? 'Deletion scheduled' : 'Delete this organisation'}
             description={
               ctx.organizationStatus === 'pending_deletion'

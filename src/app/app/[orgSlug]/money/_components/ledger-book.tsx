@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { FileText, HandCoins, Receipt } from 'lucide-react';
 import { Card, CardHeader, CardBody, PageHeader } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { formatDate } from '@/components/labels';
@@ -44,7 +45,7 @@ export function LedgerBookPage({
 
       <div className="flex flex-col gap-6">
         <Card>
-          <CardHeader title="This month" />
+          <CardHeader title="This month" icon={route === 'receivables' ? <HandCoins /> : <Receipt />} />
           <CardBody className="px-0 py-0">
             <FigureTable
               rows={view.figures}
@@ -60,6 +61,8 @@ export function LedgerBookPage({
             description={
               view.truncated ? 'The first 200 unpaid invoices are shown.' : 'Latest due date first.'
             }
+            icon={<FileText />}
+            tint="pink"
           />
           <CardBody className={view.invoices.length === 0 ? '' : 'px-0 py-0'}>
             {view.invoices.length === 0 ? (

@@ -57,10 +57,10 @@ export default async function ActionsPage({
             href={`/app/${orgSlug}/actions?show=${key}`}
             aria-current={selected === key ? 'page' : undefined}
             className={selected === key
-              ? 'rounded-md bg-accent-soft px-3 py-1.5 text-accent'
+              ? 'rounded-full bg-accent-soft px-3.5 py-1.5 font-medium text-accent'
               : centre.counts[key] === 0
-                ? 'rounded-md px-3 py-1.5 text-ink-faint hover:text-ink'
-                : 'rounded-md px-3 py-1.5 text-ink-muted hover:text-ink'}
+                ? 'rounded-full border border-line bg-surface px-3.5 py-1.5 text-ink-faint hover:text-ink'
+                : 'rounded-full border border-line bg-surface px-3.5 py-1.5 text-ink-muted transition-colors hover:border-accent/45 hover:text-accent'}
           >
             {ACTION_VIEW_LABELS[key]}
             <span className="ml-1.5 tabular-nums text-ink-faint">{centre.counts[key]}</span>

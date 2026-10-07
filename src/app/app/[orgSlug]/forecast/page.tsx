@@ -5,11 +5,27 @@ import {
   loadForecast, metricLabel, unavailableText, type ForecastMetricView, type ForecastView,
 } from '@/modules/forecast';
 import { getAccessContext } from '@/modules/tenancy';
-import { Badge, Banner, Card, CardBody, CardHeader, PageHeader } from '@/components/ui/surfaces';
+import type { ReactNode } from 'react';
+import {
+  CalendarRange, CircleHelp, HandCoins, Landmark, PiggyBank, Receipt, TrendingUp, Wallet,
+} from 'lucide-react';
+import {
+  Badge, Banner, Card, CardBody, CardHeader, IconBadge, PageHeader, type IconTint,
+} from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
 import { RegenerateControl } from './regenerate-control';
 
 export const dynamic = 'force-dynamic';
+
+/** Each headline figure's decorative tile (ADR-155), alternating violet and pink as the reference. */
+const FIGURE_TILE: Readonly<Record<string, { icon: ReactNode; tint: IconTint }>> = {
+  revenue: { icon: <TrendingUp />, tint: 'violet' },
+  operating_expenses: { icon: <Receipt />, tint: 'pink' },
+  operating_profit: { icon: <PiggyBank />, tint: 'violet' },
+  closing_cash: { icon: <Landmark />, tint: 'pink' },
+  receivables: { icon: <HandCoins />, tint: 'violet' },
+  payables: { icon: <Wallet />, tint: 'pink' },
+};
 
 /**
  * What is expected (REQ-FC-01/02/05; ADR-099).
@@ -43,6 +59,7 @@ export default async function ForecastPage({
         <PageHeader eyebrow="Forecast" title="What is expected" />
         <Card className="mt-6">
           <CardBody>
+            <div className="mb-3"><IconBadge tint="violet"><CircleHelp /></IconBadge></div>
             <p className="text-sm text-ink">
               {state.reason === 'never_generated'
                 ? 'No forecast has been worked out yet.'
@@ -95,14 +112,18 @@ export default async function ForecastPage({
       <p className="mt-6 text-sm text-ink-muted">{FORECAST_DISCLAIMER}</p>
 
       {first === undefined ? null : (
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {FORECAST_HEADLINE_KEYS.map((key) => {
             const metric = first.metrics.find((m) => m.metricKey === key);
             const missing = state.unavailable.find((u) => u.metricKey === key);
+            const tile = FIGURE_TILE[key];
             return (
               <Card key={key}>
                 <CardBody>
-                  <p className="text-xs uppercase tracking-wide text-ink-faint">{metricLabel(key)}</p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    {tile === undefined ? null : <IconBadge tint={tile.tint} size="sm">{tile.icon}</IconBadge>}
+                    <p className="min-w-0 text-xs font-medium uppercase tracking-[0.1em] text-ink-muted">{metricLabel(key)}</p>
+                  </div>
                   {metric === undefined ? (
                     <p className="mt-2 text-sm text-ink-muted">
                       {missing === undefined
@@ -133,11 +154,11 @@ export default async function ForecastPage({
 
       {state.periods.length <= 1 ? null : (
         <Card className="mt-6">
-          <CardHeader title="The months ahead" />
+          <CardHeader title="The months ahead" icon={<CalendarRange />} tint="pink" />
           <CardBody>
             <div className="flex flex-col gap-4">
               {state.periods.map((period) => (
-                <div key={period.periodId}>
+                <div key={period.periodId} className="rounded-xl bg-surface-sunken p-3">
                   <p className="text-sm font-medium text-ink">{period.periodLabel}</p>
                   <dl className="mt-1 flex flex-wrap gap-x-6 gap-y-1 text-sm">
                     {FORECAST_HEADLINE_KEYS.map((key) => {
@@ -165,7 +186,7 @@ export default async function ForecastPage({
       {/* Phase 12 (ADR-100): the forecast is what a what-if changes, so this is where it is offered. */}
       <p className="mt-6 text-sm text-ink-muted">
         Wondering what would happen if something changed?{' '}
-        <Link href={`/app/${orgSlug}/what-if`} className="text-accent underline underline-offset-2">
+        <Link href={`/app/${orgSlug}/what-if`} className="font-medium text-accent underline underline-offset-2">
           Try a what-if
         </Link>
         .
@@ -190,7 +211,7 @@ function ForecastFigure({ metric }: { metric: ForecastMetricView }) {
   return (
     <>
       <div className="mt-2 flex items-baseline gap-2">
-        <span className="text-2xl tabular-nums text-ink">
+        <span className="font-mono text-2xl tabular-nums text-ink">
           {formatMoney(metric.value, { currency })}
         </span>
         <Badge tone="neutral">Forecast</Badge>
@@ -220,8 +241,8 @@ function ForecastFigure({ metric }: { metric: ForecastMetricView }) {
 /** Progressive disclosure (§15): the working, only for a reader who asks for it. */
 function HowItWasWorkedOut({ state, orgSlug }: { state: ForecastView; orgSlug: string }) {
   return (
-    <details className="mt-6 rounded-card border border-line bg-surface p-4">
-      <summary className="cursor-pointer text-sm text-ink">How was this worked out?</summary>
+    <details className="panel mt-6 rounded-card p-4">
+      <summary className="cursor-pointer text-sm font-medium text-accent">How was this worked out?</summary>
       <div className="mt-3 flex flex-col gap-3 text-sm text-ink-muted">
         <p>
           Each figure is the average of your last finished months, with the most recent months

@@ -1,7 +1,8 @@
 import Link from 'next/link';
 import { listNotifications } from '@/modules/engagement';
 import { getAccessContext } from '@/modules/tenancy';
-import { Card, CardBody, EmptyState, PageHeader } from '@/components/ui/surfaces';
+import { Bell, BellDot } from 'lucide-react';
+import { Card, CardBody, EmptyState, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { MarkAllReadForm } from '@/components/engagement/forms';
 import { requirePermission } from '@/app/_lib/authz';
 import { markAllReadAction } from '../engagement/actions';
@@ -26,13 +27,16 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
           <Card><CardBody>
             <ul className="flex flex-col divide-y divide-line">
               {items.map((n) => (
-                <li key={n.id} className="py-3 text-sm">
+                <li key={n.id} className="flex min-w-0 items-start gap-3 py-3 text-sm">
+                  <IconBadge tint={n.read ? 'violet' : 'pink'} size="sm">{n.read ? <Bell /> : <BellDot />}</IconBadge>
+                  <div className="min-w-0 flex-1">
                   <p className={n.read ? 'text-ink-muted' : 'font-medium text-ink'}>
-                    {n.href === null ? n.title : <Link href={n.href} className="underline-offset-2 hover:underline">{n.title}</Link>}
+                    {n.href === null ? n.title : <Link href={n.href} className="underline-offset-2 hover:text-accent hover:underline">{n.title}</Link>}
                     {n.read ? null : <span className="sr-only"> (unread)</span>}
                   </p>
                   {n.body === null ? null : <p className="mt-1 text-ink-muted">{n.body}</p>}
                   <p className="mt-1 text-xs text-ink-faint">{n.createdAt.slice(0, 16).replace('T', ' ')} UTC</p>
+                  </div>
                 </li>
               ))}
             </ul>

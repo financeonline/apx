@@ -2,6 +2,7 @@ import { redirect } from 'next/navigation';
 import { createUserClient } from '@/core/db/user-client';
 import { listMyOrganizations } from '@/modules/tenancy';
 import { OnboardingForm } from './onboarding-form';
+import { BrandedScreen } from '@/components/dashboard/branded-screen';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,14 +15,14 @@ export default async function OnboardingPage() {
   if (organizations.length > 0) redirect('/select-organization');
 
   return (
-    <main className="mx-auto flex min-h-dvh w-full max-w-lg flex-col justify-center gap-6 px-6 py-12">
+    <BrandedScreen width="lg">
       <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Set up your organisation</h1>
+        <h1 className="text-3xl">Set up your organisation</h1>
         <p className="mt-2 text-ink-muted">
           This is the business MOTION will report on. You can change these details later in Settings.
         </p>
       </div>
       <OnboardingForm />
-    </main>
+    </BrandedScreen>
   );
 }

@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ChartColumn, FileText, Handshake, Package, Wallet } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { z } from 'zod';
 import { getAccessContext } from '@/modules/tenancy';
@@ -69,7 +70,7 @@ export default async function CustomerPage({
 
       <div className="flex flex-col gap-6">
         <Card>
-          <CardHeader title="This month" />
+          <CardHeader title="This month" icon={<Wallet />} />
           <CardBody className={figures.length === 0 ? '' : 'px-0 py-0'}>
             {figures.length === 0 ? (
               <p className="text-sm text-ink-muted">
@@ -88,9 +89,9 @@ export default async function CustomerPage({
           </CardBody>
         </Card>
 
-        <div className="grid gap-6 md:grid-cols-2 [&>*]:min-w-0">
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 [&>*]:min-w-0">
           <Card>
-            <CardHeader title="What they buy" description="Share of this customer’s attributed revenue over the last twelve months." />
+            <CardHeader title="What they buy" description="Share of this customer’s attributed revenue over the last twelve months." icon={<Package />} tint="pink" />
             <CardBody>
               {commercial.products.length === 0 ? (
                 <p className="text-sm text-ink-muted">No invoice has been split into products yet{mayEdit ? ' — use “Split into lines” under an invoice below' : ''}.</p>
@@ -107,7 +108,7 @@ export default async function CustomerPage({
             </CardBody>
           </Card>
           <Card>
-            <CardHeader title="How they were won" />
+            <CardHeader title="How they were won" icon={<Handshake />} />
             <CardBody>
               {commercial.wonThrough.length === 0 ? (
                 <p className="text-sm text-ink-muted">No won opportunity names this customer, so no campaign is credited with them.</p>
@@ -139,6 +140,8 @@ export default async function CustomerPage({
           <CardHeader
             title="Revenue over time"
             description="A month with no figure is a gap, not a zero."
+            icon={<ChartColumn />}
+            tint="pink"
           />
           <CardBody className="px-0 py-0">
             <TableWrap>
@@ -165,7 +168,7 @@ export default async function CustomerPage({
         </Card>
 
         <Card>
-          <CardHeader title="Their invoices" description={mayEdit ? 'Split an invoice into products or services to see what each one contributes.' : undefined} />
+          <CardHeader title="Their invoices" description={mayEdit ? 'Split an invoice into products or services to see what each one contributes.' : undefined} icon={<FileText />} />
           <CardBody className={view.invoices.length === 0 ? '' : 'px-0 py-0'}>
             {view.invoices.length === 0 ? (
               <p className="text-sm text-ink-muted">

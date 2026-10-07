@@ -38,7 +38,7 @@ export default async function PortfolioActionsPage({ searchParams }: { searchPar
             key={l.view}
             href={l.view === 'attention' ? '/portfolio/actions' : `/portfolio/actions?view=${l.view}`}
             aria-current={l.view === lens ? 'page' : undefined}
-            className={`rounded-full border px-3 py-1 ${l.view === lens ? 'border-ink bg-ink text-surface' : 'border-line text-ink-muted hover:text-ink'}`}
+            className={`rounded-xl border px-3 py-1 font-medium transition-colors ${l.view === lens ? 'border-accent bg-accent text-surface' : 'border-line bg-surface text-ink-muted hover:border-accent/45 hover:bg-accent-soft hover:text-accent'}`}
           >
             {l.label} <span className="tabular-nums">{lensTotal(portfolio, l.view).toLocaleString('en-GB')}</span>
           </Link>

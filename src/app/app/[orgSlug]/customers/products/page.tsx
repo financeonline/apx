@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Package, Plus } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, Badge } from '@/components/ui/surfaces';
@@ -27,7 +28,7 @@ export default async function ProductsPage({ params, searchParams }: { params: P
       ) : <PageHeader eyebrow="Commercial" title="Products and services" description="Add the things you sell; once invoices are imported you can split them into lines." />}
       <div className="flex flex-col gap-6">
         <Card>
-          <CardHeader title={scope ? `Revenue by product — ${scope.period.label}` : 'Products and services'} />
+          <CardHeader title={scope ? `Revenue by product — ${scope.period.label}` : 'Products and services'} icon={<Package />} />
           <CardBody className="px-0 py-0">
             {!view || view.products.length === 0 ? (
               <p className="px-5 py-4 text-sm text-ink-muted">Nothing recorded yet. Add a product or service below{mayEdit ? '' : ' — an owner or admin can'}, then split an invoice into lines on a customer’s page.</p>
@@ -57,7 +58,7 @@ export default async function ProductsPage({ params, searchParams }: { params: P
         </Card>
         {mayEdit ? (
           <Card>
-            <CardHeader title="Add a product or service" />
+            <CardHeader title="Add a product or service" icon={<Plus />} tint="pink" />
             <CardBody><ProductForm orgSlug={orgSlug} /></CardBody>
           </Card>
         ) : null}

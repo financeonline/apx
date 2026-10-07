@@ -73,7 +73,7 @@ export default async function ConversationPage({
         title={current ? conversationLabel(current) : 'A conversation'}
         description={own ? undefined : "A colleague's conversation. You can read it, not continue it."}
       />
-      <div className="mt-6 grid gap-6 md:grid-cols-[220px_1fr]">
+      <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
         <ConversationRail orgSlug={orgSlug} conversations={conversations} current={conversationId} />
         <AnalystChat
           orgSlug={orgSlug}

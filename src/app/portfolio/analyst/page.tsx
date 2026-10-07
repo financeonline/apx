@@ -1,6 +1,7 @@
 import Link from 'next/link';
+import { Sparkles } from 'lucide-react';
 import { getPortfolioContext, hrefs, listAdviserTurns } from '@/modules/portfolio';
-import { PageHeader, Card, CardBody, CardHeader, Badge } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardBody, CardHeader, Badge, IconBadge } from '@/components/ui/surfaces';
 import { Disclaimer } from '@/components/dashboard';
 import { formatDateTime } from '@/components/labels';
 import { AskForm } from './ask-form';
@@ -39,7 +40,10 @@ export default async function PortfolioAnalystPage() {
       </Card>
 
       <section aria-labelledby="answers" className="mt-8 flex flex-col gap-4">
-        <h2 id="answers" className="font-serif text-lg">Recent answers</h2>
+        <div className="flex min-w-0 items-center gap-3">
+          <IconBadge tint="pink" size="sm"><Sparkles /></IconBadge>
+          <h2 id="answers" className="min-w-0 font-serif text-lg">Recent answers</h2>
+        </div>
         {turns.length === 0 ? <p className="text-sm text-ink-muted">Nothing asked yet.</p> : null}
         {turns.map((turn) => {
           const status = STATUS_LABELS[turn.groundingStatus ?? 'failed'];
@@ -47,6 +51,8 @@ export default async function PortfolioAnalystPage() {
           return (
             <Card key={turn.id}>
               <CardHeader
+                icon={<Sparkles />}
+                tint="violet"
                 title={turn.question}
                 description={formatDateTime(turn.createdAt)}
                 action={turn.status === 'pending' ? <Badge tone="neutral">Working…</Badge> : <Badge tone={status.tone}>{status.label}</Badge>}
@@ -66,7 +72,7 @@ export default async function PortfolioAnalystPage() {
                           const org = named === undefined ? undefined : orgById.get(named.id);
                           const cited = answer.refs.filter((r) => client.because.includes(r.ref));
                           return (
-                            <li key={client.ref} className="rounded-md border border-line px-4 py-3">
+                            <li key={client.ref} className="rounded-2xl border border-line bg-surface px-4 py-3">
                               <p className="font-medium">
                                 {org !== undefined ? (
                                   <Link href={hrefs(org).client} className="underline-offset-2 hover:underline">{org.name}</Link>

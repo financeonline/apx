@@ -1,6 +1,7 @@
 import Link from 'next/link';
+import { ChevronRight, Lightbulb } from 'lucide-react';
 import { hrefs, type OpportunityEntry, type PortfolioOrganisation } from '@/modules/portfolio';
-import { Card, CardBody, EmptyState } from '@/components/ui/surfaces';
+import { Card, CardBody, EmptyState, IconBadge } from '@/components/ui/surfaces';
 import { RecordOpportunity } from './record-opportunity';
 
 /**
@@ -34,10 +35,13 @@ export function OpportunityList({
             <Card>
               <CardBody>
                 {withActions ? null : (
-                  <p className="flex flex-wrap items-baseline justify-between gap-2">
-                    <Link href={links.client} className="font-medium text-ink underline-offset-2 hover:underline">{org.name}</Link>
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="flex min-w-0 items-center gap-3">
+                      <IconBadge tint="pink" size="sm"><Lightbulb /></IconBadge>
+                      <Link href={links.client} className="min-w-0 font-semibold text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline">{org.name}</Link>
+                    </span>
                     <span className="text-xs text-ink-faint">{entry.periodLabel}</span>
-                  </p>
+                  </div>
                 )}
                 <ul className={withActions ? 'flex flex-col gap-4' : 'mt-2 flex flex-col gap-3'}>
                   {entry.opportunities.map((o) => (
@@ -51,8 +55,8 @@ export function OpportunityList({
                 </ul>
                 {entry.evidenceBundleId === null ? null : (
                   <p className="mt-3 text-sm">
-                    <Link href={links.evidence(entry.evidenceBundleId)} className="text-accent underline underline-offset-2">
-                      See the {entry.periodLabel} Health Score these rest on
+                    <Link href={links.evidence(entry.evidenceBundleId)} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">
+                      See the {entry.periodLabel} Health Score these rest on <ChevronRight aria-hidden="true" className="size-4" />
                     </Link>
                   </p>
                 )}

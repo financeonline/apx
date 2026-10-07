@@ -57,9 +57,9 @@ export default async function AnalystPage({
         title="Ask about the numbers"
         description="Answers with evidence, drawn only from your validated numbers."
       />
-      <div className="mt-6 grid gap-6 md:grid-cols-[220px_1fr]">
+      <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
         <ConversationRail orgSlug={orgSlug} conversations={conversations} current={null} />
-        <div className="flex flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-6">
           {conversations.length === 0 && !ask ? (
             <AnalystNoConversationsEmpty askHrefBase={`/app/${orgSlug}/analyst`} />
           ) : null}

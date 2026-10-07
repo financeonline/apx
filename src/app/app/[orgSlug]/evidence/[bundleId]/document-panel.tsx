@@ -32,7 +32,7 @@ export function DocumentPanel({
 
   if (locked || documentId === null) {
     return (
-      <div className="rounded-md border border-line bg-surface-sunken p-4">
+      <div className="rounded-2xl border border-line bg-surface-sunken p-4">
         <div className="flex flex-wrap items-center gap-2">
           <Badge tone="neutral">Locked</Badge>
           <p className="text-sm text-ink">Source documents are available to owners and admins.</p>
@@ -70,7 +70,7 @@ export function DocumentPanel({
   }
 
   return (
-    <div className="rounded-md border border-line bg-surface-sunken p-4">
+    <div className="rounded-2xl border border-line bg-surface-sunken p-4">
       <p className="text-sm text-ink">
         {filename ?? 'Source document'}
         {where ? <span className="text-ink-muted"> — {where}</span> : null}

@@ -7,7 +7,8 @@ import {
   DEFAULT_CASH_EFFECT, checkAffordability, hasScenario, listScenarios, loadScenario, parseWrittenAmount,
   type AffordabilityCheck,
 } from '@/modules/scenarios';
-import { Card, CardBody, CardHeader, EmptyState, PageHeader } from '@/components/ui/surfaces';
+import { Bookmark, FlaskConical, SlidersHorizontal } from 'lucide-react';
+import { Card, CardBody, CardHeader, EmptyState, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
 import { ScenarioComparison } from './comparison';
 import { ScenarioForm } from './scenario-form';
@@ -112,6 +113,8 @@ export default async function WhatIfPage({
         <Card className="mt-6">
           <CardHeader
             title="What would you like to change?"
+            icon={<SlidersHorizontal />}
+            tint="violet"
             description="Tick the ones you want to try. Everything else stays as MOTION expects it."
           />
           <CardBody>
@@ -165,17 +168,20 @@ export default async function WhatIfPage({
 
       {saved.length <= 1 ? null : (
         <Card className="mt-10">
-          <CardHeader title="Saved scenarios" description="What you have tried before." />
+          <CardHeader title="Saved scenarios" description="What you have tried before." icon={<Bookmark />} tint="pink" />
           <CardBody>
             <ul className="flex flex-col gap-3 text-sm">
               {saved.map((scenario) => (
-                <li key={scenario.runId} className="flex flex-wrap items-baseline justify-between gap-3">
-                  <Link
-                    href={`/app/${orgSlug}/what-if/${scenario.runId}`}
-                    className="text-accent underline underline-offset-2"
-                  >
-                    {scenario.name}
-                  </Link>
+                <li key={scenario.runId} className="flex flex-wrap items-center justify-between gap-3">
+                  <span className="flex min-w-0 items-center gap-3">
+                    <IconBadge tint="violet" size="sm"><FlaskConical /></IconBadge>
+                    <Link
+                      href={`/app/${orgSlug}/what-if/${scenario.runId}`}
+                      className="min-w-0 font-medium text-ink underline-offset-2 hover:text-accent hover:underline"
+                    >
+                      {scenario.name}
+                    </Link>
+                  </span>
                   <span className="text-ink-muted">
                     {new Date(scenario.createdAt).toLocaleDateString('en-GB', {
                       day: 'numeric', month: 'short', year: 'numeric',

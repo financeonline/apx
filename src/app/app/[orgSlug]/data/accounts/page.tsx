@@ -1,3 +1,4 @@
+import { ListChecks } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, Banner } from '@/components/ui/surfaces';
@@ -50,6 +51,8 @@ export default async function AccountsPage({ params }: { params: Promise<{ orgSl
 
       <Card>
         <CardHeader
+          icon={<ListChecks />}
+          tint="violet"
           title="Chart of accounts"
           description={
             canEdit

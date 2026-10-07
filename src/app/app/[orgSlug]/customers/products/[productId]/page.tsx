@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { ChartColumn, FileText, Users, Wallet } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { Card, CardHeader, CardBody, Badge, DetailList } from '@/components/ui/surfaces';
@@ -28,7 +29,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
       <PeriodHeading eyebrow={view.product.kind === 'product' ? 'Product' : 'Service'} title={view.product.name} description={view.product.code ? `Code ${view.product.code}` : undefined} scope={scope} hrefFor={(id) => `/app/${orgSlug}/customers/products/${productId}?period=${id}`} />
       <div className="flex flex-col gap-6">
         <Card>
-          <CardHeader title={`This month — ${scope.period.label}`} />
+          <CardHeader title={`This month — ${scope.period.label}`} icon={<Wallet />} />
           <CardBody>
             <DetailList items={[
               { label: 'Revenue', value: <span className="tabular">{m.revenue}</span> },
@@ -38,7 +39,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
           </CardBody>
         </Card>
         <Card>
-          <CardHeader title="Over time" description="Revenue attributed by lines each month; contribution only where cost lines exist." />
+          <CardHeader title="Over time" description="Revenue attributed by lines each month; contribution only where cost lines exist." icon={<ChartColumn />} tint="pink" />
           <CardBody className="px-0 py-0">
             <TableWrap>
               <caption className="sr-only">Monthly revenue for {view.product.name}</caption>
@@ -48,7 +49,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
           </CardBody>
         </Card>
         <Card>
-          <CardHeader title="Who buys it" description="Share of this product’s attributed revenue over the last twelve months." />
+          <CardHeader title="Who buys it" description="Share of this product’s attributed revenue over the last twelve months." icon={<Users />} />
           <CardBody>
             {view.customers.length === 0 ? <p className="text-sm text-ink-muted">No sales lines yet.</p> : (
               <ul className="flex flex-col gap-2 text-sm">
@@ -63,7 +64,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
           </CardBody>
         </Card>
         <Card>
-          <CardHeader title="The invoices behind these figures" description="Each line links to the invoice’s own record and, for those allowed, its source document." />
+          <CardHeader title="The invoices behind these figures" description="Each line links to the invoice’s own record and, for those allowed, its source document." icon={<FileText />} tint="pink" />
           <CardBody className="px-0 py-0">
             {view.lines.length === 0 ? <p className="px-5 py-4 text-sm text-ink-muted">No lines yet.</p> : (
               <TableWrap>

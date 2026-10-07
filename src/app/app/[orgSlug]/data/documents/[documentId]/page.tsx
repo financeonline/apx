@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { FileText, FileUp, Layers } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { can } from '@/core/permissions';
@@ -38,7 +39,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
     <>
       <p className="mb-2 text-sm"><Link href={`/app/${orgSlug}/data/documents`} className="text-accent underline underline-offset-2">Back to documents</Link></p>
       <PageHeader eyebrow="Data" title={document.filename} description={`${DOCUMENT_KIND_LABELS[document.kind] ?? document.kind} · uploaded ${formatDateTime(document.createdAt)}`} />
-      <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_320px]">
+      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card>
           <CardBody className="p-4">
             {document.deletedAt !== null ? (
@@ -50,7 +51,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
         </Card>
         <div className="flex flex-col gap-6">
           <Card>
-            <CardHeader title="About this file" />
+            <CardHeader icon={<FileText />} tint="violet" title="About this file" />
             <CardBody>
               <DetailList items={[
                 { label: 'Status', value: <Badge tone={DOCUMENT_STATUS_TONES[document.status] ?? 'neutral'}>{DOCUMENT_STATUS_LABELS[document.status] ?? document.status}</Badge> },
@@ -62,7 +63,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
             </CardBody>
           </Card>
           <Card>
-            <CardHeader title="What rests on this file" />
+            <CardHeader icon={<Layers />} tint="pink" title="What rests on this file" />
             <CardBody>
               {/*
                 * The other end of the evidence chain (EVIDENCE_MODEL.md §1, ADR-096). A reader who
@@ -99,7 +100,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
             </CardBody>
           </Card>
           <Card>
-            <CardHeader title="Imports from this file" />
+            <CardHeader icon={<FileUp />} tint="violet" title="Imports from this file" />
             <CardBody>
               {document.batches.length === 0 ? <p className="text-sm text-ink-muted">None yet.</p> : (
                 <ul className="flex flex-col gap-2 text-sm">

@@ -1,9 +1,10 @@
 import Link from 'next/link';
+import { ListChecks } from 'lucide-react';
 import { formatMoney, formatPercent } from '@/core/money';
 import { missingReasonText } from '@/modules/dashboard';
 import { getBudgetView, type BudgetLineKey } from '@/modules/budgets';
 import { getAccessContext } from '@/modules/tenancy';
-import { Badge, Card, CardBody, EmptyState, PageHeader } from '@/components/ui/surfaces';
+import { Badge, Card, CardBody, EmptyState, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 
@@ -65,11 +66,11 @@ export default async function BudgetPage({
         description="The budget is what was imported; the actual is the figure on Profit & loss for the same month. Shown to the penny."
       />
       {view.months.length > 1 ? (
-        <nav aria-label="Budget months" className="mb-6 flex flex-wrap gap-3 text-sm">
+        <nav aria-label="Budget months" className="mb-6 flex flex-wrap gap-2 text-sm">
           {view.months.map((m) => (
             <Link key={m.id} href={`/app/${orgSlug}/money/budget?period=${m.id}`}
               aria-current={m.id === view.period?.id ? 'page' : undefined}
-              className={m.id === view.period?.id ? 'font-medium text-ink' : 'text-accent underline underline-offset-2'}>
+              className={m.id === view.period?.id ? 'rounded-full bg-accent-soft px-3 py-1 font-medium text-accent' : 'rounded-full bg-surface-sunken px-3 py-1 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}>
               {m.label}
             </Link>
           ))}
@@ -132,7 +133,10 @@ export default async function BudgetPage({
 
       <Card className="mt-6">
         <CardBody>
-          <h2 className="font-serif text-lg text-ink">The budget lines</h2>
+          <div className="flex items-center gap-3">
+            <IconBadge tint="pink" size="sm"><ListChecks /></IconBadge>
+            <h2 className="font-serif text-lg text-ink">The budget lines</h2>
+          </div>
           <ul className="mt-3 flex flex-col divide-y divide-line text-sm">
             {view.lines.map((line) => (
               <li key={line.id} className="flex flex-wrap justify-between gap-2 py-2">

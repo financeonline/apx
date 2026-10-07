@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { Activity, Briefcase, ChevronRight, Database, Gauge, LogIn, ToggleRight, UsersRound } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
@@ -41,10 +42,10 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
       <p className="mb-2 text-sm"><Link href="/platform/organizations" className="underline">Back to organisations</Link></p>
       <PageHeader title={org.name} description={`${org.slug} · created ${formatDate(org.createdAt)}`} />
 
-      <div className="mt-8 grid gap-6 lg:grid-cols-[1fr_340px]">
+      <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
         <div className="flex flex-col gap-6">
           <Card>
-            <CardHeader title={`Members (${members.length})`} />
+            <CardHeader icon={<UsersRound />} tint="violet" title={`Members (${members.length})`} />
             <CardBody>
               {members.length === 0 ? <p className="text-sm text-ink-muted">Nobody has joined yet.</p> : (
                 <TableWrap>
@@ -66,7 +67,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
           </Card>
 
           <Card>
-            <CardHeader title={`Assigned staff (${assignments.length})`} />
+            <CardHeader icon={<Briefcase />} tint="pink" title={`Assigned staff (${assignments.length})`} />
             <CardBody>
               {assignments.length === 0 ? (
                 <p className="text-sm text-ink-muted">Nobody is assigned. <Link className="underline" href="/platform/assignments">Assign an employee</Link>.</p>
@@ -84,7 +85,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
           </Card>
 
           <Card>
-            <CardHeader title="What this organisation may do" />
+            <CardHeader icon={<ToggleRight />} tint="violet" title="What this organisation may do" />
             <CardBody>
               <div className="flex flex-col gap-3">
                 <OrgFeatureToggle orgId={org.id} feature="ai_pdf_extraction" label="Read PDFs with AI"
@@ -99,7 +100,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
           </Card>
 
           <Card>
-            <CardHeader title="Limits" />
+            <CardHeader icon={<Gauge />} tint="pink" title="Limits" />
             <CardBody>
               <p className="mb-3 text-sm text-ink-muted">Leave a field blank to use the platform default from <Link className="underline" href="/platform/settings">settings</Link>.</p>
               <OrgQuotasForm orgId={org.id} quotas={quotas} />
@@ -109,7 +110,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
 
         <div className="flex flex-col gap-6">
           <Card>
-            <CardHeader title="State" />
+            <CardHeader icon={<Activity />} tint="violet" title="State" />
             <CardBody>
               <DetailList items={[
                 { label: 'Status', value: org.status === 'active' ? ORG_STATUS_LABELS[org.status] : <Badge tone="warn">{ORG_STATUS_LABELS[org.status] ?? org.status}</Badge> },
@@ -127,7 +128,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
           </Card>
 
           <Card>
-            <CardHeader title="What is in it" />
+            <CardHeader icon={<Database />} tint="pink" title="What is in it" />
             <CardBody>
               <DetailList items={[
                 { label: 'Documents', value: counts.documents },
@@ -138,13 +139,13 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
           </Card>
 
           <Card>
-            <CardHeader title="Open as staff" />
+            <CardHeader icon={<LogIn />} tint="violet" title="Open as staff" />
             <CardBody>
               <p className="text-sm text-ink-muted">
                 Opening this customer&rsquo;s pages is recorded in <em>their</em> audit log, and they can see it (CD-13).
               </p>
               <p className="mt-3 text-sm">
-                <Link className="underline" href={`/app/${org.slug}/home`}>Open {org.name}</Link>
+                <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={`/app/${org.slug}/home`}>Open {org.name} <ChevronRight aria-hidden="true" className="size-4" /></Link>
               </p>
               <p className="mt-3 text-sm">
                 <Link className="underline" href={`/platform/audit?org=${org.id}`}>This organisation&rsquo;s audit trail</Link>

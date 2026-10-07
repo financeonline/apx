@@ -1,3 +1,4 @@
+import { KeyRound, UserCog } from 'lucide-react';
 import { toMotionError } from '@/core/errors';
 import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState } from '@/components/ui/surfaces';
@@ -32,7 +33,7 @@ export default async function PlatformUsersPage() {
       />
       <div className="mt-8 flex flex-col gap-6">
         <Card>
-          <CardHeader title="Accounts" />
+          <CardHeader icon={<UserCog />} tint="violet" title="Accounts" />
           <CardBody>
             {users.length === 0 ? (
               <EmptyState title="No platform accounts yet">Grant the first one below.</EmptyState>
@@ -55,6 +56,8 @@ export default async function PlatformUsersPage() {
         </Card>
         <Card>
           <CardHeader
+            icon={<KeyRound />}
+            tint="pink"
             title="Grant a platform role"
             description="Requires two-step sign-in and a recent re-authentication."
           />

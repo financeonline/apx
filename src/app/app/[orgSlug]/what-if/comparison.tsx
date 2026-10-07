@@ -8,7 +8,19 @@ import {
   BASIS_LABEL, BASIS_TEXT, metricLabel, unavailableText as forecastUnavailableText,
 } from '@/modules/forecast';
 import { DATA_QUALITY_NOTE_TEXT } from '@/components/dashboard';
-import { Badge, Banner, Card, CardBody, CardHeader } from '@/components/ui/surfaces';
+import type { ReactNode } from 'react';
+import { HandCoins, Landmark, ListChecks, PiggyBank, Receipt, TrendingUp, Wallet } from 'lucide-react';
+import { Badge, Banner, Card, CardBody, CardHeader, IconBadge, type IconTint } from '@/components/ui/surfaces';
+
+/** Each headline figure's decorative tile (ADR-155), alternating violet and pink as the reference. */
+const FIGURE_TILE: Readonly<Record<string, { icon: ReactNode; tint: IconTint }>> = {
+  revenue: { icon: <TrendingUp />, tint: 'violet' },
+  operating_expenses: { icon: <Receipt />, tint: 'pink' },
+  operating_profit: { icon: <PiggyBank />, tint: 'violet' },
+  closing_cash: { icon: <Landmark />, tint: 'pink' },
+  receivables: { icon: <HandCoins />, tint: 'violet' },
+  payables: { icon: <Wallet />, tint: 'pink' },
+};
 
 /**
  * BASELINE versus SCENARIO (REQ-SC-09, §5, §6, §14).
@@ -83,14 +95,18 @@ export function ScenarioComparison({
       )}
 
       {first === undefined ? null : (
-        <div className="mt-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+        <div className="mt-6 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {SCENARIO_HEADLINE_KEYS.map((key) => {
             const metric = first.metrics.find((m) => m.metricKey === key);
             const missing = scenario.dataQuality.forecastUnavailable.find((u) => u.metricKey === key);
+            const tile = FIGURE_TILE[key];
             return (
               <Card key={key}>
                 <CardBody>
-                  <p className="text-xs uppercase tracking-wide text-ink-faint">{metricLabel(key)}</p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    {tile === undefined ? null : <IconBadge tint={tile.tint} size="sm">{tile.icon}</IconBadge>}
+                    <p className="min-w-0 text-xs font-medium uppercase tracking-[0.1em] text-ink-muted">{metricLabel(key)}</p>
+                  </div>
                   {metric === undefined ? (
                     <p className="mt-2 text-sm text-ink-muted">
                       {missing === undefined
@@ -131,7 +147,7 @@ export function ScenarioComparison({
       )}
 
       <Card className="mt-6">
-        <CardHeader title="What this assumes" />
+        <CardHeader title="What this assumes" icon={<ListChecks />} tint="violet" />
         <CardBody>
           <ul className="flex flex-col gap-2 text-sm">
             {/*
@@ -159,8 +175,8 @@ export function ScenarioComparison({
       </Card>
 
       {later.length === 0 ? null : (
-        <details className="mt-6 rounded-card border border-line bg-surface p-4">
-          <summary className="cursor-pointer text-sm text-ink">The months after that</summary>
+        <details className="panel mt-6 rounded-card p-4">
+          <summary className="cursor-pointer text-sm font-medium text-accent">The months after that</summary>
           <div className="mt-3 flex flex-col gap-4">
             {later.map((period) => (
               <div key={period.periodId}>
@@ -185,8 +201,8 @@ export function ScenarioComparison({
         </details>
       )}
 
-      <details className="mt-4 rounded-card border border-line bg-surface p-4">
-        <summary className="cursor-pointer text-sm text-ink">How was this worked out?</summary>
+      <details className="panel mt-4 rounded-card p-4">
+        <summary className="cursor-pointer text-sm font-medium text-accent">How was this worked out?</summary>
         <div className="mt-3 flex flex-col gap-3 text-sm text-ink-muted">
           <p>
             MOTION starts from what it already expects for the next three months, changes only the

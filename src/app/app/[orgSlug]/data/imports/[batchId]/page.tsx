@@ -1,8 +1,11 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
+import {
+  ClipboardCheck, Copy, FileSearch, FileText, FileUp, ListChecks, Scale, ScanText, Sparkles, Table as TableIcon, TriangleAlert,
+} from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { loadBatchReview, loadReportCompleteness, type BatchIssueGroup } from '@/modules/imports';
-import { PageHeader, Card, CardBody, Badge, Banner } from '@/components/ui/surfaces';
+import { PageHeader, Card, CardBody, Badge, Banner, IconBadge } from '@/components/ui/surfaces';
 import { THead, TBody, TR, TD } from '@/components/ui/table';
 import { Table } from '@/components/ui/shadcn';
 import {
@@ -206,7 +209,10 @@ export default async function ReviewBatchPage({
         {completeness === null ? null : (
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">What this report covers</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="violet" size="sm"><ClipboardCheck /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">What this report covers</h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 {completeness.scope === 'open_invoices'
                   ? 'Only a list that includes every invoice still unpaid on its start date — older ones too — can show what you are owed or owe. Otherwise we show it from a balance sheet, or not at all, never a total that misses old debts.'
@@ -288,7 +294,10 @@ export default async function ReviewBatchPage({
         {aiReadingOffered ? (
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">Read this statement with AI</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="pink" size="sm"><Sparkles /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">Read this statement with AI</h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 MOTION could not find the table on its own. AI can read the rows for you; every row it reads will
                 need your confirmation against the page before it counts (CD-11).
@@ -302,7 +311,10 @@ export default async function ReviewBatchPage({
         {receiptWaiting ? (
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">Read these receipts with AI</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="violet" size="sm"><Sparkles /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">Read these receipts with AI</h2>
+              </div>
               {aiFlag ? (
                 <>
                   <p className="mt-1 text-sm text-ink-muted">
@@ -329,7 +341,10 @@ export default async function ReviewBatchPage({
         {balancesNeeded ? (
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">The balances printed on the statement</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="pink" size="sm"><Scale /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">The balances printed on the statement</h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 MOTION checks that the transactions add up to the difference between them. Type them from the page,
                 not from anywhere else.
@@ -344,7 +359,10 @@ export default async function ReviewBatchPage({
         {aiPages.length > 0 ? (
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">Rows read by AI, page by page</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="violet" size="sm"><ScanText /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">Rows read by AI, page by page</h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 Compare each page&rsquo;s rows with the statement beside them. These rows are marked as read by AI
                 and are imported as &ldquo;please check&rdquo; figures until you confirm them.
@@ -396,7 +414,10 @@ export default async function ReviewBatchPage({
         {review.batchIssues.length > 0 ? (
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">About this file</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="pink" size="sm"><FileText /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">About this file</h2>
+              </div>
               <ul className="mt-2 space-y-1 text-sm">
                 {review.batchIssues.map((issue) => (
                   <li key={issue.code} className={issue.severity === 'error' ? 'text-danger' : 'text-ink-muted'}>
@@ -411,7 +432,10 @@ export default async function ReviewBatchPage({
         {outstanding.length > 0 ? (
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">Before we import this</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="violet" size="sm"><ListChecks /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">Before we import this</h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 We read the file this way. If any of it is wrong, discard the file and check the
                 export rather than confirming — a wrong answer here changes every figure it feeds.
@@ -442,7 +466,10 @@ export default async function ReviewBatchPage({
 
         <Card>
           <CardBody className="p-4">
-            <h2 className="font-serif text-lg text-ink">What we found</h2>
+            <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="pink" size="sm"><FileSearch /></IconBadge>
+              <h2 className="min-w-0 font-serif text-lg text-ink">What we found</h2>
+            </div>
             <StatusCounts counts={review.counts} />
             {review.issueGroups.length === 0 ? (
               <p className="mt-3 text-sm text-ink-muted">
@@ -461,9 +488,12 @@ export default async function ReviewBatchPage({
         {review.undecidedErrors.length > 0 ? (
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">
-                Rows we could not read ({review.undecidedErrors.length})
-              </h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="violet" size="sm"><TriangleAlert /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">
+                  Rows we could not read ({review.undecidedErrors.length})
+                </h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 Usually a heading, a total or a note rather than a transaction. Nothing is imported
                 until you have said what these are.
@@ -486,9 +516,12 @@ export default async function ReviewBatchPage({
         {review.duplicates.length > 0 ? (
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">
-                Possible duplicates ({review.duplicates.length})
-              </h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="pink" size="sm"><Copy /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">
+                  Possible duplicates ({review.duplicates.length})
+                </h2>
+              </div>
               <p className="mt-1 text-sm text-ink-muted">
                 These look like data you have already imported. We never decide this for you.
               </p>
@@ -511,7 +544,10 @@ export default async function ReviewBatchPage({
         {review.batch.status === 'committed' ? null : (
           <Card>
             <CardBody className="p-4">
-              <h2 className="font-serif text-lg text-ink">Import</h2>
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="violet" size="sm"><FileUp /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">Import</h2>
+              </div>
               <div className="mt-3">
                 <CommitControls
                   orgSlug={orgSlug}
@@ -527,7 +563,10 @@ export default async function ReviewBatchPage({
 
         <Card>
           <CardBody className="p-4">
-            <h2 className="font-serif text-lg text-ink">Every row we read</h2>
+            <div className="flex min-w-0 items-center gap-3">
+              <IconBadge tint="pink" size="sm"><TableIcon /></IconBadge>
+              <h2 className="min-w-0 font-serif text-lg text-ink">Every row we read</h2>
+            </div>
             <p className="mt-1 text-sm text-ink-muted">
               Including the ones that will not import. Nothing from your file is thrown away.
             </p>
