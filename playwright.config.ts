@@ -98,5 +98,8 @@ export default defineConfig({
     timeout: 180_000,
     stdout: 'pipe',
     stderr: 'pipe',
+    // The journeys never call the AI provider, even on a machine whose .env.local or Vault holds a key
+    // (ADR-157): turns end on the fallback, which the analyst journeys assert either way.
+    env: { MOTION_AI_OFFLINE: '1' },
   },
 });

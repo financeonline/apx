@@ -74,6 +74,8 @@ const KEY_TTL_MS = 60_000;
  * (encrypted in Vault), else the deployment's ANTHROPIC_API_KEY. Read at most once a minute.
  */
 async function currentKey(): Promise<string | null> {
+  // The automated test server runs with no model at all, whatever key this machine holds (ADR-157).
+  if (process.env.MOTION_AI_OFFLINE === '1') return null;
   if (keyRead && Date.now() - keyRead.at < KEY_TTL_MS) return keyRead.key ?? process.env.ANTHROPIC_API_KEY ?? null;
   let stored: string | null = null;
   try {
