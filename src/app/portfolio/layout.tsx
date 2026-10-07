@@ -22,7 +22,7 @@ export default async function PortfolioLayout({ children }: { children: React.Re
     <AppShell
       homeHref="/portfolio"
       homeLabel="Command Centre home"
-      tagline="Command Centre"
+      area="Command Centre"
       groups={[
         {
           label: 'Command Centre',

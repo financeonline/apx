@@ -6,7 +6,8 @@ import { getAccessContext } from '@/modules/tenancy';
 import { can, isSuperAdmin } from '@/core/permissions';
 import { isMotionError } from '@/core/errors';
 import { recordAccessEvent } from '@/core/db/server-rpc';
-import { Banner, Badge } from '@/components/ui/surfaces';
+import { callApi } from '@/core/db';
+import { Banner } from '@/components/ui/surfaces';
 import { ROLE_LABELS } from '@/components/labels';
 import { unreadCount } from '@/modules/engagement';
 import { fundingEnabled } from '@/modules/funding';
@@ -61,9 +62,6 @@ export default async function OrgLayout({
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
 
   const base = `/app/${orgSlug}`;
-  const DATA_ICONS: Readonly<Record<string, SidebarIcon>> = {
-    'data/imports/new': 'add-data', 'data/imports': 'imports', 'data/documents': 'documents', 'data/accounts': 'accounts',
-  };
   const groups: SidebarGroup[] = [
     {
       label: 'Sections',
@@ -72,9 +70,10 @@ export default async function OrgLayout({
         ...(showFunding ? [{ label: 'Funding', href: `${base}/funding`, icon: 'funding' as const }] : []),
       ],
     },
+    // As the reference: one "Data & Forms" item; the data pages carry their own tabs (data/layout).
     ...(dataLinks(ctx).length === 0 ? [] : [{
       label: 'Data',
-      links: dataLinks(ctx).map((l) => ({ label: l.label, href: `${base}/${l.path}`, icon: DATA_ICONS[l.path] ?? 'imports' })),
+      links: [{ label: 'Data & Forms', href: `${base}/data/imports`, match: `${base}/data`, icon: 'documents' as const }],
     }]),
     {
       label: 'You',
@@ -87,14 +86,19 @@ export default async function OrgLayout({
         // The roles that hold assignments.view are exactly the roles with a Command Centre (ADR-112).
         ...(can(ctx, 'assignments.view') ? [{ label: 'Command Centre', href: '/portfolio', icon: 'portfolio' as const }] : []),
         { label: 'Switch', href: '/select-organization', icon: 'switch' as const },
-        { label: 'Account', href: '/account', icon: 'account' as const },
       ],
     },
   ];
-  const role = <Badge tone="accent">{ROLE_LABELS[ctx.effectiveRole]}</Badge>;
+  // The reference's sidebar names the signed-in person (their own profile row; ADR-155).
+  const profile = (await callApi<Array<{ full_name: string | null; email: string }>>(ctx.db, 'my_profile', {}, ctx.requestId))?.[0];
+  const user = {
+    name: profile?.full_name?.trim() || profile?.email || 'Your account',
+    role: ROLE_LABELS[ctx.effectiveRole],
+    href: '/account',
+  };
 
   return (
-    <AppShell homeHref={`${base}/home`} groups={groups} footer={role}>
+    <AppShell homeHref={`${base}/home`} groups={groups} user={user}>
         <div className="mb-6 flex flex-col gap-3 empty:mb-0">
           {isSuperAdmin(ctx) && (
             <Banner tone="warn" title="You are viewing this organisation as MOTION staff">

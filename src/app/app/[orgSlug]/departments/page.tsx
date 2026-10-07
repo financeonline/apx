@@ -136,12 +136,12 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
         </div>
         <div className="flex flex-wrap gap-3">
           {canImport ? (
-            <ButtonLink href={`${base}/data/imports/new`} tone="secondary" className="px-5 py-3 text-base">
+            <ButtonLink href={`${base}/data/imports/new`} tone="secondary" className="h-14 rounded-2xl bg-surface/80 px-7 text-lg shadow-[0_8px_24px_-14px_rgb(106_69_229/0.45)] [&_svg]:size-5">
               <Upload aria-hidden="true" /> Add data
             </ButtonLink>
           ) : null}
           {canReports && can(ctx, 'ai.use') ? (
-            <ButtonLink href={`${base}/reports/custom/new`} className="px-5 py-3 text-base">
+            <ButtonLink href={`${base}/reports/custom/new`} className="h-14 rounded-2xl px-7 text-lg [&_svg]:size-5">
               <Plus aria-hidden="true" /> New report
             </ButtonLink>
           ) : null}

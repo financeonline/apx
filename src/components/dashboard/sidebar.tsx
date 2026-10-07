@@ -32,6 +32,8 @@ export interface SidebarLink {
   readonly href: string;
   readonly icon: SidebarIcon;
   readonly hint?: string;
+  /** The path prefix that marks this link current, when it is not the href (a section's pages). */
+  readonly match?: string;
   /** A count shown as a small pill, with its words for screen readers. */
   readonly count?: { readonly value: number; readonly srText: string };
 }
@@ -52,9 +54,9 @@ function Item({ link, current }: { link: SidebarLink; current: boolean }) {
       href={link.href}
       title={link.hint}
       aria-current={current ? 'page' : undefined}
-      className={`flex items-center gap-3 rounded-xl px-3 py-2.5 text-[0.9375rem] transition-colors ${
+      className={`flex items-center gap-3 rounded-xl px-3 py-2 text-[0.9375rem] transition-colors ${
         current
-          ? 'bg-accent font-medium text-on-accent shadow-[0_10px_24px_-12px_rgb(124_58_237/0.7)]'
+          ? 'bg-accent font-medium text-on-accent shadow-[0_10px_24px_-12px_rgb(106_69_229/0.7)]'
           : 'text-ink hover:bg-accent-soft hover:text-accent'
       }`}
     >
@@ -77,11 +79,11 @@ export function SidebarNav({ groups }: { groups: readonly SidebarGroup[] }) {
   // The longest matching link is the current one, so /money/banking marks Money, not Home.
   const all = groups.flatMap((g) => g.links);
   const current = all
-    .filter((l) => isCurrent(pathname, l.href))
-    .sort((a, b) => b.href.length - a.href.length)[0]?.href ?? null;
+    .filter((l) => isCurrent(pathname, l.match ?? l.href))
+    .sort((a, b) => (b.match ?? b.href).length - (a.match ?? a.href).length)[0]?.href ?? null;
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-4">
       {groups.map((group) => (
         <nav key={group.label} aria-label={group.label} className="flex flex-col gap-1">
           {group.links.map((link) => <Item key={link.href} link={link} current={link.href === current} />)}

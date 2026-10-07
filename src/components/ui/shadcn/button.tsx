@@ -13,7 +13,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-accent text-on-accent shadow-[0_10px_24px_-10px_rgb(124_58_237/0.65)] hover:bg-accent-hover',
+        default: 'border-transparent bg-accent text-on-accent shadow-[0_10px_24px_-10px_rgb(106_69_229/0.65)] hover:bg-accent-hover',
         secondary: 'border-accent/45 bg-surface text-accent hover:border-accent hover:bg-accent-soft',
         ghost: 'border-transparent bg-transparent text-ink-muted hover:bg-accent-soft hover:text-accent',
         destructive: 'border-danger/45 bg-surface text-danger hover:border-danger hover:bg-danger-soft',

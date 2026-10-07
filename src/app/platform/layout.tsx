@@ -14,7 +14,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
     <AppShell
       homeHref="/platform"
       homeLabel="Platform home"
-      tagline="Platform"
+      area="Platform"
       groups={[
         {
           label: 'Platform',

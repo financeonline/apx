@@ -38,8 +38,10 @@
   --color-line-strong: #ddd7ee;
 
   /* Accent — violet. */
-  --color-accent: #7c3aed;
-  --color-accent-hover: #6d28d9;
+  --color-accent: #6a45e5;
+  --color-accent-hover: #5b37d6;
+  /* The wordmark's deep indigo. */
+  --color-brand-ink: #3b2d96;
   --color-accent-soft: #f3eeff;
   --color-on-accent: #ffffff;
 
@@ -63,7 +65,7 @@
   --color-platform-accent: #a78bfa;
 
   /* Chart palette — six categorical series, ordered for use */
-  --color-chart-1: #7c3aed;
+  --color-chart-1: #6a45e5;
   --color-chart-2: #db2777;
   --color-chart-3: #0ea5e9;
   --color-chart-4: #f59e0b;
@@ -99,6 +101,7 @@
 
     --color-accent: #a78bfa;
     --color-accent-hover: #c4b5fd;
+    --color-brand-ink: #e4ddff;
     --color-accent-soft: rgb(167 139 250 / 0.12);
     --color-on-accent: #120d1f;
 
