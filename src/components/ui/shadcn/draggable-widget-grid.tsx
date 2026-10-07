@@ -10,13 +10,14 @@
  * - Mouse and pen drag immediately. Touch uses a long press, so the page can
  *   still be scrolled.
  * - Keyboard: focus a widget, hold Alt and use the arrow keys.
- * - Styling uses MOTION's design tokens (`bg-surface`, `ring-line`, `text-ink`,
- *   the accent focus ring), so it follows the app's light and dark themes
- *   (SOW §6; ADR-151). Owned source, as shadcn/ui intends. Two departures from
- *   the template: an optional fixed `rowHeight` (MOTION's cards are wide and
- *   short, not square), and no resting shadow — elevation comes from the
- *   hairline; the lift shadow while dragging is kept. Also `appear` (the entrance can be
- *   switched off) and a remount, not an animation, once the grid has measured its columns.
+ * - Set `editable={false}` for the template's look without dragging.
+ * - The template's design (24px radius, hairline ring, soft resting shadow,
+ *   staggered entrance), with its `card`/`border` colours mapped to MOTION's
+ *   `surface`/`line` tokens so it follows the light and dark themes (SOW §6;
+ *   ADR-151, ADR-152). Owned source, as shadcn/ui intends. Additions: an
+ *   optional fixed `rowHeight` (MOTION's cards are wide and short, not
+ *   square), `appear` (the entrance can be switched off), and a remount, not
+ *   an animation, once the grid has measured its columns.
  */
 
 import {
@@ -426,10 +427,9 @@ const LANDED_MS = 620
 const LONG_PRESS_MS = 350
 /** Touch: movement allowed during the hold before it counts as a scroll. */
 const PRESS_SLOP = 8
-// Same number of layers in both, so the shadow can interpolate. At rest there is no shadow:
-// MOTION's elevation comes from the hairline, never a shadow.
+// Same number of layers in both, so the shadow can interpolate.
 const SHADOW_REST =
-    '0px 0px 0px 0px rgba(0,0,0,0), 0px 0px 0px 0px rgba(0,0,0,0)'
+    '0px 1px 2px 0px rgba(0,0,0,0.12), 0px 0px 0px 0px rgba(0,0,0,0)'
 const SHADOW_LIFTED =
     '0px 28px 60px -16px rgba(0,0,0,0.45), 0px 10px 24px -8px rgba(0,0,0,0.3)'
 
@@ -664,7 +664,7 @@ export function DraggableWidgetGrid({
     maxColumns = 4,
     cellSize = 215,
     gap = 12,
-    radius = 8,
+    radius = 24,
     rowHeight,
     appear = true,
     className = '',

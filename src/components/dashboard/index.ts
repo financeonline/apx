@@ -7,7 +7,7 @@
  */
 
 export { MetricCard, type MetricCardVariant } from './metric-card';
-export { ArrangeableCards, type ArrangeableCard } from './arrangeable-cards';
+export { WidgetCards, type WidgetCard } from './widget-cards';
 export { AlertCard, type AlertCardVariant } from './alert-card';
 export {
   ActionCard,

@@ -33,14 +33,4 @@ Every page of the company and the Command Centre must answer, show no error scre
 serious or critical accessibility violation; a screenshot of each lands in
 `logs/sample-data/screens`. Then the features are exercised with the sample figures.
 
-## Arrange Home's cards
-
-```sh
-MOTION_SAMPLE_EMAIL='…' MOTION_SAMPLE_PASSWORD='…' \
-  npx playwright test -c scripts/sample-data/playwright.config.ts 3-arrange
-```
-
-Moves a headline card with the keyboard and the mouse, checks the order survives a reload and that
-"Reset order" restores it (ADR-152).
-
 The password is read from the environment only; nothing is stored.

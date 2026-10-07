@@ -61,6 +61,9 @@ test.describe('axe-core: zero serious or critical violations', () => {
       // A concrete signal, not `networkidle`: a streamed RSC response keeps a connection open, so
       // "the network went quiet" never becomes true and every check waits out its timeout.
       await expect(page.getByRole('heading').first()).toBeVisible();
+      // Contrast is a property of the settled page: let entrance animations (Home's widget cards
+      // fade in, ADR-152) finish, or axe measures text mid-fade.
+      await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'));
 
       const results = await new AxeBuilder({ page })
         .withTags(['wcag2a', 'wcag2aa', 'wcag21a', 'wcag21aa'])

@@ -8,7 +8,7 @@ import {
 } from '@/modules/dashboard';
 import { PageHeader, Card, CardBody, Banner } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
-import { AlertCard, ArrangeableCards, HealthScoreCard, NO_ALERTS_BODY, NO_ALERTS_TITLE } from '@/components/dashboard';
+import { AlertCard, WidgetCards, HealthScoreCard, NO_ALERTS_BODY, NO_ALERTS_TITLE } from '@/components/dashboard';
 import { requirePermission } from '@/app/_lib/authz';
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 
@@ -75,7 +75,7 @@ function ChangeLine({ card }: { card: MetricCardView }) {
   return <p className={`mt-1 text-sm ${tone}`}>{card.change.text}</p>;
 }
 
-/** A card's content. The arrangeable grid supplies its surface and hairline. */
+/** A card's content. The widget grid supplies its surface, ring and shadow. */
 function MetricCard({ card }: { card: MetricCardView }) {
   return (
     <div className="h-full p-4">
@@ -110,12 +110,11 @@ function MetricCard({ card }: { card: MetricCardView }) {
   );
 }
 
-function HeadlineNumbers({ view, orgSlug }: { view: HomeView; orgSlug: string }) {
+function HeadlineNumbers({ view }: { view: HomeView }) {
   return (
     <section aria-labelledby="headline-numbers">
       <h2 id="headline-numbers" className="sr-only">The headline numbers</h2>
-      <ArrangeableCards
-        storageKey={`motion.home.card-order.${orgSlug}`}
+      <WidgetCards
         cards={view.cards.map((card) => ({
           id: card.metricKey, label: card.label, node: <MetricCard card={card} />,
         }))}
@@ -303,7 +302,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
           </p>
         ) : null}
 
-        <HeadlineNumbers view={view} orgSlug={orgSlug} />
+        <HeadlineNumbers view={view} />
 
         {/* Level 3: what is moving. The trend table is the accessible form (§11). */}
         {/*

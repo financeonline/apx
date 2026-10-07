@@ -35,6 +35,8 @@ async function visit(page: Page, url: string, name: string) {
   expect(response?.status(), `${url} answers`).toBeLessThan(400);
   await expect(page.locator('main'), `${url} renders its page`).toBeVisible();
   await expect(page.getByText(/something went wrong|application error/i), `${url} shows no error screen`).toHaveCount(0);
+  // Contrast is measured on the settled page, after entrance animations (ADR-152).
+  await page.waitForFunction(() => document.getAnimations().every((a) => a.playState !== 'running'));
   const axe = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa']).analyze();
   expect(axe.violations.filter((v) => v.impact === 'serious' || v.impact === 'critical').map((v) => `${v.id}: ${v.help}`), `${url} accessibility`).toEqual([]);
   await page.screenshot({ path: `${SHOTS}/${name}.png`, fullPage: true });
