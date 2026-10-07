@@ -27,7 +27,7 @@ export const dynamic = 'force-dynamic';
  */
 
 function MovementRow({ movement }: { movement: MovementView }) {
-  const tone = movement.favourable ? 'text-accent' : 'text-danger';
+  const tone = movement.favourable ? 'text-good' : 'text-danger';
 
   return (
     <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line/60 py-3 last:border-0">

@@ -168,7 +168,7 @@ export function changeTone(change: number | null): 'up' | 'down' | 'flat' | 'non
 }
 
 export const CHANGE_TONE_CLASS: Readonly<Record<'up' | 'down' | 'flat' | 'none', string>> = {
-  up: 'text-accent',
+  up: 'text-good',
   down: 'text-danger',
   flat: 'text-ink-muted',
   none: 'text-ink-faint',

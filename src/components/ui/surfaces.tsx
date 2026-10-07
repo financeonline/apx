@@ -7,7 +7,7 @@ import {
 
 /* MOTION's surfaces, on shadcn/ui (SOW §6; ADR-151): the same names and props as before. */
 
-/** A white surface on paper with a single hairline. Elevation comes from the border, never a shadow. */
+/** A liquid glass surface over the page's colour wash (ADR-153). */
 export function Card({ children, className = '', id }: { children: ReactNode; className?: string; id?: string }) {
   return <ShadcnCard id={id} className={className}>{children}</ShadcnCard>;
 }

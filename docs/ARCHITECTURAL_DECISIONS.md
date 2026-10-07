@@ -2863,3 +2863,14 @@ Decision:
 4. **The accessibility checks measure the settled page.** The axe checks (`e2e/accessibility.spec.ts`, the sample walkthrough) now wait for running animations to finish before measuring, because contrast is a property of the settled text, not of a frame mid-fade. The assertion is unchanged.
 
 Consequences: a rearranging mode (drag, keyboard moves, saved order) was built first and removed on the owner's instruction; the component still supports it (`editable`), should it be wanted later.
+
+### ADR-153 · The template's colour scheme, in liquid glass
+Status: **built locally on 2026-10-07 on the owner's instruction ("Change Color schema as per the template which I have given you"; "Change the card styles, buttons and the background style to liquid glass style"). Not reviewed, merged or deployed.**
+
+Decision:
+1. **Colours: the supplied widget-grid template's palette** (shadcn's neutral zinc: ink `#09090b`, lines `#e4e4e7`, near-black primary `#18181b`; dark: `#0a0a0b` ground, `#fafafa` ink), with its status colours — emerald for good news, amber for warnings, rose for problems, blue first in the chart series. Changed in `globals.css` tokens only, so every screen follows; token names and roles are unchanged.
+2. **A `good` token, apart from the accent.** The template's primary is near-black, so good news (favourable movements, a rising health score) moves from `text-accent` to `text-good` (emerald-700 / emerald-400) in the four places that colour by good news.
+3. **One departure for accessibility:** muted text is zinc-600 `#52525b`, not the template's zinc-500 `#71717a`, which measures 4.4:1 on the sunken panel (below WCAG AA). Every status colour was measured at AA or better on its backgrounds, light and dark.
+4. **Liquid glass:** `glass` (cards, panels, Home's widget cards, the top bars) and `glass-control` (secondary and destructive buttons) in the components layer: a translucent fill, `backdrop-filter: blur() saturate()`, a light inner top edge, a faint outer edge and a soft shadow. Buttons are capsules; the primary is a dark glass pill. The page has a fixed, faint blue/violet/emerald wash for the glass to frost. Card radius 0.5rem → 1rem. Surfaces stay opaque enough that text contrast holds over the wash.
+
+Consequences: supersedes DESIGN.md's warm paper palette, green accent and "never a shadow" rule. The accessibility sweep and the sample walkthrough pass, both light-scheme. Reverting is one commit.

@@ -61,7 +61,7 @@ export default async function OrgLayout({
 
   return (
     <div className="min-h-dvh">
-      <header className="border-b border-line bg-surface">
+      <header className="glass rounded-none border-x-0 border-t-0">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3">
           <Link href={`/app/${orgSlug}/home`} className="text-sm font-semibold tracking-widest uppercase">
             MOTION

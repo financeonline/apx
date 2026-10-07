@@ -332,7 +332,7 @@ describe('the canonical status badge (UX_ARCHITECTURE.md §8.1)', () => {
 
 describe('change lines (§4, ADR-030)', () => {
   it('colours a movement by whether it is good news, not by its sign', () => {
-    expect(changeToneClass(true)).toBe('text-accent');
+    expect(changeToneClass(true)).toBe('text-good');
     expect(changeToneClass(false)).toBe('text-danger');
     // No inherent direction — working capital can move either way for good reasons.
     expect(changeToneClass(null)).toBe('text-ink-muted');

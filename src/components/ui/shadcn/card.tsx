@@ -2,11 +2,11 @@ import * as React from 'react';
 import { cn } from '@/lib/utils';
 
 /**
- * shadcn/ui Card (SOW §6), MOTION tokens: a white surface with one hairline, never a shadow. The
+ * shadcn/ui Card (SOW §6), MOTION tokens: a liquid glass surface (ADR-153). The
  * root is a `<section>` (shadcn's is a `<div>`) because MOTION's pages name their cards as regions.
  */
 function Card({ className, ...props }: React.ComponentProps<'section'>) {
-  return <section data-slot="card" className={cn('rounded-card border border-line bg-surface text-ink', className)} {...props} />;
+  return <section data-slot="card" className={cn('glass rounded-card text-ink', className)} {...props} />;
 }
 
 function CardHeader({ className, ...props }: React.ComponentProps<'header'>) {

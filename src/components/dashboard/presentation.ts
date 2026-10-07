@@ -80,7 +80,7 @@ export const BADGE_SIZE_CLASS: Readonly<Record<BadgeSize, string>> = {
  */
 export function changeToneClass(favourable: boolean | null): string {
   if (favourable === null) return 'text-ink-muted';
-  return favourable ? 'text-accent' : 'text-danger';
+  return favourable ? 'text-good' : 'text-danger';
 }
 
 /**

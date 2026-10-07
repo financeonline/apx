@@ -70,7 +70,7 @@ function ChangeLine({ card }: { card: MetricCardView }) {
   }
 
   const tone = card.change.favourable === null ? 'text-ink-muted'
-    : card.change.favourable ? 'text-accent' : 'text-danger';
+    : card.change.favourable ? 'text-good' : 'text-danger';
 
   return <p className={`mt-1 text-sm ${tone}`}>{card.change.text}</p>;
 }

@@ -12,53 +12,71 @@
     serif;
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
-  /* Ground */
-  --color-paper: #fbfaf7;
-  --color-surface: #ffffff;
-  --color-surface-sunken: #f4f2ec;
+  /*
+   * Colour scheme: the supplied widget-grid template's (shadcn's neutral zinc), with its status
+   * colours (emerald, amber, rose) and blue for volume (ADR-153). Muted text is zinc-600, not the
+   * template's zinc-500, which measured 4.4:1 on the sunken panel — below WCAG AA.
+   */
+
+  /* Ground — the page sits under a soft colour wash so the glass surfaces have something to frost. */
+  --color-paper: #f7f7f9;
+  --color-surface: rgb(255 255 255 / 0.72);
+  --color-surface-sunken: rgb(228 228 231 / 0.55);
 
   /* Text */
-  --color-ink: #16211e;
-  --color-ink-muted: #5c6763;
-  /*
-   * WCAG AA against BOTH light surfaces (5.2:1 on white, 4.6:1 on the sunken panel).
-   *
-   * The old #8a938f measured 3.2:1 and carried real text — period labels, row counts, the "and
-   * others" line under an issue group. It read as decoration and was not: axe found it on every
-   * page once the sweep was actually signed in (ADR-058.11).
-   */
-  --color-ink-faint: #666f6b;
+  --color-ink: #09090b;
+  --color-ink-muted: #52525b;
+  --color-ink-faint: #63636b;
 
   /* Rules */
-  --color-line: #e4e0d6;
-  --color-line-strong: #cfc9bb;
+  --color-line: #e4e4e7;
+  --color-line-strong: #d4d4d8;
 
-  /* Accent */
-  --color-accent: #14634f;
-  --color-accent-hover: #0e4c3c;
-  --color-accent-soft: #e6f0eb;
-  --color-on-accent: #fbfaf7;
+  /* Accent — the template's primary: near-black controls, never a hue. */
+  --color-accent: #18181b;
+  --color-accent-hover: #27272a;
+  --color-accent-soft: rgb(24 24 27 / 0.06);
+  --color-on-accent: #fafafa;
 
-  /* Status */
-  --color-warn: #8a5a0b;
-  --color-warn-soft: #faf1de;
-  --color-danger: #963320;
-  --color-danger-soft: #fbebe7;
+  /* Status — good news is emerald, apart from the accent (the template's "ok"). */
+  --color-good: #047857;
+  --color-good-soft: #ecfdf5;
+  --color-warn: #b45309;
+  --color-warn-soft: #fffbeb;
+  --color-danger: #be123c;
+  --color-danger-soft: #fff1f2;
 
   /* Platform shell identity (UX_ARCHITECTURE.md §9.5) */
-  --color-platform: #1d2a26;
-  --color-platform-accent: #b98c2f;
+  --color-platform: #18181b;
+  --color-platform-accent: #3b82f6;
 
   /* Chart palette — six categorical series, ordered for use */
-  --color-chart-1: #14634f;
-  --color-chart-2: #2e6f9e;
-  --color-chart-3: #8a5a0b;
-  --color-chart-4: #6b4e8f;
-  --color-chart-5: #963320;
-  --color-chart-6: #4a7a2b;
+  --color-chart-1: #2563eb;
+  --color-chart-2: #059669;
+  --color-chart-3: #d97706;
+  --color-chart-4: #7c3aed;
+  --color-chart-5: #e11d48;
+  --color-chart-6: #71717a;
 
-  --radius-card: 0.5rem;
+  --radius-card: 1rem;
 }
+
+/*
+ * Liquid glass (ADR-153): translucent, frosted surfaces with a bright top edge, over a colour wash.
+ * Not theme colours, so outside @theme; the dark scheme swaps them below.
+ */
+:root {
+  --glass-bg: rgb(255 255 255 / 0.62);
+  --glass-bg-strong: rgb(255 255 255 / 0.8);
+  --glass-border: rgb(255 255 255 / 0.7);
+  --glass-edge: rgb(24 24 27 / 0.08);
+  --glass-highlight: rgb(255 255 255 / 0.95);
+  --glass-shadow: 0 1px 2px rgb(15 23 42 / 0.06), 0 10px 30px -12px rgb(15 23 42 / 0.22);
+  --wash-1: rgb(59 130 246 / 0.18);
+  --wash-2: rgb(139 92 246 / 0.15);
+  --wash-3: rgb(16 185 129 / 0.13);
+}
+
 
 /*
  * The dark scheme keeps every token's role and swaps only its value, so no component needs a
@@ -66,37 +84,48 @@
  */
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-paper: #101614;
-    --color-surface: #16201d;
-    --color-surface-sunken: #0c1211;
+    --color-paper: #0a0a0b;
+    --color-surface: rgb(24 24 27 / 0.7);
+    --color-surface-sunken: rgb(39 39 42 / 0.6);
 
-    --color-ink: #edefea;
-    --color-ink-muted: #9aa5a0;
-    /* 4.6:1 on the dark surface; the old #74807b measured 4.1:1. */
-    --color-ink-faint: #7d8984;
+    --color-ink: #fafafa;
+    --color-ink-muted: #a1a1aa;
+    --color-ink-faint: #a1a1aa;
 
-    --color-line: #26312d;
-    --color-line-strong: #38443f;
+    --color-line: #27272a;
+    --color-line-strong: #3f3f46;
 
-    --color-accent: #58b394;
-    --color-accent-hover: #74c7ab;
-    --color-accent-soft: #16302a;
-    --color-on-accent: #0c1211;
+    --color-accent: #fafafa;
+    --color-accent-hover: #e4e4e7;
+    --color-accent-soft: rgb(250 250 250 / 0.08);
+    --color-on-accent: #09090b;
 
-    --color-warn: #d8a340;
-    --color-warn-soft: #2a2317;
-    --color-danger: #e08a72;
-    --color-danger-soft: #2c1a15;
+    --color-good: #34d399;
+    --color-good-soft: #052e1f;
+    --color-warn: #fbbf24;
+    --color-warn-soft: #2a1f06;
+    --color-danger: #fb7185;
+    --color-danger-soft: #2d0a12;
 
-    --color-platform: #0c1211;
-    --color-platform-accent: #d9ac54;
+    --color-platform: #09090b;
+    --color-platform-accent: #60a5fa;
 
-    --color-chart-1: #58b394;
-    --color-chart-2: #6fa8d0;
-    --color-chart-3: #d8a340;
-    --color-chart-4: #a58ec9;
-    --color-chart-5: #e08a72;
-    --color-chart-6: #8fbf62;
+    --color-chart-1: #60a5fa;
+    --color-chart-2: #34d399;
+    --color-chart-3: #fbbf24;
+    --color-chart-4: #a78bfa;
+    --color-chart-5: #fb7185;
+    --color-chart-6: #a1a1aa;
+
+    --glass-bg: rgb(39 39 42 / 0.45);
+    --glass-bg-strong: rgb(39 39 42 / 0.7);
+    --glass-border: rgb(255 255 255 / 0.1);
+    --glass-edge: rgb(255 255 255 / 0.06);
+    --glass-highlight: rgb(255 255 255 / 0.12);
+    --glass-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -12px rgb(0 0 0 / 0.7);
+    --wash-1: rgb(59 130 246 / 0.2);
+    --wash-2: rgb(139 92 246 / 0.16);
+    --wash-3: rgb(16 185 129 / 0.1);
   }
 }
 
@@ -108,6 +137,13 @@
 
   body {
     background-color: var(--color-paper);
+    /* The wash behind the glass (ADR-153); fixed, so it stays put while the glass scrolls over it. */
+    background-image:
+      radial-gradient(60rem 40rem at 0% -10%, var(--wash-1), transparent 65%),
+      radial-gradient(55rem 45rem at 100% 10%, var(--wash-2), transparent 65%),
+      radial-gradient(70rem 50rem at 40% 110%, var(--wash-3), transparent 65%);
+    background-attachment: fixed;
+    min-height: 100vh;
     color: var(--color-ink);
     font-family: var(--font-sans);
     font-size: 0.9375rem;
@@ -161,6 +197,33 @@
 }
 
 @layer components {
+  /*
+   * Liquid glass (ADR-153). In the components layer so a utility on the same element (a different
+   * background, a radius) wins. `glass` is a surface — cards, panels, the top bar; `glass-control`
+   * is a lighter version for buttons and other controls.
+   */
+  .glass {
+    background-color: var(--glass-bg);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 1px var(--glass-edge),
+      inset 0 1px 0 var(--glass-highlight),
+      var(--glass-shadow);
+  }
+
+  .glass-control {
+    background-color: var(--glass-bg-strong);
+    -webkit-backdrop-filter: blur(12px) saturate(180%);
+    backdrop-filter: blur(12px) saturate(180%);
+    border: 1px solid var(--glass-border);
+    box-shadow:
+      0 0 0 1px var(--glass-edge),
+      inset 0 1px 0 var(--glass-highlight),
+      0 1px 2px rgb(15 23 42 / 0.08);
+  }
+
   /* Skeletons hold the exact space of the content they stand in for (UX_ARCHITECTURE.md §7.1). */
   .skeleton {
     background-color: var(--color-surface-sunken);
