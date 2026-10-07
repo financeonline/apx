@@ -38,6 +38,13 @@ export const RemapAccountInput = z.object({
 });
 export type RemapAccountInput = z.infer<typeof RemapAccountInput>;
 
+/** ADR-156: how the business marked a loan. "unmarked" clears it — it is never guessed. */
+export const SetLoanSecurityInput = z.object({
+  accountId: z.string().uuid(),
+  security: z.enum(['secured', 'unsecured', 'unmarked']),
+});
+export type SetLoanSecurityInput = z.infer<typeof SetLoanSecurityInput>;
+
 export const UpdateCounterpartyInput = z.object({
   counterpartyId: z.string().uuid(),
   name: z.string().trim().min(1).max(300).optional(),

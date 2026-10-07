@@ -10,6 +10,7 @@
 
 export {
   CATEGORY_ACCOUNT_TYPE,
+  LOAN_SECURITY_CATEGORIES,
   PNL_CATEGORIES,
   STANDARD_CATEGORIES,
   type Account,
@@ -27,10 +28,12 @@ export {
   type InvoiceStatus,
   type InvoiceType,
   type LedgerEntry,
+  type LoanSecurity,
   type MappingConfidence,
   type PeriodBalance,
   type RecordStatus,
   type StandardCategory,
+  isLoanCategory,
 } from './domain/types';
 
 export {
@@ -40,6 +43,7 @@ export {
   MoneyStringSchema,
   PageInput,
   RemapAccountInput,
+  SetLoanSecurityInput,
   SetOpeningBalanceInput,
   StandardCategorySchema,
   SupersedeRecordInput,
@@ -59,6 +63,7 @@ export {
   createBankAccount,
   mergeCounterparties,
   remapAccount,
+  setLoanSecurity,
   setOpeningBalance,
   setOpeningBalanceFlag,
   supersedeRecord,

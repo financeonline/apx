@@ -5,6 +5,8 @@ import {
   getAccessContext,
   updateOrganization,
   setVatRegistration,
+  setTaxSettings,
+  setCurrencyAndCountry,
   inviteMember,
   revokeInvitation,
   changeMemberRole,
@@ -59,6 +61,48 @@ export async function setVatRegistrationAction(
     return done('Saved. Your figures are being recalculated.');
   } catch (error) {
     return fail(error, { requestId, action: 'settings.setVatRegistration' });
+  }
+}
+
+export async function setCurrencyAndCountryAction(
+  _previous: ActionResult | null,
+  form: FormData,
+): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    await setCurrencyAndCountry(ctx, {
+      currency: text(form, 'currency'),
+      country: text(form, 'country'),
+    });
+    revalidatePath(`/app/${orgSlug}/settings`);
+    return done('Saved.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'settings.setCurrencyAndCountry' });
+  }
+}
+
+export async function setTaxSettingsAction(
+  _previous: ActionResult | null,
+  form: FormData,
+): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    // An unchosen quarter arrives as NaN and is refused by the service's validation, never defaulted.
+    await setTaxSettings(ctx, {
+      vatQuarterEndMonth: integer(form, 'vat_quarter_end_month', Number.NaN),
+      vatScheme: text(form, 'vat_scheme'),
+      ctAssociatedCompanies: integer(form, 'ct_associated_companies', Number.NaN),
+    });
+    revalidatePath(`/app/${orgSlug}/settings`);
+    return done('Saved.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'settings.setTaxSettings' });
   }
 }
 

@@ -29,7 +29,9 @@ interface Option { readonly value: string; readonly label: string }
 
 /** Mirrors `customQuestionMessage` in modules/reporting (kept here: this file runs in the browser). */
 function messageFor(periodLabel: string, dimensions: readonly Option[], question: string): string {
-  const focus = dimensions.length === 0 ? '' : `, looking at ${dimensions.map((d) => d.label.toLowerCase()).join(', ')}`;
+  // As `focusWord`: lower case, except an abbreviation ("VAT") stays as it is.
+  const word = (label: string) => (label === label.toUpperCase() ? label : label.toLowerCase());
+  const focus = dimensions.length === 0 ? '' : `, looking at ${dimensions.map((d) => word(d.label)).join(', ')}`;
   return `For ${periodLabel}${focus}: ${question.trim()}`;
 }
 
@@ -61,12 +63,14 @@ async function ask(orgSlug: string, conversationId: string | null, message: stri
 }
 
 export function CustomBuilder({
-  orgSlug, periods, suggestions, dimensions, maxQuestions, maxChars,
+  orgSlug, periods, suggestions, dimensions, fixedAreas, maxQuestions, maxChars,
 }: {
   orgSlug: string;
   periods: readonly { readonly id: string; readonly label: string }[];
   suggestions: readonly string[];
   dimensions: readonly Option[];
+  /** The areas that also carry a table of MOTION's own figures, with or without the analyst (ADR-156). */
+  fixedAreas: readonly string[];
   maxQuestions: number;
   maxChars: number;
 }) {
@@ -83,12 +87,15 @@ export function CustomBuilder({
   const questions = [...chosen, ...ownQuestions];
   const tooMany = questions.length > maxQuestions;
   const tooLong = ownQuestions.some((q) => q.length > maxChars);
+  // A Loans, Assets, VAT or Corporation Tax area puts MOTION's own figures in the report, so the
+  // report can be saved with them even when no question was asked or the analyst could not answer.
+  const hasFixed = chosenDimensions.some((d) => fixedAreas.includes(d));
 
   function toggle(list: string[], value: string, set: (next: string[]) => void) {
     set(list.includes(value) ? list.filter((v) => v !== value) : [...list, value]);
   }
 
-  async function save(conversationId: string, answered: string[]) {
+  async function save(conversationId: string | null, answered: string[]) {
     setPhase('saving');
     const result = await finishCustomReportAction({
       orgSlug, conversationId, periodId, dimensions: chosenDimensions, assistantMessageIds: answered,
@@ -99,7 +106,12 @@ export function CustomBuilder({
 
   async function run() {
     const period = periods.find((p) => p.id === periodId);
-    if (period === undefined || questions.length === 0 || tooMany || tooLong) return;
+    if (period === undefined || (questions.length === 0 && !hasFixed) || tooMany || tooLong) return;
+    if (questions.length === 0) {
+      setNotice(null);
+      await save(null, []);
+      return;
+    }
     const focus = dimensions.filter((d) => chosenDimensions.includes(d.value));
     setNotice(null);
     setPhase('asking');
@@ -119,8 +131,8 @@ export function CustomBuilder({
         // answered can still be saved.
         setNotice(result.message);
         setPhase('stopped');
-        if (conversationId !== null && answered.length > 0) {
-          setStopped({ conversationId, answered: [...answered] });
+        if ((conversationId !== null && answered.length > 0) || hasFixed) {
+          setStopped({ conversationId: answered.length > 0 ? conversationId : null, answered: [...answered] });
         }
         return;
       }
@@ -132,7 +144,7 @@ export function CustomBuilder({
     if (conversationId !== null) await save(conversationId, answered);
   }
 
-  const [stopped, setStopped] = useState<{ conversationId: string; answered: string[] } | null>(null);
+  const [stopped, setStopped] = useState<{ conversationId: string | null; answered: string[] } | null>(null);
   const busy = phase === 'asking' || phase === 'saving';
 
   return (
@@ -156,6 +168,12 @@ export function CustomBuilder({
               </label>
             ))}
           </div>
+          {fixedAreas.length === 0 ? null : (
+            <p className="mt-2 text-xs text-ink-faint">
+              {dimensions.filter((d) => fixedAreas.includes(d.value)).map((d) => d.label).join(', ')} also add a
+              table of MOTION&apos;s own figures to the report, whether or not the analyst can answer.
+            </p>
+          )}
         </div>
 
         <div>
@@ -182,8 +200,8 @@ export function CustomBuilder({
 
       {phase === 'composing' ? (
         <div>
-          <Button type="button" onClick={() => void run()} disabled={questions.length === 0 || tooMany || tooLong || periodId === ''}>
-            Ask the analyst and build the report
+          <Button type="button" onClick={() => void run()} disabled={(questions.length === 0 && !hasFixed) || tooMany || tooLong || periodId === ''}>
+            {questions.length === 0 && hasFixed ? 'Build the report with MOTION\'s figures' : 'Ask the analyst and build the report'}
           </Button>
         </div>
       ) : null}
@@ -205,7 +223,9 @@ export function CustomBuilder({
       {phase === 'stopped' && stopped !== null ? (
         <div>
           <Button type="button" tone="secondary" onClick={() => void save(stopped.conversationId, stopped.answered)}>
-            Save the report with the {stopped.answered.length} answered question{stopped.answered.length === 1 ? '' : 's'}
+            {stopped.answered.length === 0 ? 'Save the report with MOTION\'s figures only' : (
+              <>Save the report with the {stopped.answered.length} answered question{stopped.answered.length === 1 ? '' : 's'}</>
+            )}
           </Button>
         </div>
       ) : null}

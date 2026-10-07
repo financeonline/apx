@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/surfaces';
 import type { AccountRow } from '@/modules/dashboard';
 import type { StandardCategory } from '@/modules/financials';
 import { remapAccountAction } from './actions';
+import { LoanSecurityControl } from './loan-security-form';
 
 /**
  * One account, with its category and — for a role that may change it — the control that does.
@@ -22,12 +23,15 @@ export function AccountRowView({
   categories,
   categoryLabels,
   canEdit,
+  isLoan = false,
 }: {
   orgSlug: string;
   row: AccountRow;
   categories: readonly StandardCategory[];
   categoryLabels: Readonly<Record<string, string>>;
   canEdit: boolean;
+  /** A loan or long-term liability account, which can be marked secured or unsecured (ADR-156). */
+  isLoan?: boolean;
 }) {
   const [state, action] = useActionState(remapAccountAction, null);
   const { account } = row;
@@ -66,6 +70,15 @@ export function AccountRowView({
           row.categoryLabel
         )}
         <ActionMessage state={state} />
+        {isLoan ? (
+          <LoanSecurityControl
+            orgSlug={orgSlug}
+            accountId={account.id}
+            accountName={account.name}
+            security={account.loanSecurity ?? null}
+            canEdit={canEdit}
+          />
+        ) : null}
       </TD>
       <TD>
         {row.needsAttention ? (

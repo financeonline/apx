@@ -4,7 +4,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { callApi } from '@/core/db';
 import { ValidationError } from '@/core/errors';
 import {
-  CreateBankAccountInput, MergeCounterpartiesInput, RemapAccountInput, SetOpeningBalanceInput,
+  CreateBankAccountInput, MergeCounterpartiesInput, RemapAccountInput, SetLoanSecurityInput, SetOpeningBalanceInput,
   SupersedeRecordInput, UpdateCounterpartyInput,
 } from '../domain/validation';
 
@@ -40,6 +40,21 @@ export async function remapAccount(
   return callApi<string>(db, 'remap_account', {
     p_account: parsed.accountId,
     p_category: parsed.standardCategory,
+  }, requestId);
+}
+
+/**
+ * ADR-156: mark a loan or long-term liability account secured or unsecured ("unmarked" clears it).
+ * Nothing in the imported data says which, so the business says it; the engine reads it for the
+ * loans-by-security figures, so the SQL function queues a recalculation, as a re-mapping does.
+ */
+export async function setLoanSecurity(
+  db: SupabaseClient, input: unknown, requestId?: string,
+): Promise<string> {
+  const parsed = parse(SetLoanSecurityInput, input);
+  return callApi<string>(db, 'set_account_loan_security', {
+    p_account: parsed.accountId,
+    p_security: parsed.security,
   }, requestId);
 }
 

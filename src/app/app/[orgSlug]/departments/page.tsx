@@ -2,7 +2,7 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   Building2, CalendarDays, ChartColumn, ClipboardCheck, FileText, FileUp, HandCoins, Landmark, ListChecks,
-  Plus, ShieldCheck, Sparkles, TrendingUp, Upload, Users, UsersRound,
+  Plus, Receipt, ShieldCheck, Sparkles, TrendingUp, Upload, Users, UsersRound,
 } from 'lucide-react';
 import { loadDepartments, type DepartmentTile, type TileTone } from '@/modules/departments';
 import { getAccessContext } from '@/modules/tenancy';
@@ -47,7 +47,7 @@ const PRESENTATION: Readonly<Record<string, Presentation>> = {
   finance: {
     title: 'Financial Intelligence', icon: <ChartColumn />, tint: 'violet',
     description: ['KPIs & trends', 'Profit, cash and what you owe'],
-    pills: [{ label: 'Profit & loss', path: 'money/profit-and-loss' }, { label: 'Cash', path: 'money/cash' }, { label: 'Budget', path: 'money/budget' }],
+    pills: [{ label: 'Profit & loss', path: 'money/profit-and-loss' }, { label: 'Cash', path: 'money/cash' }, { label: 'Balance sheet', path: 'money/balance-sheet' }, { label: 'Budget', path: 'money/budget' }],
   },
   banking: {
     title: 'Banking', icon: <Landmark />, tint: 'pink',
@@ -161,6 +161,16 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
         <h2 id="departments-heading" className="sr-only">Business departments</h2>
         <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 min-[1440px]:grid-cols-3 min-[2200px]:grid-cols-4">
           {ordered.map(tileCard)}
+
+          {/* ADR-156: VAT and Corporation Tax, and assets and loans. */}
+          <li>
+            <DepartmentCard
+              title="Tax & VAT" href={`${base}/money/tax`} icon={<Receipt />} tint="pink"
+              description={['VAT return', 'Corporation Tax estimate', 'UK and UAE rules']}
+              pills={[{ label: 'VAT', href: `${base}/money/tax` }, { label: 'Assets & loans', href: `${base}/money/balance-sheet` }]}
+              status={null}
+            />
+          </li>
 
           {can(ctx, 'assignments.view') ? (
             <li>

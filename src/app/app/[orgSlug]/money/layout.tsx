@@ -5,7 +5,7 @@ import { can } from '@/core/permissions';
 /**
  * The Money section shell (UX_ARCHITECTURE.md §3.2, ROUTE_ARCHITECTURE.md §9).
  *
- * Five tabs in the fixed order §3.2 gives them, then Budget (ADR-142). Banking is absent — not disabled — for a role
+ * Five tabs in the fixed order §3.2 gives them, then Budget (ADR-142), Balance sheet and Tax (ADR-156). Banking is absent — not disabled — for a role
  * without `banking.view` (RBAC §5, §7.4).
  */
 const TABS = [
@@ -15,6 +15,9 @@ const TABS = [
   { slug: 'receivables', label: 'Owed to you', permission: 'financials.view' },
   { slug: 'payables', label: 'You owe', permission: 'financials.view' },
   { slug: 'budget', label: 'Budget', permission: 'financials.view' },
+  // ADR-156: assets and loans from the balance statement; VAT and Corporation Tax.
+  { slug: 'balance-sheet', label: 'Balance sheet', permission: 'financials.view' },
+  { slug: 'tax', label: 'Tax', permission: 'financials.view' },
 ] as const;
 
 export default async function MoneyLayout({

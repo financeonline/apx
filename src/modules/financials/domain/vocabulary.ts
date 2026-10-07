@@ -36,6 +36,17 @@ export const METRIC_LABELS: Readonly<Record<string, { plain: string; technical: 
   payables_overdue: { plain: 'Overdue by you', technical: 'Overdue payables' },
   payables_days: { plain: 'Days you take to pay', technical: 'Creditor days' },
   working_capital: { plain: 'Working capital', technical: 'Current assets less current liabilities' },
+  // ADR-145 / ADR-156: the balance statement's assets and borrowing.
+  debt_balance: { plain: 'Borrowing owed', technical: 'Loans and long-term liabilities' },
+  fixed_assets: { plain: 'Fixed assets', technical: 'Fixed assets (property, plant and equipment)' },
+  other_long_term_assets: { plain: 'Other long-term assets', technical: 'Other non-current assets' },
+  current_assets: { plain: 'Current assets', technical: 'Current assets' },
+  total_assets: { plain: 'Total assets', technical: 'Total assets' },
+  loan_balance: { plain: 'Loans', technical: 'Loans' },
+  long_term_borrowing: { plain: 'Long-term borrowing', technical: 'Long-term liabilities' },
+  loans_secured: { plain: 'Secured loans', technical: 'Secured borrowing' },
+  loans_unsecured: { plain: 'Unsecured loans', technical: 'Unsecured borrowing' },
+  loans_unmarked: { plain: 'Loans not yet marked', technical: 'Borrowing not marked secured or unsecured' },
   operating_expenses: { plain: 'Running costs', technical: 'Operating expenses' },
   cost_of_sales: { plain: 'Direct costs', technical: 'Cost of sales' },
   customer_concentration_top1: {

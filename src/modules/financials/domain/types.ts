@@ -103,6 +103,18 @@ export interface Account {
   readonly isActive: boolean;
   readonly source: AccountSource;
   readonly mappingConfidence: MappingConfidence;
+  /** ADR-156: as the business marked it; null = not yet marked. Only loan categories carry one. */
+  readonly loanSecurity?: LoanSecurity | null;
+}
+
+/** ADR-156: secured or unsecured, for a loan or long-term liability account. */
+export type LoanSecurity = 'secured' | 'unsecured';
+
+/** The categories whose accounts can be marked secured or unsecured (mirrors `api.set_account_loan_security`). */
+export const LOAN_SECURITY_CATEGORIES: readonly StandardCategory[] = ['loan', 'long_term_liability'];
+
+export function isLoanCategory(category: StandardCategory): boolean {
+  return LOAN_SECURITY_CATEGORIES.includes(category);
 }
 
 export interface Counterparty {

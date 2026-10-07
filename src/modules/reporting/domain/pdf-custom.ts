@@ -1,9 +1,22 @@
 import type { CustomReportContent } from './custom';
+import { INDICATIVE_TEXT, NOT_AVAILABLE_TEXT, type CustomSection } from './custom-sections';
 import {
   ANSWER_SECTION_TITLES, CUSTOM_DIMENSION_NAMES, DEGRADED_TEXT, NOTE_TEXT, PRIORITY_LABELS,
   STATEMENT_KIND_LABELS, UNANSWERED_TEXT, UNSUPPORTED_TEXT,
 } from './labels-custom';
 import { PdfWriter } from './pdf-kit';
+
+/** One fixed section (ADR-156) as a simple table: label and figure, or "Not available" and why. */
+function sectionPdf(pdf: PdfWriter, section: CustomSection): void {
+  pdf.heading(section.title);
+  if (section.subtitle !== null) pdf.text(section.subtitle, { size: 9.5, muted: true, after: 2 });
+  if (section.indicative) pdf.text(`${INDICATIVE_TEXT}.`, { size: 9, bold: true, after: 4 });
+  for (const row of section.rows) {
+    const label = row.box === undefined ? row.label : `Box ${row.box} - ${row.label}`;
+    pdf.figure(label, row.value ?? NOT_AVAILABLE_TEXT, row.value === null ? row.reason : null);
+  }
+  for (const note of section.notes) pdf.text(note, { size: 8.5, muted: true, after: 1 });
+}
 
 /**
  * The Custom AI Report as a PDF (Phase 17, R17-4): each question as asked, and the analyst's stored
@@ -16,9 +29,20 @@ export async function renderCustomPdf(content: CustomReportContent): Promise<Uin
   if (content.dimensions.length > 0) {
     pdf.text(`Looking at: ${content.dimensions.map((d) => CUSTOM_DIMENSION_NAMES[d]).join(', ')}.`, { size: 9.5, muted: true, after: 4 });
   }
-  pdf.text('Every answer below is the AI Analyst\'s, under its usual checks: figures come from MOTION\'s calculations, '
-    + 'and each statement says whether it is a fact, a calculation, an estimate, analysis or a recommendation.',
-  { size: 8.5, muted: true, after: 6 });
+  const sections = content.sections ?? [];
+  if (sections.length > 0) {
+    pdf.text('The tables below are MOTION\'s own figures, worked out when the report was produced - not the AI Analyst\'s.',
+      { size: 8.5, muted: true, after: 4 });
+    for (const section of sections) sectionPdf(pdf, section);
+    pdf.gap(6);
+  }
+  if (content.entries.length === 0) {
+    pdf.text('No question was answered by the AI Analyst in this report.', { size: 9.5, muted: true, after: 6 });
+  } else {
+    pdf.text('Every answer below is the AI Analyst\'s, under its usual checks: figures come from MOTION\'s calculations, '
+      + 'and each statement says whether it is a fact, a calculation, an estimate, analysis or a recommendation.',
+    { size: 8.5, muted: true, after: 6 });
+  }
 
   content.entries.forEach((entry, index) => {
     pdf.heading(`${index + 1}. ${entry.asked}`);

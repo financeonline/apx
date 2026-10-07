@@ -96,6 +96,89 @@ export function vatStatusOf(settings: unknown): VatStatus {
   return value === true ? 'registered' : value === false ? 'not_registered' : 'unknown';
 }
 
+/**
+ * ADR-156: the tax settings the indicative VAT return and Corporation Tax estimate read — which month
+ * the first VAT quarter ends in (the three UK stagger groups), the VAT scheme, and the number of
+ * associated companies (they share the Corporation Tax limits). Read when a report is drawn; no
+ * stored figure depends on them, so a change queues no recalculation.
+ */
+export const VatScheme = z.enum(['standard', 'cash_accounting', 'flat_rate']);
+export type VatScheme = z.infer<typeof VatScheme>;
+
+export const TaxSettingsInput = z.object({
+  vatQuarterEndMonth: z.union([z.literal(1), z.literal(2), z.literal(3)], {
+    error: 'Choose when your VAT quarters end',
+  }),
+  vatScheme: VatScheme,
+  ctAssociatedCompanies: z.number().int().min(0, 'Enter a number from 0 to 50').max(50, 'Enter a number from 0 to 50'),
+});
+export type TaxSettingsInput = z.infer<typeof TaxSettingsInput>;
+
+export interface TaxSettings {
+  /** 1, 2 or 3; null when it has never been set. */
+  readonly vatQuarterEndMonth: 1 | 2 | 3 | null;
+  readonly vatScheme: VatScheme;
+  readonly ctAssociatedCompanies: number;
+}
+
+export async function setTaxSettings(ctx: AccessContext, input: unknown): Promise<TaxSettings> {
+  assertCan(ctx, 'settings.manage');
+  const parsed = parse(TaxSettingsInput, input);
+  await callApi<unknown>(ctx.db, 'set_tax_settings', {
+    p_org: ctx.orgId,
+    p_vat_quarter_end_month: parsed.vatQuarterEndMonth,
+    p_vat_scheme: parsed.vatScheme,
+    p_ct_associated_companies: parsed.ctAssociatedCompanies,
+  }, ctx.requestId);
+  return parsed;
+}
+
+/** The stored tax settings read back, null-safe: an unset quarter is null, never guessed. */
+export function taxSettingsOf(settings: unknown): TaxSettings {
+  const s = (settings as Record<string, unknown> | null) ?? {};
+  const month = s.vat_quarter_end_month;
+  const scheme = VatScheme.safeParse(s.vat_scheme);
+  const associated = s.ct_associated_companies;
+  return {
+    vatQuarterEndMonth: month === 1 || month === 2 || month === 3 ? month : null,
+    vatScheme: scheme.success ? scheme.data : 'standard',
+    ctAssociatedCompanies:
+      typeof associated === 'number' && Number.isInteger(associated) && associated >= 0 && associated <= 50
+        ? associated
+        : 0,
+  };
+}
+
+/**
+ * ADR-156: currency and country after creation. Country can always change; the currency only while
+ * the organisation holds no financial records — amounts are never converted, so `api.set_currency_and_country`
+ * refuses a relabel of existing figures.
+ */
+export const OrgCurrency = z.enum(['GBP', 'AED', 'EUR', 'USD', 'INR']);
+export type OrgCurrency = z.infer<typeof OrgCurrency>;
+export const OrgCountry = z.enum(['GB', 'AE', 'IE', 'IN']);
+export type OrgCountry = z.infer<typeof OrgCountry>;
+
+export const CurrencyAndCountryInput = z.object({
+  currency: OrgCurrency,
+  country: OrgCountry,
+});
+export type CurrencyAndCountryInput = z.infer<typeof CurrencyAndCountryInput>;
+
+export async function setCurrencyAndCountry(
+  ctx: AccessContext,
+  input: unknown,
+): Promise<CurrencyAndCountryInput> {
+  assertCan(ctx, 'settings.manage');
+  const parsed = parse(CurrencyAndCountryInput, input);
+  await callApi<unknown>(ctx.db, 'set_currency_and_country', {
+    p_org: ctx.orgId,
+    p_currency: parsed.currency,
+    p_country: parsed.country,
+  }, ctx.requestId);
+  return parsed;
+}
+
 export async function requestDeletion(ctx: AccessContext): Promise<string> {
   assertCan(ctx, 'org.delete');
   return callApi<string>(ctx.db, 'request_deletion', { p_org: ctx.orgId }, ctx.requestId);

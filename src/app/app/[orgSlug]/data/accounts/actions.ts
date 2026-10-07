@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { getAccessContext } from '@/modules/tenancy';
 import { assertCan } from '@/core/permissions';
-import { remapAccount } from '@/modules/financials';
+import { remapAccount, setLoanSecurity } from '@/modules/financials';
 import { fail, done, text } from '@/app/_lib/server-action';
 import type { ActionResult } from '@/components/action-result';
 
@@ -36,5 +36,33 @@ export async function remapAccountAction(
     return done('Saved. Your figures are being updated.');
   } catch (error) {
     return fail(error, { requestId, action: 'accounts.remap' });
+  }
+}
+
+/**
+ * Mark a loan or long-term liability account secured or unsecured (ADR-156). "unmarked" clears it.
+ * The engine reads the marking for the loans-by-security figures, so the SQL function queues a
+ * recalculation, as a re-mapping does; it refuses any other category.
+ */
+export async function setLoanSecurityAction(
+  _previous: ActionResult | null,
+  form: FormData,
+): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    assertCan(ctx, 'financials.edit');
+
+    await setLoanSecurity(ctx.db, {
+      accountId: text(form, 'account_id'),
+      security: text(form, 'loan_security'),
+    }, requestId);
+
+    revalidatePath(`/app/${orgSlug}/data/accounts`);
+    return done('Saved. Your figures are being updated.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'accounts.setLoanSecurity' });
   }
 }

@@ -11,7 +11,6 @@ export function OrganizationForm(props: {
   name: string;
   timezone: string;
   fiscalYearStartMonth: number;
-  baseCurrency: string;
 }) {
   const [state, action] = useActionState(updateOrganizationAction, null);
   return (
@@ -33,9 +32,6 @@ export function OrganizationForm(props: {
       </Field>
       <Field label="Time zone" htmlFor="timezone">
         <Input id="timezone" name="timezone" defaultValue={props.timezone} />
-      </Field>
-      <Field label="Currency" htmlFor="currency" hint="Set when the organisation was created.">
-        <Input id="currency" defaultValue={props.baseCurrency} disabled readOnly />
       </Field>
       <ActionMessage state={state} />
       <SubmitButton pendingLabel="Saving…">Save changes</SubmitButton>

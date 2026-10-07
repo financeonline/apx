@@ -482,6 +482,36 @@ export async function loadCash(
   };
 }
 
+/** Assets and borrowing at the month end (ADR-156): every figure is the engine's, from the balance statement. */
+export const ASSET_KEYS = ['fixed_assets', 'other_long_term_assets', 'current_assets', 'total_assets'] as const;
+export const BORROWING_KEYS = ['loan_balance', 'long_term_borrowing', 'debt_balance'] as const;
+export const SECURITY_KEYS = ['loans_secured', 'loans_unsecured', 'loans_unmarked'] as const;
+
+export interface BalanceSheetView {
+  readonly scope: PeriodScope;
+  readonly assets: MetricCardView[];
+  readonly borrowing: MetricCardView[];
+  readonly security: MetricCardView[];
+  /** True when some borrowing is not yet marked secured or unsecured. */
+  readonly unmarkedLoans: boolean;
+}
+
+export async function loadBalanceSheet(
+  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+): Promise<BalanceSheetView> {
+  const snapshots = await repo.loadPeriodSnapshots(db, orgId, scope.period.id, requestId);
+  const byKey = index(snapshots);
+  const options = { orgSlug, comparisonLabel: scope.previous?.label ?? 'the previous month' };
+  const unmarked = byKey.get('loans_unmarked')?.value ?? null;
+  return {
+    scope,
+    assets: figuresFor(ASSET_KEYS, byKey, scope.period, options),
+    borrowing: figuresFor(BORROWING_KEYS, byKey, scope.period, options),
+    security: figuresFor(SECURITY_KEYS, byKey, scope.period, options),
+    unmarkedLoans: unmarked !== null && !/^-?0(\.0+)?$/.test(unmarked),
+  };
+}
+
 /** The bank accounts the opening-balance form offers, whether or not a period has figures yet. */
 export async function loadBankAccountsForBalances(
   db: SupabaseClient, orgId: string, requestId?: string,

@@ -75,11 +75,31 @@ export {
   SUPPORTED_QUESTIONS,
   customQuestionMessage,
   entriesFromConversation,
+  focusWord,
   isCustomDimension,
   type CustomAnswerEntry,
   type CustomDimension,
   type CustomReportContent,
 } from './domain/custom';
+export {
+  CT_NOT_ESTIMATED_TEXT,
+  FIXED_AREAS,
+  INDICATIVE_TEXT,
+  NOT_AVAILABLE_TEXT,
+  NOT_CALCULATED_REASON,
+  SECTION_TITLES,
+  VAT_NOT_CALCULATED_TEXT,
+  VAT_QUARTERS_NOT_SET_TEXT,
+  buildCorporationTaxSection,
+  buildSnapshotSection,
+  buildVatSection,
+  isFixedArea,
+  unavailableSection,
+  type CustomSection,
+  type CustomSectionRow,
+  type FixedArea,
+  type SectionFigure,
+} from './domain/custom-sections';
 export { customReportPeriods, finishCustomReport } from './services/custom';
 export {
   ANSWER_SECTION_TITLES,

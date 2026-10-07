@@ -55,7 +55,8 @@ export type FinishCustomResult =
  */
 export async function finishCustomReportAction(input: {
   orgSlug: string;
-  conversationId: string;
+  /** NULL for a report of MOTION's fixed sections only, when no question was answered (ADR-156). */
+  conversationId: string | null;
   periodId: string;
   dimensions: string[];
   assistantMessageIds: string[];

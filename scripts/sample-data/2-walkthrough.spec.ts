@@ -16,7 +16,7 @@ const SHOTS = 'logs/sample-data/screens';
 
 const PAGES = [
   'home', 'home/health', 'departments', 'insights', 'money', 'money/profit-and-loss', 'money/cash', 'money/receivables',
-  'money/payables', 'money/banking', 'money/banking/transactions', 'money/budget', 'customers', 'customers/sales',
+  'money/payables', 'money/banking', 'money/banking/transactions', 'money/budget', 'money/balance-sheet', 'money/tax', 'customers', 'customers/sales',
   'customers/marketing', 'customers/products', 'customers/held', 'actions', 'engagement', 'notifications', 'reports',
   'reports/custom/new', 'analyst', 'forecast', 'what-if', 'funding', 'data/imports', 'data/imports/new',
   'data/documents', 'data/accounts', 'settings', 'settings/team', 'settings/audit',

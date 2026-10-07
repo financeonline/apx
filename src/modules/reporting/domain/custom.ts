@@ -1,4 +1,5 @@
 import type { SubmitAnswer } from '@/modules/ai';
+import type { CustomSection } from './custom-sections';
 
 /**
  * The Custom AI Report (Phase 17; Agreement §22 "user-selected period, questions and analytical
@@ -40,12 +41,22 @@ export const CUSTOM_DIMENSIONS = {
   receivables_payables: 'What customers owe and what is owed to suppliers',
   customers: 'Customers',
   banking: 'Banking',
+  // ADR-156: these four also carry a fixed figures table MOTION computes itself (custom-sections.ts).
+  loans: 'Loans',
+  assets: 'Assets',
+  vat: 'VAT',
+  corporation_tax: 'Corporation Tax',
 } as const;
 
 export type CustomDimension = keyof typeof CUSTOM_DIMENSIONS;
 
 export function isCustomDimension(value: string): value is CustomDimension {
   return Object.prototype.hasOwnProperty.call(CUSTOM_DIMENSIONS, value);
+}
+
+/** An area's name inside a sentence: lower case, except an abbreviation ("VAT") stays as it is. */
+export function focusWord(label: string): string {
+  return label === label.toUpperCase() ? label : label.toLowerCase();
 }
 
 /**
@@ -56,7 +67,7 @@ export function isCustomDimension(value: string): value is CustomDimension {
 export function customQuestionMessage(periodLabel: string, dimensions: readonly CustomDimension[], question: string): string {
   const focus = dimensions.length === 0
     ? ''
-    : `, looking at ${dimensions.map((d) => CUSTOM_DIMENSIONS[d].toLowerCase()).join(', ')}`;
+    : `, looking at ${dimensions.map((d) => focusWord(CUSTOM_DIMENSIONS[d])).join(', ')}`;
   return `For ${periodLabel}${focus}: ${question.trim()}`;
 }
 
@@ -75,8 +86,15 @@ export interface CustomReportContent {
   readonly organisationName: string;
   readonly period: { readonly id: string; readonly label: string; readonly start: string; readonly end: string };
   readonly dimensions: readonly CustomDimension[];
-  readonly conversationId: string;
+  /** NULL when no question was put to the analyst (a report of fixed sections only, ADR-156). */
+  readonly conversationId: string | null;
   readonly entries: readonly CustomAnswerEntry[];
+  /**
+   * ADR-156: the fixed figures tables for the chosen Loans / Assets / VAT / Corporation Tax areas,
+   * computed by MOTION, not the AI. Absent from reports recorded before them — optional, so
+   * `custom.v1` content stays readable either way.
+   */
+  readonly sections?: readonly CustomSection[];
   readonly composedAt: string;
 }
 

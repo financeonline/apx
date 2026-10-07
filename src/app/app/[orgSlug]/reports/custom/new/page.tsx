@@ -1,6 +1,6 @@
 import Link from 'next/link';
 import {
-  CUSTOM_DIMENSIONS, MAX_CUSTOM_QUESTIONS, MAX_CUSTOM_QUESTION_CHARS, SUPPORTED_QUESTIONS, customReportPeriods,
+  CUSTOM_DIMENSIONS, FIXED_AREAS, MAX_CUSTOM_QUESTIONS, MAX_CUSTOM_QUESTION_CHARS, SUPPORTED_QUESTIONS, customReportPeriods,
 } from '@/modules/reporting';
 import { getAccessContext } from '@/modules/tenancy';
 import { EmptyState, PageHeader } from '@/components/ui/surfaces';
@@ -38,6 +38,7 @@ export default async function NewCustomReportPage({ params }: { params: Promise<
           periods={periods.map((p) => ({ id: p.id, label: p.label }))}
           suggestions={SUPPORTED_QUESTIONS}
           dimensions={Object.entries(CUSTOM_DIMENSIONS).map(([value, label]) => ({ value, label }))}
+          fixedAreas={FIXED_AREAS}
           maxQuestions={MAX_CUSTOM_QUESTIONS}
           maxChars={MAX_CUSTOM_QUESTION_CHARS}
         />

@@ -77,6 +77,8 @@ export {
   loadBanking,
   loadBankAccountsForBalances,
   loadCash,
+  loadBalanceSheet,
+  type BalanceSheetView,
   loadCustomerDetail,
   loadCustomers,
   loadLedgerBook,

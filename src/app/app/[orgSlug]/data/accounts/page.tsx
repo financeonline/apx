@@ -5,6 +5,7 @@ import { PageHeader, Card, CardHeader, CardBody, Banner } from '@/components/ui/
 import { TableWrap, THead, TBody } from '@/components/ui/table';
 import { CATEGORY_LABELS, loadAccountsPage } from '@/modules/dashboard';
 import { AccountRowView } from './account-map-form';
+import { isLoanCategory } from '@/modules/financials';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
@@ -24,6 +25,7 @@ export default async function AccountsPage({ params }: { params: Promise<{ orgSl
 
   const view = await loadAccountsPage(ctx.db, ctx.orgId!, ctx.requestId);
   const canEdit = can(ctx, 'financials.edit');
+  const hasLoans = view.rows.some((row) => isLoanCategory(row.account.standardCategory));
 
   return (
     <>
@@ -61,6 +63,11 @@ export default async function AccountsPage({ params }: { params: Promise<{ orgSl
           }
         />
         <CardBody className="px-0 py-0">
+          {hasLoans ? (
+            <p className="px-6 pt-4 text-sm text-ink-muted">
+              Mark each loan as secured or unsecured — MOTION never guesses it from the name.
+            </p>
+          ) : null}
           <TableWrap>
             <caption className="sr-only">
               Accounts with their standard category and how confident the mapping is
@@ -75,6 +82,7 @@ export default async function AccountsPage({ params }: { params: Promise<{ orgSl
                   categories={view.categories}
                   categoryLabels={CATEGORY_LABELS}
                   canEdit={canEdit}
+                  isLoan={isLoanCategory(row.account.standardCategory)}
                 />
               ))}
             </TBody>

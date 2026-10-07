@@ -53,7 +53,7 @@ export async function listAccounts(
 ): Promise<Account[]> {
   const { data, error } = await db
     .from('accounts')
-    .select('id, code, name, account_type, standard_category, is_system, is_active, source, mapping_confidence')
+    .select('id, code, name, account_type, standard_category, is_system, is_active, source, mapping_confidence, loan_security')
     .eq('organization_id', orgId)
     .order('standard_category')
     .order('name');
@@ -68,6 +68,7 @@ export async function listAccounts(
     isActive: r.is_active,
     source: r.source,
     mappingConfidence: r.mapping_confidence,
+    loanSecurity: r.loan_security ?? null,
   }));
 }
 
