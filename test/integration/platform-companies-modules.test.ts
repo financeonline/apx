@@ -79,3 +79,48 @@ describe('api.platform_users_list', () => {
     expect(sqlstate((await clientFor(ownerId, { aal: 'aal2' }).schema('api').rpc('platform_users_list')).error)).toBe('42501');
   });
 });
+
+describe('the owner of a company the super admin created (ADR-160)', () => {
+  const create = async (name: string, email: string) => {
+    const { data, error } = await asAdmin('platform_create_organization', {
+      p_name: name, p_country_code: 'GB', p_base_currency: 'GBP',
+      p_fiscal_year_start_month: 4, p_timezone: '', p_owner_email: email,
+    });
+    expect(error).toBeNull();
+    return (data as Array<{ organization_id: string; invitation_token: string }>)[0]!;
+  };
+
+  it('joins through the invitation link the super admin sent', async () => {
+    const email = `invited@${DOMAIN}`;
+    const row = await create('ITest Invited Owner Co', email);
+    const invitedId = createAuthUser(email);
+    const { error } = await clientFor(invitedId, { email }).schema('api').rpc('accept_invitation', { p_token: row.invitation_token });
+    expect(error).toBeNull();
+    expect(adminSql(`select role from public.organization_memberships where organization_id = '${row.organization_id}' and user_id = '${invitedId}'`)).toBe('owner');
+  });
+
+  it('is set directly by the super admin once, accepting the pending invitation, and never by anyone else', async () => {
+    const email = `direct@${DOMAIN}`;
+    const row = await create('ITest Direct Owner Co', email);
+    const directId = createAuthUser(email);
+
+    const refused = await clientFor(ownerId, { aal: 'aal2' }).schema('api').rpc('platform_set_company_owner', { p_org: row.organization_id, p_user: directId });
+    expect(sqlstate(refused.error)).toBe('42501');
+
+    const set = await asAdmin('platform_set_company_owner', { p_org: row.organization_id, p_user: directId });
+    expect(set.error?.message ?? null).toBeNull();
+    expect(adminSql(`select role from public.organization_memberships where organization_id = '${row.organization_id}' and user_id = '${directId}'`)).toBe('owner');
+    expect(adminSql(`select status from public.invitations where organization_id = '${row.organization_id}'`)).toBe('accepted');
+
+    // A company that has an owner is never re-owned this way.
+    const again = await asAdmin('platform_set_company_owner', { p_org: row.organization_id, p_user: ownerId });
+    expect(sqlstate(again.error)).toBe('23505');
+  });
+
+  it('refuses the super admin a stale sign-in', async () => {
+    const row = await create('ITest Stale Owner Co', `stale@${DOMAIN}`);
+    const stale = clientFor(adminId, { aal: 'aal2', amrTimestamp: Math.floor(Date.now() / 1000) - 3600 });
+    const { error } = await stale.schema('api').rpc('platform_set_company_owner', { p_org: row.organization_id, p_user: ownerId });
+    expect(sqlstate(error)).toBe('42501');
+  });
+});

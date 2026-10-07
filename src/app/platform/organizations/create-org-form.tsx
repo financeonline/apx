@@ -46,9 +46,17 @@ export function CreateCompanyForm() {
           </Select>
         </Field>
       </div>
-      <Field label="Owner's email" htmlFor="owner_email" hint="They join as the owner through the invitation link.">
-        <Input id="owner_email" name="owner_email" type="email" required />
-      </Field>
+      <div className="grid grid-cols-1 gap-5 sm:grid-cols-2">
+        <Field label="Owner's email" htmlFor="owner_email" hint="Their sign-in email.">
+          <Input id="owner_email" name="owner_email" type="email" required autoComplete="off" />
+        </Field>
+        <Field
+          label="Owner's password (optional)" htmlFor="owner_password"
+          hint="Set one and they can sign in straight away. Leave it empty to send them an invitation link instead."
+        >
+          <Input id="owner_password" name="owner_password" type="password" minLength={8} maxLength={72} autoComplete="new-password" />
+        </Field>
+      </div>
       <ActionMessage state={state} />
       {link ? (
         <Field label="Invitation link" htmlFor="invitation_link">

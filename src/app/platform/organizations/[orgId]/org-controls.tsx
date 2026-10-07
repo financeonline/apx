@@ -18,13 +18,33 @@ export function OrgStatusControl({ orgId, status }: { orgId: string; status: str
       <input type="hidden" name="status" value={next} />
       <span className="text-ink-muted">
         {status === 'active'
-          ? 'Suspending freezes the figures: members can read, nothing can be changed.'
-          : 'Reactivating lets the organisation change its data again.'}
+          ? 'Deactivating freezes the company: its people can still read, nothing can be changed.'
+          : 'Activating lets the company change its data again.'}
       </span>
       <SubmitButton tone={status === 'active' ? 'danger' : 'primary'} pendingLabel="Saving…">
-        {status === 'active' ? 'Suspend' : 'Reactivate'}
+        {status === 'active' ? 'Deactivate' : 'Activate'}
       </SubmitButton>
       <ActionMessage state={state} />
+    </form>
+  );
+}
+
+/** The same switch, compact, for a row of the organisations list. */
+export function OrgStatusRowControl({ orgId, name, status }: { orgId: string; name: string; status: string }) {
+  const [state, submit] = useActionState(setOrgStatusAction, null);
+  if (status !== 'active' && status !== 'suspended') return null;
+  const active = status === 'active';
+  return (
+    <form action={submit} className="flex flex-wrap items-center gap-2">
+      <input type="hidden" name="org_id" value={orgId} />
+      <input type="hidden" name="status" value={active ? 'suspended' : 'active'} />
+      <SubmitButton
+        tone={active ? 'danger' : 'primary'} pendingLabel="Saving…" className="h-8 px-3 text-xs"
+        aria-label={`${active ? 'Deactivate' : 'Activate'} ${name}`}
+      >
+        {active ? 'Deactivate' : 'Activate'}
+      </SubmitButton>
+      {state && !state.ok ? <ActionMessage state={state} /> : null}
     </form>
   );
 }

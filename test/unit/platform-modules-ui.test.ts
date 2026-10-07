@@ -7,7 +7,14 @@ describe('platform form inputs (ADR-158)', () => {
     const value = parseInput(CreateCompanyInput, {
       name: '  Acme Ltd ', countryCode: 'GB', baseCurrency: 'GBP', fiscalYearStartMonth: '4', ownerEmail: ' Owner@Example.COM ',
     });
-    expect(value).toEqual({ name: 'Acme Ltd', countryCode: 'GB', baseCurrency: 'GBP', fiscalYearStartMonth: 4, ownerEmail: 'owner@example.com' });
+    expect(value).toEqual({ name: 'Acme Ltd', countryCode: 'GB', baseCurrency: 'GBP', fiscalYearStartMonth: 4, ownerEmail: 'owner@example.com', ownerPassword: '' });
+  });
+
+  it('takes an optional owner password as typed, of at least 8 characters (ADR-160)', () => {
+    const base = { name: 'Acme', countryCode: 'GB', baseCurrency: 'GBP', fiscalYearStartMonth: '1', ownerEmail: 'o@example.com' };
+    expect(parseInput(CreateCompanyInput, { ...base, ownerPassword: ' secret pw ' }).ownerPassword).toBe(' secret pw ');
+    expect(parseInput(CreateCompanyInput, { ...base, ownerPassword: '' }).ownerPassword).toBe('');
+    expect(() => parseInput(CreateCompanyInput, { ...base, ownerPassword: 'short' })).toThrow(ValidationError);
   });
 
   it('refuses a country, currency or month the database would refuse, field by field', () => {

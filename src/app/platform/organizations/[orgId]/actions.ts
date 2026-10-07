@@ -24,7 +24,8 @@ export async function setOrgStatusAction(_previous: ActionResult | null, form: F
     const status = text(form, 'status');
     await updateOrganizationAsPlatform(ctx, orgId, { status });
     revalidatePath(`/platform/organizations/${orgId}`);
-    return done(status === 'suspended' ? 'The organisation is suspended.' : 'The organisation is active again.');
+    revalidatePath('/platform/organizations');
+    return done(status === 'suspended' ? 'The company is deactivated.' : 'The company is active again.');
   } catch (error) {
     return fail(error, { requestId: ctx.requestId, action: 'platform.setOrgStatus' });
   }

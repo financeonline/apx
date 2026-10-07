@@ -39,12 +39,12 @@ export default async function AccountPage() {
   const serverFallback = Boolean(process.env.ANTHROPIC_API_KEY);
 
   return (
-    <BrandedScreen width="2xl" panel={false}>
+    <BrandedScreen width={superAdmin ? '6xl' : '2xl'} panel={false}>
       <PageHeader
         title="Your account" description="Your details."
         action={<SignOutButton className="w-36 rounded-xl border border-line bg-surface" />}
       />
-      <div className="mt-8 flex flex-col gap-6">
+      <div className={superAdmin ? 'mt-8 grid grid-cols-1 items-start gap-6 lg:grid-cols-2' : 'mt-8 flex flex-col gap-6'}>
         <Card>
           <CardHeader title="Your details" />
           <CardBody>

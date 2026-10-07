@@ -67,13 +67,19 @@ export function adminSql(sql: string): string {
   ).trim();
 }
 
+/**
+ * A login row as GoTrue writes it. The token columns are empty strings, never NULL: GoTrue cannot
+ * read a NULL there, and one such row breaks its admin user list for the whole instance.
+ */
 export function createAuthUser(email: string): string {
   const id = randomUUID();
   adminSql(`
     insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
-                            email_confirmed_at, created_at, updated_at)
+                            email_confirmed_at, created_at, updated_at,
+                            confirmation_token, recovery_token, email_change, email_change_token_new,
+                            email_change_token_current, phone_change, phone_change_token, reauthentication_token)
     values ('${id}','00000000-0000-0000-0000-000000000000','authenticated','authenticated',
-            '${email}','x', now(), now(), now())
+            '${email}','x', now(), now(), now(), '', '', '', '', '', '', '', '')
   `);
   return id;
 }

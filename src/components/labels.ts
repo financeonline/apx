@@ -29,7 +29,7 @@ export const MEMBERSHIP_ROLE_HINTS: Record<string, string> = {
 
 export const ORG_STATUS_LABELS: Record<string, string> = {
   active: 'Active',
-  suspended: 'Suspended',
+  suspended: 'Deactivated',
   pending_deletion: 'Deletion requested',
   deleted: 'Deleted',
 };
@@ -41,7 +41,7 @@ export const PLATFORM_ROLE_LABELS: Record<string, string> = {
 
 export const MEMBER_STATUS_LABELS: Record<string, string> = {
   active: 'Active',
-  suspended: 'Suspended',
+  suspended: 'Deactivated',
 };
 
 /**

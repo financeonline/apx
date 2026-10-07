@@ -6,7 +6,10 @@ import { can } from '@/core/permissions';
 import { PageHeader, Card, CardBody, CardHeader, EmptyState, Badge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { ORG_STATUS_LABELS } from '@/components/labels';
+import { Input } from '@/components/ui/field';
+import { Button } from '@/components/ui/button';
 import { CreateCompanyForm } from './create-org-form';
+import { OrgStatusRowControl } from './[orgId]/org-controls';
 
 export const dynamic = 'force-dynamic';
 
@@ -14,13 +17,30 @@ export const dynamic = 'force-dynamic';
  * A list of names, kinds and dates only. Opening tenant CONTENT is what writes org.data_viewed
  * (ADR-038.6), and that happens in the tenant layout.
  */
-export default async function PlatformOrganizationsPage() {
+/**
+ * The search term, reduced to letters, digits, spaces, hyphens, ampersands and full stops: it goes
+ * into a PostgREST `or` filter, whose own syntax (commas, brackets, `*`) must not be injectable.
+ */
+function searchTerm(raw: string | string[] | undefined): string {
+  const value = Array.isArray(raw) ? raw[0] : raw;
+  return (value ?? '').replace(/[^\p{L}\p{N} &.-]/gu, ' ').replace(/\s+/g, ' ').trim().slice(0, 100);
+}
+
+export default async function PlatformOrganizationsPage({
+  searchParams,
+}: {
+  searchParams: Promise<Record<string, string | string[] | undefined>>;
+}) {
   const ctx = await getPlatformContext();
-  const { data, error } = await ctx.db
+  const q = searchTerm((await searchParams).q);
+  let query = ctx.db
     .from('organizations')
     .select('id, slug, name, status, plan, created_at')
     .order('created_at', { ascending: false })
     .limit(100);
+  // Name, slug or legal name containing the words, in any case.
+  if (q) query = query.or(`name.ilike.*${q}*,slug.ilike.*${q}*,legal_name.ilike.*${q}*`);
+  const { data, error } = await query;
 
   // Never `data ?? []` on its own: a failing query rendered as an empty list is the one thing a
   // platform page must not show (PRODUCTION_AUDIT.md M2; ADR-070).
@@ -35,17 +55,29 @@ export default async function PlatformOrganizationsPage() {
         {mayCreate && (
           <Card>
             <CardHeader icon={<Building2 />} tint="violet" title="Create a company"
-              description="The company is set up for its owner, who joins through an invitation link. You do not become a member." />
+              description="The company is set up for its owner, who signs in with the password you set or joins through an invitation link. You do not become a member." />
             <CardBody><CreateCompanyForm /></CardBody>
           </Card>
         )}
         <Card>
-          <CardBody>
+          <CardBody className="flex flex-col gap-4">
+            <form role="search" action="/platform/organizations" className="flex flex-wrap items-center gap-3">
+              <Input
+                name="q" type="search" defaultValue={q} placeholder="Search companies by name"
+                aria-label="Search companies" className="min-w-0 flex-1 sm:max-w-md"
+              />
+              <Button type="submit">Search</Button>
+              {q ? <Link href="/platform/organizations" className="text-sm text-accent underline">Clear</Link> : null}
+            </form>
             {organizations.length === 0 ? (
-              <EmptyState title="No organisations yet">They appear here as customers sign up, or create one above.</EmptyState>
+              q ? (
+                <EmptyState title="No company matches">Nothing is called “{q}”. Check the spelling, or clear the search.</EmptyState>
+              ) : (
+                <EmptyState title="No organisations yet">They appear here as customers sign up, or create one above.</EmptyState>
+              )
             ) : (
               <TableWrap>
-                <THead columns={['Name', 'Slug', 'Plan', 'Status', 'Created']} />
+                <THead columns={mayCreate ? ['Name', 'Slug', 'Plan', 'Status', 'Created', 'Active?'] : ['Name', 'Slug', 'Plan', 'Status', 'Created']} />
                 <TBody>
                   {organizations.map((organization) => (
                     <TR key={organization.id}>
@@ -60,6 +92,9 @@ export default async function PlatformOrganizationsPage() {
                         )}
                       </TD>
                       <TD>{new Date(organization.created_at).toLocaleDateString('en-GB')}</TD>
+                      {mayCreate ? (
+                        <TD><OrgStatusRowControl orgId={organization.id} name={organization.name} status={organization.status} /></TD>
+                      ) : null}
                     </TR>
                   ))}
                 </TBody>

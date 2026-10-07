@@ -20,6 +20,14 @@ export const CreateCompanyInput = z.object({
   baseCurrency: z.enum(COMPANY_CURRENCIES, 'Choose a currency'),
   fiscalYearStartMonth: z.coerce.number().int().min(1, 'Choose a month').max(12, 'Choose a month'),
   ownerEmail: EMAIL,
+  /**
+   * ADR-160: optional. When given, the owner's login is created with it and they are the owner at
+   * once; when empty, they join through the invitation link. Never trimmed: spaces are characters.
+   */
+  ownerPassword: z.union([
+    z.literal(''),
+    z.string().min(8, 'Use at least 8 characters for the password').max(72, 'Keep the password under 72 characters'),
+  ]).default(''),
 });
 export type CreateCompanyInput = z.infer<typeof CreateCompanyInput>;
 

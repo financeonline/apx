@@ -271,28 +271,63 @@ export async function setOrgModule(ctx: AccessContext, orgId: string, featureKey
 export interface CreatedCompany {
   readonly organizationId: string;
   readonly slug: string;
-  readonly invitationToken: string;
+  /** The invitation link's token, or null when the owner's login was created with a password. */
+  readonly invitationToken: string | null;
 }
 
 /**
- * A super admin creates a company and invites its owner (ADR-158). The owner joins through
- * `/invite/{token}`; the raw token is returned once and only its hash is stored.
+ * A super admin creates a company and its owner (ADR-158, ADR-160).
+ *
+ * Without a password the owner joins through `/invite/{token}`; the raw token is returned once and
+ * only its hash is stored. With a password the owner's login is created first (email confirmed, as
+ * the super admin vouches for it) and made the owner as soon as the company exists, so they can sign
+ * in straight away. An email that already has a login is refused for the password route: the super
+ * admin never sets the password of an existing account — that person is invited instead. If the
+ * company cannot be created, the login just made is removed again.
  */
 export async function createCompanyAsPlatform(ctx: AccessContext, input: unknown): Promise<CreatedCompany> {
   assertCan(ctx, 'platform.orgs.manage');
   const value = parseInput(CreateCompanyInput, input);
-  const rows = await callApi<Array<{ organization_id: string; slug: string; invitation_token: string }>>(
-    ctx.db, 'platform_create_organization', {
-      p_name: value.name,
-      p_country_code: value.countryCode,
-      p_base_currency: value.baseCurrency,
-      p_fiscal_year_start_month: value.fiscalYearStartMonth,
-      p_timezone: '',
-      p_owner_email: value.ownerEmail,
-    }, ctx.requestId,
-  );
-  const row = (rows ?? [])[0];
-  if (!row) throw new Error('The company was not created.');
+
+  let ownerId: string | null = null;
+  if (value.ownerPassword) {
+    // Creating the login is also the check that the email is new: an existing account is refused by
+    // Auth (`email_exists`), so its password is never touched.
+    const { data, error } = await createServiceClient().auth.admin.createUser({
+      email: value.ownerEmail, password: value.ownerPassword, email_confirm: true,
+    });
+    if (error?.code === 'email_exists' || /already (been )?registered/i.test(error?.message ?? '')) {
+      throw new ConflictError('That email already has a MOTION login. Leave the password empty and send them the invitation link instead.');
+    }
+    if (error || !data.user) {
+      throw new ValidationError(error?.message ? `The login was not created: ${error.message}` : 'The login was not created.');
+    }
+    ownerId = data.user.id;
+  }
+
+  let row: { organization_id: string; slug: string; invitation_token: string } | undefined;
+  try {
+    const rows = await callApi<Array<{ organization_id: string; slug: string; invitation_token: string }>>(
+      ctx.db, 'platform_create_organization', {
+        p_name: value.name,
+        p_country_code: value.countryCode,
+        p_base_currency: value.baseCurrency,
+        p_fiscal_year_start_month: value.fiscalYearStartMonth,
+        p_timezone: '',
+        p_owner_email: value.ownerEmail,
+      }, ctx.requestId,
+    );
+    row = (rows ?? [])[0];
+    if (!row) throw new Error('The company was not created.');
+  } catch (error) {
+    if (ownerId) await createServiceClient().auth.admin.deleteUser(ownerId);
+    throw error;
+  }
+
+  if (ownerId) {
+    await callApi(ctx.db, 'platform_set_company_owner', { p_org: row.organization_id, p_user: ownerId }, ctx.requestId);
+    return { organizationId: row.organization_id, slug: row.slug, invitationToken: null };
+  }
   return { organizationId: row.organization_id, slug: row.slug, invitationToken: row.invitation_token };
 }
 

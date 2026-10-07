@@ -14,12 +14,12 @@ export function BrandedScreen({
   homeHref = '/',
 }: {
   children: ReactNode;
-  width?: 'md' | 'lg' | '2xl';
+  width?: 'md' | 'lg' | '2xl' | '6xl';
   /** Put the content on a white panel (forms); off for pages that bring their own cards. */
   panel?: boolean;
   homeHref?: string;
 }) {
-  const max = width === 'md' ? 'max-w-md' : width === 'lg' ? 'max-w-lg' : 'max-w-2xl';
+  const max = width === 'md' ? 'max-w-md' : width === 'lg' ? 'max-w-lg' : width === '6xl' ? 'max-w-6xl' : 'max-w-2xl';
   return (
     <div className="relative isolate min-h-dvh overflow-x-clip">
       <CornerSprig className="absolute top-0 right-0 -z-10 w-[34rem] max-w-[70vw] opacity-80" />
