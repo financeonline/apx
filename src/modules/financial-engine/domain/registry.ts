@@ -242,6 +242,69 @@ const RECEIVABLES: readonly MetricDefinition[] = [
     dependencies: [], aggregation: 'last', asOfDependent: false,
   }),
   define({
+    // ADR-156: from the balance family's statement, as debt_balance.
+    key: 'fixed_assets', label: 'Fixed assets',
+    description: 'Property, equipment and other fixed assets at the month end, from a trial balance or balance sheet.',
+    unit: 'money', family: 'receivables_payables', level: 2, dimensionType: 'none',
+    dependencies: [], aggregation: 'last', asOfDependent: false,
+  }),
+  define({
+    // ADR-156: from the balance family's statement, as debt_balance.
+    key: 'other_long_term_assets', label: 'Other long-term assets',
+    description: 'Other assets held for more than a year, at the month end.',
+    unit: 'money', family: 'receivables_payables', level: 2, dimensionType: 'none',
+    dependencies: [], aggregation: 'last', asOfDependent: false,
+  }),
+  define({
+    // ADR-156: from the balance family's statement, as debt_balance.
+    key: 'current_assets', label: 'Current assets',
+    description: 'Cash, what customers owe, stock and other short-term assets at the month end.',
+    unit: 'money', family: 'receivables_payables', level: 2, dimensionType: 'none',
+    dependencies: [], aggregation: 'last', asOfDependent: false,
+  }),
+  define({
+    // ADR-156: from the balance family's statement, as debt_balance.
+    key: 'total_assets', label: 'Total assets',
+    description: 'Fixed, other long-term and current assets together at the month end.',
+    unit: 'money', family: 'receivables_payables', level: 2, dimensionType: 'none',
+    dependencies: [], aggregation: 'last', asOfDependent: false,
+  }),
+  define({
+    // ADR-156: from the balance family's statement, as debt_balance.
+    key: 'loan_balance', label: 'Loans',
+    description: 'What is owed on accounts categorised as loans at the month end.',
+    unit: 'money', family: 'receivables_payables', level: 2, dimensionType: 'none',
+    dependencies: [], aggregation: 'last', asOfDependent: false,
+  }),
+  define({
+    // ADR-156: from the balance family's statement, as debt_balance.
+    key: 'long_term_borrowing', label: 'Long-term borrowing',
+    description: 'What is owed on accounts categorised as long-term liabilities at the month end.',
+    unit: 'money', family: 'receivables_payables', level: 2, dimensionType: 'none',
+    dependencies: [], aggregation: 'last', asOfDependent: false,
+  }),
+  define({
+    // ADR-156: from the balance family's statement, as debt_balance.
+    key: 'loans_secured', label: 'Secured loans',
+    description: 'Borrowing on accounts you marked as secured, at the month end.',
+    unit: 'money', family: 'receivables_payables', level: 2, dimensionType: 'none',
+    dependencies: [], aggregation: 'last', asOfDependent: false,
+  }),
+  define({
+    // ADR-156: from the balance family's statement, as debt_balance.
+    key: 'loans_unsecured', label: 'Unsecured loans',
+    description: 'Borrowing on accounts you marked as unsecured, at the month end.',
+    unit: 'money', family: 'receivables_payables', level: 2, dimensionType: 'none',
+    dependencies: [], aggregation: 'last', asOfDependent: false,
+  }),
+  define({
+    // ADR-156: from the balance family's statement, as debt_balance.
+    key: 'loans_unmarked', label: 'Loans not yet marked',
+    description: 'Borrowing on accounts not yet marked secured or unsecured, at the month end.',
+    unit: 'money', family: 'receivables_payables', level: 2, dimensionType: 'none',
+    dependencies: [], aggregation: 'last', asOfDependent: false,
+  }),
+  define({
     key: 'working_capital', label: 'Working capital',
     description: 'Short-term assets less short-term liabilities: what the business has to work with.',
     unit: 'money', family: 'derived', level: 4, dimensionType: 'none',

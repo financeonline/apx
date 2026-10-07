@@ -164,7 +164,7 @@ export async function loadAccounts(
   // its ledger cells folded into nothing and a receivables account went unrecognised.
   const rows = await paged(
     (from, to) => scoped.from('accounts')
-      .select('id, code, name, standard_category, account_type, is_system')
+      .select('id, code, name, standard_category, account_type, is_system, loan_security')
       .eq('organization_id', orgId).order('id').range(from, to),
     (r) => r,
   );
@@ -176,6 +176,7 @@ export async function loadAccounts(
     standardCategory: r.standard_category as AccountRef['standardCategory'],
     accountType: r.account_type as AccountRef['accountType'],
     isSystem: Boolean(r.is_system),
+    loanSecurity: (r.loan_security ?? null) as AccountRef['loanSecurity'],
   }));
 }
 

@@ -274,6 +274,8 @@ export interface AccountRef {
   readonly standardCategory: StandardCategory;
   readonly accountType: 'asset' | 'liability' | 'equity' | 'income' | 'expense';
   readonly isSystem: boolean;
+  /** ADR-156: secured / unsecured as the business marked a loan account; null or absent = not marked. */
+  readonly loanSecurity?: 'secured' | 'unsecured' | null;
 }
 
 export interface CounterpartyRef {

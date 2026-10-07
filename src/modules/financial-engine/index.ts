@@ -146,6 +146,7 @@ export {
 
 /** Phase 16 (ADR-145): borrowing owed, read only by Funding Readiness. */
 export { computeDebtBalance, DEBT_CATEGORIES } from './domain/debt';
+export { computeBalanceSheetFigures, ASSET_GROUPS } from './domain/balance-sheet';
 
 /** Phase 16 (ADR-145): the bank evidence ratio's own rule, for Funding Readiness. */
 export { bankCoverageFor } from './domain/cash-history';

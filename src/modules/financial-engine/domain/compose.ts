@@ -19,6 +19,7 @@ import type { TransferKind } from '@/modules/banking';
 import { computeConcentration, type ConcentrationPeriodInput } from './concentration';
 import { computeReceivables } from './receivables';
 import { computeDebtBalance } from './debt';
+import { computeBalanceSheetFigures } from './balance-sheet';
 import { receivablesPeriodInput, type ReceivablesComposeInput } from './receivables-input';
 import {
   bankDirectedPart, bankLineDirection, commercialPopulation, commercialSelection,
@@ -735,6 +736,8 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
   // From the same balance-family statement receivables and payables read; needs the run's batches.
   if (input.receivables !== undefined) {
     results.push(computeDebtBalance(context, period, cells, input.receivables.batches));
+    // ---- Assets and loans by security (ADR-156): the same statement, the same rules ----
+    results.push(...computeBalanceSheetFigures(context, period, cells, input.receivables.batches));
   }
 
   // A stable order makes two runs over identical data write byte-identical snapshots, which is the

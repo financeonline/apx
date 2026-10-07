@@ -182,7 +182,13 @@
  * zero only on a complete statement. Every existing value is unchanged (§6: a new metric is minor).
  * Read only by Funding Readiness.
  */
-export const ENGINE_VERSION = '15.1.0';
+/**
+ * 15.2.0 (ADR-156): MINOR. New metrics from the balance family's statement, under `debt_balance`'s
+ * rules: fixed_assets, other_long_term_assets, current_assets, total_assets, loan_balance,
+ * long_term_borrowing, and loans_secured / loans_unsecured / loans_unmarked (by the account's
+ * `loan_security`, never inferred). Every existing value is unchanged.
+ */
+export const ENGINE_VERSION = '15.2.0';
 
 /** Bumped independently of the engine (§6). */
 /**
