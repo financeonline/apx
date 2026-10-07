@@ -34,7 +34,16 @@ describe('api.set_ai_model', () => {
   it('stores a model and effort, and the server reads them', async () => {
     expect((await asAdmin({ p_model: 'claude-sonnet-4-6', p_effort: 'low' })).error).toBeNull();
     const server = await serviceClientScoped().schema('api_server').rpc('ai_model');
-    expect(server.data).toEqual({ model: 'claude-sonnet-4-6', effort: 'low' });
+    expect(server.data).toEqual({ provider: 'anthropic', model: 'claude-sonnet-4-6', effort: 'low' });
+  });
+
+  it('stores an OpenAI model with its provider (ADR-164), and refuses an effort OpenAI does not take', async () => {
+    expect((await asAdmin({ p_model: 'gpt-4.1', p_effort: null, p_provider: 'openai' })).error).toBeNull();
+    const server = await serviceClientScoped().schema('api_server').rpc('ai_model');
+    expect(server.data).toEqual({ provider: 'openai', model: 'gpt-4.1', effort: null });
+    expect(sqlstate((await asAdmin({ p_model: 'o3', p_effort: 'max', p_provider: 'openai' })).error)).toBe('22023');
+    expect(sqlstate((await asAdmin({ p_model: 'gpt-4.1', p_effort: null, p_provider: 'mistral' })).error)).toBe('22023');
+    expect(sqlstate((await asAdmin({ p_model: 'gpt-4.1', p_effort: null, p_provider: 'anthropic' })).error)).toBe('22023');
   });
 
   it('clears the choice back to the default', async () => {
@@ -59,3 +68,45 @@ describe('api.set_ai_model', () => {
     expect(Number(adminSql(`select count(*) from public.audit_events where action = 'platform.ai_model_changed' and actor_user_id = '${adminId}'`))).toBeGreaterThan(0);
   });
 });
+
+describe('the OpenAI key (ADR-164)', () => {
+  const KEY = `sk-proj-${'q'.repeat(40)}LMNO`;
+  let savedKey: { secret: string; description: string } | null = null;
+
+  beforeAll(() => {
+    const existing = adminSql(`select coalesce(json_build_object('secret', decrypted_secret, 'description', description)::text, '')
+                                 from vault.decrypted_secrets where name = 'openai_api_key'`);
+    savedKey = existing ? (JSON.parse(existing) as { secret: string; description: string }) : null;
+    adminSql(`delete from vault.secrets where name = 'openai_api_key'`);
+  });
+
+  afterAll(() => {
+    adminSql(`delete from vault.secrets where name = 'openai_api_key'`);
+    if (savedKey) {
+      const q = (v: string) => `'${v.replace(/'/g, "''")}'`;
+      adminSql(`select vault.create_secret(${q(savedKey.secret)}, 'openai_api_key', ${q(savedKey.description)})`);
+    }
+  });
+
+  it('is stored encrypted, shown by its last four characters, and read in clear by the server alone', async () => {
+    const api = clientFor(adminId).schema('api');
+    expect((await api.rpc('set_openai_api_key', { p_key: KEY })).data).toBe('LMNO');
+    expect(adminSql(`select count(*) from vault.secrets where name = 'openai_api_key' and secret like '%qqqq%'`)).toBe('0');
+    const status = (await api.rpc('openai_api_key_status')).data as Array<{ configured: boolean; ending: string }>;
+    expect(status[0]).toMatchObject({ configured: true, ending: 'LMNO' });
+    expect((await serviceClientScoped().schema('api_server').rpc('openai_api_key')).data).toBe(KEY);
+    expect((await clientFor(adminId).schema('api_server').rpc('openai_api_key')).error).not.toBeNull();
+  });
+
+  it('refuses an Anthropic key, a malformed key, an owner and a stale sign-in; and is removed', async () => {
+    const api = clientFor(adminId).schema('api');
+    expect(sqlstate((await api.rpc('set_openai_api_key', { p_key: `sk-ant-${'a'.repeat(30)}` })).error)).toBe('22023');
+    expect(sqlstate((await api.rpc('set_openai_api_key', { p_key: 'hello' })).error)).toBe('22023');
+    expect(sqlstate((await clientFor(ownerId).schema('api').rpc('set_openai_api_key', { p_key: KEY })).error)).toBe('42501');
+    const stale = clientFor(adminId, { amrTimestamp: Math.floor(Date.now() / 1000) - 3600 });
+    expect(sqlstate((await stale.schema('api').rpc('clear_openai_api_key')).error)).toBe('42501');
+    expect((await api.rpc('clear_openai_api_key')).data).toBe(true);
+    expect(adminSql(`select count(*) from vault.secrets where name = 'openai_api_key'`)).toBe('0');
+  });
+});
+

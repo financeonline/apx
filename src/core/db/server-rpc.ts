@@ -964,10 +964,22 @@ export async function anthropicApiKeyFromVault(): Promise<string | null> {
  * The super admin's model choice (ADR-163): `{ model, effort }`, or null when none is set and the
  * server's configuration applies. Read by the server that calls the model, never by a browser.
  */
-export async function aiModelChoice(): Promise<{ model: string; effort: string | null } | null> {
+export async function aiModelChoice(): Promise<{ provider: 'anthropic' | 'openai'; model: string; effort: string | null } | null> {
   const { data, error } = await serverClient().schema('api_server').rpc('ai_model');
   if (error) throw toMotionError(error);
-  const value = data as { model?: unknown; effort?: unknown } | null;
+  const value = data as { provider?: unknown; model?: unknown; effort?: unknown } | null;
   if (!value || typeof value.model !== 'string' || value.model.length === 0) return null;
-  return { model: value.model, effort: typeof value.effort === 'string' ? value.effort : null };
+  return {
+    // ADR-164: a choice stored before providers existed is Anthropic.
+    provider: value.provider === 'openai' ? 'openai' : 'anthropic',
+    model: value.model,
+    effort: typeof value.effort === 'string' ? value.effort : null,
+  };
+}
+
+/** The OpenAI key from Vault (ADR-164), for the server's model calls only. */
+export async function openAiApiKeyFromVault(): Promise<string | null> {
+  const { data, error } = await serverClient().schema('api_server').rpc('openai_api_key');
+  if (error) throw toMotionError(error);
+  return typeof data === 'string' && data.length > 0 ? data : null;
 }

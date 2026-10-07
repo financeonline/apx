@@ -9,7 +9,7 @@ import { AiKeyForm } from './ai-key-form';
 import { AiModelForm } from './ai-model-form';
 import { timeZoneOptions } from '@/components/time-zones';
 import { getPlatformContext } from '@/modules/tenancy';
-import { loadAiModelSettings, type AiModelSettings } from '@/modules/platform';
+import { loadAiModelSettings, loadOpenAiKeyStatus, type AiModelSettings } from '@/modules/platform';
 import { SignOutButton } from '@/components/dashboard/sign-out-button';
 
 export const dynamic = 'force-dynamic';
@@ -41,7 +41,10 @@ export default async function AccountPage() {
   }
   const serverFallback = Boolean(process.env.ANTHROPIC_API_KEY);
   // ADR-163: the model and effort, offered from the provider's list for the key in use.
-  const aiModel: AiModelSettings | null = superAdmin ? await loadAiModelSettings(await getPlatformContext()) : null;
+  const platformCtx = superAdmin ? await getPlatformContext() : null;
+  const aiModel: AiModelSettings | null = platformCtx ? await loadAiModelSettings(platformCtx) : null;
+  // ADR-164: the OpenAI key, beside the Anthropic one.
+  const openAiKey = platformCtx ? await loadOpenAiKeyStatus(platformCtx) : null;
 
   return (
     <BrandedScreen width={superAdmin ? '6xl' : '2xl'} panel={false}>
@@ -65,7 +68,7 @@ export default async function AccountPage() {
           <Card>
             <CardHeader
               icon={<KeyRound />} tint="pink" title="AI provider key"
-              description="The Anthropic key every organisation's AI Analyst and document reading use. Only super admins see this."
+              description="The Anthropic key, and the model every organisation's AI Analyst and document reading use. Only super admins see this."
             />
             <CardBody className="flex flex-col gap-4">
               {aiKey === null ? null : (
@@ -82,14 +85,14 @@ export default async function AccountPage() {
                     <div className="flex flex-col gap-3 border-t border-line pt-4">
                       <p className="text-sm text-ink" data-testid="ai-model-status">
                         {aiModel.chosen
-                          ? <>In use: <span className="font-medium">{aiModel.options.find((o) => o.id === aiModel.chosen!.model)?.name ?? aiModel.chosen.model}</span>{aiModel.chosen.effort ? `, ${aiModel.chosen.effort} effort` : ', its default effort'}.</>
+                          ? <>In use: <span className="font-medium">{aiModel.options.find((o) => o.provider === aiModel.chosen!.provider && o.id === aiModel.chosen!.model)?.name ?? `${aiModel.chosen.provider === 'openai' ? 'OpenAI ' : ''}${aiModel.chosen.model}`}</span>{aiModel.chosen.effort ? `, ${aiModel.chosen.effort} effort` : ', its default effort'}.</>
                           : <>In use: the default, <span className="font-medium">{aiModel.options.find((o) => o.id === aiModel.defaultModel)?.name ?? aiModel.defaultModel}</span>.</>}
                       </p>
                       {aiModel.options.length === 0 ? (
                         <p className="text-sm text-ink-muted">The list of models could not be read from Anthropic just now. Refresh to try again.</p>
                       ) : (
                         <AiModelForm
-                          options={aiModel.options} chosenModel={aiModel.chosen?.model ?? null}
+                          options={aiModel.options} chosenModel={aiModel.chosen ? `${aiModel.chosen.provider}:${aiModel.chosen.model}` : null}
                           chosenEffort={aiModel.chosen?.effort ?? null} defaultModel={aiModel.defaultModel}
                         />
                       )}
@@ -97,6 +100,22 @@ export default async function AccountPage() {
                   ) : null}
                 </>
               )}
+            </CardBody>
+          </Card>
+        ) : null}
+        {openAiKey ? (
+          <Card>
+            <CardHeader
+              icon={<KeyRound />} tint="violet" title="OpenAI key (optional)"
+              description="Store an OpenAI key to choose an OpenAI model for the AI. Only super admins see this."
+            />
+            <CardBody className="flex flex-col gap-4">
+              <p className="text-sm text-ink" data-testid="openai-key-status">
+                {openAiKey.configured
+                  ? <>A key ending <span className="font-mono">…{openAiKey.ending}</span> is stored{openAiKey.updatedAt ? `, set ${formatDateTime(openAiKey.updatedAt)}` : ''}.</>
+                  : 'No OpenAI key is stored. The AI uses Anthropic.'}
+              </p>
+              <AiKeyForm configured={openAiKey.configured} provider="openai" />
             </CardBody>
           </Card>
         ) : null}

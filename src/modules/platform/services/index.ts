@@ -1,6 +1,6 @@
 import 'server-only';
-import { anthropicApiKeyFromVault, createServiceClient } from '@/core/db';
-import { DEFAULT_ANALYST_MODEL } from '@/modules/ai';
+import { anthropicApiKeyFromVault, createServiceClient, openAiApiKeyFromVault } from '@/core/db';
+import { DEFAULT_ANALYST_MODEL, OPENAI_EFFORTS, isOpenAiChatModel, isOpenAiReasoningModel } from '@/modules/ai';
 import { callApi } from '@/core/db/api-rpc';
 import { ConflictError, NotFound, ValidationError, isMotionError, toMotionError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
@@ -408,13 +408,16 @@ export async function addPlatformUser(
 }
 
 /**
- * The AI model and its effort (ADR-163), chosen by the super admin on Account. The models offered
- * are the ones the provider lists for the key in use, with the effort levels each one supports.
+ * The AI model and its effort (ADR-163), from Anthropic or OpenAI (ADR-164), chosen by the super
+ * admin on Account. The models offered are the ones each provider lists for the key in use, with
+ * the effort levels each one supports.
  */
 export const AI_EFFORTS = ['low', 'medium', 'high', 'xhigh', 'max'] as const;
 export type AiEffortLevel = (typeof AI_EFFORTS)[number];
+export type AiProvider = 'anthropic' | 'openai';
 
 export interface AiModelOption {
+  readonly provider: AiProvider;
   readonly id: string;
   readonly name: string;
   /** The effort levels this model accepts; empty when it has no effort setting. */
@@ -422,19 +425,23 @@ export interface AiModelOption {
 }
 
 export interface AiModelSettings {
-  /** The models the key is offered, newest first; empty when the provider could not be reached. */
+  /** The models the stored keys are offered; a provider that could not be reached lists none. */
   readonly options: readonly AiModelOption[];
   /** The super admin's choice, or null when the default applies. */
-  readonly chosen: { readonly model: string; readonly effort: AiEffortLevel | null } | null;
-  /** The model used when nothing is chosen. */
+  readonly chosen: { readonly provider: AiProvider; readonly model: string; readonly effort: AiEffortLevel | null } | null;
+  /** The model used when nothing is chosen (Anthropic). */
   readonly defaultModel: string;
 }
 
-async function keyInUse(): Promise<string | null> {
+async function anthropicKeyInUse(): Promise<string | null> {
   return (await anthropicApiKeyFromVault().catch(() => null)) ?? process.env.ANTHROPIC_API_KEY ?? null;
 }
 
-async function offeredModels(key: string): Promise<AiModelOption[]> {
+async function openAiKeyInUse(): Promise<string | null> {
+  return (await openAiApiKeyFromVault().catch(() => null)) ?? process.env.OPENAI_API_KEY ?? null;
+}
+
+async function anthropicModels(key: string): Promise<AiModelOption[]> {
   const response = await fetch('https://api.anthropic.com/v1/models?limit=100', {
     headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01' },
     signal: AbortSignal.timeout(10_000),
@@ -448,45 +455,108 @@ async function offeredModels(key: string): Promise<AiModelOption[]> {
     const efforts = effort?.supported
       ? AI_EFFORTS.filter((level) => (effort[level] as { supported?: boolean } | undefined)?.supported === true)
       : [];
-    return { id: m.id, name: m.display_name ?? m.id, efforts };
+    return { provider: 'anthropic' as const, id: m.id, name: m.display_name ?? m.id, efforts };
   });
+}
+
+async function openAiModels(key: string): Promise<AiModelOption[]> {
+  const response = await fetch('https://api.openai.com/v1/models', {
+    headers: { authorization: `Bearer ${key}` },
+    signal: AbortSignal.timeout(10_000),
+  });
+  if (!response.ok) throw new Error(`model list ${response.status}`);
+  const body = (await response.json()) as { data?: Array<{ id: string; created?: number }> };
+  return (body.data ?? [])
+    .filter((m) => isOpenAiChatModel(m.id))
+    .sort((a, b) => (b.created ?? 0) - (a.created ?? 0))
+    .map((m) => ({
+      provider: 'openai' as const, id: m.id, name: `OpenAI ${m.id}`,
+      efforts: isOpenAiReasoningModel(m.id) ? [...OPENAI_EFFORTS] : [],
+    }));
 }
 
 export async function loadAiModelSettings(ctx: AccessContext): Promise<AiModelSettings> {
   assertCan(ctx, 'system.manage');
   const { data, error } = await ctx.db.from('platform_settings').select('value').eq('key', 'ai_model').maybeSingle();
   if (error) throw toMotionError(error, ctx.requestId);
-  const value = (data?.value ?? null) as { model?: unknown; effort?: unknown } | null;
+  const value = (data?.value ?? null) as { provider?: unknown; model?: unknown; effort?: unknown } | null;
   const chosen = value && typeof value.model === 'string'
-    ? { model: value.model, effort: (AI_EFFORTS as readonly string[]).includes(String(value.effort)) ? value.effort as AiEffortLevel : null }
+    ? {
+      provider: (value.provider === 'openai' ? 'openai' : 'anthropic') as AiProvider,
+      model: value.model,
+      effort: (AI_EFFORTS as readonly string[]).includes(String(value.effort)) ? value.effort as AiEffortLevel : null,
+    }
     : null;
-  const key = await keyInUse();
-  let options: AiModelOption[] = [];
-  if (key) options = await offeredModels(key).catch(() => []);
-  return { options, chosen, defaultModel: DEFAULT_ANALYST_MODEL };
+  const [anthropicKey, openAiKey] = await Promise.all([anthropicKeyInUse(), openAiKeyInUse()]);
+  const [fromAnthropic, fromOpenAi] = await Promise.all([
+    anthropicKey ? anthropicModels(anthropicKey).catch(() => []) : Promise.resolve([]),
+    openAiKey ? openAiModels(openAiKey).catch(() => []) : Promise.resolve([]),
+  ]);
+  return { options: [...fromAnthropic, ...fromOpenAi], chosen, defaultModel: DEFAULT_ANALYST_MODEL };
+}
+
+/** The tool MOTION requires a model to call — what the analyst's answer, document reading and the briefing depend on. */
+const TRIAL_TOOL = { name: 'submit', description: 'Submit the word.', schema: { type: 'object', properties: { word: { type: 'string' } }, required: ['word'] } };
+
+/** One small call with a REQUIRED tool call; returns the provider's refusal, or null when it worked. */
+async function trialRefusal(provider: AiProvider, key: string, model: string, effort: string | null): Promise<string | null> {
+  const request = provider === 'anthropic'
+    ? fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model, max_tokens: 64, messages: [{ role: 'user', content: 'Submit the word OK.' }],
+        tools: [{ name: TRIAL_TOOL.name, description: TRIAL_TOOL.description, input_schema: TRIAL_TOOL.schema }],
+        tool_choice: { type: 'tool', name: TRIAL_TOOL.name },
+        ...(effort ? { output_config: { effort } } : {}),
+      }),
+      signal: AbortSignal.timeout(30_000),
+    })
+    : fetch('https://api.openai.com/v1/chat/completions', {
+      method: 'POST',
+      headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+      body: JSON.stringify({
+        model, max_completion_tokens: effort ? 2000 : 64, messages: [{ role: 'user', content: 'Submit the word OK.' }],
+        tools: [{ type: 'function', function: { name: TRIAL_TOOL.name, description: TRIAL_TOOL.description, parameters: TRIAL_TOOL.schema } }],
+        tool_choice: { type: 'function', function: { name: TRIAL_TOOL.name } },
+        ...(effort ? { reasoning_effort: effort } : {}),
+      }),
+      signal: AbortSignal.timeout(60_000),
+    });
+  const trial = await request.catch(() => null);
+  if (!trial) return 'could not be reached';
+  if (trial.ok) return null;
+  return ((await trial.json().catch(() => null)) as { error?: { message?: string } } | null)?.error?.message ?? `HTTP ${trial.status}`;
 }
 
 /**
- * Choose the model and effort. The model must be one the key is offered and the effort one it
- * supports; one tiny call proves the pair works before it is stored, so a choice can never leave
- * every analyst question failing. An empty model goes back to the default.
+ * Choose the provider, model and effort. The model must be one that provider offers the stored key
+ * and the effort one it supports; one tiny call with a required tool proves the choice works before
+ * it is stored, so a choice can never leave every analyst question failing. An empty model goes back
+ * to the default.
  */
-export async function setAiModel(ctx: AccessContext, model: string, effort: string): Promise<{ model: string | null; effort: string | null }> {
+export async function setAiModel(
+  ctx: AccessContext, choice: string, effort: string,
+): Promise<{ provider: AiProvider | null; model: string | null; effort: string | null }> {
   assertCan(ctx, 'system.manage');
   const wantedEffort = effort.trim() || null;
-  // "Default" with an effort means the default model at that effort, named explicitly.
-  const wantedModel = model.trim() || (wantedEffort ? DEFAULT_ANALYST_MODEL : '');
-  if (!wantedModel) {
-    await callApi(ctx.db, 'set_ai_model', { p_model: null, p_effort: null }, ctx.requestId);
-    return { model: null, effort: null };
+  // The form sends "provider:model"; "Default" with an effort means the default model, named explicitly.
+  const raw = choice.trim() || (wantedEffort ? `anthropic:${DEFAULT_ANALYST_MODEL}` : '');
+  if (!raw) {
+    await callApi(ctx.db, 'set_ai_model', { p_model: null, p_effort: null, p_provider: 'anthropic' }, ctx.requestId);
+    return { provider: null, model: null, effort: null };
   }
-  const key = await keyInUse();
-  if (!key) throw new ValidationError('Add an AI provider key first.');
+  const split = raw.indexOf(':');
+  const provider: AiProvider = split > 0 && raw.slice(0, split) === 'openai' ? 'openai' : 'anthropic';
+  const wantedModel = split > 0 && ['openai', 'anthropic'].includes(raw.slice(0, split)) ? raw.slice(split + 1) : raw;
+
+  const key = provider === 'openai' ? await openAiKeyInUse() : await anthropicKeyInUse();
+  if (!key) throw new ValidationError(provider === 'openai' ? 'Add an OpenAI key first.' : 'Add an Anthropic key first.');
   let options: AiModelOption[];
   try {
-    options = await offeredModels(key);
+    options = provider === 'openai' ? await openAiModels(key) : await anthropicModels(key);
   } catch {
-    throw new ValidationError('Anthropic could not be reached to check the model. Try again in a moment.');
+    throw new ValidationError(`${provider === 'openai' ? 'OpenAI' : 'Anthropic'} could not be reached to check the model. Try again in a moment.`);
   }
   const option = options.find((o) => o.id === wantedModel);
   if (!option) throw new ValidationError('Your key is not offered that model.');
@@ -495,28 +565,50 @@ export async function setAiModel(ctx: AccessContext, model: string, effort: stri
       ? `${option.name} has no effort setting. Choose "Model default".`
       : `${option.name} does not support ${wantedEffort} effort.`);
   }
-  const trial = await fetch('https://api.anthropic.com/v1/messages', {
-    method: 'POST',
-    headers: { 'x-api-key': key, 'anthropic-version': '2023-06-01', 'content-type': 'application/json' },
-    // The trial uses what MOTION depends on: a tool the model is REQUIRED to call (the analyst's final
-    // answer, document reading and the adviser briefing all do). Some models refuse that (2026-10-07:
-    // the Claude 5 family), and would otherwise fail those features after being chosen.
-    body: JSON.stringify({
-      model: wantedModel, max_tokens: 64, messages: [{ role: 'user', content: 'Submit the word OK.' }],
-      tools: [{ name: 'submit', description: 'Submit the word.', input_schema: { type: 'object', properties: { word: { type: 'string' } }, required: ['word'] } }],
-      tool_choice: { type: 'tool', name: 'submit' },
-      ...(wantedEffort ? { output_config: { effort: wantedEffort } } : {}),
-    }),
-    signal: AbortSignal.timeout(30_000),
-  }).catch(() => null);
-  if (!trial || !trial.ok) {
-    const detail = trial ? ((await trial.json().catch(() => null)) as { error?: { message?: string } } | null)?.error?.message : null;
-    if (detail && /tool_choice/i.test(detail)) {
+  const refusal = await trialRefusal(provider, key, wantedModel, wantedEffort);
+  if (refusal) {
+    if (/tool_choice|tool choice|function/i.test(refusal)) {
       throw new ValidationError(`${option.name} cannot give MOTION the structured answers it needs yet, so it cannot be used. Choose another model.`);
     }
-    throw new ValidationError(`Anthropic refused that choice${detail ? `: ${detail}` : '. Try again in a moment.'}`);
+    throw new ValidationError(`${provider === 'openai' ? 'OpenAI' : 'Anthropic'} refused that choice: ${refusal}`);
   }
-  await callApi(ctx.db, 'set_ai_model', { p_model: wantedModel, p_effort: wantedEffort }, ctx.requestId);
-  return { model: wantedModel, effort: wantedEffort };
+  await callApi(ctx.db, 'set_ai_model', { p_model: wantedModel, p_effort: wantedEffort, p_provider: provider }, ctx.requestId);
+  return { provider, model: wantedModel, effort: wantedEffort };
 }
 
+/**
+ * The OpenAI key (ADR-164): the Anthropic key's rules — checked with OpenAI before it is stored
+ * encrypted, shown only as its last four characters.
+ */
+export async function loadOpenAiKeyStatus(ctx: AccessContext): Promise<{ configured: boolean; ending: string | null; updatedAt: string | null }> {
+  assertCan(ctx, 'system.manage');
+  const rows = await callApi<Array<{ configured: boolean; ending: string | null; updated_at: string | null }>>(
+    ctx.db, 'openai_api_key_status', {}, ctx.requestId,
+  );
+  const row = (rows ?? [])[0];
+  return { configured: row?.configured === true, ending: row?.ending ?? null, updatedAt: row?.updated_at ?? null };
+}
+
+export async function setOpenAiKey(ctx: AccessContext, key: string): Promise<string> {
+  assertCan(ctx, 'system.manage');
+  const trimmed = key.trim();
+  if (!/^sk-[A-Za-z0-9_-]{20,}$/.test(trimmed) || trimmed.startsWith('sk-ant-')) {
+    throw new ValidationError('That does not look like an OpenAI API key (it starts sk-).');
+  }
+  let accepted: boolean;
+  try {
+    const response = await fetch('https://api.openai.com/v1/models', {
+      headers: { authorization: `Bearer ${trimmed}` }, signal: AbortSignal.timeout(10_000),
+    });
+    accepted = response.ok;
+  } catch {
+    throw new ValidationError('OpenAI could not be reached to check the key. Try again in a moment.');
+  }
+  if (!accepted) throw new ValidationError('OpenAI did not accept that key. Check it and try again.');
+  return await callApi<string>(ctx.db, 'set_openai_api_key', { p_key: trimmed }, ctx.requestId);
+}
+
+export async function clearOpenAiKey(ctx: AccessContext): Promise<boolean> {
+  assertCan(ctx, 'system.manage');
+  return await callApi<boolean>(ctx.db, 'clear_openai_api_key', {}, ctx.requestId);
+}

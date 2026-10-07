@@ -7,7 +7,7 @@ import { newRequestId } from '@/core/logging';
 import { fail, done, text } from '@/app/_lib/server-action';
 import type { ActionResult } from '@/components/action-result';
 import { assertCan } from '@/core/permissions';
-import { clearAiKey, setAiKey, setAiModel } from '@/modules/platform';
+import { clearAiKey, clearOpenAiKey, setAiKey, setAiModel, setOpenAiKey } from '@/modules/platform';
 import { forgetAiKey } from '@/modules/ai';
 import { confirmPassword, getPlatformContext } from '@/modules/tenancy';
 
@@ -80,10 +80,39 @@ export async function setAiModelAction(_previous: ActionResult | null, form: For
     forgetAiKey();
     revalidatePath('/account');
     return done(saved.model
-      ? `Saved. The AI now uses ${saved.model}${saved.effort ? ` at ${saved.effort} effort` : ''}.`
+      ? `Saved. The AI now uses ${saved.provider === 'openai' ? 'OpenAI ' : ''}${saved.model}${saved.effort ? ` at ${saved.effort} effort` : ''}.`
       : 'Saved. The AI uses the default model.');
   } catch (error) {
     return fail(error, { requestId: ctx.requestId, action: 'platform.setAiModel' });
+  }
+}
+
+/** The OpenAI key (ADR-164): the Anthropic key's rules — password confirmed, checked with OpenAI, stored encrypted. */
+export async function setOpenAiKeyAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const ctx = await getPlatformContext();
+  try {
+    assertCan(ctx, 'system.manage');
+    await confirmPassword(ctx, password(form));
+    const ending = await setOpenAiKey(ctx, text(form, 'api_key'));
+    forgetAiKey();
+    revalidatePath('/account');
+    return done(`Saved. The OpenAI key ending ${ending} is stored. Choose an OpenAI model below to use it.`);
+  } catch (error) {
+    return fail(error, { requestId: ctx.requestId, action: 'platform.setOpenAiKey' });
+  }
+}
+
+export async function clearOpenAiKeyAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+  const ctx = await getPlatformContext();
+  try {
+    assertCan(ctx, 'system.manage');
+    await confirmPassword(ctx, password(form));
+    const removed = await clearOpenAiKey(ctx);
+    forgetAiKey();
+    revalidatePath('/account');
+    return done(removed ? 'Removed. If an OpenAI model was chosen, choose another model.' : 'There was no stored key to remove.');
+  } catch (error) {
+    return fail(error, { requestId: ctx.requestId, action: 'platform.clearOpenAiKey' });
   }
 }
 

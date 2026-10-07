@@ -19,6 +19,7 @@ export {
   recordAccessEvent,
   anthropicApiKeyFromVault,
   aiModelChoice,
+  openAiApiKeyFromVault,
   revokeUserSessions,
   recordReportFile,
   finishFunding,

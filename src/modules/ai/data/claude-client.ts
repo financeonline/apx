@@ -5,7 +5,8 @@ import type {
 } from '@anthropic-ai/sdk/resources/messages';
 import { UpstreamError } from '@/core/errors';
 import { log } from '@/core/logging';
-import { aiModelChoice, anthropicApiKeyFromVault } from '@/core/db';
+import { aiModelChoice, anthropicApiKeyFromVault, openAiApiKeyFromVault } from '@/core/db';
+import { callOpenAi } from './openai-client';
 
 /**
  * The one file that imports the Anthropic SDK (AI_ARCHITECTURE.md §1.2, §11; ADR-023).
@@ -88,15 +89,17 @@ async function currentKey(): Promise<string | null> {
   return stored ?? process.env.ANTHROPIC_API_KEY ?? null;
 }
 
-let modelRead: { readonly choice: { model: string; effort: string | null } | null; readonly at: number } | null = null;
+type ModelChoice = { provider: 'anthropic' | 'openai'; model: string; effort: string | null };
+let modelRead: { readonly choice: ModelChoice | null; readonly at: number } | null = null;
+let openAiKeyRead: { readonly key: string | null; readonly at: number } | null = null;
 
 /**
- * The model and effort the super admin chose (ADR-163), else the configured default at the model's
- * own effort. Read at most once a minute, like the key.
+ * The provider, model and effort the super admin chose (ADR-163, ADR-164), else the configured
+ * Anthropic default at the model's own effort. Read at most once a minute, like the key.
  */
-async function currentModel(): Promise<{ model: string; effort: string | null }> {
+async function currentModel(): Promise<ModelChoice> {
   if (!modelRead || Date.now() - modelRead.at >= KEY_TTL_MS) {
-    let choice: { model: string; effort: string | null } | null = null;
+    let choice: ModelChoice | null = null;
     try {
       choice = await aiModelChoice();
     } catch (error) {
@@ -104,7 +107,22 @@ async function currentModel(): Promise<{ model: string; effort: string | null }>
     }
     modelRead = { choice, at: Date.now() };
   }
-  return modelRead.choice ?? { model: DEFAULT_ANALYST_MODEL, effort: null };
+  return modelRead.choice ?? { provider: 'anthropic', model: DEFAULT_ANALYST_MODEL, effort: null };
+}
+
+/** The OpenAI key (ADR-164): the stored one, else the deployment's OPENAI_API_KEY. Read at most once a minute. */
+async function currentOpenAiKey(): Promise<string | null> {
+  if (process.env.MOTION_AI_OFFLINE === '1') return null;
+  if (!openAiKeyRead || Date.now() - openAiKeyRead.at >= KEY_TTL_MS) {
+    let stored: string | null = null;
+    try {
+      stored = await openAiApiKeyFromVault();
+    } catch (error) {
+      log.warn('the stored OpenAI key could not be read; using the server setting', { service: 'ai.claude-client', error: String(error) });
+    }
+    openAiKeyRead = { key: stored, at: Date.now() };
+  }
+  return openAiKeyRead.key ?? process.env.OPENAI_API_KEY ?? null;
 }
 
 /** Called after the owner changes the key or the model, so this server uses the new one at once. */
@@ -112,6 +130,7 @@ export function forgetAiKey(): void {
   keyRead = null;
   cached = null;
   modelRead = null;
+  openAiKeyRead = null;
 }
 
 /** The effort levels the API accepts (ADR-163). */
@@ -147,8 +166,14 @@ function isTransient(error: unknown): boolean {
 
 /** The real transport: prompt caching on the stable prefix (§9, §11), one retry on a transient error. */
 export const liveTransport: ModelTransport = async (call) => {
-  // A caller naming its own model (the evaluation) gets that model at its default effort.
-  const chosen = call.model ? { model: call.model, effort: null } : await currentModel();
+  // A caller naming its own model (the evaluation) gets that Anthropic model at its default effort.
+  const chosen: ModelChoice = call.model ? { provider: 'anthropic', model: call.model, effort: null } : await currentModel();
+  if (chosen.provider === 'openai') {
+    const key = await currentOpenAiKey();
+    // Fail closed and loudly, exactly as for a missing Anthropic key.
+    if (!key) throw new UpstreamError('The analyst is not configured on this deployment.');
+    return callOpenAi(call, key, chosen.model, chosen.effort, call.maxTokens ?? ANALYST_MAX_TOKENS);
+  }
   const effort = isEffort(chosen.effort) ? chosen.effort : null;
   const attempt = async (): Promise<ModelResponse> => {
     const response = await (await client()).messages.create({
