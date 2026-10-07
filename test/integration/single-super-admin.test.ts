@@ -14,15 +14,14 @@ let staffId: string;
 let personId: string;
 
 const asAdmin = (fn: string, args: Record<string, unknown>) =>
-  clientFor(adminId, { aal: 'aal2' }).schema('api').rpc(fn, args);
+  clientFor(adminId).schema('api').rpc(fn, args);
 
 beforeAll(() => {
   resetFixtures();
   adminId = createAuthUser(`admin@${DOMAIN}`);
   staffId = createAuthUser(`staff@${DOMAIN}`);
   personId = createAuthUser(`person@${DOMAIN}`);
-  adminSql(`insert into public.platform_users (user_id, platform_role, status) values ('${adminId}', 'super_admin', 'active');
-            update public.profiles set mfa_enrolled_at = now() where id = '${adminId}';`);
+  adminSql(`insert into public.platform_users (user_id, platform_role, status) values ('${adminId}', 'super_admin', 'active');`);
 });
 
 afterAll(() => {

@@ -1,9 +1,9 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
-import { adminSql, clientFor, createAuthUser, resetFixtures, serviceClientScoped, sqlstate, withPlatformMfaRequired } from './setup';
+import { adminSql, clientFor, createAuthUser, resetFixtures, serviceClientScoped, sqlstate } from './setup';
 
 /**
- * ADR-157 over the real wire: the AI provider key is set and removed only by a super admin at aal2
+ * ADR-157 over the real wire: the AI provider key is set and removed only by the super admin
  * with a fresh sign-in, is stored encrypted in Vault (never in a table), is shown only as its last
  * four characters, and is readable in clear by the service role alone.
  */
@@ -18,7 +18,7 @@ let ownerId: string;
 let saved: { secret: string; description: string } | null = null;
 
 const asAdmin = (fn: string, args: Record<string, unknown> = {}) =>
-  clientFor(adminId, { aal: 'aal2' }).schema('api').rpc(fn, args);
+  clientFor(adminId).schema('api').rpc(fn, args);
 
 beforeAll(() => {
   resetFixtures();
@@ -29,8 +29,7 @@ beforeAll(() => {
   adminId = createAuthUser(`admin@${DOMAIN}`);
   ownerId = createAuthUser(`owner@${DOMAIN}`);
   adminSql(`
-    insert into public.platform_users (user_id, platform_role, status) values ('${adminId}', 'super_admin', 'active');
-    update public.profiles set mfa_enrolled_at = now() where id = '${adminId}';`);
+    insert into public.platform_users (user_id, platform_role, status) values ('${adminId}', 'super_admin', 'active');`);
 });
 
 afterAll(() => {
@@ -66,7 +65,7 @@ describe('api.set_ai_api_key / ai_api_key_status / clear_ai_api_key', () => {
     const server = await serviceClientScoped().schema('api_server').rpc('anthropic_api_key');
     expect(server.error).toBeNull();
     expect(server.data).toBe(KEY_B);
-    const user = await clientFor(adminId, { aal: 'aal2' }).schema('api_server').rpc('anthropic_api_key');
+    const user = await clientFor(adminId).schema('api_server').rpc('anthropic_api_key');
     expect(user.error).not.toBeNull();
   });
 
@@ -74,28 +73,19 @@ describe('api.set_ai_api_key / ai_api_key_status / clear_ai_api_key', () => {
     expect(sqlstate((await asAdmin('set_ai_api_key', { p_key: 'hello' })).error)).toBe('22023');
   });
 
-  it('refuses an organisation owner, and an admin without two-step sign-in', async () => {
-    const owner = clientFor(ownerId, { aal: 'aal2' }).schema('api');
+  it('refuses an organisation owner, and the super admin without a recent sign-in', async () => {
+    const owner = clientFor(ownerId).schema('api');
     expect(sqlstate((await owner.rpc('set_ai_api_key', { p_key: KEY_A })).error)).toBe('42501');
     expect(sqlstate((await owner.rpc('ai_api_key_status')).error)).toBe('42501');
     expect(sqlstate((await owner.rpc('clear_ai_api_key')).error)).toBe('42501');
-    const aal1 = clientFor(adminId, { aal: 'aal1' }).schema('api');
-    await withPlatformMfaRequired(true, async () => {
-      expect(sqlstate((await aal1.rpc('set_ai_api_key', { p_key: KEY_A })).error)).toBe('42501');
-    });
+    const stale = clientFor(adminId, { amrTimestamp: Math.floor(Date.now() / 1000) - 3600 }).schema('api');
+    expect(sqlstate((await stale.rpc('set_ai_api_key', { p_key: KEY_A })).error)).toBe('42501');
   });
 
-  it('accepts a password-only super admin when two-step is switched off for platform staff (ADR-159)', async () => {
-    const aal1 = clientFor(adminId, { aal: 'aal1' }).schema('api');
-    await withPlatformMfaRequired(false, async () => {
-      const { data, error } = await aal1.rpc('ai_api_key_status');
-      expect(error).toBeNull();
-      expect(data).toBeDefined();
-    });
-    // The owner never gains it, whatever the setting.
-    await withPlatformMfaRequired(false, async () => {
-      expect(sqlstate((await clientFor(ownerId).schema('api').rpc('ai_api_key_status')).error)).toBe('42501');
-    });
+  it('shows the super admin, signed in with a password, the key status (ADR-161)', async () => {
+    const { data, error } = await clientFor(adminId).schema('api').rpc('ai_api_key_status');
+    expect(error).toBeNull();
+    expect(data).toBeDefined();
   });
 
   it('records the change in the audit log without the key', () => {

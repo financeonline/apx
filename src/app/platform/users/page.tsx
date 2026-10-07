@@ -27,7 +27,7 @@ export default async function PlatformUsersPage() {
               <EmptyState title="No platform accounts yet">Add the first one below.</EmptyState>
             ) : (
               <TableWrap>
-                <THead columns={['Email', 'Name', 'Role', 'Status', 'Two-step sign-in', '']} />
+                <THead columns={['Email', 'Name', 'Role', 'Status', '']} />
                 <TBody>
                   {users.map((user) => (
                     <PlatformUserRow
@@ -37,7 +37,6 @@ export default async function PlatformUsersPage() {
                       fullName={user.fullName}
                       platformRole={user.platformRole}
                       status={user.status}
-                      twoStep={user.twoStep}
                     />
                   ))}
                 </TBody>
@@ -50,7 +49,7 @@ export default async function PlatformUsersPage() {
             icon={<KeyRound />}
             tint="pink"
             title="Add a platform admin"
-            description="Requires two-step sign-in and a recent re-authentication."
+            description="Needs your password from the last ten minutes (Confirm it is you, above)."
           />
           <CardBody><AddPlatformUserForm /></CardBody>
         </Card>

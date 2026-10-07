@@ -27,7 +27,7 @@ const rpc = (
   userId: string,
   fn: string,
   args: Record<string, unknown> = {},
-  jwt: { email?: string; aal?: 'aal1' | 'aal2' } = {},
+  jwt: { email?: string } = {},
 ) => clientFor(userId, jwt).schema('api').rpc(fn, args);
 
 /** Seed a member directly, so a test is not dependent on the invitation flow it does not exercise. */

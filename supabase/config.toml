@@ -299,8 +299,7 @@ max_enrolled_factors = 10
 
 # Control MFA via App Authenticator (TOTP)
 [auth.mfa.totp]
-# Off (owner, 2026-10-07: "remove the two-step verification and the authenticator app"). Platform
-# staff sign in with a password while platform_settings.platform_mfa_required is false (ADR-159).
+# Off: MOTION has no two-step sign-in (ADR-161; owner, 2026-10-07). Everyone signs in with a password.
 enroll_enabled = false
 verify_enabled = false
 

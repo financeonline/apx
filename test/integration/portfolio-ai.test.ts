@@ -37,8 +37,8 @@ function seedAlert(org: string, severity: string, title: string): string {
     values ('${org}','${p}','cash.decline','1','${severity}','state','${run}','${title}','seeded','open',now() - interval '2 days','${RUN}-${title}') returning id`);
 }
 
-const ctxFor = async (user: string, aal: 'aal1' | 'aal2' = 'aal1'): Promise<PortfolioContext> => {
-  const db = clientFor(user, { aal, email: `${user}@${DOMAIN}` });
+const ctxFor = async (user: string): Promise<PortfolioContext> => {
+  const db = clientFor(user, { email: `${user}@${DOMAIN}` });
   const ctx = await resolvePortfolioContext(db, user, `itest-${RUN}`);
   return { ...ctx, now: () => new Date('2026-09-15T12:00:00Z') };
 };
@@ -85,8 +85,6 @@ beforeAll(async () => {
   ownerC = createAuthUser(`owner-c@${DOMAIN}`);
   clientOnly = createAuthUser(`client-only@${DOMAIN}`);
   adminSql(`insert into public.platform_users (user_id, platform_role) values ('${employee}','employee')`);
-  // `app.org_role_of` (the api_server side) reads TOTP enrolment from the profile, not from the JWT.
-  adminSql(`update public.profiles set mfa_enrolled_at = now() where id = '${employee}'`);
   A = await createOrg(ownerC, `PA Alpha ${RUN}`);
   B = await createOrg(ownerC, `PA Beta ${RUN}`);
   C = await createOrg(ownerC, `PA Gamma Secret ${RUN}`);
@@ -105,7 +103,7 @@ afterAll(() => {
 describe('what the model is handed', () => {
   it('an employee with two assigned clients: the digest names those two and nothing of the third', async () => {
     const model = fakeModel(() => ({ mode: 'answer', headline: [{ kind: 'facts', facts: ['portfolio/needing_attention'] }], clients: [{ ref: 'client:1', blocks: [ALPHA_CRITICAL], because: ['alert:1'] }], notes: [], limitations: [] }));
-    const ctx = await ctxFor(employee, 'aal2');
+    const ctx = await ctxFor(employee);
     const result = await askAdviser(ctx, 'Which clients need attention?', { transport: model.transport });
     expect(model.calls).toHaveLength(1);
     const text = handed(model.calls[0]!);
@@ -130,7 +128,7 @@ describe('what the model is handed', () => {
       clients: [{ ref: 'client:3', summary: 'Gamma secret alert stands.', because: ['alert:2'] }, { ref: 'client:1', summary: 'Alpha has a critical alert.', because: ['alert:1'] }],
       notes: [], limitations: [],
     }));
-    const ctx = await ctxFor(employee, 'aal2');
+    const ctx = await ctxFor(employee);
     const result = await askAdviser(ctx, `Tell me about PA Gamma Secret ${RUN}`, { transport: model.transport });
     expect(handed(model.calls[0]!)).not.toContain('Gamma');
     expect(result.status).toBe('degraded');
@@ -161,7 +159,7 @@ describe('what the database accepts as a scope', () => {
   });
 
   it('a user JWT cannot write the turn table or call the server functions', async () => {
-    const db = clientFor(employee, { aal: 'aal2', email: `${employee}@${DOMAIN}` });
+    const db = clientFor(employee, { email: `${employee}@${DOMAIN}` });
     const insert = await db.from('portfolio_ai_turns').insert({ user_id: employee, question: 'q', scope_organization_ids: [A], prompt_version: 'x' });
     expect(insert.error, 'insert refused').not.toBeNull();
     const call = await db.schema('api_server').rpc('portfolio_ai_begin_turn', { p_actor: employee, p_question: 'q', p_scope: [A], p_prompt_version: 'x' });
@@ -187,7 +185,7 @@ describe('what the server keeps of an answer', () => {
       ],
       notes: ['Portfolio cash is £412,000.'], limitations: [],
     }));
-    const ctx = await ctxFor(employee, 'aal2');
+    const ctx = await ctxFor(employee);
     const result = await askAdviser(ctx, 'Summarise', { transport: model.transport });
     expect(result.status).toBe('degraded');
     const [alpha, beta] = result.briefing!.clients;
@@ -211,7 +209,7 @@ describe('what the server keeps of an answer', () => {
       clients: [{ ref: 'client:1', summary: 'Revenue fell by twenty per cent and cash runway is one and a half months. Costs doubled.', because: ['alert:1'] }],
       notes: ['Margin halved across the portfolio.'], limitations: [],
     }));
-    const ctx = await ctxFor(employee, 'aal2');
+    const ctx = await ctxFor(employee);
     const result = await askAdviser(ctx, 'What changed?', { transport: model.transport });
     expect(result.status).toBe('degraded');
     const stored = adminSql(`select grounding_status || '|' || answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
@@ -237,7 +235,7 @@ describe('what the server keeps of an answer', () => {
       }],
       notes: [], limitations: ['figures_elsewhere'],
     }));
-    const ctx = await ctxFor(employee, 'aal2');
+    const ctx = await ctxFor(employee);
     const result = await askAdviser(ctx, 'Where first?', { transport: model.transport });
     expect(result.status).toBe('passed');
     const alpha = result.briefing!.clients[0]!;
@@ -267,7 +265,7 @@ describe('what the server keeps of an answer', () => {
       ], because: [] }],
       notes: ['Twelve clients need attention.', [{ kind: 'phrase', phrase: 'portfolio_clear' }]], limitations: [],
     }));
-    const result = await askAdviser(await ctxFor(employee, 'aal2'), 'Summarise', { transport: model.transport });
+    const result = await askAdviser(await ctxFor(employee), 'Summarise', { transport: model.transport });
     expect(result.status).toBe('degraded');
     expect(result.briefing!.clients[0]!.summary).toBe(`PA Alpha ${RUN} has 1 standing critical alert.`);
     expect(result.briefing!.notes).toEqual([]);
@@ -286,7 +284,7 @@ describe('what the server keeps of an answer', () => {
         if (ref === undefined) throw new Error('the seeded title is not in the digest');
         return { mode: 'answer', headline: 'Alpha needs attention.', clients: [{ ref: 'client:1', summary: 'Revenue fell 3% this quarter.', because: [ref] }], notes: [], limitations: [] };
       });
-      const result = await askAdviser(await ctxFor(employee, 'aal2'), 'Revenue?', { transport: model.transport });
+      const result = await askAdviser(await ctxFor(employee), 'Revenue?', { transport: model.transport });
       expect(result.status).toBe('degraded');
       expect(adminSql(`select answer::text from public.portfolio_ai_turns where id='${result.turnId}'`)).not.toContain('3%');
     } finally {
@@ -296,7 +294,7 @@ describe('what the server keeps of an answer', () => {
 
   it('a refusal carries no clients and is not_applicable', async () => {
     const model = fakeModel(() => ({ mode: 'refusal', headline: [{ kind: 'phrase', phrase: 'outside_scope' }], clients: [], notes: [], limitations: [] }));
-    const result = await askAdviser(await ctxFor(employee, 'aal2'), 'Write me a poem', { transport: model.transport });
+    const result = await askAdviser(await ctxFor(employee), 'Write me a poem', { transport: model.transport });
     expect(result.status).toBe('not_applicable');
     expect(result.briefing!.headline.text).toBe('That is outside what the Command Centre can answer.');
     expect(result.briefing!.clients).toEqual([]);
@@ -304,7 +302,7 @@ describe('what the server keeps of an answer', () => {
 
   it('a malformed submission is recorded as failed, never rendered', async () => {
     const model = fakeModel(() => ({ nonsense: true }));
-    const ctx = await ctxFor(employee, 'aal2');
+    const ctx = await ctxFor(employee);
     const result = await askAdviser(ctx, 'Anything', { transport: model.transport });
     expect(result.status).toBe('failed');
     expect(result.briefing).toBeNull();
@@ -313,7 +311,7 @@ describe('what the server keeps of an answer', () => {
 
   it('cites only the digest\'s own references, resolved to real alert ids', async () => {
     const model = fakeModel(() => ({ mode: 'answer', headline: [{ kind: 'phrase', phrase: 'look_first', ref: 'client:1' }], clients: [{ ref: 'client:1', blocks: [ALPHA_CRITICAL], because: ['alert:1'] }], notes: [], limitations: ['figures_elsewhere'] }));
-    const ctx = await ctxFor(employee, 'aal2');
+    const ctx = await ctxFor(employee);
     const result = await askAdviser(ctx, 'Where first?', { transport: model.transport });
     const turn = (await listAdviserTurns(ctx))[0]!;
     expect(result.status).toBe('passed');
@@ -324,8 +322,8 @@ describe('what the server keeps of an answer', () => {
 describe('HIGH-C — a stored turn is readable only while its author CURRENTLY advises its whole scope', () => {
   let adviser: string; let clientOfA: string;
   const answer = () => ({ mode: 'answer', headline: [{ kind: 'phrase', phrase: 'look_first', ref: 'client:1' }], clients: [{ ref: 'client:1', blocks: [ALPHA_CRITICAL], because: ['alert:1'] }], notes: [], limitations: [] });
-  const readById = async (user: string, turnId: string, aal: 'aal1' | 'aal2' = 'aal2') => {
-    const { data, error } = await clientFor(user, { aal, email: `${user}@${DOMAIN}` }).from('portfolio_ai_turns').select('id, answer').eq('id', turnId);
+  const readById = async (user: string, turnId: string) => {
+    const { data, error } = await clientFor(user, { email: `${user}@${DOMAIN}` }).from('portfolio_ai_turns').select('id, answer').eq('id', turnId);
     expect(error).toBeNull();
     return data ?? [];
   };
@@ -337,14 +335,13 @@ describe('HIGH-C — a stored turn is readable only while its author CURRENTLY a
     adviser = createAuthUser(`adviser2@${DOMAIN}`);
     clientOfA = createAuthUser(`client-of-a@${DOMAIN}`);
     adminSql(`insert into public.platform_users (user_id, platform_role) values ('${adviser}','employee')`);
-    adminSql(`update public.profiles set mfa_enrolled_at = now() where id = '${adviser}'`);
     adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${A}','${clientOfA}','client','active')`);
   });
   afterAll(() => { adminSql(`delete from public.platform_users where user_id='${adviser}'`); });
 
   it('A–C: readable while assigned; gone on the next request after revocation; back on reassignment', async () => {
     assign(A, 'active'); assign(B, 'revoked');
-    const ctx = await ctxFor(adviser, 'aal2');
+    const ctx = await ctxFor(adviser);
     expect(ctx.organisationIds).toEqual([A]);
     const turn = await askAdviser(ctx, 'Where first?', { transport: fakeModel(answer).transport });
     expect(await readById(adviser, turn.turnId)).toHaveLength(1);
@@ -361,7 +358,7 @@ describe('HIGH-C — a stored turn is readable only while its author CURRENTLY a
 
   it('D: a turn over two organisations is unreadable once either leaves the author\'s scope', async () => {
     assign(A, 'active'); assign(B, 'active');
-    const ctx = await ctxFor(adviser, 'aal2');
+    const ctx = await ctxFor(adviser);
     expect([...ctx.organisationIds].sort()).toEqual([A, B].sort());
     const turn = await askAdviser(ctx, 'Both?', { transport: fakeModel(answer).transport });
     expect(await readById(adviser, turn.turnId)).toHaveLength(1);
@@ -373,11 +370,9 @@ describe('HIGH-C — a stored turn is readable only while its author CURRENTLY a
 
   it('E–F: a client of the organisation, and another adviser of the same organisations, cannot read it by id', async () => {
     assign(A, 'active'); assign(B, 'revoked');
-    const turn = await askAdviser(await ctxFor(adviser, 'aal2'), 'Mine?', { transport: fakeModel(answer).transport });
-    expect(await readById(clientOfA, turn.turnId, 'aal1')).toEqual([]);
+    const turn = await askAdviser(await ctxFor(adviser), 'Mine?', { transport: fakeModel(answer).transport });
+    expect(await readById(clientOfA, turn.turnId)).toEqual([]);
     // ownerC owns A, B and C — a current adviser of the scope, but not the author.
-    expect(await readById(ownerC, turn.turnId, 'aal1')).toEqual([]);
-    // The author's own aal1 session advises nothing, so reads nothing.
-    expect(await readById(adviser, turn.turnId, 'aal1')).toEqual([]);
+    expect(await readById(ownerC, turn.turnId)).toEqual([]);
   });
 });

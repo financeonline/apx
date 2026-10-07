@@ -299,12 +299,11 @@ describe('M/N · every role sees exactly what the matrix allows (RLS and the res
                 values ('${org.INVBANK}', '${roles.admin}', 'admin', 'active'), ('${org.INVBANK}', '${roles.client}', 'client', 'active');
               insert into public.platform_users (user_id, platform_role)
                 values ('${roles.assigned}', 'employee'), ('${roles.unassigned}', 'employee'), ('${roles.superAdmin}', 'super_admin');
-              insert into public.organization_assignments (organization_id, employee_user_id) values ('${org.INVBANK}', '${roles.assigned}');
-              update public.profiles set mfa_enrolled_at = now() where id in ('${roles.assigned}', '${roles.unassigned}', '${roles.superAdmin}');`);
+              insert into public.organization_assignments (organization_id, employee_user_id) values ('${org.INVBANK}', '${roles.assigned}');`);
   });
 
-  const reads = async (user: string, aal: 'aal1' | 'aal2' = 'aal1'): Promise<number> => {
-    const { data, error } = await clientFor(user, { aal }).from('metric_snapshots').select('id')
+  const reads = async (user: string): Promise<number> => {
+    const { data, error } = await clientFor(user).from('metric_snapshots').select('id')
       .eq('organization_id', org.INVBANK).in('metric_key', ['receivables', 'payables', 'working_capital']);
     expect(error).toBeNull();
     return (data ?? []).length;
@@ -316,23 +315,21 @@ describe('M/N · every role sees exactly what the matrix allows (RLS and the res
     expect(await reads(roles.client)).toBeGreaterThan(0);
   });
 
-  it('an employee reads only an ASSIGNED organisation, and only at aal2', async () => {
-    expect(await reads(roles.assigned, 'aal2')).toBeGreaterThan(0);
-    expect(await reads(roles.unassigned, 'aal2')).toBe(0);
-    expect(await reads(roles.assigned, 'aal1')).toBe(0);
+  it('an employee reads only an ASSIGNED organisation', async () => {
+    expect(await reads(roles.assigned)).toBeGreaterThan(0);
+    expect(await reads(roles.unassigned)).toBe(0);
   });
 
-  it('a super admin reads at aal2 and not at aal1', async () => {
-    expect(await reads(roles.superAdmin, 'aal2')).toBeGreaterThan(0);
-    expect(await reads(roles.superAdmin, 'aal1')).toBe(0);
+  it('a super admin reads it', async () => {
+    expect(await reads(roles.superAdmin)).toBeGreaterThan(0);
   });
 
   it('an unassigned employee\'s session cannot resolve the organisation\'s evidence', async () => {
     const snapshot = headline(org.INVBANK, '2026-08-01', 'receivables')!;
     const query = JSON.parse(adminSql(`select evidence_query::text from public.metric_snapshots where id = '${snapshot.snapshotId}'`).trim()) as { descriptor: unknown };
-    const intruder: AccessContext = { ...ctxFor(org.INVBANK), userId: roles.unassigned, db: clientFor(roles.unassigned, { aal: 'aal2' }) };
+    const intruder: AccessContext = { ...ctxFor(org.INVBANK), userId: roles.unassigned, db: clientFor(roles.unassigned) };
     expect((await resolveDescriptor(intruder, query.descriptor)).count).toBe(0);
-    const allowed: AccessContext = { ...ctxFor(org.INVBANK), userId: roles.assigned, db: clientFor(roles.assigned, { aal: 'aal2' }) };
+    const allowed: AccessContext = { ...ctxFor(org.INVBANK), userId: roles.assigned, db: clientFor(roles.assigned) };
     expect(money((await resolveDescriptor(allowed, query.descriptor)).total)).toBe('4400.00');
   });
 });

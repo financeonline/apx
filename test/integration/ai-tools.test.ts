@@ -423,15 +423,13 @@ describe('an employee reaches figures only where assigned (§4)', () => {
     adminSql(`
       insert into public.platform_users (user_id, platform_role, status) values
         ('${assignedEmployee}', 'employee', 'active'), ('${unassignedEmployee}', 'employee', 'active');
-      update public.profiles set mfa_enrolled_at = now()
-       where id in ('${assignedEmployee}', '${unassignedEmployee}');
       insert into public.organization_assignments (organization_id, employee_user_id, status)
       values ('${orgId}', '${assignedEmployee}', 'active');`);
   });
 
   const employeeContext = (userId: string) => ({
     ...contextFor(userId, 'employee'),
-    db: clientFor(userId, { email: `employee@${DOMAIN}`, aal: 'aal2' }),
+    db: clientFor(userId, { email: `employee@${DOMAIN}` }),
   });
 
   it('the assigned employee reads the organisation’s figures', async () => {
@@ -450,16 +448,6 @@ describe('an employee reaches figures only where assigned (§4)', () => {
     expect(persisted.authorized).toBe(true);
     expect(result.ok).toBe(false);
     expect((result.data as { code: string }).code).toMatch(/NO_DATA|PERIOD_NOT_FOUND/);
-    expect(JSON.stringify(result.data)).not.toContain('25,000');
-  });
-
-  it('the same employee at aal1 sees nothing even where assigned (ADR-044.1)', async () => {
-    const atAal1 = {
-      ...contextFor(assignedEmployee, 'employee'),
-      db: clientFor(assignedEmployee, { email: `employee@${DOMAIN}`, aal: 'aal1' }),
-    };
-    const { result } = await invoke(atAal1, 'get_metric', { metric_key: 'revenue', period: MAY() });
-    expect(result.ok).toBe(false);
     expect(JSON.stringify(result.data)).not.toContain('25,000');
   });
 

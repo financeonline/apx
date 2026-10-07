@@ -5,7 +5,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
  * The ONLY browser-side Supabase client in MOTION.
  *
  * It exists because authentication is the one thing the server cannot do on the user's behalf:
- * password sign-in, sign-up, password reset and TOTP enrolment all need the browser to hold the
+ * password sign-in, sign-up and password reset all need the browser to hold the
  * PKCE verifier and to receive the upgraded session. It carries the anon key, which is safe only
  * because `authenticated` holds no write privilege on any table (ADR-026) and RLS is forced
  * everywhere — so this client can read what the user may read and execute `api.*`, nothing more.

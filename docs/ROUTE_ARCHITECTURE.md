@@ -25,7 +25,6 @@ Next.js App Router. Three route families, each with its own root layout and shel
 /onboarding                           (authenticated, no org yet) create first organization
 /select-organization                  (authenticated) org switcher when > 1 org
 /account                              (authenticated) profile, password, sessions
-/account/mfa                          (authenticated) TOTP enrolment; mandatory for platform users (ADR-038.8)
 
 /app/[orgSlug]                        → redirects to /home
 /app/[orgSlug]/home
@@ -117,7 +116,6 @@ Next.js App Router. Three route families, each with its own root layout and shel
 | `/onboarding` | Create the first organization (name, country, currency, fiscal year start) | signed-in with 0 memberships and no platform role | — | — | Server + client form | `tenancy.createOrganization` | Users with ≥1 org redirected to `/select-organization` or last org |
 | `/select-organization` | Switcher | signed-in | — | — | Server | `tenancy.listAccessibleOrganizations` | 0 orgs → `/onboarding`; 1 org → redirect to it |
 | `/account` | Profile, password, sessions, sign-out-everywhere | signed-in | — | — | Server + client forms | `profiles` self (column-limited update via `api.update_profile`, ADR-038.3) | — |
-| `/account/mfa` | Enrol/verify TOTP | signed-in | — | — | Client | Supabase Auth MFA | Platform users are redirected here until enrolled |
 
 ## 4. Tenant family `/app/[orgSlug]/*`
 
@@ -166,17 +164,16 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 
 | Route | Purpose | Roles | Permissions | Flag | Render | Data loaded | Empty / denied |
 |---|---|---|---|---|---|---|---|
-| `/portfolio` | The Command Centre (ADR-112): attention queue, portfolio counts, client list, recent changes; `/portfolio/alerts`, `/portfolio/actions`, `/portfolio/clients/[orgId]`, `/portfolio/analyst` | `platform_employee`, `platform_super_admin` (TOTP enrolled), and any member holding `owner` or `admin` in at least one organisation | the adviser roles, i.e. the holders of `assignments.view` | — | Server | `getPortfolioContext()` (the resolver's adviser organisations, read in pages) → `loadPortfolio(ctx)`: one uncapped aggregate `api.portfolio_summary(NULL, today, due_soon_until)` over `app.portfolio_scope` (the caller's current adviser organisations, derived in the database), plus the two recent feeds (7 days, capped 50); detail pages add their own capped list (500) with its authoritative total. Every read is an RPC (POST); no id list travels in a URL, and a client page's one id can only narrow the scope (ADR-112, ADR-114, ADR-117) | No assignments → "You haven't been assigned to any organisations yet." (an eligible platform account at aal2; everyone else without a portfolio gets the uniform 404) |
+| `/portfolio` | The Command Centre (ADR-112): attention queue, portfolio counts, client list, recent changes; `/portfolio/alerts`, `/portfolio/actions`, `/portfolio/clients/[orgId]`, `/portfolio/analyst` | `platform_employee`, `platform_super_admin` (TOTP enrolled), and any member holding `owner` or `admin` in at least one organisation | the adviser roles, i.e. the holders of `assignments.view` | — | Server | `getPortfolioContext()` (the resolver's adviser organisations, read in pages) → `loadPortfolio(ctx)`: one uncapped aggregate `api.portfolio_summary(NULL, today, due_soon_until)` over `app.portfolio_scope` (the caller's current adviser organisations, derived in the database), plus the two recent feeds (7 days, capped 50); detail pages add their own capped list (500) with its authoritative total. Every read is an RPC (POST); no id list travels in a URL, and a client page's one id can only narrow the scope (ADR-112, ADR-114, ADR-117) | No assignments → "You haven't been assigned to any organisations yet." (an eligible platform account; everyone else without a portfolio gets the uniform 404) |
 
 ### 5.1 `/portfolio` — who gets what (ADR-112, ADR-114)
 
 | Caller | `/portfolio` | `/portfolio/clients/[id]` | Scope |
 |---|---|---|---|
-| Platform employee, active, aal2, with assignments | 200 — Command Centre | 200 for an assigned id; 404 for any other | active, in-window assignments |
-| Platform employee, active, aal2, with no assignment | 200 — empty state ("You haven't been assigned to any organisations yet.") | 404 | none |
-| Platform account at aal1 | 302 → `/account/mfa` (middleware step 4a) | same | none |
+| Platform employee, active, with assignments | 200 — Command Centre | 200 for an assigned id; 404 for any other | active, in-window assignments |
+| Platform employee, active, with no assignment | 200 — empty state ("You haven't been assigned to any organisations yet.") | 404 | none |
 | Platform account, suspended | 404 | 404 | none |
-| Super admin, aal2 | 200 | 200 for any non-deleted id | every organisation |
+| Super admin | 200 | 200 for any non-deleted id | every organisation |
 | Owner or admin of at least one organisation | 200 | 200 for an organisation they own or administer; 404 otherwise | organisations held as owner/admin |
 | Member who is only a client (or suspended) everywhere | 404 | 404, including their own organisation's id | none |
 | Client in A and owner/admin in B | 200 | 200 for B; 404 for A | B only |
@@ -187,7 +184,7 @@ All routes: `effectiveRole ∈ {owner, admin, client, employee, super_admin}` fo
 
 ## 6. Platform family `/platform/*`
 
-All routes: `platform_super_admin` only with `aal2` (TOTP verified, ADR-038.8); everyone else 404; a super admin without TOTP is redirected to `/account/mfa`. Suspend, purge, role grants and assignment creation require re-authentication within the last 10 minutes.
+All routes: `platform_super_admin` only (ADR-161: a password sign-in; the sensitive changes need a sign-in from the last ten minutes — Confirm it is you); everyone else 404. Suspend, purge, role grants and assignment creation require re-authentication within the last 10 minutes.
 
 | Route | Purpose | Permissions | Render | Data loaded | Empty / denied |
 |---|---|---|---|---|---|
@@ -224,7 +221,7 @@ Server actions (in `actions.ts` files colocated with pages) handle all other mut
 2. Classify the path: `public`, `auth-noorg`, `app`, `portfolio`, `platform`, `api`.
 3. No session: `public` and `api/health` pass; everything else redirects to `/sign-in?next=<path>` (`next` is judged by `core/routing.safeNextPath` — parsed as the browser parses it and kept only on our origin, ADR-069).
 4. Session present, `profiles.disabled_at` set → sign out and redirect to `/sign-in?error=disabled`.
-4a. Session present and the user has a `platform_users` row: if the session's `aal` is not `aal2`, redirect every request except `/account/mfa`, `/account` and sign-out to `/account/mfa` (ADR-038.8). `/auth/callback` refuses a magic-link exchange for platform users and shows "Platform accounts must sign in with a password and authenticator code".
+4a. (Removed, ADR-161: there is no two-step sign-in; a platform account signs in with a password.)
 5. Load the platform role (single cached query per request):
    - `platform_super_admin`: may access every family.
    - `platform_employee`: `/platform/*` → 404; `/app/[orgSlug]` allowed only if an active assignment exists (checked in layout, not middleware, to keep middleware light); `/` and `/select-organization` redirect to `/portfolio`.
@@ -287,7 +284,6 @@ Expected HTTP status for a representative set. `member-B` = member of another or
 | `PATCH /rest/v1/ledger_entries?id=eq.X` (direct PostgREST with the user JWT) | 403† | 403† | 403† | 403† | 403† | 403† | 403† | 401 |
 | `POST /rest/v1/jobs` (direct, any payload) | 403† | 403† | 403† | 403† | 403† | 403† | 403† | 401 |
 | `GET /storage/v1/object/authenticated/source-documents/A/…` (direct with user JWT) | 400/403 | 400/403 | 400/403 | 400/403 | 400/403 | 400/403 | 400/403 | 401 |
-| `/platform/organizations` as super admin without `aal2` | — | — | — | — | — | — | 302 → `/account/mfa` | — |
 | `rpc('api.invite_member', role='owner')` as admin | 200 | 403 (function raises) | 403 | 403 | 404 | 404 | 200 | 401 |
 
 `403*` = page renders the friendly permission-denied state (`UX_ARCHITECTURE.md §7.4`) with HTTP 403; the organization's existence is already known to these users, so 403 does not leak anything. `403†` = PostgREST `42501 permission denied` because `authenticated` holds no write privilege on any table (ADR-026); this is independent of RLS and of the caller's role.

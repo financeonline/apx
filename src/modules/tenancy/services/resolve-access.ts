@@ -92,15 +92,15 @@ export const getAccessContext = cache(resolveAccessFresh);
 
 /**
  * The caller's platform role, from the database: `super_admin` or `employee` for an ACTIVE platform
- * account at aal2, else `none`. The same rule `getPlatformContext` applies, callable with any client
+ * account, else `none`. The same rule `getPlatformContext` applies, callable with any client
  * (the Command Centre's resolver and its tests pass their own).
  */
 export async function resolvePlatformRole(db: SupabaseClient, requestId?: string): Promise<EffectiveRole> {
   const { data, error } = await db.schema('api').rpc('my_platform_role');
   if (error) throw toMotionError(error, requestId);
-  const row = (data as Array<{ platform_role: string; status: string; has_aal2: boolean }> | null)?.[0];
-  if (row?.platform_role === 'super_admin' && row.status === 'active' && row.has_aal2) return 'super_admin';
-  if (row?.platform_role === 'employee' && row.status === 'active' && row.has_aal2) return 'employee';
+  const row = (data as Array<{ platform_role: string; status: string }> | null)?.[0];
+  if (row?.platform_role === 'super_admin' && row.status === 'active') return 'super_admin';
+  if (row?.platform_role === 'employee' && row.status === 'active') return 'employee';
   return 'none';
 }
 

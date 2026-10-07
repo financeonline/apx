@@ -114,7 +114,7 @@ describe('the SQL resolver and the TypeScript resolver agree on every scenario',
     'api.my_context resolves %s exactly as the pure resolver does',
     async (_id, index) => {
       const { scenario, userId, slug } = materialised[index]!;
-      const client = clientFor(userId, { aal: scenario.aal });
+      const client = clientFor(userId);
 
       const { data, error } = await client.schema('api').rpc('my_context', { p_slug: slug });
       expect(error, `${scenario.id} should resolve without error`).toBeNull();
@@ -134,7 +134,7 @@ describe('the SQL resolver and the TypeScript resolver agree on every scenario',
     expect(denied.length, 'the fixture must contain denial cases').toBeGreaterThan(0);
 
     for (const { scenario, userId, slug } of denied) {
-      const client = clientFor(userId, { aal: scenario.aal });
+      const client = clientFor(userId);
       const { data, error } = await client.schema('api').rpc('my_context', { p_slug: slug });
       expect(error, `${scenario.id} must not raise`).toBeNull();
       expect(data ?? [], `${scenario.id} must return no row`).toHaveLength(0);
@@ -143,7 +143,7 @@ describe('the SQL resolver and the TypeScript resolver agree on every scenario',
 
   it('api.my_organizations never lists an organization my_context denies', async () => {
     for (const { scenario, userId, slug } of materialised) {
-      const client = clientFor(userId, { aal: scenario.aal });
+      const client = clientFor(userId);
       const { data } = await client.schema('api').rpc('my_organizations');
       const listed = (data as { slug: string; role: string }[] | null) ?? [];
       const match = listed.find((o) => o.slug === slug);

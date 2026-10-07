@@ -197,7 +197,7 @@ describe('the server-asserted surface is unreachable from a browser (ADR-043)', 
   });
 });
 
-describe('platform staff need MFA at the database (ADR-044.1, R2-A-03)', () => {
+describe('platform staff reach only what they are assigned, at the database', () => {
   let employee: string;
 
   beforeAll(async () => {
@@ -207,16 +207,8 @@ describe('platform staff need MFA at the database (ADR-044.1, R2-A-03)', () => {
               values ('${orgA}','${employee}')`);
   });
 
-  it('an assigned employee at aal1 sees nothing at all', async () => {
-    const e = clientFor(employee, { aal: 'aal1' });
-    const { data } = await e.schema('api').rpc('my_organizations');
-    expect(data ?? []).toHaveLength(0);
-    const { data: orgs } = await e.from('organizations').select('id');
-    expect(orgs ?? []).toHaveLength(0);
-  });
-
-  it('the same employee at aal2 sees exactly the assigned organization, as employee', async () => {
-    const e = clientFor(employee, { aal: 'aal2' });
+  it('an assigned employee sees exactly the assigned organization, as employee', async () => {
+    const e = clientFor(employee);
     const { data } = await e.schema('api').rpc('my_organizations');
     expect(data).toHaveLength(1);
     const row = (data as Array<{ organization_id: string; role: string }>)[0]!;
@@ -225,7 +217,7 @@ describe('platform staff need MFA at the database (ADR-044.1, R2-A-03)', () => {
   });
 
   it('an employee cannot govern the organization they advise', async () => {
-    const e = clientFor(employee, { aal: 'aal2' });
+    const e = clientFor(employee);
     const { error } = await e.schema('api').rpc('invite_member', {
       p_org: orgA,
       p_email: 'someone@itest.motion',

@@ -307,7 +307,7 @@ describe('roles, assignment and isolation', () => {
       const view = await loadCommercialOverview(clientFor(u), orgA, 'a', await scopeA(u));
       expect(view.topProducts[0]!.name).toBe('Consulting');
     }
-    const emp = clientFor(empAssigned, { aal: 'aal2' });
+    const emp = clientFor(empAssigned);
     expect((await loadMarketing(emp, orgA, 'a', (await loadPeriodScope(emp, orgA, aug))!)).campaigns).toHaveLength(2);
     for (const [name, args] of [
       ['upsert_product', { p_org: orgA, p_input: { name: 'Sneaky' } }],
@@ -317,7 +317,7 @@ describe('roles, assignment and isolation', () => {
       ['set_invoice_lines', { p_invoice: invBetaAug, p_lines: [] }],
     ] as const) {
       expect(sqlstate((await api(client).rpc(name, args as never)).error), `client ${name}`).toBe('42501');
-      expect(sqlstate((await clientFor(empOther, { aal: 'aal2' }).schema('api').rpc(name, args as never)).error), `unassigned ${name}`).toBe('P0002');
+      expect(sqlstate((await clientFor(empOther).schema('api').rpc(name, args as never)).error), `unassigned ${name}`).toBe('P0002');
     }
     expect(one(`select count(*) from public.products where organization_id = '${orgA}' and name = 'Sneaky'`)).toBe('0');
   });

@@ -455,7 +455,7 @@ describe('one tenant never sees another’s alerts', () => {
  * RBAC_MATRIX.md §2.1, §3.5; SECURITY_MODEL.md §4; ADR-044.1).
  *
  * The alerts policy is `organization_id in (select app.accessible_org_ids())`, and an employee's
- * accessible set IS their active assignments at aal2 — so this holds by construction rather than by
+ * accessible set IS their active assignments — so this holds by construction rather than by
  * a rule written twice. It is asserted here because "by construction" has been wrong before: the
  * feedback queue's policies named owner/admin/super_admin and silently locked out the very employee
  * the matrix sends to review it (ADR-082). A financial alert is exactly the kind of row where that
@@ -467,8 +467,8 @@ describe('a platform employee sees only the organisations assigned to them', () 
     persist(run, [insertChange()]);
   });
 
-  it('the assigned employee at aal2 reads the organisation’s alerts and their revisions', async () => {
-    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}`, aal: 'aal2' });
+  it('the assigned employee reads the organisation’s alerts and their revisions', async () => {
+    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}` });
     const alerts = await employee.from('alerts').select('id, rule_key, severity').eq('organization_id', orgId);
     expect(alerts.error).toBeNull();
     expect(alerts.data).toHaveLength(1);
@@ -480,15 +480,8 @@ describe('a platform employee sees only the organisations assigned to them', () 
     expect((revisions.data ?? []).length).toBeGreaterThan(0);
   });
 
-  it('the same employee at aal1 reads nothing at all (ADR-044.1)', async () => {
-    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}`, aal: 'aal1' });
-    const alerts = await employee.from('alerts').select('id').eq('organization_id', orgId);
-    expect(alerts.error).toBeNull();
-    expect(alerts.data ?? []).toHaveLength(0);
-  });
-
-  it('an employee with no assignment to this organisation reads nothing, even at aal2', async () => {
-    const stranger = clientFor(strangerEmployeeId, { email: `unassigned@${DOMAIN}`, aal: 'aal2' });
+  it('an employee with no assignment to this organisation reads nothing', async () => {
+    const stranger = clientFor(strangerEmployeeId, { email: `unassigned@${DOMAIN}` });
     const alerts = await stranger.from('alerts').select('id').eq('organization_id', orgId);
     expect(alerts.error).toBeNull();
     expect(alerts.data ?? []).toHaveLength(0);
@@ -498,13 +491,13 @@ describe('a platform employee sees only the organisations assigned to them', () 
 
   it('the assigned employee may act on an alert; the unassigned one is refused', async () => {
     const id = alertId();
-    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}`, aal: 'aal2' });
+    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}` });
     const acted = await employee.schema('api').rpc('set_alert_status', {
       p_alert: id, p_status: 'acknowledged', p_reason: null,
     });
     expect(acted.error, JSON.stringify(acted.error)).toBeNull();
 
-    const stranger = clientFor(strangerEmployeeId, { email: `unassigned@${DOMAIN}`, aal: 'aal2' });
+    const stranger = clientFor(strangerEmployeeId, { email: `unassigned@${DOMAIN}` });
     const refused = await stranger.schema('api').rpc('set_alert_status', {
       p_alert: id, p_status: 'resolved', p_reason: null,
     });
@@ -515,7 +508,7 @@ describe('a platform employee sees only the organisations assigned to them', () 
   it('the assignment is what grants it: revoking the assignment closes the door', async () => {
     adminSql(`update public.organization_assignments set status = 'revoked'
                where organization_id = '${orgId}' and employee_user_id = '${assignedEmployeeId}'`);
-    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}`, aal: 'aal2' });
+    const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}` });
     const alerts = await employee.from('alerts').select('id').eq('organization_id', orgId);
     expect(alerts.data ?? []).toHaveLength(0);
     adminSql(`update public.organization_assignments set status = 'active'

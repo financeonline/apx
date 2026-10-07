@@ -70,7 +70,6 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'platform.role_granted': 'Platform role granted',
   'platform.role_revoked': 'Platform role removed',
   'profile.updated': 'Profile updated',
-  'auth.mfa_enrolled': 'Authenticator app set up',
   'auth.sign_in': 'Signed in',
   'auth.sign_out': 'Signed out',
   'user.disabled': 'Account disabled',

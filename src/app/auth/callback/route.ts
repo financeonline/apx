@@ -6,8 +6,8 @@ import { safeNextPath } from '@/core/routing';
  * PKCE code exchange (SECURITY_MODEL.md §3).
  *
  * ROUTE_ARCHITECTURE.md §8.4a: a magic-link exchange is REFUSED for a platform account. Platform
- * users sign in with a password and an authenticator code, because their session must be able to
- * reach aal2 — and app.is_platform_user() grants nothing below it (ADR-044.1).
+ * users sign in with their password, so the session carries the recent sign-in the sensitive
+ * super-admin actions need (ADR-161).
  */
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);

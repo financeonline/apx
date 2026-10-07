@@ -35,9 +35,9 @@ const one = (sql: string): string => adminSql(sql).split('\n')[0]!.trim();
 
 const owner = (id: string): string =>
   one(`select user_id from public.organization_memberships where organization_id = '${id}' and role = 'owner' limit 1`);
-const ctxFor = (id: string, userId = owner(id), aal: 'aal1' | 'aal2' = 'aal1'): AccessContext => ({
+const ctxFor = (id: string, userId = owner(id)): AccessContext => ({
   userId, orgId: id, orgSlug: 'x', effectiveRole: 'owner', permissions: permissionsFor('owner'),
-  actorType: 'user', db: clientFor(userId, { aal }), requestId: TAG, now: () => new Date(`${AS_OF}T00:00:00Z`),
+  actorType: 'user', db: clientFor(userId), requestId: TAG, now: () => new Date(`${AS_OF}T00:00:00Z`),
   organizationStatus: 'active',
 });
 const descriptorOf = (k: Audit2Key, start: string, key: string): unknown => {
@@ -190,15 +190,14 @@ describe('tenancy · the new reads stay inside the organisation', () => {
     expect(selection.count).toBe(0);
   });
 
-  it('an unassigned employee resolves nothing; an assigned one resolves the figure, at aal2', async () => {
+  it('an unassigned employee resolves nothing; an assigned one resolves the figure', async () => {
     const assigned = createAuthUser(`assigned@${TAG}.roles.itest`);
     const unassigned = createAuthUser(`unassigned@${TAG}.roles.itest`);
     adminSql(`insert into public.platform_users (user_id, platform_role) values ('${assigned}', 'employee'), ('${unassigned}', 'employee');
-              insert into public.organization_assignments (organization_id, employee_user_id) values ('${o('LEDGER3')}', '${assigned}');
-              update public.profiles set mfa_enrolled_at = now() where id in ('${assigned}', '${unassigned}');`);
+              insert into public.organization_assignments (organization_id, employee_user_id) values ('${o('LEDGER3')}', '${assigned}');`);
     const descriptor = descriptorOf('LEDGER3', '2026-08-01', 'receivables');
-    expect((await resolveDescriptor(ctxFor(o('LEDGER3'), unassigned, 'aal2'), descriptor)).count).toBe(0);
-    expect(money((await resolveDescriptor(ctxFor(o('LEDGER3'), assigned, 'aal2'), descriptor)).total)).toBe('5000.00');
+    expect((await resolveDescriptor(ctxFor(o('LEDGER3'), unassigned), descriptor)).count).toBe(0);
+    expect(money((await resolveDescriptor(ctxFor(o('LEDGER3'), assigned), descriptor)).total)).toBe('5000.00');
   });
 
   it('a member of one organisation cannot read another\'s per-account cash components', async () => {

@@ -23,8 +23,8 @@ let bulk: string[] = [];
 let far: string[] = [];
 let own = '';
 
-const ctxFor = async (user: string, aal: 'aal1' | 'aal2' = 'aal2'): Promise<PortfolioContext> => {
-  const ctx = await resolvePortfolioContext(clientFor(user, { aal, email: `${user}@${DOMAIN}` }), user, `itest-${RUN}`);
+const ctxFor = async (user: string): Promise<PortfolioContext> => {
+  const ctx = await resolvePortfolioContext(clientFor(user, { email: `${user}@${DOMAIN}` }), user, `itest-${RUN}`);
   return { ...ctx, now: () => new Date('2026-09-15T12:00:00Z') };
 };
 
@@ -50,7 +50,6 @@ beforeAll(() => {
   owner = createAuthUser(`owner@${DOMAIN}`);
   clientUser = createAuthUser(`client@${DOMAIN}`);
   adminSql(`insert into public.platform_users (user_id, platform_role) values ('${superAdmin}','super_admin'), ('${employee}','employee')`);
-  adminSql(`update public.profiles set mfa_enrolled_at = now() where id in ('${superAdmin}','${employee}')`);
   bulk = adminSql(`with q as (insert into public.organizations (slug, name)
       select '${RUN}-' || g, 'PT Bulk ' || lpad(g::text, 4, '0') || ' ${RUN}' from generate_series(1, ${BULK}) g returning id)
     select id from q order by id`).split('\n').map((s) => s.trim()).filter(Boolean);
@@ -112,15 +111,11 @@ describe('an employee with two hundred and fifty assignments', () => {
     expect(actions.rows.map((a) => a.organizationId).sort()).toEqual([...far].sort());
     expect(actions.total).toBe(3);
   }, 120_000);
-
-  it('at aal1 there is no portfolio at all', async () => {
-    await expect(ctxFor(employee, 'aal1')).rejects.toThrow();
-  });
 });
 
 describe('a list in the body never widens the scope', () => {
   const call = (user: string, fn: string, args: Record<string, unknown>) =>
-    clientFor(user, { aal: 'aal2', email: `${user}@${DOMAIN}` }).schema('api').rpc(fn, args);
+    clientFor(user, { email: `${user}@${DOMAIN}` }).schema('api').rpc(fn, args);
 
   it('an owner asking for foreign organisations gets only their own', async () => {
     const asked = [own, far[0]!, far[2]!];

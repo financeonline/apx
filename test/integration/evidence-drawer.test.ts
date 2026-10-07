@@ -736,10 +736,9 @@ describe('an employee reaches evidence only where assigned (§9)', () => {
   let unassignedId: string;
   let bundleId: string;
 
-  /** Platform staff resolve nothing without a second factor (ADR-044.1), so the session carries aal2. */
   const employeeContext = (userId: string): AccessContext => ({
     userId, orgId, orgSlug: null, effectiveRole: 'employee', permissions: permissionsFor('employee'),
-    actorType: 'employee', db: clientFor(userId, { email: `employee@${DOMAIN}`, aal: 'aal2' }),
+    actorType: 'employee', db: clientFor(userId, { email: `employee@${DOMAIN}` }),
     requestId: `itest-${RUN}`, now: () => new Date('2026-06-15T00:00:00Z'), organizationStatus: 'active',
   });
 
@@ -749,7 +748,6 @@ describe('an employee reaches evidence only where assigned (§9)', () => {
     adminSql(`
       insert into public.platform_users (user_id, platform_role, status) values
         ('${assignedId}', 'employee', 'active'), ('${unassignedId}', 'employee', 'active');
-      update public.profiles set mfa_enrolled_at = now() where id in ('${assignedId}', '${unassignedId}');
       insert into public.organization_assignments (organization_id, employee_user_id, status)
       values ('${orgId}', '${assignedId}', 'active');`);
     bundleId = await buildBundleForMetric(contextFor(ownerId, 'owner'), snapshotOf('revenue'));
@@ -766,7 +764,7 @@ describe('an employee reaches evidence only where assigned (§9)', () => {
       .rejects.toBeInstanceOf(NotFound);
 
     // And nothing of the underlying rows either, addressed directly.
-    const direct = await clientFor(unassignedId, { aal: 'aal2' })
+    const direct = await clientFor(unassignedId)
       .from('evidence_items').select('id').eq('bundle_id', bundleId);
     expect(direct.data ?? []).toHaveLength(0);
   });

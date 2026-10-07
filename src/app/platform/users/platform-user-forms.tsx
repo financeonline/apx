@@ -5,7 +5,6 @@ import { addPlatformUserAction, revokePlatformRoleAction } from '../actions';
 import { Field, Input } from '@/components/ui/field';
 import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 import { TR, TD } from '@/components/ui/table';
-import { Badge } from '@/components/ui/surfaces';
 import { PLATFORM_ROLE_LABELS } from '@/components/labels';
 
 export function AddPlatformUserForm() {
@@ -30,7 +29,6 @@ export function PlatformUserRow(props: {
   fullName: string | null;
   platformRole: string;
   status: string;
-  twoStep: boolean;
 }) {
   const [state, action] = useActionState(revokePlatformRoleAction, null);
   return (
@@ -39,7 +37,6 @@ export function PlatformUserRow(props: {
       <TD>{props.fullName ?? '—'}</TD>
       <TD>{PLATFORM_ROLE_LABELS[props.platformRole] ?? props.platformRole}</TD>
       <TD>{props.status}</TD>
-      <TD>{props.twoStep ? <Badge tone="accent">Set up</Badge> : <Badge tone="warn">Not set up</Badge>}</TD>
       <TD>
         {props.platformRole === 'super_admin' ? (
           <span className="text-xs text-ink-muted">The super admin</span>

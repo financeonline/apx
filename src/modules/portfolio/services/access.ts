@@ -13,7 +13,7 @@ import { ADVISER_ROLES, type AdviserRole, type PortfolioOrganisation } from '../
  *
  * The set is `api.my_organizations()` — the database's own answer, derived from
  * `app.accessible_org_roles()`, the one source every RLS policy also reads — kept to the rows whose
- * role is one an adviser holds. A super admin reaches every organisation (at aal2), an employee only
+ * role is one an adviser holds. A super admin reaches every organisation, an employee only
  * the ones assigned to them, an owner or admin the ones they belong to in that role. A client's
  * membership is not an adviser's, so a client-only caller resolves to nothing and gets the uniform
  * 404, the same answer a stranger gets; and a person who is a client in one organisation and an
@@ -58,10 +58,10 @@ export async function resolvePortfolioContext(
   const organisations = adviserOrganisations(rows);
   if (organisations.length === 0) {
     /*
-     * ADR-114 §6: an ACTIVE platform account at aal2 with nothing to advise yet — an employee before
+     * ADR-114 §6: an ACTIVE platform account with nothing to advise yet — an employee before
      * their first assignment — has an empty Command Centre, the state UX_ARCHITECTURE.md specifies,
-     * not the uniform 404. Everyone else without a portfolio (a client-only member, a stranger, an
-     * aal1 platform session, a suspended or revoked employee) still gets NotFound.
+     * not the uniform 404. Everyone else without a portfolio (a client-only member, a stranger, a
+     * suspended or revoked employee) still gets NotFound.
      */
     const platformRole = await resolvePlatformRole(db, requestId);
     if (!permissionsFor(platformRole).has('assignments.view')) throw new NotFound();

@@ -42,14 +42,6 @@ describe('the invariants the scenarios encode', () => {
     }
   });
 
-  it('no platform user at aal1 ever resolves to anything (ADR-044.1, R2-A-03)', () => {
-    for (const s of RESOLUTION_SCENARIOS) {
-      if (s.platformUser && s.aal === 'aal1') {
-        expect(roleOf(s.id)).toBe('none');
-      }
-    }
-  });
-
   it('a suspended membership never grants access, whatever the organization status', () => {
     for (const s of RESOLUTION_SCENARIOS) {
       if (s.membership?.status === 'suspended' && !s.platformUser) {
@@ -64,7 +56,7 @@ describe('the invariants the scenarios encode', () => {
     for (const s of RESOLUTION_SCENARIOS) {
       if (s.organizationStatus !== 'suspended') continue;
       const role = roleOf(s.id);
-      if (s.platformUser?.role === 'super_admin' && s.aal === 'aal2' && s.platformUser.status === 'active') {
+      if (s.platformUser?.role === 'super_admin' && s.platformUser.status === 'active') {
         expect(role).toBe('super_admin');
       } else {
         expect(['suspended_member', 'none']).toContain(role);

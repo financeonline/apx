@@ -2961,3 +2961,15 @@ Decision:
 5. **Account**: for the super admin the page widens and the two cards sit side by side.
 
 Consequences: integration tests for the invitation fix, the owner function (super admin only, once, recent sign-in) and the password input. The test fixture `createAuthUser` now writes empty token columns as GoTrue does: NULLs there broke GoTrue's admin user list for the whole local instance (and with it "Add a platform admin"); the local rows were repaired.
+
+### ADR-161 · Two-step sign-in is removed
+Status: **built locally on 2026-10-07 on the owner's instruction ("remove this completely from the entire code", of the platform users' two-step column, after "remove the two-step verification and the authenticator app"). Supersedes ADR-038.8, ADR-044.1 / R2-A-03 and ADR-159.1 wherever they require aal2 or TOTP; the historical documents that state those rules are not rewritten. Not reviewed, merged or deployed.**
+
+Decision: MOTION has no two-step sign-in. A platform account (the one super admin, or staff) counts with a password sign-in.
+- Database (migration `20261018000007`): `app.is_platform_user` is an active platform account; `app.org_role_of` no longer checks a factor; `app.aal`, `app.actor_has_aal2`, `app.platform_mfa_required` and `api.confirm_mfa_enrolment` are dropped; `profiles.mfa_enrolled_at` is dropped; `api.my_platform_role` and `api.platform_users_list` lose `has_aal2` / `two_step`; the `platform_mfa_required` setting is deleted.
+- App: `/account/mfa` and the enrolment component are deleted; middleware no longer redirects platform accounts to it; the two-step column, the setting and every message about it are gone; the pure resolver (`tenancy/domain/resolve.ts`) has no `aal` input. Supabase TOTP enrolment and verification stay off in `config.toml`.
+- What still guards the platform: one super admin (ADR-159), a password sign-in from the last ten minutes for the sensitive changes ("Confirm it is you", ADR-160), magic-link sign-in refused for platform accounts, and every RLS / assignment rule unchanged.
+
+Tests: the assertions that a platform account WITHOUT two-step is refused tested the removed rule and were removed — the resolution fixtures' six "aal1" platform scenarios (each identical to its kept twin apart from the factor, verified by script), and the "at aal1 sees nothing" cases in rls-isolation, ai-tools, alerts-persist, forecast, scenarios, portfolio, portfolio-transport, portfolio-ai (the adviser's own aal1 read), receivables-recovery and platform-pages. The AI key test now proves a stale sign-in is refused and a password sign-in is enough. The test JWT no longer carries an `aal` claim.
+
+Consequences: a stolen super-admin password is now enough to reach every company; the owner accepted this. Re-introducing two-step later means a new decision, not a setting.

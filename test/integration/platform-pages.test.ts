@@ -5,12 +5,12 @@ import {
   updateOrganizationAsPlatform, updatePlatformSetting,
 } from '@/modules/platform';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, withPlatformMfaRequired } from './setup';
+import { adminSql, clientFor, createAuthUser } from './setup';
 
 /**
  * The platform pages' reads and writes (ROUTE_ARCHITECTURE.md §150, §155, §156; ADR-088).
  *
- * What a super admin at aal2 may see and change, and — the point of the suite — what everybody else
+ * What a super admin may see and change, and — the point of the suite — what everybody else
  * may not: an organisation's own owner, and an employee assigned to it, are both refused the
  * platform's surfaces, and the refusal comes from the database, not from the page.
  */
@@ -26,11 +26,11 @@ let orgName: string;
 
 const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 
-function platformContext(userId: string, role: 'super_admin' | 'employee', aal: 'aal1' | 'aal2' = 'aal2'): AccessContext {
+function platformContext(userId: string, role: 'super_admin' | 'employee'): AccessContext {
   return {
     userId, orgId: null, orgSlug: null, effectiveRole: role, permissions: permissionsFor(role),
     actorType: role === 'super_admin' ? 'platform_admin' : 'employee',
-    db: clientFor(userId, { email: `${role}@${DOMAIN}`, aal }),
+    db: clientFor(userId, { email: `${role}@${DOMAIN}` }),
     requestId: `itest-${RUN}`, now: () => new Date(), organizationStatus: null,
   };
 }
@@ -115,12 +115,9 @@ describe('the global audit trail', () => {
     expect(await searchAudit(ctx, { action: 'nothing.matches' })).toEqual([]);
   });
 
-  it('is refused to an owner, to an assigned employee, and to a super admin without a second factor', async () => {
+  it('is refused to an owner and to an assigned employee', async () => {
     await expect(searchAudit(orgContext(ownerId, 'owner'))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
     await expect(searchAudit(platformContext(employeeId, 'employee'))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
-    await withPlatformMfaRequired(true, async () => {
-      await expect(searchAudit(platformContext(adminId, 'super_admin', 'aal1'))).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
-    });
   });
 });
 

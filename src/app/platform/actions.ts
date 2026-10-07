@@ -12,7 +12,7 @@ import type { ActionResult } from '@/components/action-result';
 
 /**
  * Platform actions. Each is authorised twice: assertCan here, and app.require_super_admin() inside
- * the api.* function — which additionally requires aal2 and, for these, re-authentication within
+ * the api.* function — which, for these, additionally requires re-authentication within
  * the last ten minutes (ADR-044.3).
  */
 
@@ -33,7 +33,7 @@ export async function addPlatformUserAction(
     );
     revalidatePath('/platform/users');
     return done(invited
-      ? 'Invited. They will receive an email to set their password, then must set up two-step sign-in.'
+      ? 'Invited. They will receive an email to set their password.'
       : 'Added.');
   } catch (error) {
     return fail(error, { requestId, action: 'platform.addUser' });

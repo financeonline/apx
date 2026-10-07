@@ -7,7 +7,6 @@ import type { MembershipRole, OrgStatus } from './types';
  * (TENANCY_MODEL.md §4, TEST_STRATEGY.md §3).
  */
 export interface ResolutionInput {
-  readonly aal: 'aal1' | 'aal2';
   readonly platformUser: { role: 'super_admin' | 'employee'; status: 'active' | 'suspended' } | null;
   readonly organizationStatus: OrgStatus | null;
   readonly membership: { role: MembershipRole; status: 'active' | 'suspended' } | null;
@@ -19,9 +18,9 @@ export interface ResolutionInput {
   readonly now: Date;
 }
 
-/** MFA is a database fact for every platform user, not only super admins (ADR-044.1; R2-A-03). */
+/** An active platform account; a password sign-in counts (ADR-161: two-step sign-in was removed). */
 function isActivePlatformUser(input: ResolutionInput): boolean {
-  return input.platformUser?.status === 'active' && input.aal === 'aal2';
+  return input.platformUser?.status === 'active';
 }
 
 function assignmentIsLive(input: ResolutionInput): boolean {
@@ -38,12 +37,12 @@ export function resolveEffectiveRole(input: ResolutionInput): EffectiveRole {
   // A deleted organization, or one that does not exist, is invisible to everyone.
   if (orgStatus === null || orgStatus === 'deleted') return 'none';
 
-  // 1. Super admin at aal2.
+  // 1. Super admin.
   if (isActivePlatformUser(input) && input.platformUser?.role === 'super_admin') {
     return 'super_admin';
   }
 
-  // 2. Platform employee at aal2 with a live assignment.
+  // 2. Platform employee with a live assignment.
   if (
     isActivePlatformUser(input) &&
     input.platformUser?.role === 'employee' &&

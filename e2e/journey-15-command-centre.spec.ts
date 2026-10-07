@@ -8,7 +8,7 @@ import {
  *
  * An owner of two organisations lands on one screen that says which needs attention, and a client
  * of one of them is told nothing about a portfolio at all: the same uniform 404 a stranger gets.
- * Runs as an owner because a platform employee's browser session needs TOTP; the employee boundary
+ * Runs as an owner; the employee boundary
  * is proven at the database and the API in `test/integration/portfolio.test.ts`.
  */
 
@@ -38,7 +38,7 @@ test('an owner of two organisations sees both on the Command Centre; a client se
   // first-organisation form, and the switcher has no "create another" (a settings concern).
   const orgA = sql(`select id from public.organizations where slug = '${slugA}'`);
   const orgB = sql(`select api.create_organization('${ORG_B}')
-    from (select set_config('request.jwt.claims', '{"sub":"${owner.userId}","role":"authenticated","aal":"aal1","email":"${owner.email}"}', true) as c) s
+    from (select set_config('request.jwt.claims', '{"sub":"${owner.userId}","role":"authenticated","email":"${owner.email}"}', true) as c) s
     where s.c is not null`);
   const slugB = sql(`select slug from public.organizations where id = '${orgB}'`);
 

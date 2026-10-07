@@ -30,12 +30,12 @@ function orgContext(userId: string, role: EffectiveRole): AccessContext {
   };
 }
 
-/** A platform context: no organisation, aal2, the platform role's permissions. */
+/** A platform context: no organisation, the platform role's permissions. */
 function platformContext(userId: string, role: 'super_admin' | 'employee'): AccessContext {
   return {
     userId, orgId: null, orgSlug: null, effectiveRole: role, permissions: permissionsFor(role),
     actorType: role === 'super_admin' ? 'platform_admin' : 'employee',
-    db: clientFor(userId, { email: `${role}@${DOMAIN}`, aal: 'aal2' }),
+    db: clientFor(userId, { email: `${role}@${DOMAIN}` }),
     requestId: `itest-${RUN}`, now: () => new Date(), organizationStatus: null,
   };
 }

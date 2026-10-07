@@ -54,8 +54,8 @@ function seedAction(org: string, title: string, priority: string, due: string | 
     values ('${org}','${title}','${priority}',${due === null ? 'null' : `'${due}'`},'${status}','user',${owner === null ? 'null' : `'${owner}'`}${status === 'completed' ? ', now()' : ''}) returning id`);
 }
 
-const ctxFor = async (user: string, aal: 'aal1' | 'aal2' = 'aal1'): Promise<PortfolioContext> => {
-  const db = clientFor(user, { aal, email: `${user}@${DOMAIN}` });
+const ctxFor = async (user: string): Promise<PortfolioContext> => {
+  const db = clientFor(user, { email: `${user}@${DOMAIN}` });
   const ctx = await resolvePortfolioContext(db, user, `itest-${RUN}`);
   return { ...ctx, now: () => new Date('2026-09-15T12:00:00Z') };
 };
@@ -113,14 +113,10 @@ async function details(ctx: PortfolioContext, view: PortfolioView) {
 }
 
 describe('who has a portfolio, and over what (ADR-112 §2)', () => {
-  it('an employee: assigned organisations only, at aal2', async () => {
-    const ctx = await ctxFor(employee, 'aal2');
+  it('an employee: assigned organisations only', async () => {
+    const ctx = await ctxFor(employee);
     expect(names(ctx)).toEqual([named.get(A), named.get(B)]);
     expect(ctx.organisations.every((o) => o.role === 'employee')).toBe(true);
-  });
-
-  it('an employee at aal1 has no portfolio: the platform gate is the database\'s, not the page\'s', async () => {
-    await expect(ctxFor(employee, 'aal1')).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
   });
 
   it('an owner of two organisations: both, as owner', async () => {
@@ -138,10 +134,9 @@ describe('who has a portfolio, and over what (ADR-112 §2)', () => {
     expect(names(ctx)).toEqual([named.get(D)]);
   });
 
-  it('a super admin at aal2 sees every organisation; at aal1 none', async () => {
-    const ctx = await ctxFor(superAdmin, 'aal2');
+  it('a super admin sees every organisation', async () => {
+    const ctx = await ctxFor(superAdmin);
     for (const org of [A, B, C, D, E]) expect(ctx.organisationIds).toContain(org);
-    await expect(ctxFor(superAdmin, 'aal1')).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
   });
 
   it('a stranger, and a client-only member, get NOT_FOUND — the same answer', async () => {
@@ -152,7 +147,7 @@ describe('who has a portfolio, and over what (ADR-112 §2)', () => {
 
 describe('the read model counts over the authorised population only (ADR-112 §4)', () => {
   it('the employee\'s counts are A and B\'s, and never C\'s', async () => {
-    const ctx = await ctxFor(employee, 'aal2');
+    const ctx = await ctxFor(employee);
     const view = await loadPortfolio(ctx);
     expect(view.counts).toEqual({
       clients: 2, needingAttention: 1, healthy: 1, unscored: 0, alertsStanding: 3,
@@ -170,7 +165,7 @@ describe('the read model counts over the authorised population only (ADR-112 §4
   });
 
   it('ranks A above B: critical alert first, with the health fall and the overdue action behind it', async () => {
-    const view = await loadPortfolio(await ctxFor(employee, 'aal2'));
+    const view = await loadPortfolio(await ctxFor(employee));
     expect(view.attention.map((c) => c.organisation.id)).toEqual([A]);
     const a = view.attention[0]!;
     expect(a.attention!.reasons.map((r) => r.kind)).toEqual([
@@ -192,7 +187,7 @@ describe('the read model counts over the authorised population only (ADR-112 §4
   });
 
   it('the super admin\'s counts include C and an unscored organisation is not a zero', async () => {
-    const view = await loadPortfolio(await ctxFor(superAdmin, 'aal2'));
+    const view = await loadPortfolio(await ctxFor(superAdmin));
     expect(view.counts.criticalAlerts).toBeGreaterThanOrEqual(2);
     const d = view.clients.find((c) => c.organisation.id === D)!;
     expect(d.health).toBeNull();
@@ -203,7 +198,7 @@ describe('the read model counts over the authorised population only (ADR-112 §4
 
 describe('the adversarial path: the resolver bypassed, a foreign id in the statement', () => {
   it('RLS returns nothing of C to the employee even when C\'s id is put in every query', async () => {
-    const real = await ctxFor(employee, 'aal2');
+    const real = await ctxFor(employee);
     const forged: PortfolioContext = {
       ...real,
       organisations: [...real.organisations, { id: C, slug: 'gamma', name: 'Gamma', status: 'active', role: 'employee' }],
@@ -243,7 +238,7 @@ describe('an assignment revoked stops working on the next request', () => {
   it('B leaves the employee\'s portfolio, and its facts with it', async () => {
     adminSql(`update public.organization_assignments set status='revoked' where organization_id='${B}' and employee_user_id='${employee}'`);
     try {
-      const ctx = await ctxFor(employee, 'aal2');
+      const ctx = await ctxFor(employee);
       expect(names(ctx)).toEqual([named.get(A)]);
       const view = await loadPortfolio(ctx);
       expect(view.counts.clients).toBe(1);
@@ -251,7 +246,7 @@ describe('an assignment revoked stops working on the next request', () => {
       // And with A revoked too, the employee has an EMPTY Command Centre (ADR-114 §6) — no organisation,
       // no count, no row — not a 404.
       adminSql(`update public.organization_assignments set status='revoked' where organization_id='${A}' and employee_user_id='${employee}'`);
-      const empty = await ctxFor(employee, 'aal2');
+      const empty = await ctxFor(employee);
       expect(empty.organisations).toEqual([]);
       const emptyView = await loadPortfolio(empty);
       expect(emptyView.counts.clients).toBe(0);
@@ -270,22 +265,18 @@ describe('an eligible employee with no assignment has an empty Command Centre (A
   });
   afterAll(() => { adminSql(`delete from public.platform_users where user_id='${unassigned}'`); });
 
-  it('at aal2: an empty portfolio — no organisation, no count — not the uniform 404', async () => {
-    const ctx = await ctxFor(unassigned, 'aal2');
+  it('an empty portfolio — no organisation, no count — not the uniform 404', async () => {
+    const ctx = await ctxFor(unassigned);
     expect(ctx.organisations).toEqual([]);
     const view = await loadPortfolio(ctx);
     expect(view.counts).toMatchObject({ clients: 0, criticalAlerts: 0, openActions: 0, needingAttention: 0 });
     expect(view.clients).toEqual([]);
   });
 
-  it('at aal1: still NOT_FOUND', async () => {
-    await expect(ctxFor(unassigned, 'aal1')).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
-  });
-
   it('a suspended platform account: NOT_FOUND', async () => {
     adminSql(`update public.platform_users set status='suspended' where user_id='${unassigned}'`);
     try {
-      await expect(ctxFor(unassigned, 'aal2')).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
+      await expect(ctxFor(unassigned)).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
     } finally {
       adminSql(`update public.platform_users set status='active' where user_id='${unassigned}'`);
     }
@@ -302,7 +293,7 @@ describe('advisory opportunities follow the same boundary (ADR-148)', () => {
   });
 
   it('the employee sees A\'s, never C\'s — even with C forged into the context', async () => {
-    const real = await ctxFor(employee, 'aal2');
+    const real = await ctxFor(employee);
     const view = await loadPortfolio(real);
     expect((await loadOpportunities(real, view)).map((e) => [e.organizationId, e.opportunities.map((o) => o.kind)]))
       .toEqual([[A, ['campaigns_paying_back']]]);
@@ -317,7 +308,7 @@ describe('advisory opportunities follow the same boundary (ADR-148)', () => {
   });
 
   it('the super admin sees A\'s and C\'s; the database function gives a stranger nothing', async () => {
-    const admin = await ctxFor(superAdmin, 'aal2');
+    const admin = await ctxFor(superAdmin);
     const view = await loadPortfolio(admin);
     // A super admin sees every organisation in the database; this file's own are A, C (and B, without one).
     const ours = new Set([A, B, C, D, E]);
@@ -331,11 +322,11 @@ describe('advisory opportunities follow the same boundary (ADR-148)', () => {
 
 describe('the portfolio report covers the caller\'s portfolio and nothing else (ADR-149)', () => {
   it('the employee\'s report is A and B, attention first; the super admin\'s includes C', async () => {
-    const report = await loadPortfolioReport(await ctxFor(employee, 'aal2'));
+    const report = await loadPortfolioReport(await ctxFor(employee));
     expect(report.clients.map((c) => c.organizationId)).toEqual([A, B]);
     expect(report.clients[0]!.attention.length).toBeGreaterThan(0);
     expect(report.counts.clients).toBe(2);
-    const admin = await loadPortfolioReport(await ctxFor(superAdmin, 'aal2'));
+    const admin = await loadPortfolioReport(await ctxFor(superAdmin));
     expect(admin.clients.map((c) => c.organizationId)).toEqual(expect.arrayContaining([A, B, C]));
   });
 });

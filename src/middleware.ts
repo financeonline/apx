@@ -33,15 +33,6 @@ const PUBLIC_PREFIXES = [
   '/api/jobs',
 ] as const;
 
-/** A platform account without a verified authenticator may only reach these (§8.4a). */
-const MFA_ALLOWED_PREFIXES = [
-  '/account',
-  '/sign-in',
-  '/auth/callback',
-  '/legal',
-  '/api/health',
-] as const;
-
 type Family = 'public' | 'auth-noorg' | 'app' | 'portfolio' | 'platform';
 
 function classify(pathname: string): Family {
@@ -55,10 +46,6 @@ function classify(pathname: string): Family {
   return 'auth-noorg';
 }
 
-function startsWithAny(pathname: string, prefixes: readonly string[]): boolean {
-  return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
-}
-
 /** Only same-origin relative paths survive as a `next` target (§10, ADR-069) — one rule, one place. */
 function relativeTarget(request: NextRequest): string {
   const { pathname, search, origin } = request.nextUrl;
@@ -68,7 +55,6 @@ function relativeTarget(request: NextRequest): string {
 interface PlatformRoleRow {
   platform_role: string;
   status: string;
-  has_aal2: boolean;
 }
 
 interface ProfileRow {
@@ -187,11 +173,6 @@ export async function middleware(request: NextRequest) {
     platform?.platform_role === 'super_admin' && platform.status === 'active';
   const isActivePlatformAccount = isPlatformAccount && platform?.status === 'active';
 
-  // 4a. A platform account without a verified authenticator can go nowhere but /account (ADR-038.8).
-  if (isPlatformAccount && !platform?.has_aal2 && !startsWithAny(url.pathname, MFA_ALLOWED_PREFIXES)) {
-    return finish(new URL('/account/mfa', url.origin));
-  }
-
   // 5. Family membership. Anything not permitted renders the uniform 404 at the requested URL.
   const notFound = new URL('/404', url.origin);
 
@@ -200,8 +181,7 @@ export async function middleware(request: NextRequest) {
    * `/portfolio` is the Command Centre for every adviser-capable role, member or platform account
    * (ADR-112). Which organisations, if any, a session may advise needs the database, so the
    * portfolio layout decides and renders the uniform 404 for a caller with none — a client-only
-   * member, a stranger, an unassigned employee. Middleware keeps only the session and MFA checks
-   * above; a platform account still cannot reach here at aal1 (step 4a).
+   * member, a stranger, an unassigned employee. Middleware keeps only the session checks above.
    */
 
   // 6. `/` with a session goes to the family the account belongs to. A stale or foreign

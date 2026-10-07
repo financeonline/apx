@@ -19,7 +19,6 @@ const b64url = (input: Buffer | string) =>
 
 export interface JwtOptions {
   email?: string;
-  aal?: 'aal1' | 'aal2';
   expiresInSeconds?: number;
   amrTimestamp?: number;
 }
@@ -36,7 +35,6 @@ export function mintJwt(userId: string, options: JwtOptions = {}): string {
     role: 'authenticated',
     aud: 'authenticated',
     email: options.email ?? `${userId}@test.motion`,
-    aal: options.aal ?? 'aal1',
     amr: [{ method: 'password', timestamp: options.amrTimestamp ?? now }],
     iat: now,
     exp: now + (options.expiresInSeconds ?? 3600),
@@ -93,24 +91,6 @@ export function resetFixtures(): void {
     delete from auth.users where email like '%@itest.motion';
     delete from public.api_rate_limits;
   `);
-}
-
-/**
- * Runs `fn` with `platform_settings.platform_mfa_required` pinned (ADR-159), then puts back whatever
- * the local database had: the owner's own setting must survive a test run. Integration files run one
- * at a time (fileParallelism: false), so the global setting is not raced.
- */
-export async function withPlatformMfaRequired(required: boolean, fn: () => Promise<void>): Promise<void> {
-  const before = adminSql(`select value::text from public.platform_settings where key = 'platform_mfa_required'`);
-  adminSql(`insert into public.platform_settings (key, value) values ('platform_mfa_required', '${required}'::jsonb)
-            on conflict (key) do update set value = excluded.value`);
-  try {
-    await fn();
-  } finally {
-    adminSql(before
-      ? `update public.platform_settings set value = '${before}'::jsonb where key = 'platform_mfa_required'`
-      : `delete from public.platform_settings where key = 'platform_mfa_required'`);
-  }
 }
 
 /** Postgres SQLSTATE carried by a PostgREST error, when there is one. */

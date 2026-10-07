@@ -3,7 +3,7 @@ import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { adminSql, clientFor, createAuthUser, resetFixtures, sqlstate } from './setup';
 
 /**
- * ADR-158 over the real wire: only a super admin (aal2, recent sign-in) switches a company's systems,
+ * ADR-158 over the real wire: only a super admin (recent sign-in) switches a company's systems,
  * creates a company (without becoming its member; the owner is invited) and lists the staff.
  */
 
@@ -13,14 +13,13 @@ let ownerId: string;
 let orgId: string;
 
 const asAdmin = (fn: string, args: Record<string, unknown> = {}) =>
-  clientFor(adminId, { aal: 'aal2' }).schema('api').rpc(fn, args);
+  clientFor(adminId).schema('api').rpc(fn, args);
 
 beforeAll(async () => {
   resetFixtures();
   adminId = createAuthUser(`admin@${DOMAIN}`);
   ownerId = createAuthUser(`owner@${DOMAIN}`);
-  adminSql(`insert into public.platform_users (user_id, platform_role, status) values ('${adminId}', 'super_admin', 'active');
-            update public.profiles set mfa_enrolled_at = now() where id = '${adminId}';`);
+  adminSql(`insert into public.platform_users (user_id, platform_role, status) values ('${adminId}', 'super_admin', 'active');`);
   const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: 'ITest Modules Co' });
   if (created.error) throw new Error(created.error.message);
   orgId = created.data as unknown as string;
@@ -42,7 +41,7 @@ describe('api.set_org_module', () => {
 
   it('refuses a switch MOTION does not know, and anyone but a super admin', async () => {
     expect(sqlstate((await asAdmin('set_org_module', { p_org: orgId, p_feature_key: 'everything', p_on: true })).error)).toBe('22023');
-    const owner = await clientFor(ownerId, { aal: 'aal2' }).schema('api').rpc('set_org_module', { p_org: orgId, p_feature_key: 'module_banking', p_on: true });
+    const owner = await clientFor(ownerId).schema('api').rpc('set_org_module', { p_org: orgId, p_feature_key: 'module_banking', p_on: true });
     expect(sqlstate(owner.error)).toBe('42501');
   });
 });
@@ -64,7 +63,7 @@ describe('api.platform_create_organization', () => {
   });
 
   it('refuses a company owner', async () => {
-    const { error } = await clientFor(ownerId, { aal: 'aal2' }).schema('api').rpc('platform_create_organization', {
+    const { error } = await clientFor(ownerId).schema('api').rpc('platform_create_organization', {
       p_name: 'Nope', p_country_code: 'GB', p_base_currency: 'GBP', p_fiscal_year_start_month: 1, p_timezone: '', p_owner_email: `x@${DOMAIN}`,
     });
     expect(sqlstate(error)).toBe('42501');
@@ -76,7 +75,7 @@ describe('api.platform_users_list', () => {
     const { data, error } = await asAdmin('platform_users_list');
     expect(error).toBeNull();
     expect((data as Array<{ email: string }>).map((r) => r.email)).toContain(`admin@${DOMAIN}`);
-    expect(sqlstate((await clientFor(ownerId, { aal: 'aal2' }).schema('api').rpc('platform_users_list')).error)).toBe('42501');
+    expect(sqlstate((await clientFor(ownerId).schema('api').rpc('platform_users_list')).error)).toBe('42501');
   });
 });
 
@@ -104,7 +103,7 @@ describe('the owner of a company the super admin created (ADR-160)', () => {
     const row = await create('ITest Direct Owner Co', email);
     const directId = createAuthUser(email);
 
-    const refused = await clientFor(ownerId, { aal: 'aal2' }).schema('api').rpc('platform_set_company_owner', { p_org: row.organization_id, p_user: directId });
+    const refused = await clientFor(ownerId).schema('api').rpc('platform_set_company_owner', { p_org: row.organization_id, p_user: directId });
     expect(sqlstate(refused.error)).toBe('42501');
 
     const set = await asAdmin('platform_set_company_owner', { p_org: row.organization_id, p_user: directId });
@@ -119,7 +118,7 @@ describe('the owner of a company the super admin created (ADR-160)', () => {
 
   it('refuses the super admin a stale sign-in', async () => {
     const row = await create('ITest Stale Owner Co', `stale@${DOMAIN}`);
-    const stale = clientFor(adminId, { aal: 'aal2', amrTimestamp: Math.floor(Date.now() / 1000) - 3600 });
+    const stale = clientFor(adminId, { amrTimestamp: Math.floor(Date.now() / 1000) - 3600 });
     const { error } = await stale.schema('api').rpc('platform_set_company_owner', { p_org: row.organization_id, p_user: ownerId });
     expect(sqlstate(error)).toBe('42501');
   });

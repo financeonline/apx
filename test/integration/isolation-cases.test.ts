@@ -39,14 +39,6 @@ beforeAll(async () => {
 
   adminSql(`insert into public.platform_users (user_id, platform_role) values ('${employee}','employee')`);
   adminSql(`insert into public.platform_users (user_id, platform_role) values ('${superAdmin}','super_admin')`);
-  /*
-   * `app.actor_has_aal2` reads `profiles.mfa_enrolled_at`, not the session's `aal` claim — the
-   * server-asserted path has no session to read (ADR-043.2, ADR-044.1). Platform staff therefore
-   * need an enrolled factor before any of their access resolves at all.
-   */
-  adminSql(`
-    update public.profiles set mfa_enrolled_at = now()
-     where id in ('${employee}', '${superAdmin}')`);
 });
 
 afterAll(() => {
@@ -60,7 +52,7 @@ afterAll(() => {
 
 describe('case 8 — an unassigned employee sees nothing at all', () => {
   it('resolves no context for an organisation they were never assigned to', async () => {
-    const e = clientFor(employee, { aal: 'aal2', email: `employee@${DOMAIN}` });
+    const e = clientFor(employee, { email: `employee@${DOMAIN}` });
 
     const { data: context, error } = await e.schema('api').rpc('my_context', { p_slug: slugA });
     expect(error).toBeNull();
@@ -71,7 +63,7 @@ describe('case 8 — an unassigned employee sees nothing at all', () => {
   });
 
   it('has an empty portfolio, not an error', async () => {
-    const e = clientFor(employee, { aal: 'aal2', email: `employee@${DOMAIN}` });
+    const e = clientFor(employee, { email: `employee@${DOMAIN}` });
     const { data, error } = await e.schema('api').rpc('my_organizations');
     expect(error, 'an empty portfolio is a state, not a failure').toBeNull();
     expect(data ?? []).toHaveLength(0);
@@ -85,7 +77,7 @@ describe('case 9 — an assignment revoked mid-session stops working on the next
       values ('${orgA}', '${employee}')`);
 
     // The SAME token throughout: this is about the next request, not about a new session.
-    const e = clientFor(employee, { aal: 'aal2', email: `employee@${DOMAIN}` });
+    const e = clientFor(employee, { email: `employee@${DOMAIN}` });
 
     const before = await e.schema('api').rpc('my_context', { p_slug: slugA });
     expect(before.data, 'assigned: the context resolves').toHaveLength(1);
@@ -106,7 +98,7 @@ describe('case 9 — an assignment revoked mid-session stops working on the next
 
 describe('case 11 — a super admin may look, and the looking is recorded', () => {
   it('resolves the context and can read the organisation', async () => {
-    const s = clientFor(superAdmin, { aal: 'aal2', email: `super@${DOMAIN}` });
+    const s = clientFor(superAdmin, { email: `super@${DOMAIN}` });
     const { data, error } = await s.schema('api').rpc('my_context', { p_slug: slugA });
     expect(error).toBeNull();
     expect(data).toHaveLength(1);

@@ -145,7 +145,7 @@ export interface PlatformAuditEvent {
   readonly createdAt: string;
 }
 
-/** The global trail (ADR-088). Super admin at aal2; the function refuses anyone else. */
+/** The global trail (ADR-088). The super admin only; the function refuses anyone else. */
 export async function searchAudit(ctx: AccessContext, filters: AuditFilters = {}): Promise<PlatformAuditEvent[]> {
   assertCan(ctx, 'audit.view');
   const rows = await callApi<Array<Record<string, unknown>>>(ctx.db, 'platform_audit_events', {
@@ -337,7 +337,6 @@ export interface PlatformUser {
   readonly fullName: string | null;
   readonly platformRole: string;
   readonly status: string;
-  readonly twoStep: boolean;
   readonly createdAt: string;
 }
 
@@ -350,7 +349,6 @@ export async function listPlatformUsers(ctx: AccessContext): Promise<PlatformUse
     fullName: (r.full_name as string | null) ?? null,
     platformRole: r.platform_role as string,
     status: r.status as string,
-    twoStep: r.two_step === true,
     createdAt: r.created_at as string,
   }));
 }

@@ -15,7 +15,7 @@ export const dynamic = 'force-dynamic';
  *
  * Everything the platform recorded, newest first, across every organisation and the platform's own
  * events. The filters are links rather than a form so a search is a URL a person can keep, paste
- * into a ticket and come back to. `api.platform_audit_events` is super admin at aal2 and resolves
+ * into a ticket and come back to. `api.platform_audit_events` is the super admin only and resolves
  * the actor's name, which `profiles`' own-row-only RLS hides from a direct read.
  */
 

@@ -275,11 +275,11 @@ describe('api.bank_period_summary agrees with the engine and is fenced like ever
   it('a client may read it; another organisation’s owner and an unassigned employee are told not found', async () => {
     const asClient = await clientFor(clientA).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
     expect(asClient.error).toBeNull();
-    const asAssigned = await clientFor(empAssigned, { aal: 'aal2' }).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
+    const asAssigned = await clientFor(empAssigned).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
     expect(asAssigned.error).toBeNull();
     const asB = await clientFor(ownerB).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
     expect(sqlstate(asB.error)).toBe('P0002');
-    const asOther = await clientFor(empOther, { aal: 'aal2' }).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
+    const asOther = await clientFor(empOther).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
     expect(sqlstate(asOther.error)).toBe('P0002');
     // A period id from organisation B, with organisation A: not found, never B's month.
     const augustB = one(`select id from public.fiscal_periods where organization_id = '${orgB}' and period_start = '2026-08-01'`);
@@ -309,12 +309,12 @@ describe('currency is the organisation’s, never a literal', () => {
 // ---------------------------------------------------------------------------------------------
 
 function contextFor(
-  userId: string, role: 'owner' | 'client' | 'employee', org: string, aal: 'aal1' | 'aal2' = 'aal1',
+  userId: string, role: 'owner' | 'client' | 'employee', org: string,
 ): AccessContext {
   return {
     userId, orgId: org, orgSlug: null, effectiveRole: role, permissions: permissionsFor(role),
     actorType: role === 'employee' ? 'employee' : 'user',
-    db: clientFor(userId, { email: `${userId.slice(0, 6)}@${DOMAIN}`, aal }),
+    db: clientFor(userId, { email: `${userId.slice(0, 6)}@${DOMAIN}` }),
     requestId: `itest-${RUN}`, now: () => new Date('2026-09-15T00:00:00Z'),
     organizationStatus: 'active',
   };
@@ -375,7 +375,7 @@ describe('the banking tools read only through the services, only for the caller�
     const asClient = await invoke(contextFor(clientA, 'client', orgA), 'get_bank_accounts', { period: 'Aug 2026' });
     expect(asClient.result.ok).toBe(true);
     expect(asClient.persisted.authorized).toBe(true);
-    const asEmployee = await invoke(contextFor(empAssigned, 'employee', orgA, 'aal2'), 'get_recurring_payments', {});
+    const asEmployee = await invoke(contextFor(empAssigned, 'employee', orgA), 'get_recurring_payments', {});
     expect(asEmployee.result.ok).toBe(true);
     // A caller who smuggles another organisation into the input gets nothing for it: the input
     // schema has no such field, and the organisation is the session's.
@@ -416,7 +416,7 @@ describe('cross-organisation ids fail safely on every banking write', () => {
     const bRow = one(`select id from public.bank_transactions where organization_id = '${orgB}' limit 1`);
     const crossPair = await clientFor(ownerA).schema('api').rpc('mark_transfer', { p_txn: wageIds[2], p_pair: bRow });
     expect(sqlstate(crossPair.error)).toBe('P0002');
-    const other = clientFor(empOther, { aal: 'aal2' });
+    const other = clientFor(empOther);
     expect(sqlstate((await other.schema('api').rpc('override_bank_category', { p_txn: wageIds[2], p_account: account(orgA, 'marketing') })).error)).toBe('P0002');
     expect(sqlstate((await other.schema('api').rpc('create_bank_account', { p_org: orgA, p_input: { name: 'X', bank_name: 'Y' } })).error)).toBeDefined();
   });

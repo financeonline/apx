@@ -28,12 +28,11 @@ const one = (sql: string): string => adminSql(`with q as (${sql}) select * from 
 
 function contextFor(
   userId: string, role: 'owner' | 'client' | 'employee' | 'super_admin', org: string = orgA,
-  aal: 'aal1' | 'aal2' = 'aal1',
 ): AccessContext {
   return {
     userId, orgId: org, orgSlug: null, effectiveRole: role, permissions: permissionsFor(role),
     actorType: role === 'employee' ? 'employee' : role === 'super_admin' ? 'platform_admin' : 'user',
-    db: clientFor(userId, { email: `${userId.slice(0, 6)}@${DOMAIN}`, aal }),
+    db: clientFor(userId, { email: `${userId.slice(0, 6)}@${DOMAIN}` }),
     requestId: `itest-${RUN}`, now: () => new Date('2026-09-15T00:00:00Z'),
     organizationStatus: 'active',
   };
@@ -100,8 +99,6 @@ beforeAll(async () => {
     insert into public.platform_users (user_id, platform_role, status)
     values ('${empAssigned}', 'employee', 'active'), ('${empOther}', 'employee', 'active'),
            ('${superAdmin}', 'super_admin', 'active');
-    update public.profiles set mfa_enrolled_at = now()
-     where id in ('${empAssigned}', '${empOther}', '${superAdmin}');
     insert into public.organization_assignments
            (organization_id, employee_user_id, status, starts_at, ends_at, assigned_by)
     values ('${orgA}', '${empAssigned}', 'active', now() - interval '1 day',
@@ -298,7 +295,7 @@ describe('the analyst reads the forecast rather than computing one (§18)', () =
   });
 
   it('says NO_DATA for an organisation with no forecast rather than inventing one', async () => {
-    const ctx = contextFor(empOther, 'employee', orgA, 'aal2');
+    const ctx = contextFor(empOther, 'employee', orgA);
     const { result } = await invoke(ctx);
     expect(result.ok).toBe(false);
     expect((result.data as { code: string }).code).toBe('NO_DATA');
@@ -345,23 +342,18 @@ describe('who may see a forecast (§22)', () => {
     expect(hasForecast(state)).toBe(true);
   });
 
-  it('lets the assigned employee at aal2 read A’s forecast', async () => {
-    const state = await loadForecast(contextFor(empAssigned, 'employee', orgA, 'aal2'));
+  it('lets the assigned employee read A’s forecast', async () => {
+    const state = await loadForecast(contextFor(empAssigned, 'employee', orgA));
     expect(hasForecast(state)).toBe(true);
   });
 
   it('shows an unassigned employee nothing, though the role holds the permission', async () => {
-    const state = await loadForecast(contextFor(empOther, 'employee', orgA, 'aal2'));
+    const state = await loadForecast(contextFor(empOther, 'employee', orgA));
     expect(hasForecast(state), 'RLS stops what the permission alone would allow').toBe(false);
   });
 
-  it('shows the assigned employee nothing at aal1 (ADR-044.1)', async () => {
-    const state = await loadForecast(contextFor(empAssigned, 'employee', orgA, 'aal1'));
-    expect(hasForecast(state)).toBe(false);
-  });
-
   it('shows the assigned employee nothing of organisation B', async () => {
-    const state = await loadForecast(contextFor(empAssigned, 'employee', orgB, 'aal2'));
+    const state = await loadForecast(contextFor(empAssigned, 'employee', orgB));
     expect(hasForecast(state)).toBe(false);
   });
 });

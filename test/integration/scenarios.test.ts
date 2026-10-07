@@ -45,12 +45,11 @@ const one = (sql: string): string => adminSql(`with q as (${sql}) select * from 
 
 function contextFor(
   userId: string, role: 'owner' | 'client' | 'employee' | 'super_admin', org: string = orgA,
-  aal: 'aal1' | 'aal2' = 'aal1',
 ): AccessContext {
   return {
     userId, orgId: org, orgSlug: null, effectiveRole: role, permissions: permissionsFor(role),
     actorType: role === 'employee' ? 'employee' : role === 'super_admin' ? 'platform_admin' : 'user',
-    db: clientFor(userId, { email: `${userId.slice(0, 6)}@${DOMAIN}`, aal }),
+    db: clientFor(userId, { email: `${userId.slice(0, 6)}@${DOMAIN}` }),
     requestId: `itest-${RUN}`, now: () => new Date('2026-09-15T00:00:00Z'),
     organizationStatus: 'active',
   };
@@ -148,8 +147,6 @@ beforeAll(async () => {
     insert into public.platform_users (user_id, platform_role, status)
     values ('${empAssigned}', 'employee', 'active'), ('${empOther}', 'employee', 'active'),
            ('${superAdmin}', 'super_admin', 'active');
-    update public.profiles set mfa_enrolled_at = now()
-     where id in ('${empAssigned}', '${empOther}', '${superAdmin}');
     insert into public.organization_assignments
            (organization_id, employee_user_id, status, starts_at, ends_at, assigned_by)
     values ('${orgA}', '${empAssigned}', 'active', now() - interval '1 day',
@@ -549,7 +546,7 @@ describe('the analyst reads a scenario rather than computing one (§18)', () => 
   });
 
   it('says NO_DATA for an organisation with no saved scenario rather than inventing one', async () => {
-    const { result } = await invoke(contextFor(empOther, 'employee', orgA, 'aal2'));
+    const { result } = await invoke(contextFor(empOther, 'employee', orgA));
     expect(result.ok).toBe(false);
     expect((result.data as { code: string }).code).toBe('NO_DATA');
   });
@@ -797,25 +794,20 @@ describe('who may read a scenario, and who may work one out (§19, §20)', () =>
     expect(sqlstate(error)).toBe('P0002');
   });
 
-  it('lets the assigned employee at aal2 read and work one out', async () => {
-    const ctx = contextFor(empAssigned, 'employee', orgA, 'aal2');
+  it('lets the assigned employee read and work one out', async () => {
+    const ctx = contextFor(empAssigned, 'employee', orgA);
     expect(hasScenario(await loadScenario(ctx))).toBe(true);
     const made = await runScenario(ctx, { name: 'Adviser’s try', assumptions: [REVENUE_UP_10] });
     expect(hasScenario(made)).toBe(true);
   });
 
   it('shows an unassigned employee nothing, though the role holds the permission', async () => {
-    const state = await loadScenario(contextFor(empOther, 'employee', orgA, 'aal2'));
+    const state = await loadScenario(contextFor(empOther, 'employee', orgA));
     expect(hasScenario(state), 'RLS stops what the permission alone would allow').toBe(false);
   });
 
-  it('shows the assigned employee nothing at aal1 (ADR-044.1)', async () => {
-    const state = await loadScenario(contextFor(empAssigned, 'employee', orgA, 'aal1'));
-    expect(hasScenario(state)).toBe(false);
-  });
-
   it('shows the assigned employee nothing of organisation B', async () => {
-    const state = await loadScenario(contextFor(empAssigned, 'employee', orgB, 'aal2'));
+    const state = await loadScenario(contextFor(empAssigned, 'employee', orgB));
     expect(hasScenario(state)).toBe(false);
   });
 

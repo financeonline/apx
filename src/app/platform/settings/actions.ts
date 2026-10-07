@@ -9,7 +9,7 @@ import type { ActionResult } from '@/components/action-result';
 
 /**
  * The platform's defaults (ROUTE_ARCHITECTURE.md §156). `api.update_platform_settings` is super
- * admin at aal2 and audits `platform.settings_changed`; this validates the shape of the value so a
+ * admin only and audits `platform.settings_changed`; this validates the shape of the value so a
  * typo cannot put a string where every reader expects a number.
  */
 

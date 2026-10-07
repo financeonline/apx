@@ -24,14 +24,13 @@ export default async function AccountPage() {
   const { data } = await db.schema('api').rpc('my_profile');
   const profile = (data as ProfileRow[] | null)?.[0];
 
-  // ADR-157: the AI provider key is managed here, by a super admin only; nobody else's profile shows
-  // it. Its status is readable only when the platform counts this sign-in (aal2, or two-step switched
-  // off for platform staff — ADR-159). The two-step card was removed on the owner's request.
+  // ADR-157: the AI provider key is managed here, by the super admin only; nobody else's profile
+  // shows it.
   const { data: roleRows } = await db.schema('api').rpc('my_platform_role');
-  const role = (roleRows as Array<{ platform_role: string; status: string; has_aal2: boolean }> | null)?.[0];
+  const role = (roleRows as Array<{ platform_role: string; status: string }> | null)?.[0];
   const superAdmin = role?.platform_role === 'super_admin' && role.status === 'active';
   let aiKey: { configured: boolean; ending: string | null; updatedAt: string | null } | null = null;
-  if (superAdmin && role.has_aal2) {
+  if (superAdmin) {
     const { data: keyRows } = await db.schema('api').rpc('ai_api_key_status');
     const row = (keyRows as Array<{ configured: boolean; ending: string | null; updated_at: string | null }> | null)?.[0];
     aiKey = { configured: row?.configured === true, ending: row?.ending ?? null, updatedAt: row?.updated_at ?? null };
@@ -62,11 +61,7 @@ export default async function AccountPage() {
               description="The Anthropic key every organisation's AI Analyst and document reading use. Only super admins see this."
             />
             <CardBody className="flex flex-col gap-4">
-              {aiKey === null ? (
-                <p className="text-sm text-ink">
-                  Two-step sign-in is required for platform staff (Platform → Settings), so sign in with your code to see or change the key.
-                </p>
-              ) : (
+              {aiKey === null ? null : (
                 <>
                   <p className="text-sm text-ink" data-testid="ai-key-status">
                     {aiKey.configured
