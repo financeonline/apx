@@ -17,3 +17,6 @@ test/regression/out/
 
 # Local run output (sample-data screenshots, Playwright results)
 /logs/
+
+# Local secrets handoff (owner, 2026-10-07): never committed
+SECRETS.local.md
