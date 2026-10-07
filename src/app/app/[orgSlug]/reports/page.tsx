@@ -10,7 +10,7 @@ import {
   type StoredKind, type StoredReportSummary,
 } from '@/modules/reporting';
 import { fundingEnabled } from '@/modules/funding';
-import { getAccessContext } from '@/modules/tenancy';
+import { getAccessContext, moduleOn } from '@/modules/tenancy';
 import { ReportsBeforeFirstMonthEmpty } from '@/components/dashboard';
 import { Badge, Card, CardBody, IconBadge, PageHeader, type IconTint } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
@@ -82,7 +82,8 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
   requirePermission(ctx, 'reports.view');
 
   const canGenerate = can(ctx, 'reports.generate');
-  const canAsk = can(ctx, 'ai.use');
+  // ADR-158: a new custom report needs the AI Analyst system; reports already made stay listed.
+  const canAsk = can(ctx, 'ai.use') && moduleOn(ctx, 'analyst');
   const [monthly, stored, windows, funding] = await Promise.all([
     listAvailable(ctx),
     listStoredReports(ctx, ['daily_brief', 'weekly_intelligence', 'adviser', 'custom_ai', 'funding_readiness']),

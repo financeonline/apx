@@ -1,4 +1,5 @@
 import { SectionTabs } from '@/components/dashboard/section-tabs';
+import { requireModulePage } from '@/app/_lib/authz';
 import { getAccessContext } from '@/modules/tenancy';
 
 /**
@@ -25,7 +26,7 @@ export default async function CommercialLayout({
   params: Promise<{ orgSlug: string }>;
 }) {
   const { orgSlug } = await params;
-  await getAccessContext(orgSlug);
+  requireModulePage(await getAccessContext(orgSlug), 'customers');
   return (
     <>
       <SectionTabs

@@ -2,10 +2,12 @@
 
 import { revalidatePath } from 'next/cache';
 import { revokeUserSessions } from '@/core/db';
+import { addPlatformUser } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { assertCan } from '@/core/permissions';
 import { toMotionError } from '@/core/errors';
 import { fail, done, text, optionalText } from '@/app/_lib/server-action';
+import { requestOrigin } from '@/app/_lib/request-origin';
 import type { ActionResult } from '@/components/action-result';
 
 /**
@@ -14,7 +16,7 @@ import type { ActionResult } from '@/components/action-result';
  * the last ten minutes (ADR-044.3).
  */
 
-export async function grantPlatformRoleAction(
+export async function addPlatformUserAction(
   _previous: ActionResult | null,
   form: FormData,
 ): Promise<ActionResult> {
@@ -23,15 +25,18 @@ export async function grantPlatformRoleAction(
     const ctx = await getPlatformContext();
     requestId = ctx.requestId;
     assertCan(ctx, 'platform.users.manage');
-    const { error } = await ctx.db.schema('api').rpc('grant_platform_role', {
-      p_user: text(form, 'user_id'),
-      p_role: text(form, 'platform_role'),
-    });
-    if (error) throw toMotionError(error, requestId);
+    const origin = await requestOrigin();
+    const { invited } = await addPlatformUser(
+      ctx,
+      { email: text(form, 'email'), role: text(form, 'platform_role') },
+      { redirectTo: `${origin}/account` },
+    );
     revalidatePath('/platform/users');
-    return done('Platform role granted.');
+    return done(invited
+      ? 'Invited. They will receive an email to set their password, then must set up two-step sign-in.'
+      : 'Added.');
   } catch (error) {
-    return fail(error, { requestId, action: 'platform.grantRole' });
+    return fail(error, { requestId, action: 'platform.addUser' });
   }
 }
 

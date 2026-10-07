@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Permission, EffectiveRole } from '@/core/permissions';
 import type { ActorType, OrgStatus } from './domain/types';
+import type { ModuleKey } from './domain/modules';
 
 /**
  * Everything a service needs to authorise and act (SERVICE_ARCHITECTURE.md §3).
@@ -19,4 +20,9 @@ export interface AccessContext {
   readonly now: () => Date;
   /** Present so the UI can render the frozen-Home banner (ADR-044.4). */
   readonly organizationStatus: OrgStatus | null;
+  /**
+   * ADR-158: the systems this organisation may use, as the super admin set them. Absent (platform
+   * contexts, tests) means every default-on system — see `moduleOn`.
+   */
+  readonly modules?: ReadonlySet<ModuleKey>;
 }

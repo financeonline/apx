@@ -200,3 +200,5 @@ export {
   extractReceipts, ReceiptExtractionSchema, ReceiptSchema, SUBMIT_RECEIPTS_TOOL, RECEIPT_PROMPT_VERSION,
   type ExtractReceiptsInput, type ExtractReceiptsResult, type ReceiptExtraction,
 } from './services/extract-receipts';
+
+export { TOOL_MODULES, toolModule } from './domain/tool-modules';

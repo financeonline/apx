@@ -8,6 +8,8 @@ import { TOOL_TIMEOUT_MS, toolNamed } from '../domain/tools/registry';
 import type { ToolCallContext, ToolError, ToolOutcome } from '../domain/tools/types';
 import type { ToolResult } from '../domain/allowed-set';
 import type { PersistedToolCall } from '@/core/db';
+import { moduleOn } from '@/modules/tenancy';
+import { toolModule } from '../domain/tool-modules';
 
 /**
  * Running one tool the way §4 requires (AI_ARCHITECTURE.md §2 step 7, §4; ADR-032.8, F-C-17).
@@ -115,6 +117,15 @@ export async function runTool(input: RunToolInput): Promise<RunToolOutput> {
     finish(errorOutcome('PERMISSION_DENIED', 'Your access changed during this question.'),
       { authorized: false, denial_reason: 'context_changed' });
     throw new ContextChanged();
+  }
+
+  // ADR-158: a tool of a system switched off for this organisation never runs, even if asked for.
+  const system = toolModule(tool.name);
+  if (system !== null && !moduleOn(ctx, system)) {
+    return finish(
+      errorOutcome('NOT_FOUND', 'That part of MOTION is not switched on for this organisation.'),
+      { authorized: false, denial_reason: `module_off:${system}` },
+    );
   }
 
   if (!can(ctx, tool.permission)) {

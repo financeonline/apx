@@ -1,29 +1,17 @@
 import { KeyRound, UserCog } from 'lucide-react';
-import { toMotionError } from '@/core/errors';
+import { listPlatformUsers } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody } from '@/components/ui/table';
-import { GrantRoleForm, PlatformUserRow } from './platform-user-forms';
+import { AddPlatformUserForm, PlatformUserRow } from './platform-user-forms';
 
 export const dynamic = 'force-dynamic';
 
-interface PlatformUserRecord {
-  user_id: string;
-  platform_role: string;
-  status: string;
-}
-
 export default async function PlatformUsersPage() {
   const ctx = await getPlatformContext();
-  const { data, error } = await ctx.db
-    .from('platform_users')
-    .select('user_id, platform_role, status')
-    .order('platform_role');
-
-  // Never `data ?? []` on its own: a failing query rendered as an empty list is the one thing a
-  // platform page must not show (PRODUCTION_AUDIT.md M2; ADR-070).
-  if (error) throw toMotionError(error, ctx.requestId);
-  const users = (data ?? []) as PlatformUserRecord[];
+  // A failing read throws rather than rendering as an empty list — the one thing a platform page
+  // must not show (PRODUCTION_AUDIT.md M2; ADR-070).
+  const users = await listPlatformUsers(ctx);
 
   return (
     <>
@@ -36,17 +24,20 @@ export default async function PlatformUsersPage() {
           <CardHeader icon={<UserCog />} tint="violet" title="Accounts" />
           <CardBody>
             {users.length === 0 ? (
-              <EmptyState title="No platform accounts yet">Grant the first one below.</EmptyState>
+              <EmptyState title="No platform accounts yet">Add the first one below.</EmptyState>
             ) : (
               <TableWrap>
-                <THead columns={['User', 'Role', 'Status', '']} />
+                <THead columns={['Email', 'Name', 'Role', 'Status', 'Two-step sign-in', '']} />
                 <TBody>
                   {users.map((user) => (
                     <PlatformUserRow
-                      key={user.user_id}
-                      userId={user.user_id}
-                      platformRole={user.platform_role}
+                      key={user.userId}
+                      userId={user.userId}
+                      email={user.email}
+                      fullName={user.fullName}
+                      platformRole={user.platformRole}
                       status={user.status}
+                      twoStep={user.twoStep}
                     />
                   ))}
                 </TBody>
@@ -58,10 +49,10 @@ export default async function PlatformUsersPage() {
           <CardHeader
             icon={<KeyRound />}
             tint="pink"
-            title="Grant a platform role"
+            title="Add a platform admin"
             description="Requires two-step sign-in and a recent re-authentication."
           />
-          <CardBody><GrantRoleForm /></CardBody>
+          <CardBody><AddPlatformUserForm /></CardBody>
         </Card>
       </div>
     </>

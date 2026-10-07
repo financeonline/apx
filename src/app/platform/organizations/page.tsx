@@ -1,9 +1,12 @@
 import Link from 'next/link';
 import { toMotionError } from '@/core/errors';
 import { getPlatformContext } from '@/modules/tenancy';
-import { PageHeader, Card, CardBody, EmptyState, Badge } from '@/components/ui/surfaces';
+import { Building2 } from 'lucide-react';
+import { can } from '@/core/permissions';
+import { PageHeader, Card, CardBody, CardHeader, EmptyState, Badge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { ORG_STATUS_LABELS } from '@/components/labels';
+import { CreateCompanyForm } from './create-org-form';
 
 export const dynamic = 'force-dynamic';
 
@@ -23,15 +26,23 @@ export default async function PlatformOrganizationsPage() {
   // platform page must not show (PRODUCTION_AUDIT.md M2; ADR-070).
   if (error) throw toMotionError(error, ctx.requestId);
   const organizations = data ?? [];
+  const mayCreate = can(ctx, 'platform.orgs.manage');
 
   return (
     <>
       <PageHeader title="Organisations" description="Every customer organisation on the platform." />
-      <div className="mt-8">
+      <div className="mt-8 flex flex-col gap-6">
+        {mayCreate && (
+          <Card>
+            <CardHeader icon={<Building2 />} tint="violet" title="Create a company"
+              description="The company is set up for its owner, who joins through an invitation link. You do not become a member." />
+            <CardBody><CreateCompanyForm /></CardBody>
+          </Card>
+        )}
         <Card>
           <CardBody>
             {organizations.length === 0 ? (
-              <EmptyState title="No organisations yet">They appear here as customers sign up.</EmptyState>
+              <EmptyState title="No organisations yet">They appear here as customers sign up, or create one above.</EmptyState>
             ) : (
               <TableWrap>
                 <THead columns={['Name', 'Slug', 'Plan', 'Status', 'Created']} />

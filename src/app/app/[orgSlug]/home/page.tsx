@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import { getAccessContext } from '@/modules/tenancy';
+import { getAccessContext, moduleOn } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { systemClock, todayInTimeZone } from '@/core/periods';
 import { getActionsSummary, type ActionsSummary } from '@/modules/actions';
@@ -338,7 +338,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
           deliberately — the risks are what the product found, and the actions are what people chose
           in response, which is the order the conversation happens in.
         */}
-        <OutstandingActions orgSlug={orgSlug} summary={actionsSummary} today={today} />
+        {moduleOn(ctx, 'actions') ? <OutstandingActions orgSlug={orgSlug} summary={actionsSummary} today={today} /> : null}
 
         <Card>
           <CardBody className="p-4">

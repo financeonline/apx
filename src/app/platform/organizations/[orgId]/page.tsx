@@ -4,11 +4,11 @@ import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import { loadOrganizationDetail } from '@/modules/platform';
-import { getPlatformContext } from '@/modules/tenancy';
+import { MODULES, enabledModules, getPlatformContext } from '@/modules/tenancy';
 import { Badge, Card, CardBody, CardHeader, DetailList, PageHeader } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
 import { formatDate, formatDateTime, MEMBERSHIP_ROLE_LABELS, ORG_STATUS_LABELS } from '@/components/labels';
-import { OrgFeatureToggle, OrgQuotasForm, OrgStatusControl } from './org-controls';
+import { OrgModuleSwitch, OrgQuotasForm, OrgStatusControl } from './org-controls';
 
 export const dynamic = 'force-dynamic';
 
@@ -34,8 +34,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
     throw error;
   }
   const { organization: org, quotas, members, assignments, counts } = detail;
-  const aiExtraction = org.features.ai_pdf_extraction === true;
-  const fundingReadiness = org.features.funding_readiness === true;
+  const systems = enabledModules(org.features);
 
   return (
     <>
@@ -85,16 +84,14 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
           </Card>
 
           <Card>
-            <CardHeader icon={<ToggleRight />} tint="violet" title="What this organisation may do" />
+            <CardHeader icon={<ToggleRight />} tint="violet" title="Systems this company can use" />
             <CardBody>
+              <p className="mb-4 text-sm text-ink-muted">Home, Money, Insights, Departments, Data &amp; Forms and Settings are always on.</p>
               <div className="flex flex-col gap-3">
-                <OrgFeatureToggle orgId={org.id} feature="ai_pdf_extraction" label="Read PDFs with AI"
-                  hint="statement text is sent to the AI provider; the customer consents per import (CD-35)"
-                  enabled={aiExtraction} features={org.features} />
-                {/* Phase 16 (D-5, ADR-121): default off; switching it on assesses every eligible month. */}
-                <OrgFeatureToggle orgId={org.id} feature="funding_readiness" label="Funding Readiness"
-                  hint="an indicative readiness assessment; switching it on assesses every complete month, and switching it off hides it everywhere"
-                  enabled={fundingReadiness} features={org.features} />
+                {MODULES.map((m) => (
+                  <OrgModuleSwitch key={m.key} orgId={org.id} featureKey={m.featureKey}
+                    label={m.label} description={m.description} on={systems.has(m.key)} />
+                ))}
               </div>
             </CardBody>
           </Card>

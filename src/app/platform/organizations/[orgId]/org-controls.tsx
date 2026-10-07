@@ -2,7 +2,8 @@
 
 import { useActionState } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
-import { setOrgFeatureAction, setOrgQuotasAction, setOrgStatusAction } from './actions';
+import { setOrgModuleAction, setOrgQuotasAction, setOrgStatusAction } from './actions';
+import { Badge } from '@/components/ui/surfaces';
 import { Input } from '@/components/ui/shadcn';
 
 export function OrgStatusControl({ orgId, status }: { orgId: string; status: string }) {
@@ -28,20 +29,24 @@ export function OrgStatusControl({ orgId, status }: { orgId: string; status: str
   );
 }
 
-export function OrgFeatureToggle({ orgId, feature, label, hint, enabled, features }: {
-  orgId: string; feature: string; label: string; hint: string; enabled: boolean; features: Record<string, unknown>;
+export function OrgModuleSwitch({ orgId, featureKey, label, description, on }: {
+  orgId: string; featureKey: string; label: string; description: string; on: boolean;
 }) {
-  const [state, submit] = useActionState(setOrgFeatureAction, null);
+  const [state, submit] = useActionState(setOrgModuleAction, null);
   return (
-    <form action={submit} className="flex flex-wrap items-center gap-3 text-sm">
+    <form action={submit} className="flex flex-col gap-2 border-b border-line pb-3 last:border-b-0 last:pb-0 sm:flex-row sm:items-start sm:justify-between">
       <input type="hidden" name="org_id" value={orgId} />
-      <input type="hidden" name="feature" value={feature} />
-      <input type="hidden" name="enabled" value={enabled ? 'no' : 'yes'} />
-      <input type="hidden" name="current_features" value={JSON.stringify(features)} />
-      <span className="text-ink">{label}</span>
-      <span className="text-ink-muted">{enabled ? 'on' : 'off'} — {hint}</span>
-      <SubmitButton tone="secondary" pendingLabel="Saving…">{enabled ? 'Turn off' : 'Turn on'}</SubmitButton>
-      <ActionMessage state={state} />
+      <input type="hidden" name="feature_key" value={featureKey} />
+      <input type="hidden" name="on" value={on ? 'no' : 'yes'} />
+      <div className="min-w-0 text-sm">
+        <p className="flex flex-wrap items-center gap-2 font-medium text-ink">
+          {label}
+          <Badge tone={on ? 'accent' : 'neutral'}>{on ? 'On' : 'Off'}</Badge>
+        </p>
+        <p className="text-ink-muted">{description}</p>
+        <ActionMessage state={state} />
+      </div>
+      <SubmitButton tone="secondary" pendingLabel="Saving…" className="shrink-0">{on ? 'Turn off' : 'Turn on'}</SubmitButton>
     </form>
   );
 }

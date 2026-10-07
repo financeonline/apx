@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { assertCan } from '@/core/permissions';
-import { updateOrgQuotas, updateOrganizationAsPlatform } from '@/modules/platform';
+import { setOrgModule, updateOrgQuotas, updateOrganizationAsPlatform } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { done, fail, text } from '@/app/_lib/server-action';
 import type { ActionResult } from '@/components/action-result';
@@ -10,10 +10,10 @@ import type { ActionResult } from '@/components/action-result';
 /**
  * What a super admin may change about a customer organisation (ROUTE_ARCHITECTURE.md §150).
  *
- * `api.update_organization` owns the rules for status, plan and features — status moves only
+ * `api.update_organization` owns the rules for status and plan — status moves only
  * between active and suspended, deletion goes through `api.request_deletion`, and quota keys are
  * refused there because they are platform-controlled. `api.update_platform_org_settings` owns the
- * quotas. These actions are the forms.
+ * quotas, and `api.set_org_module` switches one system at a time (ADR-158). These actions are the forms.
  */
 
 export async function setOrgStatusAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
@@ -30,20 +30,18 @@ export async function setOrgStatusAction(_previous: ActionResult | null, form: F
   }
 }
 
-export async function setOrgFeatureAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
+export async function setOrgModuleAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
   const ctx = await getPlatformContext();
   try {
     assertCan(ctx, 'platform.orgs.manage');
     const orgId = text(form, 'org_id');
-    const feature = text(form, 'feature');
-    const enabled = form.get('enabled') === 'yes';
-    // `features` is patched whole, so the current set is sent back with this one key changed.
-    const current = JSON.parse(text(form, 'current_features')) as Record<string, unknown>;
-    await updateOrganizationAsPlatform(ctx, orgId, { features: { ...current, [feature]: enabled } });
+    const featureKey = text(form, 'feature_key');
+    const on = text(form, 'on') === 'yes';
+    await setOrgModule(ctx, orgId, featureKey, on);
     revalidatePath(`/platform/organizations/${orgId}`);
-    return done(enabled ? `${feature} is on for this organisation.` : `${feature} is off.`);
+    return done(on ? 'Turned on for this company.' : 'Turned off for this company.');
   } catch (error) {
-    return fail(error, { requestId: ctx.requestId, action: 'platform.setOrgFeature' });
+    return fail(error, { requestId: ctx.requestId, action: 'platform.setOrgModule' });
   }
 }
 

@@ -1,4 +1,8 @@
 export type { AccessContext } from './context';
+export {
+  MODULES, MODULE_KEYS, enabledModules, isModuleKey, moduleDefinition, type ModuleDefinition, type ModuleKey,
+} from './domain/modules';
+export { moduleOn, requireModule } from './services/modules';
 export type { ActorType, OrgStatus, MembershipRole } from './domain/types';
 export { resolveEffectiveRole, type ResolutionInput } from './domain/resolve';
 export { getAccessContext, getPlatformContext, resolveAccessFresh, resolvePlatformRole } from './services/resolve-access';

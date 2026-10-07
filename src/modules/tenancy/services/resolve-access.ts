@@ -7,6 +7,7 @@ import { NotFound, toMotionError } from '@/core/errors';
 import { newRequestId } from '@/core/logging';
 import type { AccessContext } from '../context';
 import type { ActorType, OrgStatus } from '../domain/types';
+import { enabledModules } from '../domain/modules';
 
 /**
  * Builds the AccessContext for a request (SERVICE_ARCHITECTURE.md §3).
@@ -61,6 +62,10 @@ export async function resolveAccessFresh(orgSlug: string): Promise<AccessContext
   const row = (data as MyContextRow[] | null)?.[0];
   if (!row || !row.role) throw new NotFound();
 
+  // ADR-158: the systems the super admin switched on for this organisation.
+  const { data: org } = await db.from('organizations').select('features').eq('id', row.organization_id).maybeSingle();
+  const modules = enabledModules((org?.features ?? {}) as Record<string, unknown>);
+
   return {
     userId: user.id,
     orgId: row.organization_id,
@@ -69,6 +74,7 @@ export async function resolveAccessFresh(orgSlug: string): Promise<AccessContext
     permissions: permissionsFor(row.role),
     actorType: row.actor_type,
     organizationStatus: row.status,
+    modules,
     db,
     requestId,
     now: () => new Date(),

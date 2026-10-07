@@ -5,7 +5,7 @@ import { MotionError, NotFound, PermissionDenied, ValidationError, toMotionError
 import { log, newRequestId } from '@/core/logging';
 import { can } from '@/core/permissions';
 import { answer, createConversation, FALLBACK_MESSAGE, type AnswerOutput } from '@/modules/ai';
-import { getAccessContext, resolveAccessFresh } from '@/modules/tenancy';
+import { getAccessContext, moduleOn, resolveAccessFresh } from '@/modules/tenancy';
 
 /**
  * `POST /api/ai/chat` — the analyst turn, streamed (AI_ARCHITECTURE.md §2; ROUTE_ARCHITECTURE.md §165).
@@ -87,6 +87,8 @@ export async function POST(request: NextRequest) {
     const ctx = await getAccessContext(orgSlug);
     if (!ctx.orgId) throw new NotFound();
     if (!can(ctx, 'ai.use')) throw new PermissionDenied('ai.use');
+    // ADR-158: the AI Analyst is a system the super admin may switch off for this organisation.
+    if (!moduleOn(ctx, 'analyst')) throw new NotFound();
 
     const conversationId = body.conversationId ?? (await createConversation(ctx));
 

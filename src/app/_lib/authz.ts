@@ -1,5 +1,6 @@
 import 'server-only';
-import { forbidden } from 'next/navigation';
+import { forbidden, notFound } from 'next/navigation';
+import { moduleOn, type AccessContext, type ModuleKey } from '@/modules/tenancy';
 import { can, type AuthzContext, type Permission } from '@/core/permissions';
 
 /**
@@ -22,4 +23,12 @@ import { can, type AuthzContext, type Permission } from '@/core/permissions';
  */
 export function requirePermission(ctx: AuthzContext, permission: Permission): void {
   if (!can(ctx, permission)) forbidden();
+}
+
+/**
+ * ADR-158: a page of a system the super admin has switched off for this organisation answers 404 —
+ * the system is absent for this company, not forbidden to this person.
+ */
+export function requireModulePage(ctx: AccessContext, key: ModuleKey): void {
+  if (!moduleOn(ctx, key)) notFound();
 }

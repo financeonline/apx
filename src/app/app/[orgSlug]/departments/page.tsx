@@ -5,7 +5,7 @@ import {
   Plus, Receipt, ShieldCheck, Sparkles, TrendingUp, Upload, Users, UsersRound,
 } from 'lucide-react';
 import { loadDepartments, type DepartmentTile, type TileTone } from '@/modules/departments';
-import { getAccessContext } from '@/modules/tenancy';
+import { getAccessContext, moduleOn, type ModuleKey } from '@/modules/tenancy';
 import { fundingEnabled } from '@/modules/funding';
 import { can } from '@/core/permissions';
 import { ButtonLink } from '@/components/ui/button';
@@ -98,10 +98,19 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
   const base = `/app/${orgSlug}`;
 
-  const byKey = new Map(view.tiles.map((t) => [t.key, t]));
+  // ADR-158: a department of a system the super admin switched off is absent.
+  const TILE_MODULES: Readonly<Record<string, ModuleKey>> = {
+    banking: 'banking', customers: 'customers', actions: 'actions', reports: 'reports', analyst: 'analyst', planning: 'planning',
+  };
+  const PILL_MODULES: Readonly<Record<string, ModuleKey>> = {
+    'money/budget': 'planning', 'money/balance-sheet': 'tax', 'money/banking/transactions': 'banking',
+    forecast: 'planning', 'what-if': 'planning',
+  };
+  const on = (key: ModuleKey | undefined) => key === undefined || moduleOn(ctx, key);
+  const byKey = new Map(view.tiles.filter((t) => on(TILE_MODULES[t.key])).map((t) => [t.key, t]));
   const ordered = [
     ...ORDER.flatMap((k) => byKey.get(k) ?? []),
-    ...view.tiles.filter((t) => !ORDER.includes(t.key)),
+    ...view.tiles.filter((t) => !ORDER.includes(t.key) && on(TILE_MODULES[t.key])),
   ];
 
   const tileCard = (tile: DepartmentTile) => {
@@ -117,7 +126,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
           description={p?.description ?? []}
           headline={tile.headline}
           lines={tile.lines}
-          pills={(p?.pills ?? []).map((pill) => ({ label: pill.label, href: `${base}/${pill.path}` }))}
+          pills={(p?.pills ?? []).filter((pill) => on(PILL_MODULES[pill.path])).map((pill) => ({ label: pill.label, href: `${base}/${pill.path}` }))}
           status={{ tone: tile.tone, label: STATUS[tile.tone] }}
         />
       </li>
@@ -125,7 +134,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
   };
 
   const canImport = can(ctx, 'imports.review');
-  const canReports = can(ctx, 'reports.view');
+  const canReports = can(ctx, 'reports.view') && moduleOn(ctx, 'reports');
 
   return (
     <>
@@ -140,7 +149,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
               <Upload aria-hidden="true" /> Add data
             </ButtonLink>
           ) : null}
-          {canReports && can(ctx, 'ai.use') ? (
+          {canReports && can(ctx, 'ai.use') && moduleOn(ctx, 'analyst') ? (
             <ButtonLink href={`${base}/reports/custom/new`} className="h-14 rounded-2xl px-7 text-lg [&_svg]:size-5">
               <Plus aria-hidden="true" /> New report
             </ButtonLink>
@@ -163,14 +172,14 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
           {ordered.map(tileCard)}
 
           {/* ADR-156: VAT and Corporation Tax, and assets and loans. */}
-          <li>
+          {moduleOn(ctx, 'tax') ? <li>
             <DepartmentCard
               title="Tax & VAT" href={`${base}/money/tax`} icon={<Receipt />} tint="pink"
               description={['VAT return', 'Corporation Tax estimate', 'UK and UAE rules']}
               pills={[{ label: 'VAT', href: `${base}/money/tax` }, { label: 'Assets & loans', href: `${base}/money/balance-sheet` }]}
               status={null}
             />
-          </li>
+          </li> : null}
 
           {can(ctx, 'assignments.view') ? (
             <li>
@@ -199,7 +208,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
                 title="Team & Clients" href={`${base}/settings/team`} icon={<UsersRound />} tint="violet"
                 description={['Team', 'Requests & deliverables']}
                 headline={view.system.team}
-                pills={can(ctx, 'actions.view') ? [{ label: 'Requests', href: `${base}/engagement` }] : []}
+                pills={can(ctx, 'actions.view') && moduleOn(ctx, 'actions') ? [{ label: 'Requests', href: `${base}/engagement` }] : []}
                 status={{ tone: 'good', label: 'Active' }}
               />
             </li>
@@ -239,7 +248,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
             </div>
             <ul className="mt-4 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3">
               <li><ShortcutLink href={`${base}/reports`} label="All reports" icon={<CalendarDays />} /></li>
-              {can(ctx, 'ai.use') ? <li><ShortcutLink href={`${base}/reports/custom/new`} label="Custom" icon={<Sparkles />} /></li> : null}
+              {can(ctx, 'ai.use') && moduleOn(ctx, 'analyst') ? <li><ShortcutLink href={`${base}/reports/custom/new`} label="Custom" icon={<Sparkles />} /></li> : null}
               {showFunding ? <li><ShortcutLink href={`${base}/funding`} label="Funding" icon={<HandCoins />} /></li> : null}
               {can(ctx, 'assignments.view') ? <li><ShortcutLink href="/portfolio/report" label="Portfolio" icon={<Building2 />} /></li> : null}
             </ul>

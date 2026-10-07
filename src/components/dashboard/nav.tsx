@@ -1,5 +1,5 @@
 import Link from 'next/link';
-import type { AccessContext } from '@/modules/tenancy';
+import { moduleOn, type AccessContext, type ModuleKey } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import type { Permission } from '@/core/permissions';
 
@@ -140,8 +140,14 @@ export function DataMenu({ ctx, orgSlug }: { ctx: AccessContext; orgSlug: string
 }
 
 /** The sections a role may open, as plain data for the sidebar (ADR-155). Same filter as PrimaryNav. */
+/** ADR-158: the sections that belong to a switchable system. */
+const SECTION_MODULES: Readonly<Record<string, ModuleKey>> = {
+  customers: 'customers', actions: 'actions', engagement: 'actions', reports: 'reports', analyst: 'analyst',
+};
+
 export function sectionLinks(ctx: AccessContext): ReadonlyArray<{ label: string; path: string; hint: string }> {
   return PRIMARY.filter((item) => item.built && can(ctx, item.permission))
+    .filter((item) => { const m = SECTION_MODULES[item.path]; return m === undefined || moduleOn(ctx, m); })
     .map(({ label, path, hint }) => ({ label, path, hint }));
 }
 

@@ -18,6 +18,8 @@ import { judge, validate, type Verdict } from '../domain/verdict';
 import { untrusted, userQuestion } from '../domain/untrusted';
 import { findConversation, loadHistory } from './conversations';
 import { ContextChanged, runTool, snapshotAccess } from './run-tool';
+import { moduleOn } from '@/modules/tenancy';
+import { toolModule } from '../domain/tool-modules';
 
 /**
  * The analyst turn (AI_ARCHITECTURE.md §2, steps 1–12; §7.8; §14).
@@ -127,7 +129,11 @@ export async function answer(input: AnswerInput): Promise<AnswerOutput> {
 
   // 6. The prompt. The tenant section sits after the cache breakpoint (§9).
   const prompt = systemPrompt({ organisationName: organisation.name, baseCurrency: organisation.baseCurrency, periodContext });
-  const tools = [...TOOLS.map(toSdkTool), submitAnswerTool()];
+  // ADR-158: a switched-off system's tools are not offered at all.
+  const tools = [
+    ...TOOLS.filter((t) => { const m = toolModule(t.name); return m === null || moduleOn(ctx, m); }).map(toSdkTool),
+    submitAnswerTool(),
+  ];
   const state: TurnState = {
     results: [], persisted: [],
     // History excludes the turn just persisted; the question is appended once, wrapped.
