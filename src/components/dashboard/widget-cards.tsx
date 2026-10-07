@@ -17,7 +17,7 @@ export interface WidgetCard {
 
 export function WidgetCards({
   cards,
-  rowHeight = 208,
+  rowHeight = 216,
 }: {
   cards: readonly WidgetCard[];
   rowHeight?: number;
@@ -32,6 +32,9 @@ export function WidgetCards({
         maxColumns={3}
         cellSize={240}
         rowHeight={rowHeight}
+        // The reference's tiles: very rounded, as every card (`rounded-card`, 28px; ADR-154).
+        radius={28}
+        gap={16}
         renderItem={(item) => byId.get(item.id)?.node}
       />
     </div>

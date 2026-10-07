@@ -12,7 +12,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
 
   return (
     <div className="min-h-dvh bg-canvas-alt">
-      <header className="glass rounded-none border-x-0 border-t-0">
+      <header className="glass mx-3 mt-3 rounded-card sm:mx-4 lg:mx-auto lg:max-w-5xl">
         <div className="mx-auto flex max-w-5xl flex-wrap items-center gap-x-6 gap-y-2 px-6 py-3">
           <Link href="/platform" className="text-sm font-semibold tracking-widest uppercase">
             MOTION · Platform

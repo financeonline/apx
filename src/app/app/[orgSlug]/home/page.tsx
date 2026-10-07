@@ -78,7 +78,7 @@ function ChangeLine({ card }: { card: MetricCardView }) {
 /** A card's content. The widget grid supplies its surface, ring and shadow. */
 function MetricCard({ card }: { card: MetricCardView }) {
   return (
-    <div className="h-full p-4">
+    <div className="h-full p-6">
       <div>
         <div className="flex items-start justify-between gap-2">
           <h3 className="text-sm text-ink-muted" title={card.technicalLabel}>{card.label}</h3>

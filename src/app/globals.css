@@ -13,76 +13,72 @@
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
   /*
-   * Colour scheme: the supplied widget-grid template's (shadcn's neutral zinc), with its status
-   * colours (emerald, amber, rose) and blue for volume (ADR-153). Muted text is zinc-600, not the
-   * template's zinc-500, which measured 4.4:1 on the sunken panel — below WCAG AA.
+   * Colour scheme: the owner's reference (ADR-154) — a sky ground (dusty blue to lavender, a warm
+   * glow low down), near-white frosted tiles, deep navy text and a deep indigo accent; status
+   * colours as before. Every text colour was measured at WCAG AA on the darkest part of the sky.
    */
 
-  /* Ground — the page sits under a soft colour wash so the glass surfaces have something to frost. */
-  --color-paper: #f7f7f9;
-  --color-surface: rgb(255 255 255 / 0.72);
-  --color-surface-sunken: rgb(228 228 231 / 0.55);
+  /* Ground — the sky itself is the body's background image (below). */
+  --color-paper: #d3daee;
+  --color-surface: rgb(255 255 255 / 0.78);
+  --color-surface-sunken: rgb(27 35 64 / 0.06);
 
   /* Text */
-  --color-ink: #09090b;
-  --color-ink-muted: #52525b;
-  --color-ink-faint: #63636b;
+  --color-ink: #1b2340;
+  --color-ink-muted: #434c69;
+  --color-ink-faint: #434c69;
 
   /* Rules */
-  --color-line: #e4e4e7;
-  --color-line-strong: #d4d4d8;
+  --color-line: rgb(27 35 64 / 0.1);
+  --color-line-strong: rgb(27 35 64 / 0.18);
 
-  /* Accent — the template's primary: near-black controls, never a hue. */
-  --color-accent: #18181b;
-  --color-accent-hover: #27272a;
-  --color-accent-soft: rgb(24 24 27 / 0.06);
-  --color-on-accent: #fafafa;
+  /* Accent — deep indigo. */
+  --color-accent: #2e2f7f;
+  --color-accent-hover: #25266a;
+  --color-accent-soft: rgb(46 47 127 / 0.09);
+  --color-on-accent: #ffffff;
 
-  /* Status — good news is emerald, apart from the accent (the template's "ok"). */
-  --color-good: #065f46;
-  --color-good-soft: #ecfdf5;
+  /* Status */
+  --color-good: #064e3b;
+  --color-good-soft: #e7f6ef;
   --color-warn: #78350f;
-  --color-warn-soft: #fffbeb;
+  --color-warn-soft: #fdf3e3;
   --color-danger: #9f1239;
-  --color-danger-soft: #fff1f2;
+  --color-danger-soft: #fdecef;
 
   /* Platform shell identity (UX_ARCHITECTURE.md §9.5) */
-  --color-platform: #18181b;
-  --color-platform-accent: #3b82f6;
+  --color-platform: #1b2340;
+  --color-platform-accent: #6366f1;
 
   /* Chart palette — six categorical series, ordered for use */
-  --color-chart-1: #2563eb;
-  --color-chart-2: #059669;
+  --color-chart-1: #4f46e5;
+  --color-chart-2: #0284c7;
   --color-chart-3: #d97706;
-  --color-chart-4: #7c3aed;
+  --color-chart-4: #059669;
   --color-chart-5: #e11d48;
-  --color-chart-6: #71717a;
+  --color-chart-6: #64748b;
 
-  --radius-card: 1rem;
+  --radius-card: 1.75rem;
 }
 
 /*
- * Liquid glass (ADR-153): translucent, frosted surfaces with a bright top edge, over a colour wash.
- * Not theme colours, so outside @theme; the dark scheme swaps them below.
+ * Liquid glass (ADR-153, ADR-154): bright frosted tiles over the sky. Not theme colours, so
+ * outside @theme; the dark scheme swaps them below.
  */
 :root {
-  /*
-   * The strongest glass that keeps text at WCAG AA: the wash and the status colours were measured
-   * together, where two wash colours overlap under bare page text (ADR-153).
-   */
-  --glass-bg: rgb(255 255 255 / 0.4);
-  --glass-bg-strong: rgb(255 255 255 / 0.58);
-  --glass-blur: 28px;
-  --glass-border: rgb(255 255 255 / 0.85);
-  --glass-edge: rgb(24 24 27 / 0.07);
+  --glass-bg: rgb(255 255 255 / 0.62);
+  --glass-bg-strong: rgb(255 255 255 / 0.8);
+  --glass-blur: 24px;
+  --glass-border: rgb(255 255 255 / 0.9);
+  --glass-edge: rgb(27 35 64 / 0.06);
   --glass-highlight: rgb(255 255 255 / 1);
-  --glass-glow: rgb(255 255 255 / 0.45);
-  --glass-sheen: linear-gradient(135deg, rgb(255 255 255 / 0.55) 0%, rgb(255 255 255 / 0.12) 38%,
-    rgb(255 255 255 / 0) 62%, rgb(255 255 255 / 0.22) 100%);
-  --glass-shadow: 0 2px 4px rgb(15 23 42 / 0.05), 0 18px 40px -14px rgb(15 23 42 / 0.3);
-  --wash-1: rgb(59 130 246 / 0.22);
-  --wash-2: rgb(139 92 246 / 0.18);
-  --wash-3: rgb(16 185 129 / 0.16);
+  --glass-glow: rgb(255 255 255 / 0.5);
+  --glass-sheen: linear-gradient(150deg, rgb(255 255 255 / 0.6) 0%, rgb(255 255 255 / 0.15) 40%,
+    rgb(255 255 255 / 0) 65%, rgb(255 255 255 / 0.25) 100%);
+  --glass-shadow: 0 2px 6px rgb(27 35 64 / 0.06), 0 24px 48px -18px rgb(27 35 64 / 0.3);
+  --sky: linear-gradient(180deg, #bfcbe7 0%, #ccd5ee 40%, #e3e0ee 75%, #ece2e6 100%);
+  --sky-glow: rgb(255 255 255 / 0.45);
+  --sky-warm: rgb(251 191 146 / 0.35);
 }
 
 
@@ -92,51 +88,52 @@
  */
 @media (prefers-color-scheme: dark) {
   :root {
-    --color-paper: #0a0a0b;
-    --color-surface: rgb(24 24 27 / 0.7);
-    --color-surface-sunken: rgb(39 39 42 / 0.6);
+    /* A night sky: deep navy to dusk violet. */
+    --color-paper: #10153a;
+    --color-surface: rgb(30 36 74 / 0.7);
+    --color-surface-sunken: rgb(255 255 255 / 0.06);
 
-    --color-ink: #fafafa;
-    --color-ink-muted: #a1a1aa;
-    --color-ink-faint: #a1a1aa;
+    --color-ink: #eef1fb;
+    --color-ink-muted: #b4bbd6;
+    --color-ink-faint: #b4bbd6;
 
-    --color-line: #27272a;
-    --color-line-strong: #3f3f46;
+    --color-line: rgb(255 255 255 / 0.1);
+    --color-line-strong: rgb(255 255 255 / 0.18);
 
-    --color-accent: #fafafa;
-    --color-accent-hover: #e4e4e7;
-    --color-accent-soft: rgb(250 250 250 / 0.08);
-    --color-on-accent: #09090b;
+    --color-accent: #a9adff;
+    --color-accent-hover: #c3c6ff;
+    --color-accent-soft: rgb(169 173 255 / 0.12);
+    --color-on-accent: #10153a;
 
     --color-good: #34d399;
-    --color-good-soft: #052e1f;
+    --color-good-soft: #062d22;
     --color-warn: #fbbf24;
-    --color-warn-soft: #2a1f06;
+    --color-warn-soft: #2d2208;
     --color-danger: #fb7185;
-    --color-danger-soft: #2d0a12;
+    --color-danger-soft: #2e0b16;
 
-    --color-platform: #09090b;
-    --color-platform-accent: #60a5fa;
+    --color-platform: #0b0f2a;
+    --color-platform-accent: #818cf8;
 
-    --color-chart-1: #60a5fa;
-    --color-chart-2: #34d399;
+    --color-chart-1: #a5b4fc;
+    --color-chart-2: #7dd3fc;
     --color-chart-3: #fbbf24;
-    --color-chart-4: #a78bfa;
+    --color-chart-4: #34d399;
     --color-chart-5: #fb7185;
-    --color-chart-6: #a1a1aa;
+    --color-chart-6: #94a3b8;
 
-    --glass-bg: rgb(39 39 42 / 0.32);
-    --glass-bg-strong: rgb(39 39 42 / 0.55);
+    --glass-bg: rgb(30 36 74 / 0.42);
+    --glass-bg-strong: rgb(30 36 74 / 0.62);
     --glass-border: rgb(255 255 255 / 0.14);
     --glass-edge: rgb(255 255 255 / 0.06);
     --glass-highlight: rgb(255 255 255 / 0.22);
     --glass-glow: rgb(255 255 255 / 0.05);
-    --glass-sheen: linear-gradient(135deg, rgb(255 255 255 / 0.12) 0%, rgb(255 255 255 / 0.03) 38%,
-      rgb(255 255 255 / 0) 62%, rgb(255 255 255 / 0.06) 100%);
-    --glass-shadow: 0 2px 4px rgb(0 0 0 / 0.4), 0 18px 40px -14px rgb(0 0 0 / 0.8);
-    --wash-1: rgb(59 130 246 / 0.26);
-    --wash-2: rgb(139 92 246 / 0.2);
-    --wash-3: rgb(16 185 129 / 0.14);
+    --glass-sheen: linear-gradient(150deg, rgb(255 255 255 / 0.12) 0%, rgb(255 255 255 / 0.03) 40%,
+      rgb(255 255 255 / 0) 65%, rgb(255 255 255 / 0.06) 100%);
+    --glass-shadow: 0 2px 6px rgb(0 0 0 / 0.4), 0 24px 48px -18px rgb(0 0 0 / 0.8);
+    --sky: linear-gradient(180deg, #0e1330 0%, #171d48 45%, #241f45 80%, #2a2140 100%);
+    --sky-glow: rgb(129 140 248 / 0.12);
+    --sky-warm: rgb(251 146 60 / 0.12);
   }
 }
 
@@ -148,11 +145,11 @@
 
   body {
     background-color: var(--color-paper);
-    /* The wash behind the glass (ADR-153); fixed, so it stays put while the glass scrolls over it. */
+    /* The sky behind the glass (ADR-154); fixed, so it stays put while the tiles scroll over it. */
     background-image:
-      radial-gradient(50rem 36rem at 0% 0%, var(--wash-1), transparent 70%),
-      radial-gradient(46rem 40rem at 100% 25%, var(--wash-2), transparent 70%),
-      radial-gradient(60rem 42rem at 30% 105%, var(--wash-3), transparent 70%);
+      radial-gradient(45rem 30rem at 8% 0%, var(--sky-glow), transparent 70%),
+      radial-gradient(42rem 30rem at 88% 100%, var(--sky-warm), transparent 70%),
+      var(--sky);
     background-attachment: fixed;
     min-height: 100vh;
     color: var(--color-ink);

@@ -10,7 +10,7 @@ function Card({ className, ...props }: React.ComponentProps<'section'>) {
 }
 
 function CardHeader({ className, ...props }: React.ComponentProps<'header'>) {
-  return <header data-slot="card-header" className={cn('flex flex-wrap items-start justify-between gap-3 border-b border-line px-5 py-4', className)} {...props} />;
+  return <header data-slot="card-header" className={cn('flex flex-wrap items-start justify-between gap-3 border-b border-line px-6 py-5', className)} {...props} />;
 }
 
 function CardTitle({ className, ...props }: React.ComponentProps<'h2'>) {
@@ -26,11 +26,11 @@ function CardAction({ className, ...props }: React.ComponentProps<'div'>) {
 }
 
 function CardContent({ className, ...props }: React.ComponentProps<'div'>) {
-  return <div data-slot="card-content" className={cn('px-5 py-4', className)} {...props} />;
+  return <div data-slot="card-content" className={cn('px-6 py-5', className)} {...props} />;
 }
 
 function CardFooter({ className, ...props }: React.ComponentProps<'div'>) {
-  return <div data-slot="card-footer" className={cn('flex items-center border-t border-line px-5 py-4', className)} {...props} />;
+  return <div data-slot="card-footer" className={cn('flex items-center border-t border-line px-6 py-5', className)} {...props} />;
 }
 
 export { Card, CardAction, CardContent, CardDescription, CardFooter, CardHeader, CardTitle };

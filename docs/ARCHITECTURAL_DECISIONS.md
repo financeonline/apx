@@ -2876,3 +2876,13 @@ Decision:
 5. **Strengthened the same day on the owner's instruction ("make the glass effect stronger"):** fill 62% → 40% white, blur 20 → 28px, saturation 200%, a diagonal sheen, a brighter top edge with an inner glow, a deeper shadow, and a stronger wash. The wash and the status colours were measured together, including where two wash colours overlap under text sitting on the bare page; to keep WCAG AA there, warning, problem and good-news text moved one or two shades darker (amber-900 `#78350f`, rose-800 `#9f1239`, emerald-800 `#065f46`).
 
 Consequences: supersedes DESIGN.md's warm paper palette, green accent and "never a shadow" rule. The accessibility sweep and the sample walkthrough pass, both light-scheme. Reverting is one commit.
+
+### ADR-154 · The owner's reference: sky, frosted tiles, indigo
+Status: **built locally on 2026-10-07 on the owner's instruction (a reference screenshot of a glass real-estate interface: "and this color schema and the tiles style"). Not reviewed, merged or deployed.** Refines ADR-153's glass; replaces its zinc palette.
+
+Decision:
+1. **Colour scheme from the reference:** the page is a sky — dusty blue at the top to lavender, with a warm peach glow low on the right and a soft light glow top left (`--sky`, `--sky-glow`, `--sky-warm`); text is deep navy (`#1b2340`, muted `#434c69`); the accent is deep indigo (`#2e2f7f`, white on it at 11.5:1); lines are navy at low opacity. Status colours stay (emerald-900 `#064e3b` for good news, amber-900, rose-800). Every text colour measured at WCAG AA on the darkest part of the sky and on the glass. Dark scheme: a night sky (navy to dusk violet) with a light-indigo accent.
+2. **Tile style from the reference:** bright frosted tiles (62% white, 24px blur, sheen, white edge, soft navy shadow), 28px corners everywhere (`--radius-card: 1.75rem`, Home's widget tiles `radius={28}`, 16px gaps), roomier padding (cards `px-6 py-5`, Home tiles `p-6`), and the top bar as a floating rounded glass tile rather than a full-width strip. Buttons remain glass capsules; the primary is indigo.
+3. **Content unchanged:** the same cards, figures, links and order; only colour, shape and spacing.
+
+Consequences: the accessibility sweep, the Home journeys and the sample walkthrough pass (light scheme).

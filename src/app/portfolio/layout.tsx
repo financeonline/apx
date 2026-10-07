@@ -20,7 +20,7 @@ export default async function PortfolioLayout({ children }: { children: React.Re
 
   return (
     <div className="min-h-dvh bg-canvas-alt">
-      <header className="glass rounded-none border-x-0 border-t-0">
+      <header className="glass mx-3 mt-3 rounded-card sm:mx-4 lg:mx-auto lg:max-w-6xl">
         <div className="mx-auto flex max-w-6xl flex-wrap items-center gap-x-6 gap-y-2 px-4 py-3 sm:px-6">
           <Link href="/portfolio" className="text-sm font-semibold tracking-widest uppercase">
             MOTION · Command Centre
