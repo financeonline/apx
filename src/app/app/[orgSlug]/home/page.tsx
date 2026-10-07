@@ -8,7 +8,7 @@ import {
 } from '@/modules/dashboard';
 import { PageHeader, Card, CardBody, Banner } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
-import { AlertCard, HealthScoreCard, NO_ALERTS_BODY, NO_ALERTS_TITLE } from '@/components/dashboard';
+import { AlertCard, ArrangeableCards, HealthScoreCard, NO_ALERTS_BODY, NO_ALERTS_TITLE } from '@/components/dashboard';
 import { requirePermission } from '@/app/_lib/authz';
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 
@@ -75,10 +75,11 @@ function ChangeLine({ card }: { card: MetricCardView }) {
   return <p className={`mt-1 text-sm ${tone}`}>{card.change.text}</p>;
 }
 
+/** A card's content. The arrangeable grid supplies its surface and hairline. */
 function MetricCard({ card }: { card: MetricCardView }) {
   return (
-    <Card>
-      <CardBody className="p-4">
+    <div className="h-full p-4">
+      <div>
         <div className="flex items-start justify-between gap-2">
           <h3 className="text-sm text-ink-muted" title={card.technicalLabel}>{card.label}</h3>
           <StatusBadge card={card} />
@@ -104,18 +105,21 @@ function MetricCard({ card }: { card: MetricCardView }) {
         >
           Why?
         </Link>
-      </CardBody>
-    </Card>
+      </div>
+    </div>
   );
 }
 
-function HeadlineNumbers({ view }: { view: HomeView }) {
+function HeadlineNumbers({ view, orgSlug }: { view: HomeView; orgSlug: string }) {
   return (
     <section aria-labelledby="headline-numbers">
       <h2 id="headline-numbers" className="sr-only">The headline numbers</h2>
-      <div className="grid grid-cols-2 gap-4 lg:grid-cols-3">
-        {view.cards.map((card) => <MetricCard key={card.metricKey} card={card} />)}
-      </div>
+      <ArrangeableCards
+        storageKey={`motion.home.card-order.${orgSlug}`}
+        cards={view.cards.map((card) => ({
+          id: card.metricKey, label: card.label, node: <MetricCard card={card} />,
+        }))}
+      />
       {view.grossProfitNote ? (
         <p className="mt-3 text-xs text-ink-muted" data-testid="gross-profit-note">
           Profit after direct costs isn’t shown: {view.grossProfitNote}
@@ -299,7 +303,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
           </p>
         ) : null}
 
-        <HeadlineNumbers view={view} />
+        <HeadlineNumbers view={view} orgSlug={orgSlug} />
 
         {/* Level 3: what is moving. The trend table is the accessible form (§11). */}
         {/*

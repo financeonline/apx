@@ -2852,3 +2852,14 @@ Decision:
 4. **Charts stay MOTION's own SVG**, which §6 allows ("Recharts or equivalent").
 
 Consequences: new dependencies `class-variance-authority`, `clsx`, `tailwind-merge`, `@radix-ui/react-slot`, `@radix-ui/react-label`. Visual output is intended to be unchanged; the browser journeys and the accessibility sweep are the check.
+
+### ADR-152 · Home's headline cards can be rearranged (the draggable widget grid)
+Status: **built locally on 2026-10-07 on the owner's instruction (a supplied `draggable-widget-grid` template: "Only use this template, styled to my App"). Not reviewed, merged or deployed.**
+
+Decision:
+1. **The template, as owned shadcn/ui source** (`src/components/ui/shadcn/draggable-widget-grid.tsx`, exported from the shadcn barrel; ADR-151). Its layout (exact tiler with a row-packing fallback), drop-target choice, Motion springs, long-press touch and Alt + arrow keyboard moves are kept. New dependency: `motion`.
+2. **Styled to MOTION:** `bg-surface text-ink`, the `ring-line` hairline, the accent focus ring and drop outline, the `rounded-card` 8px radius, and **no resting shadow** (elevation is the hairline; the lift shadow while dragging stays).
+3. **Changes to the template, each for a reason:** an optional fixed `rowHeight` (MOTION's cards are wide and short, not square); an `appear` switch for the entrance animation, off on Home so figures read at once on arrival; a remount, not an animation, when the grid first measures its columns (the server render guesses three, and animating out of the guess overhung a phone screen, failing the no-sideways-scroll sweep); latest-value refs written in a layout effect and the DOM order held in state, as the React Compiler lint requires.
+4. **Home only, behind "Arrange cards".** Outside it the cards are ordinary and their "Why?" links work; inside it they drag, and "Reset order" restores the default. The order is a **per-browser, per-company preference in localStorage** (`motion.home.card-order.<slug>`), read through `useSyncExternalStore`, unknown ids dropped and new cards appended. It changes no figure, and nothing is sent or stored on the server.
+
+Consequences: a browser journey (`scripts/sample-data/3-arrange.spec.ts`) checks keyboard and mouse moves, focus kept on the moved card, persistence across reload, reset, working links outside arranging, and axe while arranging. Saving the order to the user's account (so it follows them between devices) would be a separate decision.

@@ -14,3 +14,6 @@ test-results/
 playwright-report/
 e2e/.shots
 test/regression/out/
+
+# Local run output (sample-data screenshots, Playwright results)
+/logs/

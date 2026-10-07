@@ -13,3 +13,4 @@ export { NativeSelect } from './native-select';
 export { Skeleton } from './skeleton';
 export { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from './table';
 export { Textarea } from './textarea';
+export { DraggableWidgetGrid, type DraggableWidgetGridProps, type WidgetItem, type WidgetSize } from './draggable-widget-grid';
