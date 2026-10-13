@@ -80,13 +80,28 @@ describe('attention reasons come only from facts other modules established', () 
   });
 });
 
-describe('who has a portfolio (ADR-112 §2)', () => {
+describe('who has a portfolio (ADR-112 §2, as amended 2026-10-14)', () => {
   const row = (organizationId: string, role: string) => ({ organizationId, slug: organizationId, name: organizationId, status: 'active' as const, role });
 
-  it('keeps adviser roles and drops a client membership, so a client-only caller has nothing', () => {
+  /*
+   * The Command Centre is APX staff only (owner, 2026-10-14: "only the app owner can see
+   * everything"; ADR-112 addendum). Until then an owner's or admin's rows were kept — over their own
+   * companies — and this test said so. The owner withdrew that: the rows are now DROPPED, a deliberate
+   * change of rule, not a weaker assertion. Only the super admin and the Financial Analysts
+   * (`employee`, over their assignments) advise.
+   */
+  it('keeps staff roles and drops every company role, so a company login has nothing', () => {
     expect(adviserOrganisations([row('a', 'client')])).toEqual([]);
-    expect(adviserOrganisations([row('a', 'client'), row('b', 'owner')]).map((o) => o.id)).toEqual(['b']);
-    expect(adviserOrganisations([row('c', 'employee'), row('a', 'super_admin'), row('b', 'admin')]).map((o) => o.id)).toEqual(['a', 'b', 'c']);
+    expect(adviserOrganisations([row('a', 'owner')])).toEqual([]);
+    expect(adviserOrganisations([row('a', 'admin')])).toEqual([]);
+    expect(adviserOrganisations([row('a', 'client'), row('b', 'owner'), row('c', 'admin')])).toEqual([]);
+    expect(adviserOrganisations([row('c', 'employee'), row('a', 'super_admin'), row('b', 'admin')]).map((o) => o.id)).toEqual(['a', 'c']);
+    expect(adviserOrganisations([row('c', 'employee'), row('a', 'super_admin'), row('b', 'admin')]).map((o) => o.role)).toEqual(['super_admin', 'employee']);
+  });
+
+  it('a company role added later is not a portfolio either: only the listed staff roles advise', () => {
+    // The accountant and third-party company roles (2026-10-14) see their own company, nothing more.
+    expect(adviserOrganisations([row('a', 'accountant'), row('b', 'third_party')])).toEqual([]);
   });
 
   it('drops a suspended membership: a role that resolves to suspended_member advises nothing', () => {

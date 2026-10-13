@@ -1,8 +1,8 @@
 import { writeFileSync } from 'node:fs';
 import { expect, test as setup } from '@playwright/test';
 import {
-  AUTH_STATE, GL_CSV, SEEDED_ORG, STATEMENT_MAY_CSV, addBankAccount, drainQueue, importLedger, importStatement,
-  onboard, seedUser, signIn, sweepOldFixtures, uniqueName,
+  ADVISER_STATE, AUTH_STATE, GL_CSV, SEEDED_ORG, STATEMENT_MAY_CSV, addBankAccount, drainQueue, importLedger, importStatement,
+  onboard, seedUser, signIn, sql, sweepOldFixtures, uniqueName,
 } from './fixtures';
 
 /**
@@ -33,4 +33,16 @@ setup('sign in and seed an organisation with figures', async ({ page }) => {
 
   await page.context().storageState({ path: AUTH_STATE });
   writeFileSync(SEEDED_ORG, JSON.stringify({ slug }), 'utf8');
+
+  // A Financial Analyst assigned to the same organisation, for the Command Centre's sweep: it is
+  // APX staff only (owner, 2026-10-14; ADR-112 addendum), and the owner above has none.
+  const adviser = seedUser('a11y-adviser');
+  sql(`insert into public.platform_users (user_id, platform_role) values ('${adviser.userId}', 'employee')`);
+  sql(`insert into public.organization_assignments (organization_id, employee_user_id)
+       select id, '${adviser.userId}' from public.organizations where slug = '${slug}'`);
+  await page.context().clearCookies();
+  await signIn(page, adviser);
+  const portfolio = await page.goto('/portfolio');
+  expect(portfolio?.status(), 'the assigned employee has a Command Centre').toBe(200);
+  await page.context().storageState({ path: ADVISER_STATE });
 });

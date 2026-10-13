@@ -10,8 +10,14 @@ import type { ActionPriority, ActionStatus } from '@/modules/actions';
 import type { AlertSeverity } from '@/modules/alerts';
 import type { HealthBand } from '@/modules/health';
 
-/** The roles whose holders may open the Command Centre (ADR-112). A client is not one of them. */
-export const ADVISER_ROLES = ['super_admin', 'employee', 'owner', 'admin'] as const;
+/**
+ * The roles whose holders may open the Command Centre: APX's own staff only — the super admin and
+ * the Financial Analysts (`employee`) over the companies assigned to them (owner, 2026-10-14: "only
+ * the app owner can see everything"; company logins see only their own company). ADR-112 had also
+ * opened it to company owners and admins over their own companies; that is withdrawn. A company
+ * owner or admin who reaches `/portfolio` gets the uniform 404, as a client always did.
+ */
+export const ADVISER_ROLES = ['super_admin', 'employee'] as const;
 export type AdviserRole = (typeof ADVISER_ROLES)[number];
 
 export type OrganisationStatus = 'active' | 'suspended' | 'pending_deletion';

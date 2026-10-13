@@ -3,7 +3,7 @@ import type { SidebarGroup, SidebarIcon } from '@/components/dashboard/sidebar';
 import { AppShell } from '@/components/dashboard/app-shell';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
-import { can, isSuperAdmin } from '@/core/permissions';
+import { can, isPlatformStaff, isSuperAdmin } from '@/core/permissions';
 import { isMotionError } from '@/core/errors';
 import { recordAccessEvent } from '@/core/db/server-rpc';
 import { callApi } from '@/core/db';
@@ -91,8 +91,9 @@ export default async function OrgLayout({
           count: { value: unread, srText: `${unread} unread` },
         }]),
         ...(showSettings ? [{ label: 'Settings', href: `${base}/settings`, icon: 'settings' as const }] : []),
-        // The roles that hold assignments.view are exactly the roles with a Command Centre (ADR-112).
-        ...(can(ctx, 'assignments.view') ? [{ label: 'Command Centre', href: '/portfolio', icon: 'portfolio' as const }] : []),
+        // The Command Centre is APX staff only (ADR-112 addendum, owner 2026-10-14): company owners and
+        // admins hold assignments.view to see their analysts, but have no Command Centre.
+        ...(isPlatformStaff(ctx) ? [{ label: 'Command Centre', href: '/portfolio', icon: 'portfolio' as const }] : []),
         { label: 'Switch', href: '/select-organization', icon: 'switch' as const },
       ],
     },

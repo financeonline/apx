@@ -7,7 +7,7 @@ import { renderPortfolioPdf } from '@/modules/reporting';
  * other client by name — with the opportunities beside each. Nothing new is worked out.
  */
 
-const org = (id: string, name: string) => ({ id, slug: id, name, status: 'active' as const, role: 'owner' as const });
+const org = (id: string, name: string) => ({ id, slug: id, name, status: 'active' as const, role: 'employee' as const });
 const zero = { alertsStanding: 0, alertsCritical: 0, alertsHigh: 0, actionsOpen: 0, actionsOverdue: 0, actionsDueSoon: 0, actionsUrgent: 0, actionsUrgentOnTime: 0, actionsMine: 0 };
 const row = (id: string, name: string, attention: string | null, score: number | null) => ({
   organisation: org(id, name),

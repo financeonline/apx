@@ -9,18 +9,25 @@ import { adminSql, clientFor, createAuthUser } from './setup';
 /**
  * The Command Centre's boundary (ADR-112 §2, §4; brief §7, §8, §18, §19).
  *
- * Five callers, five organisations. What each may see is asserted at three layers that must agree:
- * the resolver (who has a portfolio, and over which organisations), the read model (what the
- * portfolio's own statements return for them), and the database (what RLS returns when the
- * resolver is BYPASSED and a foreign organisation's id is put straight into the statement — the
- * adversarial path). A count that leaked across that line would fail here before any page saw it.
+ * Five organisations; staff callers who advise some of them, and company logins who advise none.
+ * What each may see is asserted at three layers that must agree: the resolver (who has a portfolio,
+ * and over which organisations), the read model (what the portfolio's own statements return for
+ * them), and the database (what RLS returns when the resolver is BYPASSED and a foreign
+ * organisation's id is put straight into the statement — the adversarial path). A count that leaked
+ * across that line would fail here before any page saw it.
+ *
+ * The Command Centre is APX staff only (owner, 2026-10-14; ADR-112 addendum): the super admin, and
+ * the Financial Analysts (`employee`) over their assignments. A company's owner, admin or client has
+ * none — the uniform 404 from the resolver, and nothing from the database's portfolio functions even
+ * for their OWN organisations (20261018000030). The owners and admins below still create and hold the
+ * organisations; the portfolio actors are employees and the super admin.
  */
 
 const RUN = `pf${Date.now().toString(36)}`;
 const DOMAIN = `${RUN}.portfolio.itest`;
 const one = (s: string) => adminSql(`with q as (${s}) select * from q`).trim();
 
-let ownerAB: string; let employee: string; let superAdmin: string; let clientC: string; let clientOnly: string; let stranger: string; let adminD: string;
+let ownerAB: string; let employee: string; let employeeD: string; let superAdmin: string; let clientC: string; let clientOnly: string; let stranger: string; let adminD: string; let adminOnly: string;
 let A: string; let B: string; let C: string; let D: string; let E: string;
 const named = new Map<string, string>();
 
@@ -65,10 +72,12 @@ beforeAll(async () => {
   adminD = createAuthUser(`admin-d@${DOMAIN}`);
   clientC = createAuthUser(`client-c@${DOMAIN}`);
   employee = createAuthUser(`employee@${DOMAIN}`);
+  employeeD = createAuthUser(`employee-d@${DOMAIN}`);
   superAdmin = createAuthUser(`super@${DOMAIN}`);
   stranger = createAuthUser(`stranger@${DOMAIN}`);
   clientOnly = createAuthUser(`client-only@${DOMAIN}`);
-  adminSql(`insert into public.platform_users (user_id, platform_role) values ('${employee}','employee'), ('${superAdmin}','super_admin')`);
+  adminOnly = createAuthUser(`admin-only@${DOMAIN}`);
+  adminSql(`insert into public.platform_users (user_id, platform_role) values ('${employee}','employee'), ('${employeeD}','employee'), ('${superAdmin}','super_admin')`);
 
   A = await createOrg(ownerAB, `PF Alpha ${RUN}`);
   B = await createOrg(ownerAB, `PF Beta ${RUN}`);
@@ -78,7 +87,10 @@ beforeAll(async () => {
 
   adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${C}','${clientC}','client','active'), ('${C}','${clientOnly}','client','active')`);
   adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${D}','${adminD}','admin','active')`);
-  adminSql(`insert into public.organization_assignments (organization_id, employee_user_id) values ('${A}','${employee}'), ('${B}','${employee}')`);
+  // A company admin and nothing else: an admin of A, a member of no other organisation.
+  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${A}','${adminOnly}','admin','active')`);
+  // The staff: one Financial Analyst over A and B, another over D alone; E is assigned to nobody.
+  adminSql(`insert into public.organization_assignments (organization_id, employee_user_id) values ('${A}','${employee}'), ('${B}','${employee}'), ('${D}','${employeeD}')`);
 
   // Facts, written the way the jobs write them.
   for (const [org, score, prev] of [[A, 35, 62], [B, 85, 84], [C, 50, 50]] as const) {
@@ -101,7 +113,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   adminSql(`delete from public.organizations where id in ('${A}','${B}','${C}','${D}','${E}');
-            delete from public.platform_users where user_id in ('${employee}','${superAdmin}');
+            delete from public.platform_users where user_id in ('${employee}','${employeeD}','${superAdmin}');
             delete from auth.users where email like '%@${DOMAIN}';`);
 });
 
@@ -112,36 +124,75 @@ async function details(ctx: PortfolioContext, view: PortfolioView) {
   return { alerts: alerts.rows, actions: actions.rows };
 }
 
-describe('who has a portfolio, and over what (ADR-112 §2)', () => {
+const notFound = (e: unknown) => isMotionError(e) && e.code === 'NOT_FOUND';
+
+describe('who has a portfolio, and over what (ADR-112 §2, as amended 2026-10-14)', () => {
   it('an employee: assigned organisations only', async () => {
     const ctx = await ctxFor(employee);
     expect(names(ctx)).toEqual([named.get(A), named.get(B)]);
     expect(ctx.organisations.every((o) => o.role === 'employee')).toBe(true);
   });
 
-  it('an owner of two organisations: both, as owner', async () => {
-    const ctx = await ctxFor(ownerAB);
-    expect(names(ctx)).toEqual([named.get(A), named.get(B)]);
-  });
-
-  it('an admin: the organisation they administer and the one they own', async () => {
-    const ctx = await ctxFor(adminD);
-    expect(names(ctx)).toEqual([named.get(C), named.get(D), named.get(E)].sort());
-  });
-
-  it('a client of C who owns D sees D only: a client membership advises nothing', async () => {
-    const ctx = await ctxFor(clientC);
+  it('a second employee: their own assignment only — D, not their colleague\'s A and B, not unassigned E', async () => {
+    const ctx = await ctxFor(employeeD);
     expect(names(ctx)).toEqual([named.get(D)]);
+    expect(ctx.organisations.every((o) => o.role === 'employee')).toBe(true);
   });
 
   it('a super admin sees every organisation', async () => {
     const ctx = await ctxFor(superAdmin);
     for (const org of [A, B, C, D, E]) expect(ctx.organisationIds).toContain(org);
+    expect(ctx.organisations.filter((o) => [A, B, C, D, E].includes(o.id)).every((o) => o.role === 'super_admin')).toBe(true);
   });
 
   it('a stranger, and a client-only member, get NOT_FOUND — the same answer', async () => {
-    await expect(ctxFor(stranger)).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
-    await expect(ctxFor(clientOnly)).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
+    await expect(ctxFor(stranger)).rejects.toSatisfy(notFound);
+    await expect(ctxFor(clientOnly)).rejects.toSatisfy(notFound);
+  });
+});
+
+describe('a company login has no Command Centre — not even over its own companies (owner, 2026-10-14)', () => {
+  it('a company owner of two organisations gets NOT_FOUND — the same answer as a stranger', async () => {
+    await expect(ctxFor(ownerAB)).rejects.toSatisfy(notFound);
+  });
+
+  it('a company admin gets NOT_FOUND', async () => {
+    await expect(ctxFor(adminOnly)).rejects.toSatisfy(notFound);
+  });
+
+  it('a company client gets NOT_FOUND', async () => {
+    await expect(ctxFor(clientOnly)).rejects.toSatisfy(notFound);
+  });
+
+  it('mixed company roles add up to nothing: an owner of C and E who administers D, and a client of C who owns D', async () => {
+    await expect(ctxFor(adminD)).rejects.toSatisfy(notFound);
+    await expect(ctxFor(clientC)).rejects.toSatisfy(notFound);
+  });
+
+  it('the database agrees: every portfolio function returns nothing to them, even for their own organisations', async () => {
+    // The resolver is bypassed here: each login asks the portfolio's own functions, with its own JWT,
+    // for exactly the organisations it holds a company role in — and for the whole scope (NULL).
+    const own: Array<[string, string, string[]]> = [
+      [ownerAB, 'owner-ab', [A, B]], [adminOnly, 'admin-only', [A]], [clientOnly, 'client-only', [C]],
+      [adminD, 'admin-d', [C, D, E]], [clientC, 'client-c', [C, D]],
+    ];
+    for (const [user, local, orgs] of own) {
+      const db = clientFor(user, { email: `${local}@${DOMAIN}` }).schema('api');
+      for (const p_orgs of [orgs, null]) {
+        for (const [fn, args] of [
+          ['portfolio_summary', { p_orgs, p_today: '2026-09-15', p_due_soon_until: '2026-09-29' }],
+          ['portfolio_standing_alerts', { p_orgs, p_limit: 500 }],
+          ['portfolio_recent_alerts', { p_orgs, p_since: '2000-01-01T00:00:00Z', p_limit: 50 }],
+          ['portfolio_open_actions', { p_orgs, p_lens: 'attention', p_today: '2026-09-15', p_due_soon_until: '2026-09-29', p_limit: 500 }],
+          ['portfolio_finished_actions', { p_orgs, p_since: '2000-01-01T00:00:00Z', p_limit: 50 }],
+          ['portfolio_health_breakdowns', { p_orgs }],
+        ] as const) {
+          const r = await db.rpc(fn, args);
+          expect(r.error, `${fn} for ${local}`).toBeNull();
+          expect(r.data ?? [], `${fn} for ${local} over ${p_orgs === null ? 'the whole scope' : 'its own organisations'}`).toEqual([]);
+        }
+      }
+    }
   });
 });
 
@@ -180,7 +231,7 @@ describe('the read model counts over the authorised population only (ADR-112 §4
   });
 
   it('a resolved alert is not standing, and a completed action is not open', async () => {
-    const ctx = await ctxFor(ownerAB);
+    const ctx = await ctxFor(employee);
     const { alerts, actions } = await details(ctx, await loadPortfolio(ctx));
     expect(alerts.some((a) => a.title === 'A resolved')).toBe(false);
     expect(actions.some((a) => a.title === 'B done')).toBe(false);
@@ -217,11 +268,12 @@ describe('the adversarial path: the resolver bypassed, a foreign id in the state
     expect(view.counts.overdueActions).toBe(1);
   });
 
-  it('the same for the owner of D forging E, an organisation they are no member of, into their portfolio', async () => {
-    const real = await ctxFor(clientC);
+  it('the same for the employee of D forging E, an organisation they are not assigned, into their portfolio', async () => {
+    const real = await ctxFor(employeeD);
+    expect(real.organisationIds).toEqual([D]);
     const forged: PortfolioContext = {
       ...real,
-      organisations: [...real.organisations, { id: E, slug: 'epsilon', name: 'Epsilon', status: 'active', role: 'owner' }],
+      organisations: [...real.organisations, { id: E, slug: 'epsilon', name: 'Epsilon', status: 'active', role: 'employee' }],
       organisationIds: [...real.organisationIds, E],
     };
     adminSql(`insert into public.actions (organization_id, title, priority, status, source_type) values ('${E}','E secret','critical','open','user')`);
@@ -307,7 +359,7 @@ describe('advisory opportunities follow the same boundary (ADR-148)', () => {
     expect((await loadOpportunities(forged, forgedView)).map((e) => e.organizationId)).toEqual([A]);
   });
 
-  it('the super admin sees A\'s and C\'s; the database function gives a stranger nothing', async () => {
+  it('the super admin sees A\'s and C\'s; the database function gives a stranger, and A\'s own owner, nothing', async () => {
     const admin = await ctxFor(superAdmin);
     const view = await loadPortfolio(admin);
     // A super admin sees every organisation in the database; this file's own are A, C (and B, without one).
@@ -317,6 +369,11 @@ describe('advisory opportunities follow the same boundary (ADR-148)', () => {
       .rpc('portfolio_health_breakdowns', { p_orgs: [A, B, C] });
     expect(error).toBeNull();
     expect(data ?? []).toEqual([]);
+    // A's own owner: a company login, so no portfolio — A's breakdown is not served to them here.
+    const own = await clientFor(ownerAB, { email: `owner-ab@${DOMAIN}` }).schema('api')
+      .rpc('portfolio_health_breakdowns', { p_orgs: [A] });
+    expect(own.error).toBeNull();
+    expect(own.data ?? []).toEqual([]);
   });
 });
 

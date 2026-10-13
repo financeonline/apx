@@ -14,10 +14,11 @@ import { ADVISER_ROLES, type AdviserRole, type PortfolioOrganisation } from '../
  * The set is `api.my_organizations()` — the database's own answer, derived from
  * `app.accessible_org_roles()`, the one source every RLS policy also reads — kept to the rows whose
  * role is one an adviser holds. A super admin reaches every organisation, an employee only
- * the ones assigned to them, an owner or admin the ones they belong to in that role. A client's
- * membership is not an adviser's, so a client-only caller resolves to nothing and gets the uniform
- * 404, the same answer a stranger gets; and a person who is a client in one organisation and an
- * owner in another sees only the second.
+ * the ones assigned to them. The Command Centre is APX staff only (owner, 2026-10-14; ADR-112
+ * addendum): a company membership — owner, admin, client or any company role — is not an adviser's,
+ * so a company login resolves to nothing and gets the uniform 404, the same answer a stranger gets,
+ * even over its own organisations. The database agrees: `app.adviser_org_ids()` and the analyst's
+ * turn check accept only these two roles (20261018000030).
  *
  * Nothing is added here that the database did not already grant, and nothing decided here is
  * relied on alone: every read the portfolio makes puts these ids in its statement AND runs under

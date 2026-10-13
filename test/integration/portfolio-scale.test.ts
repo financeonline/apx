@@ -15,14 +15,15 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  * showed 6 as "Not yet scored".
  *
  * Organisations are created by one person each (`create_organization` is throttled per person) and
- * the portfolio holder is added as their admin: an admin advises (ADR-112).
+ * assigned to the portfolio holder, a Financial Analyst (`employee`): the Command Centre is APX staff
+ * only (owner, 2026-10-14; ADR-112 addendum), so a company admin no longer holds a portfolio.
  */
 
 const RUN = `ps${Date.now().toString(36)}`;
 const DOMAIN = `${RUN}.portfolioscale.itest`;
 const one = (s: string) => adminSql(`with q as (${s}) select * from q`).trim();
 
-let adviser: string; let healthAdviser: string; let stranger: string;
+let adviser: string; let healthAdviser: string;
 let X: string; let Y: string; let Z: string;
 const big: string[] = [];
 const all: string[] = [];
@@ -36,7 +37,7 @@ async function orgFor(holder: string, name: string): Promise<string> {
   if (r.error) throw new Error(r.error.message);
   const id = r.data as unknown as string;
   all.push(id);
-  if (holder !== '') adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${id}','${holder}','admin','active')`);
+  if (holder !== '') adminSql(`insert into public.organization_assignments (organization_id, employee_user_id) values ('${id}','${holder}')`);
   return id;
 }
 
@@ -87,12 +88,12 @@ function scoreMonths(org: string, complete: 'all' | 'past', score: (periodStart:
 beforeAll(async () => {
   adviser = createAuthUser(`adviser@${DOMAIN}`);
   healthAdviser = createAuthUser(`health-adviser@${DOMAIN}`);
-  stranger = createAuthUser(`stranger@${DOMAIN}`);
+  adminSql(`insert into public.platform_users (user_id, platform_role) values ('${adviser}','employee'), ('${healthAdviser}','employee')`);
 
   // ---- HIGH-A: X holds 1,050 NEW low alerts and 1,020 NEW low actions; Y's serious facts are OLD ----
   X = await orgFor(adviser, `PS X ${RUN}`);
   Y = await orgFor(adviser, `PS Y ${RUN}`);
-  Z = await orgFor(stranger, `PS Z unauthorised ${RUN}`);
+  Z = await orgFor('', `PS Z unauthorised ${RUN}`);   // assigned to nobody
   seedAlerts(X, 1050, 'low', 1);
   seedAlerts(Y, 3, 'critical', 60);
   seedAlerts(Z, 200, 'critical', 90);
@@ -129,6 +130,7 @@ beforeAll(async () => {
 
 afterAll(() => {
   adminSql(`delete from public.organizations where id in (${all.map((o) => `'${o}'`).join(',')});
+            delete from public.platform_users where user_id in ('${adviser}','${healthAdviser}');
             delete from auth.users where email like '%@${DOMAIN}';`);
 });
 

@@ -103,8 +103,12 @@ export async function composeAdviserReport(input: {
   const previousScore = month.health === null || month.health.changeVsPrevious === null
     ? null : month.health.score - month.health.changeVsPrevious;
   const previousPeriod = periods.find((p) => p.periodStart < period.periodStart && withData.has(p.id)) ?? null;
+  // `attentionReasons` reads only the organisation's status, never its role: the role below is a
+  // type-valid placeholder, not a claim about the reader. It is an adviser role ('employee') because
+  // `PortfolioOrganisation.role` admits only those since the Command Centre became staff-only
+  // (owner, 2026-10-14; ADR-112 addendum) — this report itself is unaffected by who may open it.
   const reasons = attentionReasons({
-    organisation: { id: orgId, slug: '', name: org.name, status: 'active', role: 'owner' },
+    organisation: { id: orgId, slug: '', name: org.name, status: 'active', role: 'employee' },
     health: month.health === null ? null : {
       organizationId: orgId,
       scoreId: '',

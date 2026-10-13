@@ -4,23 +4,32 @@ import {
 } from './fixtures';
 
 /**
- * Journey 15 — the Command Centre (SOW §18; ADR-112).
+ * Journey 15 — the Command Centre (SOW §18; ADR-112, as amended 2026-10-14).
  *
- * An owner of two organisations lands on one screen that says which needs attention, and a client
- * of one of them is told nothing about a portfolio at all: the same uniform 404 a stranger gets.
- * Runs as an owner; the employee boundary
- * is proven at the database and the API in `test/integration/portfolio.test.ts`.
+ * The Command Centre is APX staff only (owner, 2026-10-14: "only the app owner can see everything";
+ * ADR-112 addendum). A company owner of two organisations is told nothing about a portfolio — the
+ * uniform 404 at every `/portfolio` URL, and no Command Centre on the organisation picker. A
+ * Financial Analyst (platform `employee`) assigned to both lands on one screen that says which needs
+ * attention; and a client of one of them gets the same uniform 404 a stranger gets. The super admin's
+ * view, and every boundary at the database and the API, are proven in
+ * `test/integration/portfolio*.test.ts` — there is one super admin (ADR-159), and a journey never
+ * signs in as a real account.
  */
 
 const ORG_A = uniqueName('Centre Alpha');
 const ORG_B = uniqueName('Centre Beta');
 const SHOTS = 'e2e/.shots';
 
-test.afterAll(() => cleanUpOwn([ORG_A, ORG_B], ['j15-owner', 'j15-client']));
+test.afterAll(() => cleanUpOwn([ORG_A, ORG_B], ['j15-owner', 'j15-adviser', 'j15-client']));
 
-test('an owner of two organisations sees both on the Command Centre; a client sees no portfolio', async ({ page }) => {
+const PORTFOLIO_PATHS = ['/portfolio', '/portfolio/alerts', '/portfolio/actions', '/portfolio/analyst', '/portfolio/report'];
+
+test('an employee assigned two organisations sees both on the Command Centre; their owner and a client see no portfolio', async ({ page }) => {
   const owner = seedUser('j15-owner');
+  const adviser = seedUser('j15-adviser');
   const client = seedUser('j15-client');
+  // A Financial Analyst: a platform employee, signed in with a password like everyone else (ADR-161).
+  sql(`insert into public.platform_users (user_id, platform_role) values ('${adviser.userId}', 'employee')`);
   await signIn(page, owner);
 
   // ---- Two organisations, one with figures --------------------------------------------------
@@ -51,6 +60,22 @@ test('an owner of two organisations sees both on the Command Centre; a client se
        values ('${orgA}', 'recalc_manual', '1.0.0', '${periodA}', '${periodA}', '2026-06-15', 'succeeded') returning id) select id from q`);
   sql(`insert into public.alerts (organization_id, period_id, rule_key, rule_version, severity, key_kind, calculation_run_id, title, explanation, status, first_seen_at, dedupe_key)
        values ('${orgA}', '${periodA}', 'cash.runway_low', '1', 'critical', 'state', '${runA}', 'Cash runway is under two months', 'Seeded for journey 15.', 'open', now(), 'j15-${slugA}')`);
+
+  // ---- The owner of both: no Command Centre, and nothing that says one exists --------------------
+  for (const path of [...PORTFOLIO_PATHS, `/portfolio/clients/${orgA}`]) {
+    expect((await page.goto(path))?.status(), `${path} is a uniform 404 for a company owner`).toBe(404);
+  }
+  // Two organisations put the owner on the picker, which offers the Command Centre to staff only.
+  await page.goto('/select-organization');
+  await expect(page.getByRole('heading', { level: 1, name: /choose an organisation/i })).toBeVisible();
+  await expect(page.getByRole('link', { name: ORG_A })).toBeVisible();
+  await expect(page.getByRole('link', { name: /command centre/i })).toHaveCount(0);
+
+  // ---- The Financial Analyst assigned to both ----------------------------------------------------
+  sql(`insert into public.organization_assignments (organization_id, employee_user_id)
+       values ('${orgA}', '${adviser.userId}'), ('${orgB}', '${adviser.userId}')`);
+  await page.context().clearCookies();
+  await signIn(page, adviser);
 
   // ---- The Command Centre ----------------------------------------------------------------------
   const response = await page.goto('/portfolio');
@@ -124,7 +149,7 @@ test('an owner of two organisations sees both on the Command Centre; a client se
       clients: [], refs: [],
     });
     sql(`with q as (insert into public.portfolio_ai_turns (user_id, question, scope_organization_ids, status, answer, grounding_status, prompt_version, finished_at)
-         values ('${owner.userId}', '${question}', array['${orgA}']::uuid[], 'answered', '${answer}'::jsonb, '${grounding}', 'adviser-v4.0', now())
+         values ('${adviser.userId}', '${question}', array['${orgA}']::uuid[], 'answered', '${answer}'::jsonb, '${grounding}', 'adviser-v4.0', now())
          returning id) select id from q`);
   };
   storeTurn('What changed at Alpha this month', 'degraded');
@@ -157,7 +182,7 @@ test('an owner of two organisations sees both on the Command Centre; a client se
   await page.context().clearCookies();
   await signIn(page, client);
   expect((await page.goto(`/app/${slugB}/home`))?.status()).toBe(200);
-  for (const path of ['/portfolio', '/portfolio/alerts', '/portfolio/actions', '/portfolio/analyst', `/portfolio/clients/${orgB}`, `/portfolio/clients/${orgA}`]) {
+  for (const path of [...PORTFOLIO_PATHS, `/portfolio/clients/${orgB}`, `/portfolio/clients/${orgA}`]) {
     expect((await page.goto(path))?.status(), `${path} is a uniform 404 for a client`).toBe(404);
   }
 });

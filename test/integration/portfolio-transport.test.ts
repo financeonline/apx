@@ -11,6 +11,9 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  * derives from the caller's CURRENT adviser organisations; a list sent in the body can only narrow
  * it. This suite holds 1,005 organisations: a super admin reads all of them, an employee with 250
  * assignments reads exactly those, and a body with forged ids reads nothing it should not.
+ *
+ * The Command Centre is APX staff only (owner, 2026-10-14; ADR-112 addendum): a company owner or
+ * client reads nothing through these functions — not even their own organisation (20261018000030).
  */
 
 const RUN = `pt${Date.now().toString(36)}`;
@@ -18,7 +21,7 @@ const DOMAIN = `${RUN}.portfoliotransport.itest`;
 const BULK = 1_005;
 const ASSIGNED = 250;
 
-let superAdmin: string; let employee: string; let owner: string; let clientUser: string;
+let superAdmin: string; let employee: string; let employeeOne: string; let owner: string; let clientUser: string;
 let bulk: string[] = [];
 let far: string[] = [];
 let own = '';
@@ -47,9 +50,10 @@ async function requestsDuring<T>(run: () => Promise<T>): Promise<{ result: T; re
 beforeAll(() => {
   superAdmin = createAuthUser(`super@${DOMAIN}`);
   employee = createAuthUser(`employee@${DOMAIN}`);
+  employeeOne = createAuthUser(`employee-one@${DOMAIN}`);
   owner = createAuthUser(`owner@${DOMAIN}`);
   clientUser = createAuthUser(`client@${DOMAIN}`);
-  adminSql(`insert into public.platform_users (user_id, platform_role) values ('${superAdmin}','super_admin'), ('${employee}','employee')`);
+  adminSql(`insert into public.platform_users (user_id, platform_role) values ('${superAdmin}','super_admin'), ('${employee}','employee'), ('${employeeOne}','employee')`);
   bulk = adminSql(`with q as (insert into public.organizations (slug, name)
       select '${RUN}-' || g, 'PT Bulk ' || lpad(g::text, 4, '0') || ' ${RUN}' from generate_series(1, ${BULK}) g returning id)
     select id from q order by id`).split('\n').map((s) => s.trim()).filter(Boolean);
@@ -61,15 +65,17 @@ beforeAll(() => {
   const assigned = [...bulk.slice(0, ASSIGNED - 3), ...far];
   adminSql(`insert into public.organization_assignments (organization_id, employee_user_id)
     select o, '${employee}' from unnest(array['${assigned.join("','")}']::uuid[]) o`);
-  // An owner of one organisation, who is a client in another.
+  // A second employee assigned to one organisation only — the narrow scope a forged body must not widen.
   own = bulk[0]!;
+  adminSql(`insert into public.organization_assignments (organization_id, employee_user_id) values ('${own}','${employeeOne}')`);
+  // A company owner of that same organisation, who is a client in another; and a client.
   adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values
     ('${own}','${owner}','owner','active'), ('${far[0]}','${owner}','client','active'), ('${far[1]}','${clientUser}','client','active')`);
 }, 300_000);
 
 afterAll(() => {
   adminSql(`delete from public.organizations where slug like '${RUN}-%';
-            delete from public.platform_users where user_id in ('${superAdmin}','${employee}');
+            delete from public.platform_users where user_id in ('${superAdmin}','${employee}','${employeeOne}');
             delete from auth.users where email like '%@${DOMAIN}';`);
 }, 300_000);
 
@@ -117,18 +123,26 @@ describe('a list in the body never widens the scope', () => {
   const call = (user: string, fn: string, args: Record<string, unknown>) =>
     clientFor(user, { email: `${user}@${DOMAIN}` }).schema('api').rpc(fn, args);
 
-  it('an owner asking for foreign organisations gets only their own', async () => {
+  it('an employee asking for foreign organisations gets only their assigned one', async () => {
     const asked = [own, far[0]!, far[2]!];
-    const summary = await call(owner, 'portfolio_summary', { p_orgs: asked, p_today: '2026-09-15', p_due_soon_until: '2026-09-29' });
+    const summary = await call(employeeOne, 'portfolio_summary', { p_orgs: asked, p_today: '2026-09-15', p_due_soon_until: '2026-09-29' });
     expect(summary.error).toBeNull();
     expect((summary.data as Array<{ organization_id: string }>).map((r) => r.organization_id)).toEqual([own]);
-    const actions = await call(owner, 'portfolio_open_actions', { p_orgs: asked, p_lens: 'attention', p_today: '2026-09-15', p_due_soon_until: '2026-09-29', p_limit: 500 });
+    const actions = await call(employeeOne, 'portfolio_open_actions', { p_orgs: asked, p_lens: 'attention', p_today: '2026-09-15', p_due_soon_until: '2026-09-29', p_limit: 500 });
     expect(actions.error).toBeNull();
     expect(actions.data).toEqual([]);
   });
 
-  it('a client, and an owner over the organisation they are only a client of, read nothing', async () => {
-    for (const [user, org] of [[clientUser, far[1]!], [owner, far[0]!]] as const) {
+  it('a company owner gets nothing at all — not even their own organisation (owner, 2026-10-14)', async () => {
+    for (const p_orgs of [[own], [own, far[0]!, far[2]!], null]) {
+      const summary = await call(owner, 'portfolio_summary', { p_orgs, p_today: '2026-09-15', p_due_soon_until: '2026-09-29' });
+      expect(summary.error).toBeNull();
+      expect(summary.data).toEqual([]);
+    }
+  });
+
+  it('a client, and an owner over their own organisation and the one they are only a client of, read nothing', async () => {
+    for (const [user, org] of [[clientUser, far[1]!], [owner, far[0]!], [owner, own]] as const) {
       for (const [fn, args] of [
         ['portfolio_open_actions', { p_orgs: [org], p_lens: 'attention', p_today: '2026-09-15', p_due_soon_until: '2026-09-29', p_limit: 500 }],
         ['portfolio_open_actions', { p_orgs: null, p_lens: 'overdue', p_today: '2026-09-15', p_due_soon_until: '2026-09-29', p_limit: 500 }],

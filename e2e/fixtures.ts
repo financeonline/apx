@@ -24,6 +24,12 @@ export function sql(statement: string): string {
 /** Where the setup project leaves the signed-in state and the organisation it seeded. */
 export const AUTH_STATE = 'e2e/.auth/owner.json';
 export const SEEDED_ORG = 'e2e/.auth/org.json';
+/**
+ * A Financial Analyst (platform `employee`) assigned to the seeded organisation, signed in. The
+ * Command Centre is APX staff only (owner, 2026-10-14; ADR-112 addendum), so the sweep reaches
+ * `/portfolio` with this session — the seeded owner gets the uniform 404 there.
+ */
+export const ADVISER_STATE = 'e2e/.auth/adviser.json';
 
 /**
  * The run tag.

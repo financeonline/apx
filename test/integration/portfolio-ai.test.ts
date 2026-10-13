@@ -13,13 +13,17 @@ import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
  * advises), and what the server KEEPS of an answer (only references the digest issued and numbers
  * the digest states). A model that names an unassigned client, cites a foreign alert or invents a
  * figure is corrected or refused by the server, not by the prompt.
+ *
+ * The adviser analyst is part of the Command Centre, and so APX staff only (owner, 2026-10-14;
+ * ADR-112 addendum): a company's owner, admin or client has no analyst — the resolver's 404, and the
+ * database refuses to open a turn for them even over their own organisation (20261018000030).
  */
 
 const RUN = `pa${Date.now().toString(36)}`;
 const DOMAIN = `${RUN}.portfolioai.itest`;
 const one = (s: string) => adminSql(`with q as (${s}) select * from q`).trim();
 
-let employee: string; let ownerC: string; let clientOnly: string;
+let employee: string; let ownerC: string; let adminA: string; let clientOnly: string;
 let A: string; let B: string; let C: string;
 let alertA: string; let alertC: string;
 
@@ -83,13 +87,14 @@ const handed = (call: ModelCall) => call.system.map((s) => s.text).join('\n');
 beforeAll(async () => {
   employee = createAuthUser(`employee@${DOMAIN}`);
   ownerC = createAuthUser(`owner-c@${DOMAIN}`);
+  adminA = createAuthUser(`admin-a@${DOMAIN}`);
   clientOnly = createAuthUser(`client-only@${DOMAIN}`);
   adminSql(`insert into public.platform_users (user_id, platform_role) values ('${employee}','employee')`);
   A = await createOrg(ownerC, `PA Alpha ${RUN}`);
   B = await createOrg(ownerC, `PA Beta ${RUN}`);
   C = await createOrg(ownerC, `PA Gamma Secret ${RUN}`);
   adminSql(`insert into public.organization_assignments (organization_id, employee_user_id) values ('${A}','${employee}'), ('${B}','${employee}')`);
-  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${A}','${clientOnly}','client','active')`);
+  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${A}','${clientOnly}','client','active'), ('${A}','${adminA}','admin','active')`);
   alertA = seedAlert(A, 'critical', 'Alpha cash runway is short');
   alertC = seedAlert(C, 'critical', 'Gamma secret alert');
 }, 120_000);
@@ -143,6 +148,12 @@ describe('what the model is handed', () => {
   it('a client-only member has no adviser analyst at all', async () => {
     await expect(ctxFor(clientOnly)).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
   });
+
+  it('nor has a company owner or admin — not even over their own organisations (owner, 2026-10-14)', async () => {
+    // ownerC owns A, B and C; adminA administers A. Neither is APX staff.
+    await expect(ctxFor(ownerC)).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
+    await expect(ctxFor(adminA)).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
+  });
 });
 
 describe('what the database accepts as a scope', () => {
@@ -156,6 +167,29 @@ describe('what the database accepts as a scope', () => {
     await expect(beginPortfolioTurn({ userId: clientOnly, requestId: 'x' }, {
       question: 'q', scopeOrganizationIds: [A], promptVersion: 'adviser-v1.0',
     })).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'PERMISSION_DENIED');
+  });
+
+  it('refuses a company owner and a company admin over their OWN organisations — staff only (20261018000030)', async () => {
+    for (const [user, scope] of [[ownerC, [A, B, C]], [ownerC, [A]], [adminA, [A]]] as const) {
+      const before = adminSql(`select count(*) from public.portfolio_ai_turns where user_id='${user}'`).trim();
+      await expect(beginPortfolioTurn({ userId: user, requestId: 'x' }, {
+        question: 'q', scopeOrganizationIds: [...scope], promptVersion: 'adviser-v1.0',
+      })).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'PERMISSION_DENIED');
+      expect(adminSql(`select count(*) from public.portfolio_ai_turns where user_id='${user}'`).trim()).toBe(before);
+    }
+  });
+
+  it('a turn a company owner stored before the change is no longer readable to them (RLS reads current adviser access)', async () => {
+    // Written as the server would have written it when owners still had a Command Centre.
+    const turn = one(`insert into public.portfolio_ai_turns (user_id, question, scope_organization_ids, prompt_version)
+      values ('${ownerC}', 'Before the change', array['${A}']::uuid[], 'adviser-v1.0') returning id`);
+    try {
+      const { data, error } = await clientFor(ownerC, { email: `${ownerC}@${DOMAIN}` }).from('portfolio_ai_turns').select('id').eq('id', turn);
+      expect(error).toBeNull();
+      expect(data ?? []).toEqual([]);
+    } finally {
+      adminSql(`delete from public.portfolio_ai_turns where id='${turn}'`);
+    }
   });
 
   it('a user JWT cannot write the turn table or call the server functions', async () => {
@@ -368,11 +402,14 @@ describe('HIGH-C — a stored turn is readable only while its author CURRENTLY a
     expect(await readById(adviser, turn.turnId)).toHaveLength(1);
   });
 
-  it('E–F: a client of the organisation, and another adviser of the same organisations, cannot read it by id', async () => {
+  it('E–F: a client of the organisation, its owner, and another adviser of the same organisations, cannot read it by id', async () => {
     assign(A, 'active'); assign(B, 'revoked');
     const turn = await askAdviser(await ctxFor(adviser), 'Mine?', { transport: fakeModel(answer).transport });
     expect(await readById(clientOfA, turn.turnId)).toEqual([]);
-    // ownerC owns A, B and C — a current adviser of the scope, but not the author.
+    // ownerC owns A, B and C — a company login, which advises nothing (owner, 2026-10-14).
     expect(await readById(ownerC, turn.turnId)).toEqual([]);
+    // `employee` is assigned A and B — a current adviser of the scope, but not the author.
+    expect((await ctxFor(employee)).organisationIds).toContain(A);
+    expect(await readById(employee, turn.turnId)).toEqual([]);
   });
 });

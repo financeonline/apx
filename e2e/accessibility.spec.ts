@@ -1,6 +1,6 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { seededOrgSlug } from './fixtures';
+import { ADVISER_STATE, seededOrgSlug } from './fixtures';
 
 /**
  * Responsive and accessibility (TEST_STRATEGY.md §11).
@@ -47,15 +47,30 @@ const ROUTES = [
    * (Phase 12, ADR-100).
    */
   { name: 'What if', path: () => `/app/${slug()}/what-if` },
-  // The Command Centre (ADR-112, ADR-114): the seeded owner has a portfolio of one.
+];
+
+/**
+ * The Command Centre (ADR-112, ADR-114), reached as APX staff: it is staff only (owner, 2026-10-14;
+ * ADR-112 addendum), so these run with the setup project's Financial Analyst, assigned to the seeded
+ * organisation — a portfolio of one. The seeded owner would be checking the 404 page.
+ */
+const COMMAND_CENTRE_ROUTES = [
   { name: 'Command Centre', path: () => '/portfolio' },
   { name: 'Command Centre alerts', path: () => '/portfolio/alerts' },
   { name: 'Command Centre actions', path: () => '/portfolio/actions' },
   { name: 'Adviser analyst', path: () => '/portfolio/analyst' },
 ];
 
-test.describe('axe-core: zero serious or critical violations', () => {
-  for (const route of ROUTES) {
+/** The two sessions and the routes each one reaches. */
+const SESSIONS = [
+  { label: 'the seeded owner', storageState: undefined, routes: ROUTES },
+  { label: 'a Financial Analyst', storageState: ADVISER_STATE, routes: COMMAND_CENTRE_ROUTES },
+] as const;
+
+for (const session of SESSIONS) test.describe(`axe-core: zero serious or critical violations — ${session.label}`, () => {
+  // The project's own storage state (the owner) unless this session names another.
+  if (session.storageState !== undefined) test.use({ storageState: session.storageState });
+  for (const route of session.routes) {
     test(route.name, async ({ page }) => {
       await page.goto(route.path());
       // A concrete signal, not `networkidle`: a streamed RSC response keeps a connection open, so
@@ -82,12 +97,13 @@ test.describe('axe-core: zero serious or critical violations', () => {
   }
 });
 
-test.describe('no page scrolls sideways', () => {
+for (const session of SESSIONS) test.describe(`no page scrolls sideways — ${session.label}`, () => {
+  if (session.storageState !== undefined) test.use({ storageState: session.storageState });
   for (const viewport of VIEWPORTS) {
     test(viewport.name, async ({ page }) => {
       await page.setViewportSize({ width: viewport.width, height: viewport.height });
 
-      for (const route of ROUTES) {
+      for (const route of session.routes) {
         await page.goto(route.path());
         await expect(page.getByRole('heading').first()).toBeVisible();
 

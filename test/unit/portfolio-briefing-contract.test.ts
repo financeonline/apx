@@ -13,7 +13,7 @@ import {
 
 const zero: ClientCounts = { alertsStanding: 0, alertsCritical: 0, alertsHigh: 0, actionsOpen: 0, actionsOverdue: 0, actionsDueSoon: 0, actionsUrgent: 0, actionsUrgentOnTime: 0, actionsMine: 0 };
 const alpha: ClientRow = {
-  organisation: { id: 'a', slug: 'a', name: 'Alpha Ltd', status: 'active', role: 'owner' }, health: null, trend: null,
+  organisation: { id: 'a', slug: 'a', name: 'Alpha Ltd', status: 'active', role: 'employee' }, health: null, trend: null,
   counts: { ...zero, alertsStanding: 2, alertsCritical: 2, actionsOpen: 4 },
   attention: { organizationId: 'a', rank: [100, 100], reasons: [{ kind: 'critical_alert', weight: 100, label: '2 critical alerts', count: 2 }] },
   latestChange: null,
