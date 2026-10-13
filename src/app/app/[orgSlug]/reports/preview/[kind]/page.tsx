@@ -24,7 +24,7 @@ export default async function BriefPreviewPage({ params }: { params: Promise<{ o
   return (
     <>
       <p className="mb-2 text-sm print:hidden">
-        <Link href={`/app/${orgSlug}/reports`} className="text-accent underline underline-offset-2">Back to reports</Link>
+        <Link href={`/app/${orgSlug}/reports`} className="inline-flex items-center text-accent underline underline-offset-2 pointer-coarse:min-h-10">Back to reports</Link>
       </p>
       <PageHeader
         eyebrow={content.organisationName}
@@ -35,7 +35,8 @@ export default async function BriefPreviewPage({ params }: { params: Promise<{ o
         These figures will change as the {daily ? 'day' : 'week'} goes on and more data arrives. The finished
         {daily ? ' brief is produced shortly after midnight' : ' report is produced early on Monday'}, and kept.
       </Banner>
-      <div className="mt-8">
+      {/* A readable measure on a very wide screen. */}
+      <div className="mt-8 max-w-5xl">
         <BriefView content={content} orgSlug={orgSlug} />
       </div>
     </>

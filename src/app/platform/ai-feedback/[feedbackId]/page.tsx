@@ -45,7 +45,7 @@ export default async function AiFeedbackItemPage({ params }: { params: Promise<{
 
   return (
     <>
-      <p className="text-sm"><Link className="underline" href="/platform/ai-feedback">← AI feedback</Link></p>
+      <p className="text-sm"><Link className="inline-flex items-center underline pointer-coarse:min-h-10" href="/platform/ai-feedback">← AI feedback</Link></p>
       <PageHeader
         eyebrow="AI feedback"
         title={FEEDBACK_TYPE_LABELS[item.type] ?? item.type}
@@ -53,9 +53,9 @@ export default async function AiFeedbackItemPage({ params }: { params: Promise<{
       />
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="flex flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-6">
           {item.comment ? (
-            <Card><CardHeader icon={<MessageSquareText />} tint="violet" title="What the reporter said" /><CardBody><p className="text-sm">{item.comment}</p></CardBody></Card>
+            <Card><CardHeader icon={<MessageSquareText />} tint="violet" title="What the reporter said" /><CardBody><p className="text-sm [overflow-wrap:anywhere]">{item.comment}</p></CardBody></Card>
           ) : null}
 
           <Card>

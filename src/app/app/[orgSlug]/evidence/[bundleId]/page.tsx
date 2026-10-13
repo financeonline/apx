@@ -12,6 +12,7 @@ import { getAccessContext } from '@/modules/tenancy';
 import { StatusBadgeView } from '@/components/dashboard';
 import { Badge, Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { TBody, TD, THead, TR } from '@/components/ui/table';
+import { CLICKABLE_ROW, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { Table } from '@/components/ui/shadcn';
 import { DocumentPanel } from './document-panel';
 import { requirePermission } from '@/app/_lib/authz';
@@ -201,11 +202,12 @@ export default async function EvidenceBundlePage({
               <p className="mt-1 text-sm text-ink-muted">
                 {metric?.description ?? 'This figure is worked out from the figures below.'}
               </p>
-              <ul className="mt-4 space-y-3">
+              {/* A part with evidence of its own opens it from anywhere on its row (owner, 2026-10-14). */}
+              <ul className="mt-3 space-y-1">
                 {view.components.map((component) => (
-                  <li key={component.snapshotId ?? component.name} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-3 last:border-0">
-                    <span className="text-sm text-ink">{component.label}</span>
-                    <span className="flex items-baseline gap-3">
+                  <li key={component.snapshotId ?? component.name} className={`${component.snapshotId === null ? '' : CLICKABLE_ROW} -mx-2 flex flex-wrap items-baseline justify-between gap-2 rounded-lg border-b border-line px-2 py-2 last:border-0`}>
+                    <span className="min-w-0 text-sm text-ink">{component.label}</span>
+                    <span className="flex flex-wrap items-baseline gap-3">
                       <span className="font-serif text-base text-ink">
                         {formatValue(
                           { value: component.value, unit: component.unit ?? 'money', currency: component.currency },
@@ -213,13 +215,13 @@ export default async function EvidenceBundlePage({
                         )}
                       </span>
                       {component.snapshotId === null ? null : (
-                        <Link
+                        <CardLink
                           href={`/app/${orgSlug}/evidence?snapshot=${component.snapshotId}`}
-                          className="text-sm text-accent underline underline-offset-2"
+                          className="text-sm text-accent underline underline-offset-2 after:rounded-lg group-hover:text-accent-hover"
                         >
                           Open
                           <span className="sr-only"> the evidence behind {component.label}</span>
-                        </Link>
+                        </CardLink>
                       )}
                     </span>
                   </li>
@@ -241,11 +243,12 @@ export default async function EvidenceBundlePage({
                 <IconBadge tint="pink" size="sm"><Layers /></IconBadge>
                 <h2 className="font-serif text-lg text-ink">The other figures this rests on</h2>
               </div>
-              <ul className="mt-4 space-y-3">
+              {/* A part with evidence of its own opens it from anywhere on its row (owner, 2026-10-14). */}
+              <ul className="mt-3 space-y-1">
                 {view.relatedFigures.map((figure) => (
-                  <li key={figure.snapshotId ?? figure.name} className="flex flex-wrap items-baseline justify-between gap-2 border-b border-line pb-3 last:border-0">
-                    <span className="text-sm text-ink">{figure.label}</span>
-                    <span className="flex items-baseline gap-3">
+                  <li key={figure.snapshotId ?? figure.name} className={`${figure.snapshotId === null ? '' : CLICKABLE_ROW} -mx-2 flex flex-wrap items-baseline justify-between gap-2 rounded-lg border-b border-line px-2 py-2 last:border-0`}>
+                    <span className="min-w-0 text-sm text-ink">{figure.label}</span>
+                    <span className="flex flex-wrap items-baseline gap-3">
                       <span className="font-serif text-base text-ink">
                         {formatValue(
                           { value: figure.value, unit: figure.unit ?? 'money', currency: figure.currency },
@@ -253,13 +256,13 @@ export default async function EvidenceBundlePage({
                         )}
                       </span>
                       {figure.snapshotId === null ? null : (
-                        <Link
+                        <CardLink
                           href={`/app/${orgSlug}/evidence?snapshot=${figure.snapshotId}`}
-                          className="text-sm text-accent underline underline-offset-2"
+                          className="text-sm text-accent underline underline-offset-2 after:rounded-lg group-hover:text-accent-hover"
                         >
                           Open
                           <span className="sr-only"> the evidence behind {figure.label}</span>
-                        </Link>
+                        </CardLink>
                       )}
                     </span>
                   </li>
@@ -409,11 +412,11 @@ export default async function EvidenceBundlePage({
                 * the others.
                 */}
               {block.selection.nextCursor === undefined && block.offset === 0 ? null : (
-                <p className="mt-3 flex gap-4 text-sm">
+                <p className="mt-3 flex flex-wrap gap-4 text-sm">
                   {block.offset === 0 ? null : (
                     <Link
                       href={`/app/${orgSlug}/evidence/${bundleId}?block=${block.itemId}&from=${Math.max(0, block.offset - PAGE_STEP)}`}
-                      className="text-accent underline underline-offset-2"
+                      className={`inline-flex items-center text-accent underline underline-offset-2 ${TOUCH_TARGET}`}
                     >
                       Previous rows
                     </Link>
@@ -421,7 +424,7 @@ export default async function EvidenceBundlePage({
                   {block.selection.nextCursor === undefined ? null : (
                     <Link
                       href={`/app/${orgSlug}/evidence/${bundleId}?block=${block.itemId}&from=${block.selection.nextCursor.offset}`}
-                      className="text-accent underline underline-offset-2"
+                      className={`inline-flex items-center text-accent underline underline-offset-2 ${TOUCH_TARGET}`}
                     >
                       Next rows
                     </Link>

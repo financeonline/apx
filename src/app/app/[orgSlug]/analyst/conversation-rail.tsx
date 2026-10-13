@@ -3,7 +3,11 @@ import type { ConversationRef } from '@/modules/ai';
 import { conversationLabel } from '@/components/dashboard';
 import { formatDate } from '@/components/labels';
 
-/** The caller's own conversations, newest first — the left rail on desktop (UX §5). */
+/**
+ * The caller's own conversations, newest first — the left rail on desktop (UX §5). On a phone it sits
+ * above the conversation, so it is kept short and scrolls within itself: a long history must not push
+ * the question box off the screen (owner, 2026-10-14).
+ */
 export function ConversationRail({
   orgSlug,
   conversations,
@@ -14,7 +18,7 @@ export function ConversationRail({
   current: string | null;
 }) {
   return (
-    <nav aria-label="Your conversations" className="panel flex min-w-0 flex-col gap-1 self-start rounded-card p-2 text-sm">
+    <nav aria-label="Your conversations" className="panel flex min-w-0 flex-col gap-1 self-start rounded-card p-2 text-sm max-md:max-h-56 max-md:overflow-y-auto">
       <Link
         href={`/app/${orgSlug}/analyst`}
         aria-current={current === null ? 'page' : undefined}

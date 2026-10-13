@@ -68,14 +68,14 @@ export function LedgerBookPage({
             {view.invoices.length === 0 ? (
               <NoInvoices orgSlug={orgSlug} />
             ) : (
-              <TableWrap>
+              <TableWrap stack>
                 <caption className="sr-only">Unpaid invoices with how late each one is</caption>
                 <THead columns={['Invoice', 'Name', 'Issued', 'Due', 'Aging', 'Outstanding']} />
                 <TBody>
                   {view.invoices.map((invoice) => (
                     <TR key={invoice.id}>
-                      <TD className="tabular">{invoice.number}</TD>
-                      <TD>
+                      <TD className="tabular max-sm:font-medium">{invoice.number}</TD>
+                      <TD label="Name">
                         <Link
                           href={`/app/${orgSlug}/customers/${invoice.counterpartyId}`}
                           className="underline underline-offset-2"
@@ -83,12 +83,12 @@ export function LedgerBookPage({
                           {invoice.counterpartyName}
                         </Link>
                       </TD>
-                      <TD className="whitespace-nowrap tabular">{formatDate(invoice.issueDate)}</TD>
-                      <TD className="whitespace-nowrap tabular">
+                      <TD className="whitespace-nowrap tabular" label="Issued">{formatDate(invoice.issueDate)}</TD>
+                      <TD className="whitespace-nowrap tabular" label="Due">
                         {invoice.dueDate ? formatDate(invoice.dueDate) : '—'}
                       </TD>
-                      <TD className="whitespace-nowrap">{invoice.bucketLabel}</TD>
-                      <TD className="whitespace-nowrap text-right tabular">{invoice.balanceDue}</TD>
+                      <TD className="whitespace-nowrap" label="Aging">{invoice.bucketLabel}</TD>
+                      <TD className="whitespace-nowrap text-right tabular" label="Outstanding">{invoice.balanceDue}</TD>
                     </TR>
                   ))}
                 </TBody>

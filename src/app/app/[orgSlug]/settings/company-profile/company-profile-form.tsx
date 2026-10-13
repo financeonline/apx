@@ -92,12 +92,13 @@ export function CompanyProfileForm({ orgSlug, profile, limits }: {
         <ul className="space-y-3">
           {rows.map((row, index) => (
             <li key={row.key} className="flex flex-wrap items-end gap-3">
-              <div className="w-40 shrink-0 space-y-1.5">
+              {/* Name and address side by side from `sm`; stacked on a phone. */}
+              <div className="w-full space-y-1.5 sm:w-40 sm:shrink-0">
                 <label htmlFor={`social_label_${row.key}`} className="text-xs text-ink-muted">Name</label>
                 <Input id={`social_label_${row.key}`} name="social_label" maxLength={limits.linkLabel}
                   defaultValue={row.label} placeholder="Instagram" />
               </div>
-              <div className="min-w-56 flex-1 space-y-1.5">
+              <div className="min-w-0 flex-1 basis-48 space-y-1.5">
                 <label htmlFor={`social_url_${row.key}`} className="text-xs text-ink-muted">Address</label>
                 <Input id={`social_url_${row.key}`} name="social_url" inputMode="url" maxLength={limits.linkUrl}
                   defaultValue={row.url} placeholder="https://instagram.com/yourbrand" />

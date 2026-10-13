@@ -3,6 +3,7 @@ import { ChartColumn, ChevronRight, Megaphone, Package, Target, Users, UsersRoun
 import { getAccessContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, Badge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
+import { ABOVE_CARD_LINK, CLICKABLE_CARD, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { CustomersNoneEmpty, MetricCard, StatusBadgeView } from '@/components/dashboard';
 import { loadCommercialOverview, loadCustomers, loadPeriodScope } from '@/modules/dashboard';
 import { PeriodHeading } from '../money/_components/period-heading';
@@ -11,8 +12,12 @@ import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
 
-/** An outlined pill for a card's "see all" link, as the Departments cards' "Open" (ADR-155). */
-const PILL = 'inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft';
+/**
+ * An outlined pill for a card's "see all" link, as the Departments cards' "Open" (ADR-155). It is the
+ * card's one link, stretched over the whole card (owner, 2026-10-14; `ui/clickable-card`): the names
+ * listed in the card sit above it and open their own pages.
+ */
+const PILL = `inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft group-hover:border-accent group-hover:bg-accent-soft ${TOUCH_TARGET}`;
 const CHEVRON = <ChevronRight aria-hidden="true" className="size-4" />;
 
 /**
@@ -61,14 +66,14 @@ export default async function CustomersPage({
         {commercial.revenue ? <section data-testid="commercial-revenue"><MetricCard card={commercial.revenue} /></section> : null}
 
         <div className="grid grid-cols-1 gap-6 md:grid-cols-2 [&>*]:min-w-0">
-          <Card>
-            <CardHeader title="Top customers" description="Revenue this month, biggest first." icon={<Users />} action={<Link href={`${base}#customers`} className={PILL}>All customers {CHEVRON}</Link>} />
+          <Card className={CLICKABLE_CARD}>
+            <CardHeader title="Top customers" description="Revenue this month, biggest first." icon={<Users />} action={<CardLink href={`${base}#customers`} className={PILL}>All customers {CHEVRON}</CardLink>} />
             <CardBody>
               {commercial.topCustomers.length === 0 ? <p className="text-sm text-ink-muted">No customer revenue for {scope.period.label}.</p> : (
                 <ul className="flex flex-col gap-2 text-sm" data-testid="commercial-top-customers">
                   {commercial.topCustomers.map((c) => (
                     <li key={c.id} className="flex flex-wrap items-baseline justify-between gap-2">
-                      <Link href={c.href} className="text-ink underline underline-offset-2">{c.name}</Link>
+                      <Link href={c.href} className={`${ABOVE_CARD_LINK} text-ink underline underline-offset-2`}>{c.name}</Link>
                       <span className="tabular">{c.revenue}{c.share ? <span className="ml-2 text-ink-muted">{c.share}</span> : null}</span>
                     </li>
                   ))}
@@ -84,8 +89,8 @@ export default async function CustomersPage({
             </CardBody>
           </Card>
 
-          <Card>
-            <CardHeader title="Top products and services" description="Revenue attributed by invoice lines this month." icon={<Package />} tint="pink" action={<Link href={`${base}/products`} className={PILL}>All products {CHEVRON}</Link>} />
+          <Card className={CLICKABLE_CARD}>
+            <CardHeader title="Top products and services" description="Revenue attributed by invoice lines this month." icon={<Package />} tint="pink" action={<CardLink href={`${base}/products`} className={PILL}>All products {CHEVRON}</CardLink>} />
             <CardBody>
               {commercial.topProducts.length === 0 ? (
                 <p className="text-sm text-ink-muted">No products or services recorded yet. Add them under Products, then split invoices into lines to see what each contributes.</p>
@@ -93,7 +98,7 @@ export default async function CustomersPage({
                 <ul className="flex flex-col gap-2 text-sm" data-testid="commercial-top-products">
                   {commercial.topProducts.map((p) => (
                     <li key={p.id} className="flex flex-wrap items-baseline justify-between gap-2">
-                      <Link href={p.href} className="text-ink underline underline-offset-2">{p.name}</Link>
+                      <Link href={p.href} className={`${ABOVE_CARD_LINK} text-ink underline underline-offset-2`}>{p.name}</Link>
                       <span className="tabular">{p.revenue}{p.contribution ? <span className="ml-2 text-ink-muted">{p.contribution} contribution</span> : <span className="ml-2 text-xs text-ink-faint">contribution unavailable</span>}</span>
                     </li>
                   ))}
@@ -105,14 +110,14 @@ export default async function CustomersPage({
             </CardBody>
           </Card>
 
-          <Card>
-            <CardHeader title="Marketing" description="Spend and revenue credited through won opportunities, last twelve months." icon={<Megaphone />} tint="pink" action={<Link href={`${base}/marketing`} className={PILL}>All campaigns {CHEVRON}</Link>} />
+          <Card className={CLICKABLE_CARD}>
+            <CardHeader title="Marketing" description="Spend and revenue credited through won opportunities, last twelve months." icon={<Megaphone />} tint="pink" action={<CardLink href={`${base}/marketing`} className={PILL}>All campaigns {CHEVRON}</CardLink>} />
             <CardBody>
               {commercial.topCampaigns.length === 0 ? <p className="text-sm text-ink-muted">No campaigns recorded yet.</p> : (
                 <ul className="flex flex-col gap-2 text-sm" data-testid="commercial-marketing">
                   {commercial.topCampaigns.map((c) => (
                     <li key={c.id} className="flex flex-wrap items-baseline justify-between gap-2">
-                      <Link href={c.href} className="text-ink underline underline-offset-2">{c.name}</Link>
+                      <Link href={c.href} className={`${ABOVE_CARD_LINK} text-ink underline underline-offset-2`}>{c.name}</Link>
                       <span className="tabular">{c.spend} spend · {c.attributionStatus === 'no_won_opportunities' ? <span className="text-ink-muted">no revenue attributed</span> : <>{c.attributedRevenue} attributed</>}</span>
                     </li>
                   ))}
@@ -121,8 +126,8 @@ export default async function CustomersPage({
             </CardBody>
           </Card>
 
-          <Card>
-            <CardHeader title="Pipeline" icon={<Target />} action={<Link href={`${base}/sales`} className={PILL}>Sales {CHEVRON}</Link>} />
+          <Card className={CLICKABLE_CARD}>
+            <CardHeader title="Pipeline" icon={<Target />} action={<CardLink href={`${base}/sales`} className={PILL}>Sales {CHEVRON}</CardLink>} />
             <CardBody>
               <p className="text-sm" data-testid="commercial-pipeline">
                 <span className="font-mono text-xl tabular-nums text-ink">{commercial.pipeline.openValue}</span>
@@ -154,18 +159,18 @@ export default async function CustomersPage({
           <CardBody className="px-0 py-0">
             <div id="customers" />
             {view.customers.length === 0 ? <p className="px-5 py-4 text-sm text-ink-muted">No customer revenue for {scope.period.label}.</p> : (
-              <TableWrap>
+              <TableWrap stack>
                 <caption className="sr-only">Revenue by customer for {scope.period.label}</caption>
                 <THead columns={['Customer', 'Revenue', 'Share of revenue', '']} />
                 <TBody>
                   {view.customers.map((customer) => (
                     <TR key={customer.counterpartyId ?? 'unattributed'}>
-                      <TD>
+                      <TD className="max-sm:font-medium">
                         {customer.href ? <Link href={customer.href} className="underline underline-offset-2">{customer.name}</Link>
                           : <span title="We cannot tell which customer this relates to yet.">{customer.name}</span>}
                       </TD>
-                      <TD className="whitespace-nowrap text-right tabular">{customer.revenue.value}</TD>
-                      <TD className="whitespace-nowrap text-right tabular">{customer.share}</TD>
+                      <TD className="whitespace-nowrap text-right tabular" label="Revenue">{customer.revenue.value}</TD>
+                      <TD className="whitespace-nowrap text-right tabular" label="Share of revenue">{customer.share}</TD>
                       <TD className="whitespace-nowrap text-right text-sm">
                         {customer.revenue.status.kind === 'not_available' ? null : <StatusBadgeView status={customer.revenue.status} size="sm" />}{' '}
                         <WhyLink row={customer.revenue} />

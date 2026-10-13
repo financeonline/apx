@@ -9,9 +9,8 @@ import { getAccessContext, moduleOn, type AccessContext, type ModuleKey } from '
 import { fundingEnabled } from '@/modules/funding';
 import { getMarketingView, marketingEnabled, summariseMarketing, type MarketingSummary } from '@/modules/marketing';
 import { getInvestmentView, investmentEnabled, summariseInvestment, type InvestmentSummary } from '@/modules/investment';
-import { can } from '@/core/permissions';
+import { can, isPlatformStaff } from '@/core/permissions';
 import { isMotionError } from '@/core/errors';
-import { listBatches } from '@/modules/imports';
 import { ButtonLink } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/surfaces';
 import {
@@ -120,26 +119,6 @@ async function investmentSummary(ctx: AccessContext): Promise<InvestmentSummary 
   }
 }
 
-/**
- * Data capture (SOW "Department Dashboard": "Data entry and data capture into the system"), first on
- * the page (owner, 2026-10-14). Its status is the uploads' real state: uploads waiting for a review,
- * else when data was last added, else nothing yet. Null for a viewer who may not upload.
- */
-async function dataCaptureStatus(ctx: AccessContext): Promise<{ tone: TileTone; label: string; headline: string } | null> {
-  if (!ctx.orgId || !can(ctx, 'imports.create')) return null;
-  const batches = await listBatches(ctx.db, ctx.orgId, { offset: 0, limit: 50 }, ctx.requestId);
-  const waiting = batches.filter((b) => b.status === 'awaiting_review').length;
-  if (waiting > 0) {
-    return { tone: 'attention', label: 'Needs attention', headline: `${waiting} upload${waiting === 1 ? '' : 's'} waiting for a review` };
-  }
-  const last = batches.map((b) => b.committedAt).filter((d): d is string => d !== null).sort().at(-1);
-  if (last) {
-    const when = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(last));
-    return { tone: 'good', label: STATUS.good, headline: `Data last added ${when}` };
-  }
-  return { tone: 'quiet', label: STATUS.quiet, headline: 'No data added yet' };
-}
-
 /** Order as the reference: the money departments first, then risk, actions and the rest. */
 const ORDER = ['finance', 'banking', 'planning', 'analyst', 'alerts', 'actions', 'customers', 'reports'];
 
@@ -150,7 +129,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
   requirePermission(ctx, 'financials.view');
   const view = await loadDepartments(ctx);
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
-  const [marketing, investment, capture] = await Promise.all([marketingSummary(ctx), investmentSummary(ctx), dataCaptureStatus(ctx)]);
+  const [marketing, investment] = await Promise.all([marketingSummary(ctx), investmentSummary(ctx)]);
   const base = `/app/${orgSlug}`;
 
   // ADR-158: a department of a system the super admin switched off is absent.
@@ -190,13 +169,14 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
 
   const canImport = can(ctx, 'imports.review');
   const canReports = can(ctx, 'reports.view') && moduleOn(ctx, 'reports');
+  const staff = isPlatformStaff(ctx);
 
   return (
     <>
       <header className="mb-6 flex flex-wrap items-start justify-between gap-4">
         <div className="min-w-0">
-          <h1 className="text-4xl md:text-5xl">Your departments</h1>
-          <p className="mt-2 text-lg text-ink-muted md:text-xl">One workspace. Every part of your business.</p>
+          <h1 className="text-3xl sm:text-4xl md:text-5xl">Your departments</h1>
+          <p className="mt-2 text-base text-ink-muted sm:text-lg md:text-xl">One workspace. Every part of your business.</p>
         </div>
         <div className="flex flex-wrap gap-3">
           {canImport ? (
@@ -221,25 +201,34 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
         ]}
       />
 
+      {/*
+        Data capture first, above the departments, full width (owner, 2026-10-14): the panel as it
+        was, moved up — getting data in is where every department starts. The quick links stack on
+        a phone.
+      */}
+      {canImport ? (
+        <section aria-labelledby="capture-heading" className="panel mb-4 rounded-card p-5">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="flex min-w-0 gap-3">
+              <IconTile tint="violet" size="sm"><FileText /></IconTile>
+              <div className="min-w-0">
+                <h2 id="capture-heading" className="text-lg">Data capture</h2>
+                <p className="text-sm text-ink-muted">Get your data into APX.</p>
+              </div>
+            </div>
+            <Link href={`${base}/data/imports`} className="inline-flex items-center text-sm font-medium text-accent hover:underline pointer-coarse:min-h-10">Imports &amp; evidence →</Link>
+          </div>
+          <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <li><QuickLink href={`${base}/data/imports/new`} title="Upload a file" line="CSV, XLSX or PDF" icon={<FileUp />} tint="violet" /></li>
+            <li><QuickLink href={`${base}/data/documents`} title="Documents" line="Statements, invoices, receipts" icon={<FileText />} tint="pink" /></li>
+            <li><QuickLink href={`${base}/data/accounts`} title="Accounts" line="Your chart of accounts" icon={<ListChecks />} tint="pink" /></li>
+          </ul>
+        </section>
+      ) : null}
+
       <section aria-labelledby="departments-heading">
         <h2 id="departments-heading" className="sr-only">Business departments</h2>
         <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 min-[1440px]:grid-cols-3 min-[2200px]:grid-cols-4">
-          {capture === null ? null : (
-            <li>
-              <DepartmentCard
-                title="Data capture" href={`${base}/data/imports/new`} icon={<FileUp />} tint="pink"
-                description={['Upload statements, ledgers and invoices', 'Documents & accounts']}
-                headline={capture.headline}
-                pills={[
-                  { label: 'Uploads', href: `${base}/data/imports` },
-                  { label: 'Documents', href: `${base}/data/documents` },
-                  { label: 'Accounts', href: `${base}/data/accounts` },
-                ]}
-                status={{ tone: capture.tone, label: capture.label }}
-              />
-            </li>
-          )}
-
           {ordered.map(tileCard)}
 
           {/* ADR-156: VAT and Corporation Tax, and assets and loans. */}
@@ -252,7 +241,9 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
             />
           </li> : null}
 
-          {can(ctx, 'assignments.view') ? (
+          {/* The Command Centre is APX staff only (owner, 2026-10-14): a company's own owner or admin
+              holds `assignments.view` too, and would be sent to a page that is not theirs. */}
+          {staff ? (
             <li>
               <DepartmentCard
                 title="Accountant / CFO" href="/portfolio" icon={<Building2 />} tint="violet"
@@ -312,47 +303,25 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
         </ul>
       </section>
 
-      <div className="mt-4 grid grid-cols-1 gap-4 min-[1440px]:grid-cols-[3fr_2fr]">
-        {canImport ? (
-          <section aria-labelledby="capture-heading" className="panel rounded-card p-5">
-            <div className="flex flex-wrap items-start justify-between gap-3">
-              <div className="flex gap-3">
-                <IconTile tint="violet" size="sm"><FileText /></IconTile>
-                <div>
-                  <h2 id="capture-heading" className="text-lg">Data capture</h2>
-                  <p className="text-sm text-ink-muted">Get your data into APX.</p>
-                </div>
-              </div>
-              <Link href={`${base}/data/imports`} className="text-sm font-medium text-accent hover:underline">Imports &amp; evidence →</Link>
+      {canReports ? (
+        <section aria-labelledby="reporting-heading" className="panel mt-4 rounded-card p-5">
+          <div className="flex min-w-0 gap-3">
+            <IconTile tint="violet" size="sm"><ChartColumn /></IconTile>
+            <div className="min-w-0">
+              <h2 id="reporting-heading" className="text-lg">Intelligent reporting</h2>
+              <p className="text-sm text-ink-muted">Your data as clear, actionable reports.</p>
             </div>
-            <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-              <li><QuickLink href={`${base}/data/imports/new`} title="Upload a file" line="CSV, XLSX or PDF" icon={<FileUp />} tint="violet" /></li>
-              <li><QuickLink href={`${base}/data/documents`} title="Documents" line="Statements, invoices, receipts" icon={<FileText />} tint="pink" /></li>
-              <li><QuickLink href={`${base}/data/accounts`} title="Accounts" line="Your chart of accounts" icon={<ListChecks />} tint="pink" /></li>
-            </ul>
-          </section>
-        ) : null}
-
-        {canReports ? (
-          <section aria-labelledby="reporting-heading" className="panel rounded-card p-5">
-            <div className="flex gap-3">
-              <IconTile tint="violet" size="sm"><ChartColumn /></IconTile>
-              <div>
-                <h2 id="reporting-heading" className="text-lg">Intelligent reporting</h2>
-                <p className="text-sm text-ink-muted">Your data as clear, actionable reports.</p>
-              </div>
-            </div>
-            <ul className="mt-4 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3">
-              <li><ShortcutLink href={`${base}/reports`} label="All reports" icon={<CalendarDays />} /></li>
-              {can(ctx, 'ai.use') && moduleOn(ctx, 'analyst') ? <li><ShortcutLink href={`${base}/reports/custom/new`} label="Custom" icon={<Sparkles />} /></li> : null}
-              {showFunding ? <li><ShortcutLink href={`${base}/funding`} label="Funding" icon={<HandCoins />} /></li> : null}
-              {marketing === null ? null : <li><ShortcutLink href={`${base}/marketing`} label="Marketing" icon={<Megaphone />} /></li>}
-              {investment === null ? null : <li><ShortcutLink href={`${base}/investment`} label="Investment" icon={<PiggyBank />} /></li>}
-              {can(ctx, 'assignments.view') ? <li><ShortcutLink href="/portfolio/report" label="Portfolio" icon={<Building2 />} /></li> : null}
-            </ul>
-          </section>
-        ) : null}
-      </div>
+          </div>
+          <ul className="mt-4 grid grid-cols-1 gap-3 min-[420px]:grid-cols-2 sm:grid-cols-3 xl:grid-cols-6">
+            <li><ShortcutLink href={`${base}/reports`} label="All reports" icon={<CalendarDays />} /></li>
+            {can(ctx, 'ai.use') && moduleOn(ctx, 'analyst') ? <li><ShortcutLink href={`${base}/reports/custom/new`} label="Custom" icon={<Sparkles />} /></li> : null}
+            {showFunding ? <li><ShortcutLink href={`${base}/funding`} label="Funding" icon={<HandCoins />} /></li> : null}
+            {marketing === null ? null : <li><ShortcutLink href={`${base}/marketing`} label="Marketing" icon={<Megaphone />} /></li>}
+            {investment === null ? null : <li><ShortcutLink href={`${base}/investment`} label="Investment" icon={<PiggyBank />} /></li>}
+            {staff ? <li><ShortcutLink href="/portfolio/report" label="Portfolio" icon={<Building2 />} /></li> : null}
+          </ul>
+        </section>
+      ) : null}
 
       <Card className="mt-4" id="system">
         <CardBody>

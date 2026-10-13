@@ -49,7 +49,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
         <Card>
           <CardHeader title="Month by month" icon={<CalendarDays />} tint="pink" />
           <CardBody className="px-0 py-0">
-            <TableWrap>
+            <TableWrap className="min-w-0">
               <caption className="sr-only">Spend and credited revenue by month</caption>
               <THead columns={['Month', 'Spend', 'Revenue credited']} />
               <TBody>{view.spendByPeriod.map((p) => <TR key={p.periodId}><TD>{p.label}</TD><TD className="text-right tabular">{p.amount}</TD><TD className="text-right tabular">{p.attributed}</TD></TR>)}</TBody>
@@ -63,7 +63,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
             <CardBody>
               {view.customers.length === 0 ? <p className="text-sm text-ink-muted">None yet. Mark an opportunity as won and name this campaign to credit revenue here.</p> : (
                 <ul className="flex flex-col gap-2 text-sm">
-                  {view.customers.map((c) => <li key={c.counterpartyId} className="flex justify-between gap-2"><Link href={c.href} className="underline underline-offset-2">{c.name}</Link><span className="text-ink-muted">won {formatDate(c.wonOn)}</span></li>)}
+                  {view.customers.map((c) => <li key={c.counterpartyId} className="flex flex-wrap justify-between gap-2"><Link href={c.href} className="underline underline-offset-2">{c.name}</Link><span className="text-ink-muted">won {formatDate(c.wonOn)}</span></li>)}
                 </ul>
               )}
             </CardBody>
@@ -87,10 +87,10 @@ export default async function CampaignPage({ params, searchParams }: { params: P
           <CardHeader title="Opportunities naming this campaign" icon={<Handshake />} />
           <CardBody className="px-0 py-0">
             {view.opportunities.length === 0 ? <p className="px-5 py-4 text-sm text-ink-muted">None.</p> : (
-              <TableWrap>
+              <TableWrap stack>
                 <caption className="sr-only">Opportunities for {view.campaign.name}</caption>
                 <THead columns={['Opportunity', 'Customer', 'Stage', 'Estimated value', 'Created']} />
-                <TBody>{view.opportunities.map((o) => <TR key={o.id}><TD>{o.name}</TD><TD>{o.customer ?? <span className="text-ink-faint">—</span>}</TD><TD>{o.stageLabel}</TD><TD className="text-right tabular">{o.value ?? '—'}</TD><TD className="whitespace-nowrap tabular">{formatDate(o.createdOn)}</TD></TR>)}</TBody>
+                <TBody>{view.opportunities.map((o) => <TR key={o.id}><TD className="max-sm:font-medium">{o.name}</TD><TD label="Customer">{o.customer ?? <span className="text-ink-faint">—</span>}</TD><TD label="Stage">{o.stageLabel}</TD><TD className="text-right tabular" label="Estimated value">{o.value ?? '—'}</TD><TD className="whitespace-nowrap tabular" label="Created">{formatDate(o.createdOn)}</TD></TR>)}</TBody>
               </TableWrap>
             )}
           </CardBody>

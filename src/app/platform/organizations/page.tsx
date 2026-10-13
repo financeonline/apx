@@ -72,7 +72,7 @@ export default async function PlatformOrganizationsPage({
                 aria-label="Search companies" className="min-w-0 flex-1 sm:max-w-md"
               />
               <Button type="submit">Search</Button>
-              {q ? <Link href="/platform/organizations" className="text-sm text-accent underline">Clear</Link> : null}
+              {q ? <Link href="/platform/organizations" className="inline-flex items-center text-sm text-accent underline pointer-coarse:min-h-10">Clear</Link> : null}
             </form>
             {organizations.length === 0 ? (
               q ? (

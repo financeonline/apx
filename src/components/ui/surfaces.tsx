@@ -44,7 +44,11 @@ export function CardBody({ children, className = '' }: { children: ReactNode; cl
   return <CardContent className={className}>{children}</CardContent>;
 }
 
-/** The page title band, as the reference's "Your departments" header (ADR-155). */
+/**
+ * The page title band, as the reference's "Your departments" header (ADR-155). The title steps down
+ * a size on a phone, and a long unbroken word in it (a bank reference, a file name) wraps rather than
+ * widening the page.
+ */
 export function PageHeader({
   eyebrow,
   title,
@@ -64,12 +68,12 @@ export function PageHeader({
             {eyebrow}
           </p>
         ) : null}
-        <h1 className="text-4xl md:text-5xl">{title}</h1>
+        <h1 className="text-3xl break-words sm:text-4xl md:text-5xl">{title}</h1>
         {description ? (
-          <p className="mt-2 max-w-3xl text-lg text-ink-muted md:text-xl">{description}</p>
+          <p className="mt-2 max-w-3xl text-base break-words text-ink-muted sm:text-lg md:text-xl">{description}</p>
         ) : null}
       </div>
-      {action ? <div className="flex shrink-0 flex-wrap gap-3">{action}</div> : null}
+      {action ? <div className="flex min-w-0 max-w-full flex-wrap gap-3">{action}</div> : null}
     </header>
   );
 }
@@ -102,7 +106,7 @@ export function StatTile({
       {icon ? <IconBadge tint={tint}>{icon}</IconBadge> : null}
       <div className="min-w-0">
         <p className="text-xs font-medium uppercase tracking-[0.1em] text-ink-muted">{label}</p>
-        <p className={`mt-0.5 font-mono text-2xl tabular-nums ${valueClassName}`}>{value}</p>
+        <p className={`mt-0.5 font-mono text-2xl tabular-nums break-words ${valueClassName}`}>{value}</p>
       </div>
     </div>
   );
@@ -161,7 +165,7 @@ export function EmptyState({
   secondary?: ReactNode;
 }) {
   return (
-    <div className="rounded-card border border-dashed border-line-strong bg-surface px-6 py-10 text-center">
+    <div className="rounded-card border border-dashed border-line-strong bg-surface px-4 py-10 text-center sm:px-6">
       <h2 className="text-lg">{title}</h2>
       <div className="mx-auto mt-2 max-w-prose text-sm text-ink-muted">{children}</div>
       {actionHref && actionLabel ? (
@@ -178,14 +182,17 @@ export function Skeleton({ className = 'h-4 w-full' }: { className?: string }) {
   return <ShadcnSkeleton className={className} />;
 }
 
-/** Label/value pairs, used for read-only detail (organisation, profile, assignment). */
+/**
+ * Label/value pairs, used for read-only detail (organisation, profile, assignment). On a phone the
+ * label sits above its value; from `sm` up, beside it.
+ */
 export function DetailList({ items }: { items: Array<{ label: string; value: ReactNode }> }) {
   return (
     <dl className="divide-y divide-line">
       {items.map((item) => (
         <div key={item.label} className="flex flex-wrap gap-x-6 gap-y-1 py-2.5 first:pt-0 last:pb-0">
-          <dt className="w-44 shrink-0 text-sm text-ink-muted">{item.label}</dt>
-          <dd className="min-w-0 text-sm">{item.value}</dd>
+          <dt className="w-full shrink-0 text-sm text-ink-muted sm:w-44">{item.label}</dt>
+          <dd className="min-w-0 text-sm break-words">{item.value}</dd>
         </div>
       ))}
     </dl>

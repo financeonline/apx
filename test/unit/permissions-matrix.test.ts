@@ -14,7 +14,7 @@ import { can } from '@/core/permissions/check';
  */
 
 const DOC = resolve(process.cwd(), 'docs/RBAC_MATRIX.md');
-const COLUMNS = ['super_admin', 'employee', 'owner', 'admin', 'client'] as const;
+const COLUMNS = ['super_admin', 'employee', 'owner', 'admin', 'accountant', 'client', 'third_party'] as const;
 type Column = (typeof COLUMNS)[number];
 
 interface DocRow {

@@ -37,12 +37,12 @@ export function AssignControl({
         <form action={submit} className="mt-3 flex flex-wrap items-end gap-3">
           <input type="hidden" name="org_slug" value={orgSlug} />
           <input type="hidden" name="action_id" value={actionId} />
-          <label className="flex flex-col gap-1 text-sm">
+          <label className="flex w-full min-w-0 flex-col gap-1 text-sm sm:w-auto">
             <span className="text-ink-muted">Assign to</span>
             <NativeSelect
               name="owner_user_id"
               defaultValue={ownerUserId ?? ''}
-              className="w-72 max-w-full"
+              className="w-full sm:w-72"
             >
               <option value="">Nobody</option>
               {owners.map((owner) => (

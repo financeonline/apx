@@ -13,6 +13,7 @@ import { fundingEnabled } from '@/modules/funding';
 import { getAccessContext, moduleOn } from '@/modules/tenancy';
 import { ReportsBeforeFirstMonthEmpty } from '@/components/dashboard';
 import { Badge, Card, CardBody, IconBadge, PageHeader, type IconTint } from '@/components/ui/surfaces';
+import { CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { requirePermission } from '@/app/_lib/authz';
 import { ComposeForm } from './_components/report-controls';
 
@@ -29,10 +30,17 @@ export const dynamic = 'force-dynamic';
  */
 
 /** The row's main link, as the reference's outlined "Open ›" button (ADR-155). */
-const OPEN_PILL = 'inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft';
+const OPEN_PILL = `inline-flex shrink-0 items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors group-hover:border-accent group-hover:bg-accent-soft ${TOUCH_TARGET}`;
 
-/** A secondary link in a section, as a soft pill. */
-const SOFT_PILL = 'inline-flex w-fit items-center gap-1 rounded-full bg-accent-soft px-3 py-1 text-sm font-medium text-accent transition-colors hover:bg-accent/20';
+/** A secondary link in a section, as a soft pill; a full 40px tap target on a touch screen. */
+const SOFT_PILL = `inline-flex w-fit items-center gap-1 rounded-full bg-accent-soft px-3 py-1 text-sm font-medium text-accent transition-colors hover:bg-accent/20 ${TOUCH_TARGET}`;
+
+/**
+ * A report row opens from anywhere on it (owner, 2026-10-14), as a clickable card does
+ * (`ui/clickable-card`): its one link is stretched over the row, which highlights on hover and on
+ * keyboard focus.
+ */
+const ROW = 'group relative -mx-2 rounded-xl px-2 transition-colors hover:bg-accent-soft/40 focus-within:ring-2 focus-within:ring-accent/50';
 
 const DAYS_OFFERED = 14;
 const WEEKS_OFFERED = 8;
@@ -42,10 +50,10 @@ function StoredList({ orgSlug, reports, empty }: { orgSlug: string; reports: rea
   return (
     <ul className="flex flex-col divide-y divide-line">
       {reports.map((report) => (
-        <li key={report.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
-          <Link href={`/app/${orgSlug}/reports/r/${report.id}`} className="min-w-0 font-medium text-ink underline-offset-2 hover:text-accent hover:underline">
+        <li key={report.id} className={`${ROW} flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm`}>
+          <CardLink href={`/app/${orgSlug}/reports/r/${report.id}`} className="min-w-0 font-medium text-ink underline-offset-2 after:rounded-xl group-hover:text-accent group-hover:underline">
             {windowLabel(report.windowStart, report.windowEnd)}
-          </Link>
+          </CardLink>
           <span className="flex flex-wrap items-center gap-2 text-ink-muted">
             {report.origin === 'scheduled' ? 'Produced on schedule' : 'Produced on request'}
             {report.versions > 1 ? <Badge>{report.versions} versions</Badge> : null}
@@ -105,7 +113,8 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
         description="Briefs and reports from the figures APX has already calculated. Nothing here is recalculated for the page."
       />
 
-      <div className="flex flex-col gap-6">
+      {/* A readable width on a very wide screen: a row's details stay near its title. */}
+      <div className="flex max-w-5xl flex-col gap-6">
         <Section
           title={KIND_LABELS.daily_brief}
           icon={<CalendarDays />}
@@ -140,7 +149,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
           ) : (
             <ul className="flex flex-col divide-y divide-line">
               {monthly.map((report) => (
-                <li key={report.periodId} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
+                <li key={report.periodId} className={`${ROW} flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm`}>
                   <div className="min-w-0">
                     <p className="font-medium text-ink">{report.periodLabel}</p>
                     <p className="mt-1 text-ink-muted">
@@ -150,11 +159,11 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
                     </p>
                   </div>
                   {/* The link text is the monthly report's since ADR-024; journeys and screen readers rely on it. */}
-                  <Link href={`/app/${orgSlug}/reports/monthly/${report.periodId}`} className={OPEN_PILL}>
+                  <CardLink href={`/app/${orgSlug}/reports/monthly/${report.periodId}`} className={`${OPEN_PILL} after:rounded-xl`}>
                     Open the report
                     <span className="sr-only"> for {report.periodLabel}</span>
                     <ChevronRight aria-hidden="true" className="size-4" />
-                  </Link>
+                  </CardLink>
                 </li>
               ))}
             </ul>

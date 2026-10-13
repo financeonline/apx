@@ -86,7 +86,8 @@ export function OrgQuotasForm({ orgId, quotas }: {
   return (
     <form action={submit} className="flex flex-col gap-3">
       <input type="hidden" name="org_id" value={orgId} />
-      <div className="flex flex-wrap gap-4">
+      {/* Three across where there is room; stacked on a phone. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
         {field('ai_quota_daily', 'Analyst questions a day', quotas.aiQuotaDaily)}
         {field('ai_token_ceiling_monthly', 'AI tokens a month', quotas.aiTokenCeilingMonthly)}
         {field('ai_extraction_pages_per_day', 'Pages read by AI a day', quotas.aiExtractionPagesPerDay)}
@@ -95,7 +96,7 @@ export function OrgQuotasForm({ orgId, quotas }: {
         <span className="text-ink-muted">Note (why this organisation differs)</span>
         <Input name="notes" defaultValue={quotas.notes ?? ''} maxLength={1000} />
       </label>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SubmitButton tone="secondary" pendingLabel="Saving…">Save limits</SubmitButton>
         <ActionMessage state={state} />
       </div>

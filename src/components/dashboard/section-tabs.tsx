@@ -2,12 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
+import { TOUCH_TARGET } from '@/components/ui/clickable-card';
 
 /**
  * A section's tabs as a segmented control (ADR-155), as the owner's reference: a white rounded bar,
  * the current tab a solid violet pill. The layout decides which tabs exist (RBAC §5); this marks
  * the current one. A tab is current on its own page; the section's first tab (its overview) only
- * on exactly its page.
+ * on exactly its page. The bar wraps onto a second line on a narrow screen, and each tab is a full
+ * thumb's height on a touch screen.
  */
 export function SectionTabs({ label, tabs }: { label: string; tabs: readonly { label: string; href: string }[] }) {
   const pathname = usePathname() ?? '';
@@ -23,7 +25,7 @@ export function SectionTabs({ label, tabs }: { label: string; tabs: readonly { l
           key={tab.href}
           href={tab.href}
           aria-current={tab.href === current ? 'page' : undefined}
-          className={`rounded-xl px-4 py-2 font-medium transition-colors ${
+          className={`inline-flex items-center rounded-xl px-4 py-2 font-medium transition-colors ${TOUCH_TARGET} ${
             tab.href === current
               ? 'bg-accent bg-brand-gradient font-semibold text-on-accent shadow-[0_8px_20px_-10px_rgb(255_45_85/0.7)]'
               : 'text-ink hover:bg-accent-soft hover:text-accent'

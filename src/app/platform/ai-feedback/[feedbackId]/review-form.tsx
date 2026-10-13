@@ -23,7 +23,7 @@ export function ReviewForm({ feedbackId }: { feedbackId: string }) {
         <span className="text-ink-muted">Note</span>
         <Textarea name="note" rows={3} maxLength={1000} />
       </label>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SubmitButton pendingLabel="Saving…">Save review</SubmitButton>
         <ActionMessage state={state} />
       </div>

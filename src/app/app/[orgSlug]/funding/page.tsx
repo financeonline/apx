@@ -7,6 +7,7 @@ import {
   ChevronRight, CircleHelp, Gauge, Lightbulb, ListChecks, ThumbsUp, TriangleAlert,
 } from 'lucide-react';
 import { Badge, Banner, Card, CardBody, EmptyState, IconBadge, PageHeader } from '@/components/ui/surfaces';
+import { TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
@@ -36,7 +37,7 @@ function FactorCard({ factor }: { factor: FactorResult }) {
         ) : (
           <ul className="mt-2 flex flex-col gap-1 text-sm">
             {factor.rules.map((r) => (
-              <li key={r.rule} className="flex justify-between gap-2">
+              <li key={r.rule} className="flex justify-between gap-2 [overflow-wrap:anywhere]">
                 <span className="text-ink-muted">{r.rule}{r.band === null ? '' : ` · ${r.band}`}{r.unavailable === null ? '' : ' · not available'}</span>
                 <span className="text-ink">{r.unavailable === null ? (r.points > 0 ? `+${r.points}` : String(r.points)) : '—'}</span>
               </li>
@@ -80,9 +81,9 @@ export default async function FundingPage({
             <nav aria-label="Months" className="mt-6 flex flex-wrap gap-2 text-sm">
               {view.months.map((m) => (
                 <Link key={m.periodId} href={`/app/${orgSlug}/funding?period=${m.periodId}`} aria-current={m.periodId === a.periodId ? 'page' : undefined}
-                  className={m.periodId === a.periodId
+                  className={`inline-flex items-center ${TOUCH_TARGET} ${m.periodId === a.periodId
                     ? 'rounded-full bg-accent-soft px-3 py-1 font-medium text-accent'
-                    : 'rounded-full px-3 py-1 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}>{m.label}</Link>
+                    : 'rounded-full px-3 py-1 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}`}>{m.label}</Link>
               ))}
             </nav>
           ) : null}
@@ -165,7 +166,7 @@ export default async function FundingPage({
 
           <p className="mt-6 text-sm">
             {a.evidenceBundleId === null ? null : (
-              <Link href={`/app/${orgSlug}/evidence/${a.evidenceBundleId}`} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">See the figures behind this assessment<ChevronRight aria-hidden="true" className="size-4" /></Link>
+              <Link href={`/app/${orgSlug}/evidence/${a.evidenceBundleId}`} className={`inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft ${TOUCH_TARGET}`}>See the figures behind this assessment<ChevronRight aria-hidden="true" className="size-4" /></Link>
             )}
           </p>
           <p className="mt-2 text-xs text-ink-faint">

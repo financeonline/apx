@@ -36,7 +36,8 @@ export default async function CompanyProfilePage({ params }: { params: Promise<{
           <ShortcutLink href={`/app/${orgSlug}/marketing`} label="Marketing" icon={<Megaphone aria-hidden="true" />} />
         )}
       </nav>
-      <div className="mt-8">
+      {/* A form keeps a readable width on a very wide screen. */}
+      <div className="mt-8 max-w-3xl">
         <Card>
           <CardHeader
             icon={<Store />}

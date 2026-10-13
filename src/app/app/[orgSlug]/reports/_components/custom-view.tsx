@@ -23,41 +23,45 @@ function SectionCard({ section }: { section: CustomSection }) {
   return (
     <Card>
       <CardBody>
-        <div className="flex min-w-0 items-start gap-3">
+        {/* The "indicative" badge drops below the title on a narrow screen. */}
+        <div className="flex min-w-0 flex-wrap items-start gap-3">
           <IconBadge tint={look.tint} size="sm">{look.icon}</IconBadge>
-          <div className="min-w-0">
+          <div className="min-w-0 flex-1 basis-48">
             <h2 className="font-serif text-lg text-ink">{section.title}</h2>
             {section.subtitle === null ? null : <p className="text-sm text-ink-muted">{section.subtitle}</p>}
           </div>
           {section.indicative ? <span className="ml-auto shrink-0"><Badge tone="warn">{INDICATIVE_TEXT}</Badge></span> : null}
         </div>
         {section.rows.length === 0 ? null : (
-          <table className="mt-4 w-full border-collapse text-sm">
-            <caption className="sr-only">{section.title}{section.subtitle === null ? '' : ` — ${section.subtitle}`}</caption>
-            <thead>
-              <tr className="border-b border-line text-left text-xs font-medium uppercase tracking-[0.08em] text-ink-faint">
-                {boxed ? <th scope="col" className="w-14 py-2 pr-3 font-medium">Box</th> : null}
-                <th scope="col" className="py-2 pr-3 font-medium">Figure</th>
-                <th scope="col" className="py-2 text-right font-medium">Amount</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-line">
-              {section.rows.map((row) => (
-                <tr key={`${row.box ?? ''}:${row.label}`} className="align-top">
-                  {boxed ? <td className="py-2.5 pr-3 text-ink-muted">{row.box ?? ''}</td> : null}
-                  <th scope="row" className="py-2.5 pr-3 text-left font-normal text-ink">
-                    {row.label}
-                    {row.value === null && row.reason !== null ? (
-                      <span className="mt-0.5 block text-xs text-ink-muted">{row.reason}</span>
-                    ) : null}
-                  </th>
-                  <td className="whitespace-nowrap py-2.5 text-right tabular-nums text-ink">
-                    {row.value ?? <span className="text-ink-muted">{NOT_AVAILABLE_TEXT}</span>}
-                  </td>
+          // A safety net: the table scrolls inside its own box rather than widening the page.
+          <div className="mt-4 min-w-0 overflow-x-auto">
+            <table className="w-full border-collapse text-sm">
+              <caption className="sr-only">{section.title}{section.subtitle === null ? '' : ` — ${section.subtitle}`}</caption>
+              <thead>
+                <tr className="border-b border-line text-left text-xs font-medium uppercase tracking-[0.08em] text-ink-faint">
+                  {boxed ? <th scope="col" className="w-14 py-2 pr-3 font-medium">Box</th> : null}
+                  <th scope="col" className="py-2 pr-3 font-medium">Figure</th>
+                  <th scope="col" className="py-2 text-right font-medium">Amount</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody className="divide-y divide-line">
+                {section.rows.map((row) => (
+                  <tr key={`${row.box ?? ''}:${row.label}`} className="align-top">
+                    {boxed ? <td className="py-2.5 pr-3 text-ink-muted">{row.box ?? ''}</td> : null}
+                    <th scope="row" className="py-2.5 pr-3 text-left font-normal text-ink">
+                      {row.label}
+                      {row.value === null && row.reason !== null ? (
+                        <span className="mt-0.5 block text-xs text-ink-muted">{row.reason}</span>
+                      ) : null}
+                    </th>
+                    <td className="whitespace-nowrap py-2.5 text-right tabular-nums text-ink">
+                      {row.value ?? <span className="text-ink-muted">{NOT_AVAILABLE_TEXT}</span>}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         )}
         {section.notes.length === 0 ? null : (
           <ul className="mt-3 flex flex-col gap-1 text-xs text-ink-muted">

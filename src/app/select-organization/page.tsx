@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { redirect } from 'next/navigation';
 import { createUserClient } from '@/core/db/user-client';
 import { listMyOrganizations } from '@/modules/tenancy';
@@ -7,6 +6,7 @@ import { Card, CardBody, Badge } from '@/components/ui/surfaces';
 import { ORG_STATUS_LABELS, ROLE_LABELS } from '@/components/labels';
 import type { EffectiveRole } from '@/core/permissions';
 import { BrandedScreen } from '@/components/dashboard/branded-screen';
+import { CLICKABLE_CARD, CardLink } from '@/components/ui/clickable-card';
 
 export const dynamic = 'force-dynamic';
 
@@ -21,40 +21,40 @@ export default async function SelectOrganizationPage() {
 
   const advises = adviserOrganisations(organizations).length > 0;
 
+  // Each card opens from anywhere on it, as every clickable card does (`ui/clickable-card`): the name is
+  // its one link, stretched over the card, so the link is named by the organisation alone.
   return (
     <BrandedScreen width="lg" panel={false}>
       <h1 className="text-3xl">Choose an organisation</h1>
       {advises ? (
-        <Link href="/portfolio" className="block">
-          <Card className="border-line-strong transition-colors hover:border-accent">
-            <CardBody className="flex items-center justify-between gap-4">
-              <span>
-                <span className="block font-medium">Command Centre</span>
-                <span className="block text-sm text-ink-muted">Health, alerts and actions across every organisation you advise.</span>
-              </span>
-              <span className="text-sm text-accent">Open</span>
-            </CardBody>
-          </Card>
-        </Link>
+        <Card className={`border-line-strong ${CLICKABLE_CARD}`}>
+          <CardBody className="flex items-center justify-between gap-4">
+            <span className="min-w-0">
+              <CardLink href="/portfolio" className="block font-medium">Command Centre</CardLink>
+              <span className="block text-sm text-ink-muted">Health, alerts and actions across every organisation you advise.</span>
+            </span>
+            <span aria-hidden="true" className="shrink-0 text-sm text-accent">Open</span>
+          </CardBody>
+        </Card>
       ) : null}
       <ul className="flex flex-col gap-3">
         {organizations.map((organization) => (
           <li key={organization.organizationId}>
-            <Link href={`/app/${organization.slug}/departments`} className="block">
-              <Card className="transition-colors hover:border-line-strong">
-                <CardBody className="flex items-center justify-between gap-4">
-                  <span>
-                    <span className="block font-medium">{organization.name}</span>
-                    <span className="block text-sm text-ink-muted">
-                      {ROLE_LABELS[organization.role as EffectiveRole] ?? organization.role}
-                    </span>
+            <Card className={CLICKABLE_CARD}>
+              <CardBody className="flex items-center justify-between gap-4">
+                <span className="min-w-0">
+                  <CardLink href={`/app/${organization.slug}/departments`} className="block font-medium [overflow-wrap:anywhere]">
+                    {organization.name}
+                  </CardLink>
+                  <span className="block text-sm text-ink-muted">
+                    {ROLE_LABELS[organization.role as EffectiveRole] ?? organization.role}
                   </span>
-                  {organization.status !== 'active' && (
-                    <Badge tone="warn">{ORG_STATUS_LABELS[organization.status]}</Badge>
-                  )}
-                </CardBody>
-              </Card>
-            </Link>
+                </span>
+                {organization.status !== 'active' && (
+                  <span className="shrink-0"><Badge tone="warn">{ORG_STATUS_LABELS[organization.status]}</Badge></span>
+                )}
+              </CardBody>
+            </Card>
           </li>
         ))}
       </ul>

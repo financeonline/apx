@@ -42,7 +42,8 @@ function Cover({ cover }: { cover: PresentedCover }) {
 function ReportTableView({ table }: { table: ReportTable }) {
   return (
     // The table spans the card edge to edge and scrolls inside itself on a narrow screen.
-    <div className="-mx-6">
+    // The card's side padding is 16px on a phone and 24px from `sm` (`ui/shadcn/card.tsx`).
+    <div className="-mx-6 max-sm:-mx-4">
       <Table>
         <caption className="sr-only">{table.caption}</caption>
         <TableHeader>
@@ -187,7 +188,7 @@ export function ReportView({ presentation }: { presentation: MarketingPresentati
       <Cover cover={presentation.cover} />
       <nav aria-label="Report sections" className="-mt-4 flex flex-wrap gap-2 text-sm">
         {presentation.sections.map((s) => (
-          <a key={s.id} href={`#${s.id}`} className="rounded-full border border-line bg-surface px-3 py-1 text-ink-muted transition-colors hover:border-accent/60 hover:bg-accent-soft hover:text-accent">
+          <a key={s.id} href={`#${s.id}`} className="inline-flex items-center rounded-full border border-line bg-surface px-3 py-1 text-ink-muted transition-colors hover:border-accent/60 hover:bg-accent-soft hover:text-accent pointer-coarse:min-h-10">
             {s.label === null ? s.title : `${s.label.replace('SECTION', 'Section')} · ${s.title}`}
           </a>
         ))}

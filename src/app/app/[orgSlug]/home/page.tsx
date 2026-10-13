@@ -12,6 +12,7 @@ import {
   ArrowDownLeft, ArrowLeftRight, ArrowUpRight, ChartColumn, ChevronRight, HandCoins, Percent, Receipt, TrendingUp, Wallet,
 } from 'lucide-react';
 import { ButtonLink } from '@/components/ui/button';
+import { ABOVE_CARD_LINK, CardLink } from '@/components/ui/clickable-card';
 import { AlertCard, WidgetCards, HealthScoreCard, NO_ALERTS_BODY, NO_ALERTS_TITLE } from '@/components/dashboard';
 import { requirePermission } from '@/app/_lib/authz';
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
@@ -41,9 +42,10 @@ function StatusBadge({ card }: { card: MetricCardView }) {
     : status.kind === 'partial' ? 'bg-warn-soft text-warn'
     : 'bg-surface-sunken text-ink-muted';
 
+  // Above the card's link layer, so its tooltip still shows (see `MetricCard`).
   return (
     <span
-      className={`inline-flex items-center rounded-[0.375rem] px-2 py-0.5 text-xs ${tone}`}
+      className={`${ABOVE_CARD_LINK} inline-flex shrink-0 items-center rounded-[0.375rem] px-2 py-0.5 text-xs ${tone}`}
       title={status.tooltip}
     >
       {status.label}
@@ -92,21 +94,30 @@ const METRIC_ICON: Readonly<Record<string, { icon: ReactNode; tint: IconTint }>>
   net_cash_movement: { icon: <ArrowLeftRight />, tint: 'violet' },
 };
 
-/** A card's content. The widget grid supplies its surface, ring and shadow. */
+/**
+ * A card's content. The widget grid supplies its surface, ring and shadow.
+ *
+ * The whole card opens the figure's evidence (owner, 2026-10-14): "Why?" is its one link, stretched
+ * over the card (`ui/clickable-card`). The tile clips anything drawn outside it, so the hover and
+ * focus ring is drawn inside its edge. The accountant's term and the basis, which were hover text on
+ * the label and the figure, are the link's hover text now that the link covers them; the badge sits
+ * above the link and keeps its own. The figure steps down a size in a narrow tile rather than
+ * running out of it.
+ */
 function MetricCard({ card }: { card: MetricCardView }) {
   const look = METRIC_ICON[card.metricKey] ?? { icon: <ChartColumn />, tint: 'violet' as const };
   return (
-    <div className="h-full p-5">
+    <div className="group @container relative h-full rounded-[var(--widget-radius)] p-5 transition-[box-shadow,background-color] duration-200 hover:bg-accent-soft/30 hover:shadow-[inset_0_0_0_2px_rgb(255_45_85/0.5)] focus-within:shadow-[inset_0_0_0_2px_rgb(255_45_85/0.65)]">
       <div>
         <div className="flex items-start justify-between gap-2">
           <div className="flex min-w-0 items-center gap-3">
             <IconBadge tint={look.tint} size="sm">{look.icon}</IconBadge>
-            <h3 className="text-sm font-semibold text-ink" title={card.technicalLabel}>{card.label}</h3>
+            <h3 className="min-w-0 text-sm font-semibold text-ink">{card.label}</h3>
           </div>
           <StatusBadge card={card} />
         </div>
 
-        <p className="mt-3 font-mono text-3xl text-ink tabular-nums" title={card.basisText}>
+        <p className="mt-3 font-mono text-2xl break-words text-ink tabular-nums @[15rem]:text-3xl">
           {card.value}
         </p>
 
@@ -120,12 +131,13 @@ function MetricCard({ card }: { card: MetricCardView }) {
         <ChangeLine card={card} />
 
         {/* Every number carries a "Why?" affordance opening the evidence drawer (§4). */}
-        <Link
+        <CardLink
           href={card.whyHref}
-          className="mt-3 inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
+          title={[card.technicalLabel, card.basisText].filter(Boolean).join(' · ') || undefined}
+          className="mt-3 inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors after:rounded-[var(--widget-radius)] hover:border-accent hover:bg-accent-soft group-hover:border-accent group-hover:bg-accent-soft"
         >
           Why? <ChevronRight aria-hidden="true" className="size-4" />
-        </Link>
+        </CardLink>
       </div>
     </div>
   );
@@ -153,7 +165,7 @@ function HeadlineNumbers({ view }: { view: HomeView }) {
 function FirstRun({ orgSlug, canImport }: { orgSlug: string; canImport: boolean }) {
   return (
     <Card>
-      <CardBody className="p-8">
+      <CardBody className="p-6 sm:p-8">
         <h2 className="font-serif text-2xl text-ink">Let’s get your first numbers on screen.</h2>
         <p className="mt-3 max-w-prose text-ink-muted">
           APX works from files you already have. Upload a bank statement (CSV or PDF) or an export
@@ -165,7 +177,7 @@ function FirstRun({ orgSlug, canImport }: { orgSlug: string; canImport: boolean 
           or invoice list when you can, and we’ll add profit and customer figures.
         </p>
         {canImport ? (
-          <div className="mt-6 flex items-center gap-4">
+          <div className="mt-6 flex flex-wrap items-center gap-4">
             <ButtonLink href={`/app/${orgSlug}/data/imports/new`}>Add data</ButtonLink>
             <Link href="/legal/terms" className="text-sm text-accent underline underline-offset-2">
               What files can I upload?
@@ -189,7 +201,7 @@ function BankOnlyIntro({ orgSlug, canImport }: { orgSlug: string; canImport: boo
           invoice lists.
         </p>
         {canImport ? (
-          <div className="mt-4 flex items-center gap-4">
+          <div className="mt-4 flex flex-wrap items-center gap-4">
             <ButtonLink href={`/app/${orgSlug}/money/cash`}>Enter opening balance</ButtonLink>
             <Link
               href={`/app/${orgSlug}/data/imports/new`}
@@ -235,7 +247,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
         <PageHeader title="How is my business doing?" />
         <div className="mt-8">
           <Card>
-            <CardBody className="p-8">
+            <CardBody className="p-6 sm:p-8">
               <h2 className="font-serif text-2xl text-ink">Your import is waiting for review.</h2>
               <p className="mt-3 max-w-prose text-ink-muted">
                 We found {state.rowCount} rows in{' '}
@@ -466,7 +478,7 @@ function TopRisks({ orgSlug, risks }: { orgSlug: string; risks: readonly AlertVi
           </CardBody>
         </Card>
       ) : (
-        <ul className="mt-3 grid gap-3 sm:grid-cols-3">
+        <ul className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
           {risks.map((risk) => (
             <li key={risk.id}><AlertCard alert={risk} variant="compact" /></li>
           ))}

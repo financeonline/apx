@@ -13,7 +13,8 @@ import { ChartFrame } from './chart-frame';
  *   - the surplus split as a DONUT, with a key naming each part, its share and its amount;
  *   - the five-year revenue and profit scenarios as LINE charts: a money axis from zero (so a small
  *     figure is never flattered), a line per scenario in its own colour AND dash pattern, a dot per
- *     year, and the scenario's name at the end of its line — never told apart by colour alone;
+ *     year, and the scenario's name at the end of its line (in a key beneath, on a phone) — never
+ *     told apart by colour alone;
  *   - the relative risk positioning as a GRID of the six levels, lower to very high, each option's
  *     dot in its level's column.
  *
@@ -32,6 +33,13 @@ const RISK_BG: Readonly<Record<RiskLevel, string>> = {
 
 const LINE_BOX: ChartBox = { width: 720, height: 280, padding: { top: 16, right: 112, bottom: 32, left: 96 } };
 
+/**
+ * The line charts' box for a phone-width column (owner, 2026-10-14), as `COMPACT_CHART_BOX`: about
+ * half as wide, so the labels are still readable once the drawing is scaled down to a phone. Room on
+ * the left for the money axis and none on the right: the lines are named in a key beneath instead.
+ */
+const COMPACT_LINE_BOX: ChartBox = { width: 400, height: 300, padding: { top: 16, right: 18, bottom: 32, left: 86 } };
+
 /** Moves end labels apart where two lines finish close together: at least `gap` pixels between them. */
 function spread(positions: readonly { readonly key: number; readonly y: number }[], gap: number): Map<number, number> {
   const sorted = [...positions].sort((a, b) => b.y - a.y);
@@ -45,8 +53,46 @@ function spread(positions: readonly { readonly key: number; readonly y: number }
   return placed;
 }
 
+/**
+ * A line chart on any screen: in a column narrower than 36rem the compact drawing and its key, from
+ * 36rem the full drawing with each line named at its end. The other is `display: none`, so a screen
+ * reader meets one picture.
+ */
 function LineChartView({ chart }: { chart: LineChart }) {
-  const box = LINE_BOX;
+  return (
+    <div className="@container">
+      <div className="@xl:hidden">
+        <LineDrawing chart={chart} box={COMPACT_LINE_BOX} compact />
+        <LineKey chart={chart} />
+      </div>
+      <div className="hidden @xl:block">
+        <LineDrawing chart={chart} box={LINE_BOX} compact={false} />
+      </div>
+    </div>
+  );
+}
+
+/** The compact drawing's key: each scenario's colour and dash, and its name. The table has the figures. */
+function LineKey({ chart }: { chart: LineChart }) {
+  return (
+    <ul aria-hidden="true" className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-sm text-ink">
+      {chart.series.map((series, index) => (
+        <li key={series.key} className="flex items-center gap-2">
+          <svg width="22" height="8" className="shrink-0">
+            <line
+              x1="0" y1="4" x2="22" y2="4" strokeWidth="2.5"
+              strokeDasharray={chartDash(index)} className={chartClass(CHART_STROKE, index)}
+            />
+          </svg>
+          {series.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function LineDrawing({ chart, box, compact }: { chart: LineChart; box: ChartBox; compact: boolean }) {
+  const label = compact ? 'text-[13px]' : 'text-[11px]';
   const scale: ChartScale = { min: 0, max: chart.max > 0 ? chart.max : 1, empty: false };
   const views: TrendSeriesView[] = chart.series.map((s) => ({
     key: s.key,
@@ -60,7 +106,7 @@ function LineChartView({ chart }: { chart: LineChart }) {
   }), 14);
 
   return (
-    <svg role="img" aria-label={chart.summary} viewBox={`0 0 ${box.width} ${box.height}`} className="h-auto w-full">
+    <svg role="img" aria-label={chart.summary} viewBox={`0 0 ${box.width} ${box.height}`} className={compact ? 'h-auto w-full max-w-md' : 'h-auto w-full'}>
       {chart.ticks.map((tick) => {
         const y = valueY(tick.value, scale, box);
         return (
@@ -69,12 +115,12 @@ function LineChartView({ chart }: { chart: LineChart }) {
               x1={box.padding.left} x2={box.width - box.padding.right} y1={y} y2={y}
               className={tick.value === 0 ? 'stroke-line-strong' : 'stroke-line'} strokeWidth="1"
             />
-            <text x={box.padding.left - 10} y={y + 4} textAnchor="end" className="fill-current text-[11px] text-ink-faint tabular">{tick.label}</text>
+            <text x={box.padding.left - 10} y={y + 4} textAnchor="end" className={`fill-current text-ink-faint tabular ${label}`}>{tick.label}</text>
           </g>
         );
       })}
       {chart.categories.map((category, i) => (
-        <text key={category} x={columnX(i, chart.categories.length, box)} y={box.height - 10} textAnchor="middle" className="fill-current text-[11px] text-ink-faint">
+        <text key={category} x={columnX(i, chart.categories.length, box)} y={box.height - 10} textAnchor="middle" className={`fill-current text-ink-faint ${label}`}>
           {category}
         </text>
       ))}
@@ -92,7 +138,7 @@ function LineChartView({ chart }: { chart: LineChart }) {
           {(() => {
             const last = segments.at(-1)?.at(-1);
             const y = ends.get(index);
-            return last && y !== undefined ? (
+            return last && y !== undefined && !compact ? (
               <text x={last.x + 10} y={y + 4} className={`${chartClass(CHART_FILL, index)} text-[12px] font-semibold`}>{views[index]?.label}</text>
             ) : null;
           })()}
@@ -142,15 +188,18 @@ function SplitChartView({ chart }: { chart: SplitChart }) {
 }
 
 function RiskChartView({ chart }: { chart: RiskChart }) {
-  const columns = { gridTemplateColumns: `minmax(9rem, 1.6fr) repeat(${chart.levels.length}, minmax(0, 1fr))` };
+  // The options' column gives way on a phone (never more than 40% of the width), so the levels keep
+  // room for their dots.
+  const columns = { gridTemplateColumns: `minmax(min(9rem, 40%), 1.6fr) repeat(${chart.levels.length}, minmax(0, 1fr))` };
   return (
     // The grid is the picture; its words and positions are in the table behind "Show as table".
-    <div role="img" aria-label={chart.summary} className="min-w-0">
+    <div role="img" aria-label={chart.summary} className="@container min-w-0">
       <div aria-hidden="true">
         <div className="grid items-end gap-x-1 pb-2" style={columns}>
           <span className="text-xs font-medium uppercase tracking-[0.08em] text-ink-faint">Option</span>
           {chart.levels.map((level) => (
-            <span key={level.key} className="text-center text-[10px] leading-tight text-ink-muted sm:text-xs">{level.label}</span>
+            // Too narrow for six names (a phone): the bar beneath, lower to very high, says it.
+            <span key={level.key} className="hidden text-center text-[10px] leading-tight text-ink-muted @md:block @lg:text-xs">{level.label}</span>
           ))}
         </div>
         <div className="grid gap-x-1" style={columns}>

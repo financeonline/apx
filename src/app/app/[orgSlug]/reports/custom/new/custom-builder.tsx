@@ -27,6 +27,9 @@ type QuestionState =
 
 interface Option { readonly value: string; readonly label: string }
 
+/** A checkbox and its words: the whole line is the target, at least 40px tall on a touch screen. */
+const CHOICE = 'flex items-center gap-2 py-1 text-sm text-ink pointer-coarse:min-h-10';
+
 /** Mirrors `customQuestionMessage` in modules/reporting (kept here: this file runs in the browser). */
 function messageFor(periodLabel: string, dimensions: readonly Option[], question: string): string {
   // As `focusWord`: lower case, except an abbreviation ("VAT") stays as it is.
@@ -148,7 +151,8 @@ export function CustomBuilder({
   const busy = phase === 'asking' || phase === 'saving';
 
   return (
-    <div className="flex flex-col gap-6">
+    // A readable measure on a very wide screen.
+    <div className="flex max-w-3xl flex-col gap-6">
       <fieldset disabled={busy} className="flex flex-col gap-6">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-muted">Month</span>
@@ -159,10 +163,10 @@ export function CustomBuilder({
 
         <div>
           <p className="text-sm text-ink-muted">Areas to look at (optional)</p>
-          <div className="mt-2 flex flex-wrap gap-3">
+          <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
             {dimensions.map((d) => (
-              <label key={d.value} className="flex items-center gap-2 text-sm text-ink">
-                <input type="checkbox" checked={chosenDimensions.includes(d.value)}
+              <label key={d.value} className={CHOICE}>
+                <input type="checkbox" className="shrink-0" checked={chosenDimensions.includes(d.value)}
                   onChange={() => toggle(chosenDimensions, d.value, setChosenDimensions)} />
                 {d.label}
               </label>
@@ -178,10 +182,10 @@ export function CustomBuilder({
 
         <div>
           <p className="text-sm text-ink-muted">Questions — choose any of these…</p>
-          <div className="mt-2 flex flex-col gap-2">
+          <div className="mt-2 flex flex-col gap-1">
             {suggestions.map((q) => (
-              <label key={q} className="flex items-center gap-2 text-sm text-ink">
-                <input type="checkbox" checked={chosen.includes(q)} onChange={() => toggle(chosen, q, setChosen)} />
+              <label key={q} className={CHOICE}>
+                <input type="checkbox" className="shrink-0" checked={chosen.includes(q)} onChange={() => toggle(chosen, q, setChosen)} />
                 {q}
               </label>
             ))}
@@ -213,7 +217,7 @@ export function CustomBuilder({
             const label = state?.status === 'answered' ? 'Answered'
               : state?.status === 'asking' ? 'Asking…'
                 : state?.status === 'refused' ? `Not answered: ${state.message}` : 'Waiting';
-            return <li key={`${i}:${q}`} className="flex flex-wrap justify-between gap-2"><span className="text-ink">{q}</span><span className="text-ink-muted">{label}</span></li>;
+            return <li key={`${i}:${q}`} className="flex flex-wrap justify-between gap-2"><span className="min-w-0 text-ink [overflow-wrap:anywhere]">{q}</span><span className="text-ink-muted">{label}</span></li>;
           })}
         </ol>
       )}

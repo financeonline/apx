@@ -32,8 +32,8 @@ export default async function AiFeedbackPage({ searchParams }: { searchParams: P
       />
       <p className="mt-2 text-sm text-ink-muted">
         {scope === 'all'
-          ? <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href="/platform/ai-feedback">Show only open reports</Link>
-          : <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href="/platform/ai-feedback?status=all">Show all reports</Link>}
+          ? <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href="/platform/ai-feedback">Show only open reports</Link>
+          : <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href="/platform/ai-feedback?status=all">Show all reports</Link>}
       </p>
       <div className="mt-8">
         <Card>
@@ -56,7 +56,7 @@ export default async function AiFeedbackPage({ searchParams }: { searchParams: P
                       </TD>
                       <TD>{item.groundingStatus ? <Badge tone={GROUNDING_TONES[item.groundingStatus] ?? 'neutral'}>{item.groundingStatus.replace('_', ' ')}</Badge> : '—'}</TD>
                       <TD><Badge tone={STATUS_TONES[item.status]}>{STATUS_LABELS[item.status]}</Badge></TD>
-                      <TD><Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={`/platform/ai-feedback/${item.id}`}>Open <ChevronRight aria-hidden="true" className="size-4" /></Link></TD>
+                      <TD><Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href={`/platform/ai-feedback/${item.id}`}>Open <ChevronRight aria-hidden="true" className="size-4" /></Link></TD>
                     </TR>
                   ))}
                 </TBody>

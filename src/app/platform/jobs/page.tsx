@@ -72,8 +72,8 @@ export default async function PlatformJobsPage({
       />
       <p className="mt-2 text-sm text-ink-muted">
         {showAll
-          ? <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href="/platform/jobs">Show only jobs needing attention</a>
-          : <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href="/platform/jobs?status=all">Show all recent jobs</a>}
+          ? <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href="/platform/jobs">Show only jobs needing attention</a>
+          : <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href="/platform/jobs?status=all">Show all recent jobs</a>}
       </p>
       <div className="mt-8">
         <Card>
@@ -98,7 +98,7 @@ export default async function PlatformJobsPage({
                       <TD>{new Date(job.run_after).toLocaleString('en-GB')}</TD>
                       <TD>
                         {job.last_error
-                          ? <span className="text-xs text-ink-muted" title={job.last_error}>{job.last_error.slice(0, 120)}</span>
+                          ? <span className="text-xs text-ink-muted [overflow-wrap:anywhere]" title={job.last_error}>{job.last_error.slice(0, 120)}</span>
                           : '—'}
                       </TD>
                       <TD>

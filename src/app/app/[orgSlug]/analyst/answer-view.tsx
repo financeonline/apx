@@ -192,7 +192,7 @@ function Recommendation({
   return (
     <div className="rounded-md border border-line p-3">
       <div className="flex items-start justify-between gap-2">
-        <p className="text-sm font-medium text-ink">{rec.title.statement}</p>
+        <p className="min-w-0 text-sm font-medium text-ink">{rec.title.statement}</p>
         <Badge tone={rec.priority === 'critical' || rec.priority === 'high' ? 'danger' : 'neutral'}>
           {PRIORITY_LABELS[rec.priority]}
         </Badge>
@@ -204,7 +204,7 @@ function Recommendation({
         <dd><StatementLine statement={rec.recommendation} evidenceHref={evidenceHref} /></dd>
       </dl>
       {createAllowed ? (
-        <form action={submit} className="mt-3 flex items-center gap-3">
+        <form action={submit} className="mt-3 flex flex-wrap items-center gap-3">
           <input type="hidden" name="org_slug" value={orgSlug} />
           <input type="hidden" name="message_id" value={messageId} />
           <input type="hidden" name="index" value={index} />
@@ -249,7 +249,7 @@ function FeedbackControls({ orgSlug, messageId }: { orgSlug: string; messageId: 
           <span className="text-ink-muted">Which figure, and what should it be? (optional)</span>
           <Textarea name="comment" rows={2} maxLength={1000} />
         </label>
-        <div className="flex items-center gap-3">
+        <div className="flex flex-wrap items-center gap-3">
           <SubmitButton tone="secondary" pendingLabel="Sending…">Send report</SubmitButton>
           <Button type="button" variant="ghost" onClick={() => setReporting(false)}>Cancel</Button>
           <ActionMessage state={state} />

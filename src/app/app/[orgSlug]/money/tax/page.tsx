@@ -5,6 +5,7 @@ import { can } from '@/core/permissions';
 import { formatMoney, formatPercent } from '@/core/money';
 import { loadCorporationTaxView, loadVatView, type CorporationTaxView, type VatView } from '@/modules/tax';
 import { Banner, Card, CardBody, CardHeader, DetailList, PageHeader } from '@/components/ui/surfaces';
+import { TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 import { requirePermission } from '@/app/_lib/authz';
 
@@ -100,7 +101,7 @@ function VatSection({ vat, orgSlug, canSet }: { vat: VatView; orgSlug: string; c
               key={q.end}
               href={`/app/${orgSlug}/money/tax?quarter=${q.end}`}
               aria-current={q.end === vat.selected!.end ? 'page' : undefined}
-              className={`rounded-full px-3 py-1 font-medium transition-colors ${
+              className={`inline-flex items-center rounded-full px-3 py-1 font-medium transition-colors ${TOUCH_TARGET} ${
                 q.end === vat.selected!.end ? 'bg-accent text-on-accent' : 'bg-surface-sunken text-ink-muted hover:bg-accent-soft hover:text-accent'
               }`}
             >
@@ -113,7 +114,8 @@ function VatSection({ vat, orgSlug, canSet }: { vat: VatView; orgSlug: string; c
           <p className="text-sm text-ink">{NOT_CALCULATED[r.reason]}</p>
         ) : (
           <>
-            <Table>
+            {/* Three columns, one of them words: it wraps on a phone rather than scrolling. */}
+            <Table className="min-w-0">
               <TableCaption className="sr-only">{`VAT return for ${vat.selected.label}`}</TableCaption>
               <TableHeader>
                 <TableRow>

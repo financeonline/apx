@@ -33,16 +33,16 @@ export function DuplicateDecisions({
 
       <ul className="divide-y divide-line/60 rounded-card border border-line">
         {rows.map((row) => (
-          <li key={row.id} className="flex items-start gap-3 px-3 py-2 text-sm">
+          <li key={row.id} className="flex items-start gap-3 px-3 py-2 text-sm pointer-coarse:py-3">
             <input
               type="checkbox"
               name="row_id"
               value={row.id}
               id={`row-${row.id}`}
               defaultChecked={row.decided === null}
-              className="mt-1"
+              className="mt-1 shrink-0"
             />
-            <label htmlFor={`row-${row.id}`} className="min-w-0 flex-1">
+            <label htmlFor={`row-${row.id}`} className="min-w-0 flex-1 [overflow-wrap:anywhere]">
               <span className="tabular text-ink-faint">Row {row.rowNumber}</span>{' '}
               <span className="text-ink">{row.summary}</span>
               {row.decided === null ? null : (
@@ -61,12 +61,13 @@ export function DuplicateDecisions({
           placeholder="Why? (optional, but it helps in six months)"
           className="max-w-sm"
         />
+        {/* Long labels wrap inside the button on a phone instead of running off the card. */}
         <Button
           type="submit"
           name="decision"
           value="keep"
           variant="secondary"
-          className="px-3 py-1.5"
+          className="px-3 py-1.5 whitespace-normal"
         >
           These are genuine — import them
         </Button>
@@ -75,7 +76,7 @@ export function DuplicateDecisions({
           name="decision"
           value="skip"
           variant="secondary"
-          className="px-3 py-1.5"
+          className="px-3 py-1.5 whitespace-normal"
         >
           These are duplicates — skip them
         </Button>
@@ -117,15 +118,17 @@ export function ConfirmationPrompt({
         <input key={key} type="hidden" name={`value_${key}`} value={value} />
       ))}
 
-      <span className="text-ink">{question}</span>
+      <span className="min-w-0 text-ink">{question}</span>
       {help ? <p className="w-full text-ink-muted">{help}</p> : null}
 
       {choice ? (
-        <label className="flex items-center gap-2">
+        <label className="flex min-w-0 max-w-full items-center gap-2">
           <span className="sr-only">{choice.label}</span>
+          {/* `max-w-full`: an answer such as "Yes — the full P&L, every kind of cost on its own line…"
+              is wider than a phone; the select narrows to the card instead of widening the page. */}
           <Select
             name={`value_${choice.name}`}
-            className="w-auto px-2 py-1"
+            className="w-auto max-w-full px-2 py-1"
             required={choice.explicit === true}
             defaultValue={choice.explicit === true ? '' : undefined}
           >
@@ -220,7 +223,7 @@ export function SkipUnreadableRows({
 
       <ul className="space-y-1 text-sm text-ink-muted">
         {rows.slice(0, 5).map((row) => (
-          <li key={row.id}>
+          <li key={row.id} className="[overflow-wrap:anywhere]">
             <span className="tabular text-ink-faint">Row {row.rowNumber}</span> {row.summary}
           </li>
         ))}

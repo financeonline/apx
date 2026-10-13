@@ -1,4 +1,3 @@
-import Link from 'next/link';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { hasForecast, loadForecast } from '@/modules/forecast';
@@ -9,6 +8,7 @@ import {
 } from '@/modules/scenarios';
 import { Bookmark, FlaskConical, SlidersHorizontal } from 'lucide-react';
 import { Card, CardBody, CardHeader, EmptyState, IconBadge, PageHeader } from '@/components/ui/surfaces';
+import { CLICKABLE_ROW, CardLink } from '@/components/ui/clickable-card';
 import { requirePermission } from '@/app/_lib/authz';
 import { ScenarioComparison } from './comparison';
 import { ScenarioForm } from './scenario-form';
@@ -170,17 +170,18 @@ export default async function WhatIfPage({
         <Card className="mt-10">
           <CardHeader title="Saved scenarios" description="What you have tried before." icon={<Bookmark />} tint="pink" />
           <CardBody>
-            <ul className="flex flex-col gap-3 text-sm">
+            {/* Each row opens its scenario from anywhere on it (owner, 2026-10-14; `ui/clickable-card`). */}
+            <ul className="flex flex-col gap-1 text-sm">
               {saved.map((scenario) => (
-                <li key={scenario.runId} className="flex flex-wrap items-center justify-between gap-3">
+                <li key={scenario.runId} className={`${CLICKABLE_ROW} -mx-2 flex flex-wrap items-center justify-between gap-3 rounded-lg px-2 py-1.5`}>
                   <span className="flex min-w-0 items-center gap-3">
                     <IconBadge tint="violet" size="sm"><FlaskConical /></IconBadge>
-                    <Link
+                    <CardLink
                       href={`/app/${orgSlug}/what-if/${scenario.runId}`}
-                      className="min-w-0 font-medium text-ink underline-offset-2 hover:text-accent hover:underline"
+                      className="min-w-0 font-medium text-ink underline-offset-2 after:rounded-lg hover:text-accent hover:underline group-hover:text-accent group-hover:underline"
                     >
                       {scenario.name}
-                    </Link>
+                    </CardLink>
                   </span>
                   <span className="text-ink-muted">
                     {new Date(scenario.createdAt).toLocaleDateString('en-GB', {

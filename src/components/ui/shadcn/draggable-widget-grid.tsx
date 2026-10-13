@@ -17,7 +17,9 @@
  *   ADR-151, ADR-152). Owned source, as shadcn/ui intends. Additions: an
  *   optional fixed `rowHeight` (MOTION's cards are wide and short, not
  *   square), `appear` (the entrance can be switched off), and a remount, not
- *   an animation, once the grid has measured its columns.
+ *   an animation, once the grid has measured its columns. And, for phones
+ *   (owner, 2026-10-14): `minColumns` (one column on a narrow screen) and
+ *   `growRows` (a row grows to fit rather than clipping its widget).
  */
 
 import {
@@ -62,6 +64,11 @@ export interface DraggableWidgetGridProps {
     editable?: boolean
     /** Upper bound for the number of columns. */
     maxColumns?: number
+    /**
+     * Lower bound for the number of columns (default 2, the template's). 1 lets a phone show one
+     * widget to a row instead of two squeezed side by side.
+     */
+    minColumns?: number
     /** Target cell width in px; the column count is derived from it. */
     cellSize?: number
     /** Gap between widgets in px. */
@@ -70,6 +77,11 @@ export interface DraggableWidgetGridProps {
     radius?: number
     /** Fixed row height in px. Omitted: square cells (row height = column width). */
     rowHeight?: number
+    /**
+     * With `rowHeight`: treat it as the least a row is, and let a row grow to fit a widget whose
+     * content wraps onto more lines in a narrow column, instead of clipping it. Off by default.
+     */
+    growRows?: boolean
     /** Play the staggered entrance when the grid mounts. Off where figures must read at once. */
     appear?: boolean
     className?: string
@@ -662,17 +674,19 @@ export function DraggableWidgetGrid({
     renderItem,
     editable = true,
     maxColumns = 4,
+    minColumns: fewestColumns = 2,
     cellSize = 215,
     gap = 12,
     radius = 24,
     rowHeight,
+    growRows = false,
     appear = true,
     className = '',
 }: DraggableWidgetGridProps) {
     const [items, setItems] = useState(() => initialItems ?? DEFAULT_ITEMS)
     const grid = useRef(null as HTMLDivElement | null)
     const hintId = useId()
-    const minColumns = Math.min(2, Math.max(1, maxColumns))
+    const minColumns = Math.max(1, Math.min(fewestColumns, maxColumns))
 
     const [metrics, setMetrics] = useState({ unit: 0, columns: 0 })
     useIsoLayoutEffect(() => {
@@ -922,7 +936,7 @@ export function DraggableWidgetGrid({
                         gridTemplateColumns: `repeat(${columns}, minmax(0, 1fr))`,
                         // Square cells (row height = column width) unless a row height is given.
                         gridAutoRows: rowHeight
-                            ? `${rowHeight}px`
+                            ? growRows ? `minmax(${rowHeight}px, auto)` : `${rowHeight}px`
                             : metrics.unit
                                 ? `${Math.round(metrics.unit)}px`
                                 : `minmax(${cellSize * 0.75}px, auto)`,

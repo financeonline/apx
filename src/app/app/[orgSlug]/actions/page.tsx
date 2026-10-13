@@ -6,11 +6,15 @@ import {
 import { getAccessContext } from '@/modules/tenancy';
 import { ActionCard, ActionsNoneEmpty } from '@/components/dashboard';
 import { PageHeader } from '@/components/ui/surfaces';
+import { TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { StatusControls } from './status-controls';
 import { NewActionForm } from './new-action-form';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
+
+/** A lens tab: a pill, and a full tap target on a touch screen. */
+const LENS = `inline-flex items-center rounded-full px-3.5 py-1.5 ${TOUCH_TARGET}`;
 
 /**
  * The Action Centre (SOW §17; ROUTE_ARCHITECTURE.md §116).
@@ -56,11 +60,11 @@ export default async function ActionsPage({
             key={key}
             href={`/app/${orgSlug}/actions?show=${key}`}
             aria-current={selected === key ? 'page' : undefined}
-            className={selected === key
-              ? 'rounded-full bg-accent-soft px-3.5 py-1.5 font-medium text-accent'
+            className={`${LENS} ${selected === key
+              ? 'bg-accent-soft font-medium text-accent'
               : centre.counts[key] === 0
-                ? 'rounded-full border border-line bg-surface px-3.5 py-1.5 text-ink-faint hover:text-ink'
-                : 'rounded-full border border-line bg-surface px-3.5 py-1.5 text-ink-muted transition-colors hover:border-accent/45 hover:text-accent'}
+                ? 'border border-line bg-surface text-ink-faint hover:text-ink'
+                : 'border border-line bg-surface text-ink-muted transition-colors hover:border-accent/45 hover:text-accent'}`}
           >
             {ACTION_VIEW_LABELS[key]}
             <span className="ml-1.5 tabular-nums text-ink-faint">{centre.counts[key]}</span>
@@ -74,7 +78,8 @@ export default async function ActionsPage({
         </div>
       ) : null}
 
-      <div className="mt-6 flex flex-col gap-4">
+      {/* A readable width for the list on a very wide screen. */}
+      <div className="mt-6 flex max-w-5xl flex-col gap-4">
         {actions.length === 0 ? (
           <ActionsNoneEmpty
             createHref={`/app/${orgSlug}/insights`}

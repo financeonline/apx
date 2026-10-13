@@ -37,7 +37,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
 
   return (
     <>
-      <p className="mb-2 text-sm"><Link href={`/app/${orgSlug}/data/documents`} className="text-accent underline underline-offset-2">Back to documents</Link></p>
+      <p className="mb-2 text-sm"><Link href={`/app/${orgSlug}/data/documents`} className="inline-flex items-center text-accent underline underline-offset-2 pointer-coarse:min-h-10">Back to documents</Link></p>
       <PageHeader eyebrow="Data" title={document.filename} description={`${DOCUMENT_KIND_LABELS[document.kind] ?? document.kind} · uploaded ${formatDateTime(document.createdAt)}`} />
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_320px]">
         <Card>
@@ -49,7 +49,7 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
             )}
           </CardBody>
         </Card>
-        <div className="flex flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-6">
           <Card>
             <CardHeader icon={<FileText />} tint="violet" title="About this file" />
             <CardBody>
@@ -105,9 +105,9 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
               {document.batches.length === 0 ? <p className="text-sm text-ink-muted">None yet.</p> : (
                 <ul className="flex flex-col gap-2 text-sm">
                   {document.batches.map((b) => (
-                    <li key={b.id}>
+                    <li key={b.id} className="flex flex-wrap items-baseline gap-x-2">
                       <Link href={`/app/${orgSlug}/data/imports/${b.id}`} className="underline">{b.importType.replace(/_/g, ' ')}</Link>
-                      <span className="ml-2 text-ink-muted">{b.status.replace('_', ' ')} · {formatDateTime(b.createdAt)}</span>
+                      <span className="text-ink-muted">{b.status.replace('_', ' ')} · {formatDateTime(b.createdAt)}</span>
                     </li>
                   ))}
                 </ul>

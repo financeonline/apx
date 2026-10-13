@@ -21,7 +21,7 @@ export default async function NewCustomReportPage({ params }: { params: Promise<
   return (
     <>
       <p className="mb-2 text-sm">
-        <Link href={`/app/${orgSlug}/reports`} className="text-accent underline underline-offset-2">Back to reports</Link>
+        <Link href={`/app/${orgSlug}/reports`} className="inline-flex items-center text-accent underline underline-offset-2 pointer-coarse:min-h-10">Back to reports</Link>
       </p>
       <PageHeader
         eyebrow="Reports"

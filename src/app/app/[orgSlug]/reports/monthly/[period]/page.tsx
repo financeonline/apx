@@ -39,7 +39,7 @@ export default async function MonthlyReportPage({
   return (
     <>
       <p className="mb-2 text-sm print:hidden">
-        <Link href={`/app/${orgSlug}/reports`} className="text-accent underline underline-offset-2">
+        <Link href={`/app/${orgSlug}/reports`} className="inline-flex items-center text-accent underline underline-offset-2 pointer-coarse:min-h-10">
           Back to reports
         </Link>
       </p>
@@ -62,7 +62,8 @@ export default async function MonthlyReportPage({
         </div>
       ) : null}
 
-      <div className="mt-8 flex flex-col gap-6">
+      {/* A readable measure on a very wide screen. */}
+      <div className="mt-8 flex max-w-5xl flex-col gap-6">
         <Card>
           <CardBody>
             <div className="flex min-w-0 items-center gap-3">

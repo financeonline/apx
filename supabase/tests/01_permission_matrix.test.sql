@@ -3,13 +3,14 @@
 --
 -- role_permissions is the generated mirror of ROLE_MATRIX; app.has_permission() reads nothing else,
 -- so a drift here silently changes authorisation everywhere. The first assertion is the full
--- 121-pair set comparison transcribed from the markdown table; the rest are the named
+-- 141-pair set comparison transcribed from the markdown table (ADR-172 added the accountant and
+-- third_party columns); the rest are the named
 -- representative pairs the strategy calls out, so a failure names the exact cell that drifted.
 
 begin;
 create extension if not exists pgtap;
 
-select plan(87);
+select plan(116);
 
 -- ---------------------------------------------------------------------------
 -- 1. Full parity: the table equals RBAC_MATRIX.md §2.1, cell for cell.
@@ -60,14 +61,23 @@ select set_eq(
      ('admin|users.view'),('admin|users.invite'),('admin|users.manage'),
      ('admin|assignments.view'),('admin|documents.view'),('admin|data.export'),
      ('admin|audit.view'),('admin|settings.manage'),
+     -- accountant (18, ADR-172): data capture and compliance; no AI, team, settings or assigning
+     ('accountant|dashboard.view'),('accountant|financials.view'),('accountant|financials.edit'),
+     ('accountant|imports.create'),('accountant|imports.review'),('accountant|banking.view'),
+     ('accountant|banking.reconcile'),('accountant|customers.view'),('accountant|customers.edit'),
+     ('accountant|reports.view'),('accountant|reports.generate'),('accountant|actions.view'),
+     ('accountant|actions.create'),('accountant|actions.update_own'),('accountant|alerts.manage'),
+     ('accountant|intelligence.recompute'),('accountant|documents.view'),('accountant|data.export'),
      -- client (9): read-only plus own actions and alert acknowledgement
      ('client|dashboard.view'),('client|financials.view'),('client|banking.view'),
      ('client|customers.view'),('client|reports.view'),('client|ai.use'),
      ('client|actions.view'),('client|actions.update_own'),('client|alerts.manage'),
+     -- third_party (2, ADR-172): the overview and the reports, nothing beneath them
+     ('third_party|dashboard.view'),('third_party|reports.view'),
      -- suspended_member (1): frozen Home only (ADR-044.4)
      ('suspended_member|dashboard.view')
   $$,
-  'role_permissions equals RBAC_MATRIX.md §2.1 cell for cell (121 pairs)');
+  'role_permissions equals RBAC_MATRIX.md §2.1 cell for cell (141 pairs)');
 
 -- ---------------------------------------------------------------------------
 -- 2. Cardinality per role — a fast locator when the set comparison above fails.
@@ -82,6 +92,10 @@ select is((select count(*)::int from public.role_permissions where role = 'admin
           'admin holds 26 permissions');
 select is((select count(*)::int from public.role_permissions where role = 'client'), 9,
           'client holds 9 permissions');
+select is((select count(*)::int from public.role_permissions where role = 'accountant'), 18,
+          'accountant holds 18 permissions (ADR-172)');
+select is((select count(*)::int from public.role_permissions where role = 'third_party'), 2,
+          'third_party holds 2 permissions (ADR-172)');
 select is((select count(*)::int from public.role_permissions where role = 'suspended_member'), 1,
           'suspended_member holds 1 permission');
 
@@ -183,7 +197,36 @@ from (values
   ('suspended_member', 'ai.use',               false),
   ('suspended_member', 'actions.view',         false),
   ('suspended_member', 'users.view',           false),
-  ('suspended_member', 'audit.view',           false)
+  ('suspended_member', 'audit.view',           false),
+  -- accountant (ADR-172): brings the data in and keeps it right; no AI, team, settings or assigning
+  ('accountant', 'ai.use',                     false),
+  ('accountant', 'users.view',                 false),
+  ('accountant', 'users.invite',               false),
+  ('accountant', 'users.manage',               false),
+  ('accountant', 'assignments.view',           false),
+  ('accountant', 'audit.view',                 false),
+  ('accountant', 'settings.manage',            false),
+  ('accountant', 'billing.manage',             false),
+  ('accountant', 'org.delete',                 false),
+  ('accountant', 'actions.assign',             false),
+  ('accountant', 'imports.create',             true),
+  ('accountant', 'imports.review',             true),
+  ('accountant', 'documents.view',             true),
+  ('accountant', 'financials.edit',            true),
+  -- third_party (ADR-172): the overview and the reports, nothing beneath them
+  ('third_party', 'dashboard.view',            true),
+  ('third_party', 'reports.view',              true),
+  ('third_party', 'financials.view',           false),
+  ('third_party', 'banking.view',              false),
+  ('third_party', 'customers.view',            false),
+  ('third_party', 'documents.view',            false),
+  ('third_party', 'ai.use',                    false),
+  ('third_party', 'actions.view',              false),
+  ('third_party', 'alerts.manage',             false),
+  ('third_party', 'imports.create',            false),
+  ('third_party', 'data.export',               false),
+  ('third_party', 'users.view',                false),
+  ('third_party', 'settings.manage',           false)
 ) as e(role, perm, granted);
 
 select * from finish();

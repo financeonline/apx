@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import { Card, CardBody } from '@/components/ui/surfaces';
+import { ABOVE_CARD_LINK, CLICKABLE_CARD, CardLink } from '@/components/ui/clickable-card';
 import type { ChangeView, MetricCardView } from '@/modules/dashboard';
 import { StatusBadgeView } from './data-quality-badge';
 import { BASIS_DIFFERS_TEXT, changeToneClass, changeToneWord } from './presentation';
@@ -15,6 +15,11 @@ import { BASIS_DIFFERS_TEXT, changeToneClass, changeToneWord } from './presentat
  *
  * Two variants and no others (§5): `full` for Home's level 2, `compact` for a rail or a summary
  * band.
+ *
+ * The whole card opens the figure's evidence (owner, 2026-10-14): "Why?" stays the card's one link,
+ * stretched over it (`ui/clickable-card`). What used to be hover text on the label and the figure —
+ * the accountant's term, the basis, why a figure is a dash — is the link's own hover text now, since
+ * the link covers them; the badge sits above the link so its own tooltip still shows.
  */
 export type MetricCardVariant = 'compact' | 'full';
 
@@ -27,9 +32,11 @@ export function MetricCard({
 }) {
   const compact = variant === 'compact';
   const notComputable = card.status.kind === 'not_available';
+  const hoverText = [card.technicalLabel, card.basisText, notComputable ? card.status.tooltip : null]
+    .filter(Boolean).join(' · ');
 
   return (
-    <Card className="h-full">
+    <Card className={`h-full ${CLICKABLE_CARD}`}>
       <CardBody className={compact ? 'px-4 py-3' : ''}>
         <div className="flex items-start justify-between gap-3">
           <MetricLabel card={card} compact={compact} />
@@ -37,14 +44,17 @@ export function MetricCard({
             Exactly one badge (§8.1). When the figure is not computable the badge IS the em dash,
             and it is shown once, on the value, rather than twice.
           */}
-          {notComputable ? null : <StatusBadgeView status={card.status} size={compact ? 'sm' : 'md'} />}
+          {notComputable ? null : (
+            <span className={ABOVE_CARD_LINK}>
+              <StatusBadgeView status={card.status} size={compact ? 'sm' : 'md'} />
+            </span>
+          )}
         </div>
 
         <p
-          className={`tabular mt-2 ${compact ? 'text-xl' : 'text-3xl'} ${
+          className={`tabular mt-2 break-words ${compact ? 'text-xl' : 'text-2xl sm:text-3xl'} ${
             notComputable ? 'text-ink-faint' : 'text-ink'
           }`}
-          title={notComputable ? card.status.tooltip : undefined}
         >
           {card.value}
           {notComputable ? (
@@ -68,16 +78,17 @@ export function MetricCard({
         </div>
 
         <div className="mt-3 text-sm">
-          <Link
+          <CardLink
             href={card.whyHref}
-            className="text-accent underline underline-offset-2 transition-colors duration-100 hover:text-accent-hover"
+            title={hoverText || undefined}
+            className="text-accent underline underline-offset-2 transition-colors duration-100 hover:text-accent-hover group-hover:text-accent-hover"
           >
             Why?
             <span className="sr-only">
               {' '}
               See the evidence behind {card.label} for {card.period.label}
             </span>
-          </Link>
+          </CardLink>
         </div>
       </CardBody>
     </Card>
@@ -91,11 +102,9 @@ export function MetricCard({
 function MetricLabel({ card, compact }: { card: MetricCardView; compact: boolean }) {
   const tooltip = [card.technicalLabel, card.basisText].filter(Boolean).join(' · ');
 
+  // The pointer's copy of the tooltip is on the card's link (see `MetricCard`); this is the reader's.
   return (
-    <h3
-      className={`min-w-0 font-sans font-medium text-ink-muted ${compact ? 'text-xs' : 'text-sm'}`}
-      title={tooltip}
-    >
+    <h3 className={`min-w-0 font-sans font-medium text-ink-muted ${compact ? 'text-xs' : 'text-sm'}`}>
       {card.label}
       <span className="sr-only"> — {tooltip}</span>
     </h3>

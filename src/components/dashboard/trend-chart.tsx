@@ -5,6 +5,7 @@ import { TBody, TD, THead, TR, TableWrap } from '@/components/ui/table';
 import {
   CHART_FILL,
   CHART_STROKE,
+  COMPACT_CHART_BOX,
   DEFAULT_CHART_BOX,
   chartClass,
   chartDash,
@@ -13,6 +14,8 @@ import {
   scaleFor,
   segmentsFor,
   valueY,
+  type ChartBox,
+  type ChartScale,
   type TrendSeriesView,
 } from './presentation';
 import { Button } from '@/components/ui/shadcn';
@@ -28,6 +31,11 @@ import { Button } from '@/components/ui/shadcn';
  *
  * Every string it draws arrives formatted (`point.display`); the only numbers it works out are
  * pixel coordinates, in `presentation.ts`.
+ *
+ * On a phone (owner, 2026-10-14) the picture is drawn in the compact box, so its labels stay
+ * readable once scaled down: a column narrower than 36rem shows that drawing, a wider one the full
+ * one, and the other is `display: none`. The compact one does not name lines at their ends — there
+ * is no margin for it — and the buttons above, each with its line's colour and dash, are its key.
  */
 export function TrendChart({
   series,
@@ -51,11 +59,11 @@ export function TrendChart({
 
   const shown = series.filter((one) => !hidden.has(one.key));
   const scale = scaleFor(shown);
-  const box = DEFAULT_CHART_BOX;
 
   // The columns are fixed by the first series so the three lines and the month labels line up.
   const columns = series[0]?.points ?? [];
-  const zeroY = valueY(0, scale, box);
+
+  const drawing = { series, shown, scale, columns, ariaSummary, highlightPeriodId };
 
   function toggle(key: string) {
     setHidden((current) => {
@@ -122,103 +130,14 @@ export function TrendChart({
       {scale.empty ? (
         <p className="mt-4 text-sm text-ink-faint">Nothing to plot for these months yet.</p>
       ) : (
-        <svg
-          role="img"
-          aria-label={ariaSummary}
-          viewBox={`0 0 ${box.width} ${box.height}`}
-          className="mt-4 h-auto w-full"
-        >
-          {/* The baseline. Zero is always inside the plot, so a small profit never looks large. */}
-          <line
-            x1={box.padding.left}
-            y1={zeroY}
-            x2={box.width - box.padding.right}
-            y2={zeroY}
-            className="stroke-line-strong"
-            strokeWidth="1"
-          />
-
-          {highlightPeriodId
-            ? columns.map((point, index) =>
-                point.periodId === highlightPeriodId ? (
-                  <line
-                    key={point.periodId}
-                    x1={columnX(index, columns.length, box)}
-                    y1={box.padding.top}
-                    x2={columnX(index, columns.length, box)}
-                    y2={box.height - box.padding.bottom}
-                    className="stroke-line"
-                    strokeWidth="1"
-                  />
-                ) : null,
-              )
-            : null}
-
-          {shown.map((one) => {
-            const index = series.findIndex((s) => s.key === one.key);
-            const segments = segmentsFor(one, scale, box);
-            const last = segments.at(-1)?.at(-1) ?? null;
-
-            return (
-              <g key={one.key}>
-                {segments.map((segment, s) =>
-                  segment.length === 1 ? (
-                    // A lone month between two gaps: a dot, because a line of one point is nothing.
-                    <circle
-                      key={s}
-                      cx={segment[0]!.x}
-                      cy={segment[0]!.y}
-                      r="2.5"
-                      className={chartClass(CHART_FILL, index)}
-                    />
-                  ) : (
-                    <polyline
-                      key={s}
-                      points={polylinePoints(segment)}
-                      fill="none"
-                      strokeWidth="2"
-                      strokeLinejoin="round"
-                      strokeLinecap="round"
-                      strokeDasharray={chartDash(index)}
-                      className={chartClass(CHART_STROKE, index)}
-                    />
-                  ),
-                )}
-                {/*
-                  A direct label at the end of the line. Series are never told apart by colour alone
-                  (§11, DESIGN.md), so the name travels with the line rather than sitting in a key.
-                */}
-                {last ? (
-                  <text
-                    x={last.x + 8}
-                    y={last.y + 4}
-                    className={`${chartClass(CHART_FILL, index)} text-[11px]`}
-                  >
-                    {one.label}
-                  </text>
-                ) : null}
-              </g>
-            );
-          })}
-
-          {/* Only the two ends are labelled: twelve month names under a chart is noise, and the
-              table behind the toggle carries every month in full. */}
-          <text
-            x={box.padding.left}
-            y={box.height - 8}
-            className="fill-current text-[11px] text-ink-faint"
-          >
-            {columns.at(0)?.periodLabel}
-          </text>
-          <text
-            x={box.width - box.padding.right}
-            y={box.height - 8}
-            textAnchor="end"
-            className="fill-current text-[11px] text-ink-faint"
-          >
-            {columns.at(-1)?.periodLabel}
-          </text>
-        </svg>
+        <div className="mt-4 @container">
+          <div className="@xl:hidden">
+            <TrendDrawing {...drawing} box={COMPACT_CHART_BOX} compact />
+          </div>
+          <div className="hidden @xl:block">
+            <TrendDrawing {...drawing} box={DEFAULT_CHART_BOX} compact={false} />
+          </div>
+        </div>
       )}
 
       {/*
@@ -245,5 +164,129 @@ export function TrendChart({
         </TableWrap>
       </div>
     </div>
+  );
+}
+
+/** The picture, in either box (see `TrendChart`). */
+function TrendDrawing({
+  series,
+  shown,
+  scale,
+  columns,
+  ariaSummary,
+  highlightPeriodId,
+  box,
+  compact,
+}: {
+  series: readonly TrendSeriesView[];
+  shown: readonly TrendSeriesView[];
+  scale: ChartScale;
+  columns: TrendSeriesView['points'];
+  ariaSummary: string;
+  highlightPeriodId?: string;
+  box: ChartBox;
+  compact: boolean;
+}) {
+  const zeroY = valueY(0, scale, box);
+  return (
+    <svg
+      role="img"
+      aria-label={ariaSummary}
+      viewBox={`0 0 ${box.width} ${box.height}`}
+      className={compact ? 'h-auto w-full max-w-md' : 'h-auto w-full'}
+    >
+      {/* The baseline. Zero is always inside the plot, so a small profit never looks large. */}
+      <line
+        x1={box.padding.left}
+        y1={zeroY}
+        x2={box.width - box.padding.right}
+        y2={zeroY}
+        className="stroke-line-strong"
+        strokeWidth="1"
+      />
+
+      {highlightPeriodId
+        ? columns.map((point, index) =>
+            point.periodId === highlightPeriodId ? (
+              <line
+                key={point.periodId}
+                x1={columnX(index, columns.length, box)}
+                y1={box.padding.top}
+                x2={columnX(index, columns.length, box)}
+                y2={box.height - box.padding.bottom}
+                className="stroke-line"
+                strokeWidth="1"
+              />
+            ) : null,
+          )
+        : null}
+
+      {shown.map((one) => {
+        const index = series.findIndex((s) => s.key === one.key);
+        const segments = segmentsFor(one, scale, box);
+        const last = segments.at(-1)?.at(-1) ?? null;
+
+        return (
+          <g key={one.key}>
+            {segments.map((segment, s) =>
+              segment.length === 1 ? (
+                // A lone month between two gaps: a dot, because a line of one point is nothing.
+                <circle
+                  key={s}
+                  cx={segment[0]!.x}
+                  cy={segment[0]!.y}
+                  r="2.5"
+                  className={chartClass(CHART_FILL, index)}
+                />
+              ) : (
+                <polyline
+                  key={s}
+                  points={polylinePoints(segment)}
+                  fill="none"
+                  strokeWidth="2"
+                  strokeLinejoin="round"
+                  strokeLinecap="round"
+                  strokeDasharray={chartDash(index)}
+                  className={chartClass(CHART_STROKE, index)}
+                />
+              ),
+            )}
+            {/*
+              A direct label at the end of the line. Series are never told apart by colour alone
+              (§11, DESIGN.md), so the name travels with the line rather than sitting in a key. The
+              compact drawing has no margin for it; there the buttons above, each with its line's
+              colour and dash, name the lines.
+            */}
+            {last && !compact ? (
+              <text
+                x={last.x + 8}
+                y={last.y + 4}
+                className={`${chartClass(CHART_FILL, index)} text-[11px]`}
+              >
+                {one.label}
+              </text>
+            ) : null}
+          </g>
+        );
+      })}
+
+      {/* Only the two ends are labelled: twelve month names under a chart is noise, and the
+          table behind the toggle carries every month in full. */}
+      <text
+        x={box.padding.left}
+        y={box.height - 8}
+        className={`fill-current text-ink-faint ${compact ? 'text-[12px]' : 'text-[11px]'}`}
+      >
+        {columns.at(0)?.periodLabel}
+      </text>
+      <text
+        x={box.width - box.padding.right}
+        y={box.height - 8}
+        textAnchor="end"
+        className={`fill-current text-ink-faint ${compact ? 'text-[12px]' : 'text-[11px]'}`}
+      >
+        {columns.at(-1)?.periodLabel}
+      </text>
+    </svg>
   );
 }

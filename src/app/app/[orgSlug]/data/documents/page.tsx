@@ -30,8 +30,8 @@ export default async function DocumentsPage({ params, searchParams }: { params: 
       <PageHeader eyebrow="Data" title="Documents" description="Every file you have given APX, and what became of it." />
       <p className="mt-2 text-sm text-ink-muted">
         {scope === 'all'
-          ? <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={`/app/${orgSlug}/data/documents`}>Hide deleted files</Link>
-          : <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={`/app/${orgSlug}/data/documents?show=all`}>Show deleted files too</Link>}
+          ? <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href={`/app/${orgSlug}/data/documents`}>Hide deleted files</Link>
+          : <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href={`/app/${orgSlug}/data/documents?show=all`}>Show deleted files too</Link>}
       </p>
       <div className="mt-8">
         <Card>

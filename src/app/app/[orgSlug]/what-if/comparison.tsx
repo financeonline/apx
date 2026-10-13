@@ -115,7 +115,7 @@ export function ScenarioComparison({
                     </p>
                   ) : (
                     <>
-                      <div className="mt-2 flex items-baseline gap-2">
+                      <div className="mt-2 flex flex-wrap items-baseline gap-2">
                         <span className="font-mono text-2xl tabular-nums text-ink">
                           {pounds(metric.scenarioValue, metric.currency)}
                         </span>

@@ -1,7 +1,7 @@
-import Link from 'next/link';
 import { ChevronRight, Swords } from 'lucide-react';
 import type { MarketingSummary } from '@/modules/marketing';
 import { IconTile, StatusDot } from '@/components/dashboard/department-card';
+import { CLICKABLE_CARD, CardLink } from '@/components/ui/clickable-card';
 
 /**
  * Competitive Readiness on the Departments page (ADR-170): the first three comparators of the
@@ -9,6 +9,7 @@ import { IconTile, StatusDot } from '@/components/dashboard/department-card';
  * card's own layout (ADR-155) with a list in place of its one-paragraph figures, because three names
  * run together in a sentence read as one. The comparators are the model's and are labelled as such:
  * directional, not verified. With no report it says where they will come from, not a placeholder.
+ * The whole card opens the report's Section 01, as every clickable card does (`ui/clickable-card`).
  */
 export function CompetitiveReadinessCard({ href, summary }: { href: string; summary: MarketingSummary }) {
   const title = 'Competitive Readiness';
@@ -18,7 +19,7 @@ export function CompetitiveReadinessCard({ href, summary }: { href: string; summ
   return (
     <section
       aria-label={title}
-      className="panel group relative flex h-full flex-col rounded-card p-4 transition-[border-color] duration-200 hover:border-accent/70 focus-within:border-accent/70"
+      className={`panel ${CLICKABLE_CARD} flex h-full flex-col rounded-card p-4`}
     >
       <div className="flex gap-3.5">
         <IconTile tint="pink" size="md"><Swords /></IconTile>
@@ -48,13 +49,13 @@ export function CompetitiveReadinessCard({ href, summary }: { href: string; summ
 
       <div className="mt-auto flex flex-wrap items-center gap-x-3 gap-y-2 pt-3">
         <StatusDot status={status.tone} label={status.label} />
-        <Link
+        <CardLink
           href={href}
           aria-label={`Open ${title}`}
-          className="ml-auto inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors outline-none group-hover:border-accent group-hover:bg-accent-soft after:absolute after:inset-0 after:rounded-card after:content-['']"
+          className="ml-auto inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors group-hover:border-accent group-hover:bg-accent-soft"
         >
           Open <ChevronRight aria-hidden="true" className="size-4" />
-        </Link>
+        </CardLink>
       </div>
     </section>
   );

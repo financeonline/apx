@@ -168,6 +168,18 @@ export const DEFAULT_CHART_BOX: ChartBox = {
   padding: { top: 16, right: 84, bottom: 28, left: 16 },
 };
 
+/**
+ * The box for a phone-width column (owner, 2026-10-14). A chart is drawn in its box's units and then
+ * scaled to fit the page, so the 720-wide box shrinks its 11px labels to about 5px on a phone. Half
+ * as wide, the same labels come out at about 9–10px. No right margin: a compact chart names its
+ * lines in a key or inside the plot instead of at their ends.
+ */
+export const COMPACT_CHART_BOX: ChartBox = {
+  width: 360,
+  height: 240,
+  padding: { top: 14, right: 14, bottom: 26, left: 10 },
+};
+
 export interface ChartScale {
   readonly min: number;
   readonly max: number;

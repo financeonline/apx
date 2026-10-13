@@ -17,7 +17,7 @@ export default async function DangerPage({ params }: { params: Promise<{ orgSlug
         title="Danger zone"
         description="Deleting an organisation removes its data. There is a 30-day window to change your mind."
       />
-      <div className="mt-8">
+      <div className="mt-8 max-w-3xl">
         <Card>
           <CardHeader
             icon={<Trash2 />}

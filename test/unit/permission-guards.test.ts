@@ -4,6 +4,7 @@ import {
   canInviteRole,
   canChangeRole,
   canRevokeAssignment,
+  canSetAlertStatus,
   isSelfElevation,
   roleRank,
 } from '@/core/permissions/guards';
@@ -107,6 +108,68 @@ describe('canRevokeAssignment (TENANCY_MODEL.md §5.4)', () => {
   it('nobody else may, including an admin and the employee themselves', () => {
     for (const role of ['admin', 'client', 'employee', 'suspended_member', 'none'] as const) {
       expect(canRevokeAssignment(role)).toBe(false);
+    }
+  });
+});
+
+describe('ADR-172: the accountant and the 3rd party under the ceiling', () => {
+  it('both rank with the client, below admin — exactly as app.role_rank', () => {
+    expect(roleRank('accountant')).toBe(1);
+    expect(roleRank('third_party')).toBe(1);
+    expect(roleRank('client')).toBe(1);
+    expect(roleRank('admin')).toBeGreaterThan(roleRank('accountant'));
+  });
+
+  it('an owner and an admin may invite, move and remove them', () => {
+    for (const actor of ['owner', 'admin', 'super_admin'] as const) {
+      expect(canInviteRole(actor, 'accountant')).toBe(true);
+      expect(canInviteRole(actor, 'third_party')).toBe(true);
+      expect(canChangeRole(actor, 'client', 'third_party')).toBe(true);
+      expect(canChangeRole(actor, 'third_party', 'accountant')).toBe(true);
+      expect(ceilingAllows(actor, 'third_party')).toBe(true);
+    }
+  });
+
+  it('an admin still cannot make one of them an owner', () => {
+    expect(canChangeRole('admin', 'accountant', 'owner')).toBe(false);
+    expect(canChangeRole('admin', 'third_party', 'owner')).toBe(false);
+  });
+
+  it('neither governs anybody', () => {
+    for (const actor of ['accountant', 'third_party'] as const) {
+      for (const subject of ['owner', 'admin', 'accountant', 'client', 'third_party']) {
+        expect(ceilingAllows(actor, subject)).toBe(false);
+      }
+    }
+  });
+
+  it('moving between client, accountant and 3rd party is never self-elevation, and becoming admin is', () => {
+    expect(isSelfElevation(true, 'client', 'accountant')).toBe(false);
+    expect(isSelfElevation(true, 'third_party', 'client')).toBe(false);
+    expect(isSelfElevation(true, 'accountant', 'admin')).toBe(true);
+  });
+});
+
+describe('canSetAlertStatus — an allow-list (R2-A-07; ADR-172)', () => {
+  it('the owner, admins, the Financial Analyst and the super admin decide', () => {
+    for (const role of ['owner', 'admin', 'employee', 'super_admin'] as const) {
+      for (const status of ['acknowledged', 'resolved', 'dismissed']) {
+        expect(canSetAlertStatus(role, status)).toBe(true);
+      }
+    }
+  });
+
+  it('a client, an accountant and a 3rd party may acknowledge only', () => {
+    for (const role of ['client', 'accountant', 'third_party'] as const) {
+      expect(canSetAlertStatus(role, 'acknowledged')).toBe(true);
+      expect(canSetAlertStatus(role, 'resolved')).toBe(false);
+      expect(canSetAlertStatus(role, 'dismissed')).toBe(false);
+    }
+  });
+
+  it('a suspended member and `none` may do nothing', () => {
+    for (const role of ['suspended_member', 'none'] as const) {
+      expect(canSetAlertStatus(role, 'acknowledged')).toBe(false);
     }
   });
 });

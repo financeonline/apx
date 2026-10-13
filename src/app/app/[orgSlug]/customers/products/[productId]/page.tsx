@@ -41,7 +41,7 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
         <Card>
           <CardHeader title="Over time" description="Revenue attributed by lines each month; contribution only where cost lines exist." icon={<ChartColumn />} tint="pink" />
           <CardBody className="px-0 py-0">
-            <TableWrap>
+            <TableWrap className="min-w-0">
               <caption className="sr-only">Monthly revenue for {view.product.name}</caption>
               <THead columns={['Month', 'Revenue', 'Contribution']} />
               <TBody>{view.trend.map((t) => <TR key={t.periodId}><TD>{t.label}</TD><TD className="text-right tabular">{t.revenue}</TD><TD className="text-right tabular">{t.contribution ?? <span className="text-ink-faint">—</span>}</TD></TR>)}</TBody>
@@ -67,17 +67,17 @@ export default async function ProductPage({ params, searchParams }: { params: Pr
           <CardHeader title="The invoices behind these figures" description="Each line links to the invoice’s own record and, for those allowed, its source document." icon={<FileText />} tint="pink" />
           <CardBody className="px-0 py-0">
             {view.lines.length === 0 ? <p className="px-5 py-4 text-sm text-ink-muted">No lines yet.</p> : (
-              <TableWrap>
+              <TableWrap stack>
                 <caption className="sr-only">Invoice lines for {view.product.name}</caption>
                 <THead columns={['Invoice', 'Date', 'Customer or supplier', 'Kind', 'Amount', '']} />
                 <TBody>
                   {view.lines.map((l) => (
                     <TR key={`${l.invoiceId}:${l.amount}:${l.kind}`}>
-                      <TD className="tabular">{l.number}</TD>
-                      <TD className="whitespace-nowrap tabular">{formatDate(l.date)}</TD>
-                      <TD>{l.customer}</TD>
-                      <TD>{l.kind === 'sale' ? 'Sale' : 'Cost'}{!l.counted ? <Badge tone="warn">not counted</Badge> : null}</TD>
-                      <TD className="text-right tabular">{l.amount}</TD>
+                      <TD className="tabular max-sm:font-medium">{l.number}</TD>
+                      <TD className="whitespace-nowrap tabular" label="Date">{formatDate(l.date)}</TD>
+                      <TD label="Customer or supplier">{l.customer}</TD>
+                      <TD label="Kind">{l.kind === 'sale' ? 'Sale' : 'Cost'}{!l.counted ? <Badge tone="warn">not counted</Badge> : null}</TD>
+                      <TD className="text-right tabular" label="Amount">{l.amount}</TD>
                       <TD className="text-right text-sm"><Link href={l.recordHref} className="text-ink-muted underline hover:text-ink">Where this came from</Link></TD>
                     </TR>
                   ))}

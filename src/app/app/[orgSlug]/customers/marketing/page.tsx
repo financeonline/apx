@@ -38,19 +38,19 @@ export default async function MarketingPage({ params, searchParams }: { params: 
               {view.campaigns.length === 0 ? (
                 <p className="px-5 py-4 text-sm text-ink-muted">No campaigns yet{mayEdit ? ' — add one below' : ''}. A campaign earns revenue here only when an opportunity marked as won names it.</p>
               ) : (
-                <TableWrap>
+                <TableWrap stack>
                   <caption className="sr-only">Campaign spend and attributed revenue</caption>
                   <THead columns={['Campaign', 'Channel', 'Spend', 'Customers won', 'Revenue credited', 'Cost per customer', '']} />
                   <TBody>
                     {view.campaigns.map((c) => (
                       <TR key={c.id}>
-                        <TD><Link href={c.href} className="text-ink underline underline-offset-2">{c.name}</Link>{c.status !== 'active' ? <Badge tone="neutral">{c.status}</Badge> : null}</TD>
-                        <TD>{c.channelName ?? <span className="text-ink-faint">—</span>}</TD>
-                        <TD className="whitespace-nowrap text-right tabular">{c.spend}</TD>
-                        <TD className="whitespace-nowrap text-right tabular">{c.customersWon}</TD>
-                        <TD className="whitespace-nowrap text-right tabular">{c.attributionStatus === 'attributed_via_won_opportunities' ? c.attributedRevenue : <span className="text-xs text-ink-muted">{c.attributionText}</span>}</TD>
-                        <TD className="whitespace-nowrap text-right tabular">{c.cac ?? <span className="text-xs text-ink-muted" title={c.cacNote ?? undefined}>—</span>}</TD>
-                        <TD className="text-right text-sm"><Link href={c.href} className="inline-flex items-center gap-0.5 rounded-xl border border-accent/45 bg-surface px-2.5 py-0.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">Detail <ChevronRight aria-hidden="true" className="size-4" /></Link></TD>
+                        <TD className="max-sm:font-medium"><Link href={c.href} className="text-ink underline underline-offset-2">{c.name}</Link>{c.status !== 'active' ? <Badge tone="neutral">{c.status}</Badge> : null}</TD>
+                        <TD label="Channel">{c.channelName ?? <span className="text-ink-faint">—</span>}</TD>
+                        <TD className="whitespace-nowrap text-right tabular" label="Spend">{c.spend}</TD>
+                        <TD className="whitespace-nowrap text-right tabular" label="Customers won">{c.customersWon}</TD>
+                        <TD className="whitespace-nowrap text-right tabular max-sm:whitespace-normal" label="Revenue credited">{c.attributionStatus === 'attributed_via_won_opportunities' ? c.attributedRevenue : <span className="text-xs text-ink-muted">{c.attributionText}</span>}</TD>
+                        <TD className="whitespace-nowrap text-right tabular" label="Cost per customer">{c.cac ?? <span className="text-xs text-ink-muted" title={c.cacNote ?? undefined}>—</span>}</TD>
+                        <TD className="text-right text-sm"><Link href={c.href} className="inline-flex items-center gap-0.5 rounded-xl border border-accent/45 bg-surface px-2.5 py-0.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10">Detail <ChevronRight aria-hidden="true" className="size-4" /></Link></TD>
                       </TR>
                     ))}
                   </TBody>

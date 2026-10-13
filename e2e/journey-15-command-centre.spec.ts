@@ -83,10 +83,11 @@ test('an employee assigned two organisations sees both on the Command Centre; th
   await expect(page.getByRole('heading', { level: 1 })).toContainText(/1 of 2 clients need attention/i);
 
   const queue = page.getByRole('region', { name: /clients needing attention/i });
-  await expect(queue.getByRole('link', { name: ORG_A, exact: true })).toBeVisible();
+  // The whole card opens the client; its one link is "Why, and what next", so the name is a heading.
+  await expect(queue.getByRole('heading', { name: ORG_A, exact: true })).toBeVisible();
   await expect(queue.getByText(/1 critical alert/i)).toBeVisible();
   await expect(queue.getByText(/1 overdue action/i)).toBeVisible();
-  await expect(queue.getByRole('link', { name: ORG_B, exact: true })).toHaveCount(0);
+  await expect(queue.getByRole('heading', { name: ORG_B, exact: true })).toHaveCount(0);
 
   const clients = page.getByRole('region', { name: /every client/i });
   await expect(clients.getByRole('link', { name: ORG_A, exact: true })).toBeVisible();

@@ -3,6 +3,7 @@ import { ArrowLeftRight } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState, Badge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
+import { TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { formatDate } from '@/components/labels';
 import { loadBankTransactionsPage, loadPeriodScope, parseListFilter, type BankingListFilter } from '@/modules/dashboard';
 import { PeriodHeading } from '../../_components/period-heading';
@@ -94,7 +95,7 @@ export default async function BankTransactionsPage({
             <nav aria-label="Filter transactions" className="flex flex-wrap gap-2 text-sm">
               {FILTERS.map((f) => (
                 <Link key={f.key} href={href({ filter: f.key, page: 1 })} aria-current={view.filter === f.key ? 'page' : undefined}
-                  className={view.filter === f.key ? 'rounded-full bg-accent-soft px-3 py-1 font-medium text-accent' : 'rounded-full bg-surface-sunken px-3 py-1 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}>
+                  className={`inline-flex items-center ${TOUCH_TARGET} ${view.filter === f.key ? 'rounded-full bg-accent-soft px-3 py-1 font-medium text-accent' : 'rounded-full bg-surface-sunken px-3 py-1 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}`}>
                   {f.label}
                 </Link>
               ))}
@@ -104,9 +105,9 @@ export default async function BankTransactionsPage({
         {view.accounts.length > 1 && !recurring ? (
           <div className="border-b border-line px-5 py-2 text-sm">
             <span className="text-ink-muted">Account: </span>
-            <Link href={href({ account: null, page: 1 })} className={view.account ? 'text-ink-muted hover:text-ink' : 'text-ink'}>All</Link>
+            <Link href={href({ account: null, page: 1 })} className={`inline-flex items-center ${TOUCH_TARGET} ${view.account ? 'text-ink-muted hover:text-ink' : 'text-ink'}`}>All</Link>
             {view.accounts.map((a) => (
-              <span key={a.id}>{' · '}<Link href={href({ account: a.id, page: 1 })} className={view.account?.id === a.id ? 'text-ink' : 'text-ink-muted hover:text-ink'}>{a.name}</Link></span>
+              <span key={a.id}>{' · '}<Link href={href({ account: a.id, page: 1 })} className={`inline-flex items-center ${TOUCH_TARGET} ${view.account?.id === a.id ? 'text-ink' : 'text-ink-muted hover:text-ink'}`}>{a.name}</Link></span>
             ))}
           </div>
         ) : null}
@@ -116,21 +117,21 @@ export default async function BankTransactionsPage({
               {view.filter === 'uncategorised' ? 'Every transaction here has a category. Nothing to do.' : 'No transactions match.'}
             </p>
           ) : (
-            <TableWrap>
+            <TableWrap stack>
               <caption className="sr-only">Bank transactions</caption>
               <THead columns={['Date', 'Description', 'Account', 'Category', 'Amount']} />
               <TBody>
                 {view.rows.map((row) => (
                   <TR key={row.id}>
-                    <TD className="whitespace-nowrap tabular">{formatDate(row.date)}</TD>
-                    <TD>
+                    <TD className="whitespace-nowrap tabular" label="Date">{formatDate(row.date)}</TD>
+                    <TD className="max-sm:font-medium max-sm:[overflow-wrap:anywhere]">
                       <Link href={row.href} className="text-ink hover:underline">{row.description}</Link>
                       {row.transferKind ? <span className="ml-2 text-xs text-ink-muted">{row.transferKind}</span> : null}
                       {row.recurring ? <span className="ml-2 text-xs text-ink-muted">regular</span> : null}
                     </TD>
-                    <TD className="text-ink-muted">{row.accountName}</TD>
-                    <TD>{row.uncategorised ? <Badge tone="warn">{row.categoryLabel}</Badge> : row.categoryLabel}</TD>
-                    <TD className="whitespace-nowrap text-right tabular">{row.amount}</TD>
+                    <TD className="text-ink-muted" label="Account">{row.accountName}</TD>
+                    <TD label="Category">{row.uncategorised ? <Badge tone="warn">{row.categoryLabel}</Badge> : row.categoryLabel}</TD>
+                    <TD className="whitespace-nowrap text-right tabular" label="Amount">{row.amount}</TD>
                   </TR>
                 ))}
               </TBody>
@@ -139,9 +140,9 @@ export default async function BankTransactionsPage({
         </CardBody>
         {pages > 1 ? (
           <nav aria-label="Pages" className="flex items-center justify-between border-t border-line px-5 py-3 text-sm">
-            {view.page > 1 ? <Link href={href({ page: view.page - 1 })} className="text-ink-muted hover:text-ink">Previous</Link> : <span />}
+            {view.page > 1 ? <Link href={href({ page: view.page - 1 })} className={`inline-flex items-center text-ink-muted hover:text-ink ${TOUCH_TARGET}`}>Previous</Link> : <span />}
             <span className="text-ink-muted">Page {view.page} of {pages}</span>
-            {view.page < pages ? <Link href={href({ page: view.page + 1 })} className="text-ink-muted hover:text-ink">Next</Link> : <span />}
+            {view.page < pages ? <Link href={href({ page: view.page + 1 })} className={`inline-flex items-center text-ink-muted hover:text-ink ${TOUCH_TARGET}`}>Next</Link> : <span />}
           </nav>
         ) : null}
       </Card>

@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { ChevronRight, CircleAlert, Info, ShieldAlert } from 'lucide-react';
 import { Badge, Card, CardBody, IconBadge } from '@/components/ui/surfaces';
+import { ABOVE_CARD_LINK, CLICKABLE_CARD, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import type { AlertView } from '@/modules/dashboard';
 import { reasonText, severityLabel, severityTone } from './alert-presentation';
 
@@ -13,43 +14,52 @@ import { reasonText, severityLabel, severityTone } from './alert-presentation';
  * a reader who disagrees can see the rule rather than guess at it.
  *
  * Two variants and no others (§5): `compact` for Home's top-risks band, `full` for Insights.
+ *
+ * The whole card opens the alert's own page, where its history is (owner, 2026-10-14): "History"
+ * stays its one link, stretched over the card (`ui/clickable-card`), and "Why?", the status controls
+ * and the severity badge's tooltip sit above it. On that page itself the card is not a link to itself
+ * (`linked={false}`).
  */
 export type AlertCardVariant = 'compact' | 'full';
 
 /** The reference's outlined link-button (ADR-155). */
-const PILL = 'inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft';
+const PILL = `inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft ${TOUCH_TARGET}`;
 
 export function AlertCard({
   alert,
   variant = 'full',
   actions,
+  linked = true,
 }: {
   alert: AlertView;
   variant?: AlertCardVariant;
   /** The status controls. Absent for a role that may not change this alert's status (§7.4). */
   actions?: React.ReactNode;
+  /** False on the alert's own page, where a card opening that page would go nowhere. */
+  linked?: boolean;
 }) {
   const compact = variant === 'compact';
   const reason = reasonText(alert.statusReasonCode);
 
   return (
-    <Card className="h-full">
+    <Card className={linked ? `h-full ${CLICKABLE_CARD}` : 'h-full'}>
       <CardBody className={compact ? 'px-4 py-3' : ''}>
-        <div className="flex items-start justify-between gap-3">
+        {/* In a narrow column the severity badge drops below rather than squeezing the title. */}
+        <div className="flex flex-wrap items-start justify-between gap-3">
           {/* The reference's icon tile (ADR-155): pink for the serious ones. Decorative. */}
           <IconBadge tint={alert.severity === 'critical' || alert.severity === 'high' ? 'pink' : 'violet'} size="sm">
             {alert.severity === 'critical' || alert.severity === 'high' ? <ShieldAlert />
               : alert.severity === 'info' ? <Info /> : <CircleAlert />}
           </IconBadge>
-          <div className="min-w-0 flex-1">
-            <h3 className={`text-ink ${compact ? 'text-sm' : ''}`}>{alert.title}</h3>
+          <div className="min-w-0 flex-1 basis-40">
+            <h3 className={`break-words text-ink ${compact ? 'text-sm' : ''}`}>{alert.title}</h3>
             <p className="mt-0.5 text-xs text-ink-faint">
               {alert.family} · {alert.periodLabel}
               {alert.recurring ? ' · seen since ' + alert.firstSeenLabel : null}
             </p>
           </div>
           <span
-            className="shrink-0"
+            className={`shrink-0 ${ABOVE_CARD_LINK}`}
             title={alert.thresholdNote ?? undefined}
           >
             <Badge tone={severityTone(alert.severity)}>{severityLabel(alert.severity)}</Badge>
@@ -70,16 +80,20 @@ export function AlertCard({
 
         <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
           {alert.evidenceHref ? (
-            <Link href={alert.evidenceHref} className={PILL}>
+            <Link href={alert.evidenceHref} className={`${PILL} ${ABOVE_CARD_LINK}`}>
               Why? <ChevronRight aria-hidden="true" className="size-4" />
             </Link>
           ) : null}
-          {alert.detailHref ? (
+          {alert.detailHref && linked ? (
+            <CardLink href={alert.detailHref} className={`${PILL} group-hover:border-accent group-hover:bg-accent-soft`}>
+              History <ChevronRight aria-hidden="true" className="size-4" />
+            </CardLink>
+          ) : alert.detailHref ? (
             <Link href={alert.detailHref} className={PILL}>
               History <ChevronRight aria-hidden="true" className="size-4" />
             </Link>
           ) : null}
-          {actions}
+          {actions ? <div className={ABOVE_CARD_LINK}>{actions}</div> : null}
         </div>
       </CardBody>
     </Card>

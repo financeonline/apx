@@ -90,14 +90,14 @@ export default async function ProfitAndLossPage({
                 Nothing was recorded against a spending category this month.
               </p>
             ) : (
-              <TableWrap>
+              <TableWrap stack>
                 <caption className="sr-only">
                   Spending by category for {scope.period.label}
                 </caption>
                 <THead columns={['Category', 'Amount', `Change vs ${comparison}`, '']} />
                 <TBody>
                   {view.spending.map((row) => (
-                    <FigureRow key={row.key} row={row.figure} label={row.label} />
+                    <FigureRow key={row.key} row={row.figure} label={row.label} changeLabel={`Change vs ${comparison}`} />
                   ))}
                 </TBody>
               </TableWrap>

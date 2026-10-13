@@ -43,7 +43,8 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
           <ShortcutLink href={`/app/${orgSlug}/settings/danger`} label="Danger zone" icon={<TriangleAlert aria-hidden="true" />} />
         )}
       </nav>
-      <div className="mt-8">
+      {/* Forms keep a readable width on a very wide screen. */}
+      <div className="mt-8 max-w-3xl">
         <Card>
           <CardHeader icon={<Building2 />} tint="violet" title="Organisation" description="The business's name, financial year and time zone." />
           <CardBody>
@@ -56,7 +57,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
           </CardBody>
         </Card>
       </div>
-      <div className="mt-8">
+      <div className="mt-8 max-w-3xl">
         <Card>
           <CardHeader icon={<Receipt />} tint="pink" title="VAT" description="Whether your sales and costs are recorded with or without VAT." />
           <CardBody>
@@ -64,7 +65,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
           </CardBody>
         </Card>
       </div>
-      <div className="mt-8">
+      <div className="mt-8 max-w-3xl">
         <Card>
           <CardHeader icon={<Globe />} tint="violet" title="Currency and country" description="Where the business is based and the currency its figures are kept in." />
           <CardBody>
@@ -76,7 +77,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
           </CardBody>
         </Card>
       </div>
-      <div className="mt-8">
+      <div className="mt-8 max-w-3xl">
         <Card>
           <CardHeader icon={<Landmark />} tint="pink" title="Tax" description="Used for the indicative VAT return and the Corporation Tax estimate." />
           <CardBody>

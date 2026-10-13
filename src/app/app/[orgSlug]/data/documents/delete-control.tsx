@@ -16,7 +16,7 @@ export function DeleteDocumentControl({ orgSlug, documentId, filename }: { orgSl
     <form action={submit} className="flex flex-wrap items-center gap-2 text-sm">
       <input type="hidden" name="org_slug" value={orgSlug} />
       <input type="hidden" name="document_id" value={documentId} />
-      <span className="text-ink-muted">Delete {filename}? No import rests on it.</span>
+      <span className="min-w-0 text-ink-muted [overflow-wrap:anywhere]">Delete {filename}? No import rests on it.</span>
       <SubmitButton tone="danger" pendingLabel="Deleting…">Yes, delete it</SubmitButton>
       <Button type="button" variant="ghost" onClick={() => setArmed(false)}>Keep it</Button>
       <ActionMessage state={state} />

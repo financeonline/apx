@@ -41,8 +41,8 @@ export function FundingReportView({ content, orgSlug }: { content: FundingReport
         <dl className="mt-3 flex flex-col gap-3">
           {a.factors.map((f) => (
             <div key={f.key} className="border-b border-line pb-3 last:border-0">
-              <dt className="flex justify-between text-sm text-ink">
-                <span>{f.name} <span className="text-ink-faint">· weight {f.weight}</span></span>
+              <dt className="flex justify-between gap-3 text-sm text-ink">
+                <span className="min-w-0">{f.name} <span className="text-ink-faint">· weight {f.weight}</span></span>
                 <span className="font-serif text-lg">{f.score === null ? '—' : f.score}</span>
               </dt>
               <dd className="mt-1 text-sm text-ink-muted">
@@ -99,7 +99,7 @@ export function FundingReportView({ content, orgSlug }: { content: FundingReport
       </CardBody></Card>
 
       <p className="text-sm print:hidden">
-        <Link href={`/app/${orgSlug}/funding?period=${content.period.id}`} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">
+        <Link href={`/app/${orgSlug}/funding?period=${content.period.id}`} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10">
           Open the current assessment for {content.period.label}
           <ChevronRight aria-hidden="true" className="size-4" />
         </Link>

@@ -27,11 +27,11 @@ export function AiReadingRequest({ orgSlug, batchId, documentId }: { orgSlug: st
       <input type="hidden" name="batch_id" value={batchId} />
       <input type="hidden" name="document_id" value={documentId} />
       <p className="text-ink">{CONSENT_LINE}</p>
-      <label className="flex items-center gap-2">
+      <label className="flex w-fit items-center gap-2 pointer-coarse:min-h-10">
         <input type="checkbox" name="consent" value="yes" required />
         <span>I understand.</span>
       </label>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SubmitButton pendingLabel="Asking…">Read with AI</SubmitButton>
         <ActionMessage state={state} />
       </div>
@@ -62,11 +62,11 @@ export function ReceiptReadingRequest({ orgSlug, batchId, documentId, accounts }
         </NativeSelect>
       </label>
       <p className="text-ink">{RECEIPT_CONSENT_LINE}</p>
-      <label className="flex items-center gap-2">
+      <label className="flex w-fit items-center gap-2 pointer-coarse:min-h-10">
         <input type="checkbox" name="consent" value="yes" required />
         <span>I understand.</span>
       </label>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SubmitButton pendingLabel="Asking…">Read receipts with AI</SubmitButton>
         <ActionMessage state={state} />
       </div>
@@ -91,7 +91,7 @@ export function PageConfirmation({ orgSlug, batchId, page, pageWide, confirmed }
           ? 'The AI read this page with high confidence and the line count agrees.'
           : 'This page needs each row decided before it can be confirmed as a whole.'}
       </span>
-      <SubmitButton tone="secondary" pendingLabel="Saving…">I have compared all rows on page {page}</SubmitButton>
+      <SubmitButton tone="secondary" pendingLabel="Saving…" className="whitespace-normal">I have compared all rows on page {page}</SubmitButton>
       <ActionMessage state={state} />
     </form>
   );
@@ -106,7 +106,8 @@ export function StatementBalancesForm({ orgSlug, batchId, opening, closing, comp
     <form action={submit} className="flex flex-col gap-3 text-sm">
       <input type="hidden" name="org_slug" value={orgSlug} />
       <input type="hidden" name="batch_id" value={batchId} />
-      <div className="flex flex-wrap gap-4">
+      {/* Side by side where there is room; stacked on a phone. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 sm:max-w-xl">
         <label className="flex flex-col gap-1">
           <span className="text-ink-muted">Opening balance printed on the statement</span>
           <Input name="opening" inputMode="decimal" required defaultValue={opening ?? ''} className="tabular" placeholder="1000.00" />
@@ -121,7 +122,7 @@ export function StatementBalancesForm({ orgSlug, batchId, opening, closing, comp
       ) : comparison === 'differs_from_ai' ? (
         <p className="text-ink-muted">These differ from the AI&rsquo;s reading of the page.</p>
       ) : null}
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SubmitButton tone="secondary" pendingLabel="Checking…">Save balances and check</SubmitButton>
         <ActionMessage state={state} />
       </div>

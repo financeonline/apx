@@ -18,13 +18,13 @@ export function RollbackControl({ orgSlug, batchId }: { orgSlug: string; batchId
 
   return (
     <details>
-      <summary className="cursor-pointer list-none text-sm text-ink-muted hover:text-ink">
+      <summary className="cursor-pointer list-none py-1 text-sm whitespace-nowrap text-ink-muted hover:text-ink pointer-coarse:py-2.5">
         Roll back
       </summary>
       <form action={action} className="mt-2 flex flex-wrap items-center gap-2">
         <input type="hidden" name="org_slug" value={orgSlug} />
         <input type="hidden" name="batch_id" value={batchId} />
-        <Input name="reason" placeholder="Why are you rolling this back?" required className="max-w-xs" />
+        <Input name="reason" placeholder="Why are you rolling this back?" required className="min-w-48 max-w-xs" />
         <Button
           type="submit"
           variant="secondary"

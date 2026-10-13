@@ -1,10 +1,10 @@
-import Link from 'next/link';
 import { BellRing, CalendarDays, ChartColumn, ChevronRight, CircleAlert, TrendingUp } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { loadAlertsPage, loadInsights, type MovementView } from '@/modules/dashboard';
 import { PageHeader, Card, CardBody, EmptyState, IconBadge } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
+import { CLICKABLE_ROW, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import {
   AlertCard, NO_ALERTS_BODY, NO_ALERTS_FILTERED_BODY, NO_ALERTS_FILTERED_TITLE, NO_ALERTS_TITLE,
   bySeverity,
@@ -27,11 +27,12 @@ export const dynamic = 'force-dynamic';
  * interpreted things first is the difference between a page you scan and a page you act on.
  */
 
+/** One movement. The whole row opens its evidence (owner, 2026-10-14): "Why?" is stretched over it. */
 function MovementRow({ movement }: { movement: MovementView }) {
   const tone = movement.favourable ? 'text-good' : 'text-danger';
 
   return (
-    <li className="flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 border-b border-line/60 py-3 last:border-0">
+    <li className={`${CLICKABLE_ROW} -mx-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg border-b border-line/60 px-2 py-3 last:border-0`}>
       <div className="min-w-0">
         <p className="text-ink">
           {movement.dimensionLabel ?? movement.label}
@@ -55,13 +56,13 @@ function MovementRow({ movement }: { movement: MovementView }) {
         ) : movement.percent ? (
           <span className={`text-sm ${tone}`}>{movement.percent}</span>
         ) : null}
-        <Link
+        <CardLink
           href={movement.whyHref}
-          className="inline-flex items-center gap-0.5 self-center rounded-xl border border-accent/45 bg-surface px-2.5 py-0.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
+          className={`inline-flex items-center gap-0.5 self-center rounded-xl border border-accent/45 bg-surface px-2.5 py-0.5 text-sm font-medium text-accent transition-colors after:rounded-lg hover:border-accent hover:bg-accent-soft group-hover:border-accent group-hover:bg-accent-soft ${TOUCH_TARGET}`}
         >
           Why?
           <ChevronRight aria-hidden="true" className="size-4" />
-        </Link>
+        </CardLink>
       </div>
     </li>
   );

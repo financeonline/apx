@@ -5,6 +5,7 @@ import { missingReasonText } from '@/modules/dashboard';
 import { getBudgetView, type BudgetLineKey } from '@/modules/budgets';
 import { getAccessContext } from '@/modules/tenancy';
 import { Badge, Card, CardBody, EmptyState, IconBadge, PageHeader } from '@/components/ui/surfaces';
+import { TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { requirePermission } from '@/app/_lib/authz';
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 
@@ -70,7 +71,7 @@ export default async function BudgetPage({
           {view.months.map((m) => (
             <Link key={m.id} href={`/app/${orgSlug}/money/budget?period=${m.id}`}
               aria-current={m.id === view.period?.id ? 'page' : undefined}
-              className={m.id === view.period?.id ? 'rounded-full bg-accent-soft px-3 py-1 font-medium text-accent' : 'rounded-full bg-surface-sunken px-3 py-1 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}>
+              className={`inline-flex items-center ${TOUCH_TARGET} ${m.id === view.period?.id ? 'rounded-full bg-accent-soft px-3 py-1 font-medium text-accent' : 'rounded-full bg-surface-sunken px-3 py-1 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}`}>
               {m.label}
             </Link>
           ))}

@@ -182,7 +182,7 @@ export default async function ReviewBatchPage({
   return (
     <>
       <p className="mb-2 text-sm">
-        <Link href={`/app/${orgSlug}/data/imports`} className="text-accent underline underline-offset-2">
+        <Link href={`/app/${orgSlug}/data/imports`} className="inline-flex items-center text-accent underline underline-offset-2 pointer-coarse:min-h-10">
           Back to imports
         </Link>
       </p>
@@ -374,9 +374,11 @@ export default async function ReviewBatchPage({
                   // §5.4: balances copied from the model withhold the page-wide tick, whatever the confidence.
                   const pageWide = review.batch.extractionStats.confidence?.[String(page)] === 'high' && lineCountAgrees && review.balanceComparison !== 'matches_ai';
                   return (
-                    <section key={page} className="grid gap-4 lg:grid-cols-2" aria-label={`Page ${page}`}>
+                    // `grid-cols-1`, not an implicit column: an implicit track grows to the table's
+                    // minimum width and would push the card sideways on a phone.
+                    <section key={page} className="grid grid-cols-1 gap-4 lg:grid-cols-2" aria-label={`Page ${page}`}>
                       <DocumentPageView orgSlug={orgSlug} documentId={review.batch.sourceDocumentId} page={page} filename={review.filename ?? 'statement.pdf'} />
-                      <div className="flex flex-col gap-3">
+                      <div className="flex min-w-0 flex-col gap-3">
                         <h3 className="text-sm font-medium text-ink">Page {page} · {pageRows.length} row{pageRows.length === 1 ? '' : 's'} read</h3>
                         <Table>
                           <THead columns={isReceipts ? ['Receipt', 'Date', 'Who was paid', 'Total'] : ['Line', 'Date', 'Description', 'Amount', 'Balance']} />
@@ -420,7 +422,7 @@ export default async function ReviewBatchPage({
               </div>
               <ul className="mt-2 space-y-1 text-sm">
                 {review.batchIssues.map((issue) => (
-                  <li key={issue.code} className={issue.severity === 'error' ? 'text-danger' : 'text-ink-muted'}>
+                  <li key={issue.code} className={`[overflow-wrap:anywhere] ${issue.severity === 'error' ? 'text-danger' : 'text-ink-muted'}`}>
                     {issue.message}
                   </li>
                 ))}
@@ -636,14 +638,14 @@ function IssueGroupRow({ group }: { group: BatchIssueGroup }) {
   return (
     <li className="border-b border-line/60 pb-2 last:border-0">
       <div className="flex flex-wrap items-baseline justify-between gap-2">
-        <span className={group.severity === 'error' ? 'text-danger' : 'text-ink'}>
+        <span className={`min-w-0 [overflow-wrap:anywhere] ${group.severity === 'error' ? 'text-danger' : 'text-ink'}`}>
           {group.message}
         </span>
         <span className="tabular text-sm text-ink-muted">
           {group.rowCount} row{group.rowCount === 1 ? '' : 's'}
         </span>
       </div>
-      <p className="mt-0.5 text-xs text-ink-faint">
+      <p className="mt-0.5 text-xs text-ink-faint [overflow-wrap:anywhere]">
         {group.code} · rows {group.examples.map((e) => e.rowNumber).join(', ')}
         {group.rowCount > group.examples.length ? ' and others' : ''}
       </p>

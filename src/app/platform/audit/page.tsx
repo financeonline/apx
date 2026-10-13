@@ -72,18 +72,19 @@ export default async function PlatformAuditPage({
         {FAMILIES.map((family) => (
           <Link key={family.label} href={href({ action: family.prefix, page: null })}
             aria-current={(family.prefix ?? null) === prefix ? 'page' : undefined}
-            className={(family.prefix ?? null) === prefix ? 'rounded-xl border border-accent/45 bg-accent-soft px-3 py-1.5 font-medium text-accent' : 'rounded-xl border border-line bg-surface px-3 py-1.5 text-ink-muted transition-colors hover:border-accent/45 hover:text-ink'}>
+            className={`inline-flex items-center rounded-xl border px-3 py-1.5 pointer-coarse:min-h-10 ${(family.prefix ?? null) === prefix ? 'border-accent/45 bg-accent-soft font-medium text-accent' : 'border-line bg-surface text-ink-muted transition-colors hover:border-accent/45 hover:text-ink'}`}>
             {family.label}
           </Link>
         ))}
       </nav>
 
       <div className="mt-3 flex flex-wrap items-center gap-3 text-sm">
-        <form className="flex flex-wrap items-center gap-2" action="/platform/audit">
+        <form className="flex min-w-0 max-w-full flex-wrap items-center gap-2" action="/platform/audit">
           {prefix ? <input type="hidden" name="action" value={prefix} /> : null}
-          <label className="flex items-center gap-2">
+          {/* `max-w-full`: a long organisation name narrows the select to the screen instead of widening the page. */}
+          <label className="flex min-w-0 max-w-full items-center gap-2">
             <span className="text-ink-muted">Organisation</span>
-            <NativeSelect name="org" defaultValue={organizationId ?? ''} className="w-auto px-2 py-1">
+            <NativeSelect name="org" defaultValue={organizationId ?? ''} className="w-auto min-w-0 max-w-full px-2 py-1">
               <option value="">All</option>
               {((organizations ?? []) as Array<{ id: string; name: string }>).map((o) => (
                 <option key={o.id} value={o.id}>{o.name}</option>
@@ -96,7 +97,7 @@ export default async function PlatformAuditPage({
           </label>
           <Button type="submit" variant="secondary" className="px-3 py-1">Apply</Button>
         </form>
-        {organizationId || since ? <Link href="/platform/audit" className="underline text-ink-muted">Clear</Link> : null}
+        {organizationId || since ? <Link href="/platform/audit" className="inline-flex items-center underline text-ink-muted pointer-coarse:min-h-10">Clear</Link> : null}
       </div>
 
       <div className="mt-6">
@@ -132,8 +133,8 @@ export default async function PlatformAuditPage({
       </div>
 
       <div className="mt-4 flex flex-wrap items-center gap-3 text-sm">
-        {pageNumber > 1 ? <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={href({ page: pageNumber === 2 ? null : String(pageNumber - 1) })}>Newer</Link> : null}
-        {events.length === PAGE_SIZE ? <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={href({ page: String(pageNumber + 1) })}>Older</Link> : null}
+        {pageNumber > 1 ? <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href={href({ page: pageNumber === 2 ? null : String(pageNumber - 1) })}>Newer</Link> : null}
+        {events.length === PAGE_SIZE ? <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href={href({ page: String(pageNumber + 1) })}>Older</Link> : null}
       </div>
     </>
   );

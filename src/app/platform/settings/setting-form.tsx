@@ -18,7 +18,7 @@ export function SettingForm({ settingKey, label, hint, value, numeric }: {
         <Input name="value" defaultValue={value} inputMode={numeric ? 'numeric' : 'text'}
           className={`mt-1 ${numeric ? 'tabular w-48' : 'font-mono text-xs'}`} />
       </label>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SubmitButton tone="secondary" pendingLabel="Saving…">Save</SubmitButton>
         <ActionMessage state={state} />
       </div>

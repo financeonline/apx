@@ -74,7 +74,7 @@ export function StoredPdfControl({
         </Button>
       )}
       {canGenerate ? (
-        <form action={submit} className="flex items-center gap-3">
+        <form action={submit} className="flex flex-wrap items-center gap-3">
           <input type="hidden" name="org_slug" value={orgSlug} />
           <input type="hidden" name="report_id" value={reportId} />
           <SubmitButton tone={fileId === null ? 'primary' : 'quiet'}>

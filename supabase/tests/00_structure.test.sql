@@ -140,11 +140,13 @@ select is(
       -- their callers already hold (ADR-103).
       -- `merged_calculation_payload` (ADR-132) is jsonb arithmetic on two payloads its callers hold.
       -- `held_name_key` (ADR-136) is string concatenation of a key and an id.
+      -- `overridable_role` and `switchable_permissions` (ADR-172) are a constant allow-list and a
+      -- constant array.
       and p.proname not in ('ceiling_allows', 'fiscal_position', 'held_name_key', 'invoice_net',
                             'invoice_net_is_vat_fallback', 'job_max_runtime', 'jwt',
                             'merged_calculation_payload',
-                            'normalize_name', 'role_claim', 'role_rank', 'slugify',
-                            'standard_category_label', 'uid')),
+                            'normalize_name', 'overridable_role', 'role_claim', 'role_rank', 'slugify',
+                            'standard_category_label', 'switchable_permissions', 'uid')),
   0, 'every app.* function that touches a table is SECURITY DEFINER');
 
 select is(
@@ -249,11 +251,12 @@ select is(
 -- ---------------------------------------------------------------------------
 -- 7. role_permissions — the generated matrix mirror (ADR-003).
 -- ---------------------------------------------------------------------------
-select is((select count(*)::int from public.role_permissions), 121,
-          'role_permissions holds exactly 121 grants');
+-- ADR-172 added the accountant (18) and third_party (2) rows: 121 → 141 grants, six → eight roles.
+select is((select count(*)::int from public.role_permissions), 141,
+          'role_permissions holds exactly 141 grants');
 
-select is((select count(distinct role)::int from public.role_permissions), 6,
-          'role_permissions covers exactly six roles');
+select is((select count(distinct role)::int from public.role_permissions), 8,
+          'role_permissions covers exactly eight roles');
 
 select set_eq(
   $$ select permission from public.role_permissions where role = 'suspended_member' $$,

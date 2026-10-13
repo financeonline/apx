@@ -3,6 +3,7 @@ import { Sparkles } from 'lucide-react';
 import { getPortfolioContext, hrefs, listAdviserTurns } from '@/modules/portfolio';
 import { PageHeader, Card, CardBody, CardHeader, Badge, IconBadge } from '@/components/ui/surfaces';
 import { Disclaimer } from '@/components/dashboard';
+import { ABOVE_CARD_LINK, CLICKABLE_CARD, CardLink } from '@/components/ui/clickable-card';
 import { formatDateTime } from '@/components/labels';
 import { AskForm } from './ask-form';
 
@@ -31,7 +32,8 @@ export default async function PortfolioAnalystPage() {
         title="Adviser analyst"
         description="Summaries of what APX has already established about the clients you advise: health, alerts, actions and what needs attention. The analyst does not work out figures; for a figure, open the client."
       />
-      <Card>
+      {/* A readable width on a very wide screen. */}
+      <Card className="max-w-5xl">
         <CardBody>
           {ctx.organisations.length === 0
             ? <p className="text-sm text-ink-muted">There is nothing to ask about until an organisation is assigned to you.</p>
@@ -39,7 +41,7 @@ export default async function PortfolioAnalystPage() {
         </CardBody>
       </Card>
 
-      <section aria-labelledby="answers" className="mt-8 flex flex-col gap-4">
+      <section aria-labelledby="answers" className="mt-8 flex max-w-5xl flex-col gap-4">
         <div className="flex min-w-0 items-center gap-3">
           <IconBadge tint="pink" size="sm"><Sparkles /></IconBadge>
           <h2 id="answers" className="min-w-0 font-serif text-lg">Recent answers</h2>
@@ -71,11 +73,13 @@ export default async function PortfolioAnalystPage() {
                           const named = answer.clients.find((c) => c.ref === client.ref);
                           const org = named === undefined ? undefined : orgById.get(named.id);
                           const cited = answer.refs.filter((r) => client.because.includes(r.ref));
+                          // A named client's card opens the client from anywhere on it (owner,
+                          // 2026-10-14); the alerts and actions it cites sit above that link.
                           return (
-                            <li key={client.ref} className="rounded-2xl border border-line bg-surface px-4 py-3">
-                              <p className="font-medium">
+                            <li key={client.ref} className={`rounded-2xl border border-line bg-surface px-4 py-3 ${org === undefined ? '' : CLICKABLE_CARD}`}>
+                              <p className="font-medium [overflow-wrap:anywhere]">
                                 {org !== undefined ? (
-                                  <Link href={hrefs(org).client} className="underline-offset-2 hover:underline">{org.name}</Link>
+                                  <CardLink href={hrefs(org).client} className="underline-offset-2 after:rounded-2xl hover:underline group-hover:underline">{org.name}</CardLink>
                                 ) : (named?.name ?? client.ref)}
                               </p>
                               <p className="mt-1 text-sm">{client.summary}</p>
@@ -85,7 +89,7 @@ export default async function PortfolioAnalystPage() {
                                     <Link
                                       key={ref.ref}
                                       href={ref.kind === 'alert' ? hrefs(org).alert(ref.id) : hrefs(org).action(ref.id)}
-                                      className="text-accent underline underline-offset-2"
+                                      className={`text-accent underline underline-offset-2 ${ABOVE_CARD_LINK}`}
                                     >
                                       {ref.title}
                                     </Link>

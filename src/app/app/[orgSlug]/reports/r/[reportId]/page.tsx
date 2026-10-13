@@ -58,7 +58,7 @@ export default async function StoredReportPage({ params }: { params: Promise<{ o
   return (
     <>
       <p className="mb-2 text-sm print:hidden">
-        <Link href={`/app/${orgSlug}/reports`} className="text-accent underline underline-offset-2">Back to reports</Link>
+        <Link href={`/app/${orgSlug}/reports`} className="inline-flex items-center text-accent underline underline-offset-2 pointer-coarse:min-h-10">Back to reports</Link>
       </p>
       <PageHeader eyebrow={body?.name ?? 'Report'} title={title} />
       <p className="text-sm text-ink-muted">
@@ -71,7 +71,8 @@ export default async function StoredReportPage({ params }: { params: Promise<{ o
           renderedAt={report.file?.createdAt ?? null} canGenerate={can(ctx, 'reports.generate')}
         />
       </div>
-      <div className="mt-8">
+      {/* A readable measure on a very wide screen. */}
+      <div className="mt-8 max-w-5xl">
         {body === null ? (
           <Banner tone="warn" title="This report was produced by a newer or older version of APX">
             It cannot be shown here. Produce it again to read it.

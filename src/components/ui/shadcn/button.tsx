@@ -7,9 +7,12 @@ import { cn } from '@/lib/utils';
  * shadcn/ui Button (SOW §6), themed with MOTION's tokens: the variants are the product's four tones,
  * styled as the client's APX reference (ADR-169): a coral-to-orange gradient primary, a coral outline secondary.
  * Owned source, as shadcn/ui intends — edited here, never updated from a package.
+ *
+ * On a touch screen every button is at least 40px tall (owner, 2026-10-14: the app on a phone), so a
+ * small one is still a target a thumb can hit; with a mouse they keep their size.
  */
 const buttonVariants = cva(
-  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border text-sm font-medium transition-[background-color,box-shadow,color,border-color,filter] duration-150 [&_svg]:size-4 [&_svg]:shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
+  'inline-flex items-center justify-center gap-2 whitespace-nowrap rounded-xl border text-sm font-medium pointer-coarse:min-h-10 transition-[background-color,box-shadow,color,border-color,filter] duration-150 [&_svg]:size-4 [&_svg]:shrink-0 outline-none focus-visible:ring-2 focus-visible:ring-accent/40 disabled:pointer-events-none disabled:cursor-not-allowed disabled:opacity-50',
   {
     variants: {
       variant: {

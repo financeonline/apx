@@ -38,11 +38,11 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
 
   return (
     <>
-      <p className="mb-2 text-sm"><Link href="/platform/organizations" className="underline">Back to organisations</Link></p>
+      <p className="mb-2 text-sm"><Link href="/platform/organizations" className="inline-flex items-center underline pointer-coarse:min-h-10">Back to organisations</Link></p>
       <PageHeader title={org.name} description={`${org.slug} · created ${formatDate(org.createdAt)}`} />
 
       <div className="mt-8 grid grid-cols-1 gap-6 lg:grid-cols-[minmax(0,1fr)_340px]">
-        <div className="flex flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-6">
           <Card>
             <CardHeader icon={<UsersRound />} tint="violet" title={`Members (${members.length})`} />
             <CardBody>
@@ -73,7 +73,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
               ) : (
                 <ul className="flex flex-col gap-2 text-sm">
                   {assignments.map((a) => (
-                    <li key={a.id}>
+                    <li key={a.id} className="[overflow-wrap:anywhere]">
                       <span className="font-mono text-xs">{a.employeeUserId}</span>
                       <span className="ml-2 text-ink-muted">{a.status}{a.endsAt ? ` · ends ${formatDate(a.endsAt)}` : ''}</span>
                     </li>
@@ -105,7 +105,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
           </Card>
         </div>
 
-        <div className="flex flex-col gap-6">
+        <div className="flex min-w-0 flex-col gap-6">
           <Card>
             <CardHeader icon={<Activity />} tint="violet" title="State" />
             <CardBody>
@@ -142,7 +142,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
                 Opening this customer&rsquo;s pages is recorded in <em>their</em> audit log, and they can see it (CD-13).
               </p>
               <p className="mt-3 text-sm">
-                <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={`/app/${org.slug}/departments`}>Open {org.name} <ChevronRight aria-hidden="true" className="size-4" /></Link>
+                <Link className="inline-flex max-w-full items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors [overflow-wrap:anywhere] hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href={`/app/${org.slug}/departments`}>Open {org.name} <ChevronRight aria-hidden="true" className="size-4" /></Link>
               </p>
               <p className="mt-3 text-sm">
                 <Link className="underline" href={`/platform/audit?org=${org.id}`}>This organisation&rsquo;s audit trail</Link>

@@ -29,6 +29,9 @@ export interface CompanyRow {
 
 const DIALOG = 'm-auto max-h-[calc(100dvh-2rem)] w-[min(36rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-black/70';
 
+/** A dialog's form: a little less padding on a phone, so its fields keep their width. */
+const DIALOG_FORM = 'flex flex-col gap-4 p-4 sm:p-6';
+
 /**
  * Edit and Delete for one company in the list (ADR-166). Each opens a dialog; Delete asks
  * "Are you sure?" first and says what deleting means (erased for good after 30 days, restorable
@@ -58,8 +61,8 @@ export function CompanyRowActions({ company }: { company: CompanyRow }) {
       </Button>
 
       <dialog ref={editRef} className={DIALOG} aria-labelledby={`edit-${company.id}`}>
-        <form action={edit} className="flex flex-col gap-4 p-6">
-          <h2 id={`edit-${company.id}`} className="text-lg font-bold">Edit {company.name}</h2>
+        <form action={edit} className={DIALOG_FORM}>
+          <h2 id={`edit-${company.id}`} className="text-lg font-bold [overflow-wrap:anywhere]">Edit {company.name}</h2>
           <input type="hidden" name="org_id" value={company.id} />
           <Field label="Company name" htmlFor={`name-${company.id}`}>
             <Input id={`name-${company.id}`} name="name" required maxLength={200} defaultValue={company.name} />
@@ -97,7 +100,7 @@ export function CompanyRowActions({ company }: { company: CompanyRow }) {
               <p className="text-sm text-ink-muted">This company has more than one owner, so their logins are not changed from here.</p>
             ) : (
               <>
-                <p className="text-sm text-ink-muted">
+                <p className="text-sm text-ink-muted [overflow-wrap:anywhere]">
                   {company.owner.fullName ? `${company.owner.fullName} signs in` : 'The owner signs in'} as <span className="font-medium text-ink">{company.owner.email}</span>.
                   Changing either signs them out everywhere.
                 </p>
@@ -123,8 +126,8 @@ export function CompanyRowActions({ company }: { company: CompanyRow }) {
       </dialog>
 
       <dialog ref={deleteRef} className={DIALOG} aria-labelledby={`delete-${company.id}`} role="alertdialog">
-        <form action={remove} className="flex flex-col gap-4 p-6">
-          <h2 id={`delete-${company.id}`} className="text-lg font-bold">Are you sure you want to delete {company.name}?</h2>
+        <form action={remove} className={DIALOG_FORM}>
+          <h2 id={`delete-${company.id}`} className="text-lg font-bold [overflow-wrap:anywhere]">Are you sure you want to delete {company.name}?</h2>
           <p className="text-sm text-ink-muted">
             Its people lose access straight away, and all of its data — figures, documents, reports — is erased for good
             after 30 days. Until then you can restore it from this list.
@@ -168,8 +171,8 @@ function ScheduledActions({ company, restored, restore }: {
       <ActionMessage state={restored} />
 
       <dialog ref={purgeRef} className={DIALOG} aria-labelledby={`purge-${company.id}`} role="alertdialog">
-        <form action={purge} className="flex flex-col gap-4 p-6">
-          <h2 id={`purge-${company.id}`} className="text-lg font-bold">Are you sure you want to delete {company.name} permanently?</h2>
+        <form action={purge} className={DIALOG_FORM}>
+          <h2 id={`purge-${company.id}`} className="text-lg font-bold [overflow-wrap:anywhere]">Are you sure you want to delete {company.name} permanently?</h2>
           <p className="text-sm text-ink-muted">
             Everything it holds — figures, documents, reports, its people&apos;s access — is erased now and cannot be restored.
           </p>

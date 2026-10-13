@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { TOUCH_TARGET } from '@/components/ui/clickable-card';
 import type { AlertQuery, AlertSeverity } from '@/modules/alerts';
 
 /**
@@ -113,9 +114,9 @@ function FilterLink({
     <Link
       href={to}
       aria-current={current ? 'true' : undefined}
-      className={current
+      className={`inline-flex items-center ${TOUCH_TARGET} ${current
         ? 'rounded-full bg-accent-soft px-2.5 py-0.5 font-medium text-accent'
-        : 'rounded-full bg-surface-sunken px-2.5 py-0.5 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}
+        : 'rounded-full bg-surface-sunken px-2.5 py-0.5 text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent'}`}
     >
       {children}
     </Link>

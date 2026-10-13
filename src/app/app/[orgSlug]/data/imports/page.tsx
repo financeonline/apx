@@ -104,7 +104,7 @@ export default async function ImportsPage({ params }: { params: Promise<{ orgSlu
               <ul className="mt-3 flex flex-wrap gap-2 text-sm">
                 {([['ledger', 'Ledger'], ['bank_transactions', 'Bank transactions'], ['invoices', 'Invoices'], ['metrics', 'Metrics']] as const).map(([kind, label]) => (
                   <li key={kind}>
-                    <a className="inline-flex items-center rounded-xl border border-line bg-surface px-3 py-1.5 font-medium text-ink transition-colors hover:border-accent/45 hover:bg-accent-soft hover:text-accent" href={`/api/exports/${kind}?org=${orgSlug}`} download>
+                    <a className="inline-flex items-center rounded-xl border border-line bg-surface px-3 py-1.5 font-medium text-ink transition-colors hover:border-accent/45 hover:bg-accent-soft hover:text-accent pointer-coarse:min-h-10" href={`/api/exports/${kind}?org=${orgSlug}`} download>
                       {label} (CSV)
                     </a>
                   </li>

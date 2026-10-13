@@ -35,7 +35,7 @@ function Cover({ cover }: { cover: PresentedPackCover }) {
         {cover.headlines.map((h, i) => (
           <li key={h.label} className={`rounded-2xl border border-line bg-surface-sunken p-4 border-t-2 ${i === 0 ? 'border-t-accent' : 'border-t-pink'}`}>
             <p className={`text-xs font-semibold uppercase tracking-[0.12em] ${i === 0 ? 'text-accent' : 'text-pink-icon'}`}>{h.label}</p>
-            <p className="mt-1 font-mono text-4xl font-semibold tabular text-ink">{h.figure}</p>
+            <p className="mt-1 font-mono text-3xl font-semibold tabular break-words text-ink sm:text-4xl">{h.figure}</p>
             <p className="mt-1 text-sm text-ink-muted">{h.text}</p>
           </li>
         ))}
@@ -175,7 +175,7 @@ export function PackView({ presentation }: { presentation: InvestmentPresentatio
       <Cover cover={presentation.cover} />
       <nav aria-label="Pack sections" className="-mt-4 flex flex-wrap gap-2 text-sm">
         {presentation.sections.map((s) => (
-          <a key={s.id} href={`#${s.id}`} className="rounded-full border border-line bg-surface px-3 py-1 text-ink-muted transition-colors hover:border-accent/60 hover:bg-accent-soft hover:text-accent">
+          <a key={s.id} href={`#${s.id}`} className="inline-flex items-center rounded-full border border-line bg-surface px-3 py-1 text-ink-muted transition-colors hover:border-accent/60 hover:bg-accent-soft hover:text-accent pointer-coarse:min-h-10">
             {s.label === null ? s.title : `${s.label} · ${s.title}`}
           </a>
         ))}

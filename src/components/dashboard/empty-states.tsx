@@ -205,9 +205,11 @@ export function AnalystNoConversationsEmpty({ askHrefBase }: { askHrefBase: stri
       <ul className="mt-3 flex flex-wrap justify-center gap-2">
         {ANALYST_SUGGESTIONS.map((question) => (
           <li key={question}>
+            {/* A question is a sentence: on a narrow phone it wraps inside its button. */}
             <ButtonLink
               href={`${askHrefBase}?ask=${encodeURIComponent(question)}`}
               tone="secondary"
+              className="whitespace-normal text-center"
             >
               {question}
             </ButtonLink>

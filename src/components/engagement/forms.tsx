@@ -21,7 +21,7 @@ export function CommentForm({ action, hidden, label = 'Add a comment' }: { actio
         <span className="text-ink-muted">{label}</span>
         <Textarea name={field} rows={3} maxLength={4000} required className={FIELD} />
       </label>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SubmitButton tone="secondary">Post</SubmitButton>
         <ActionMessage state={state} />
       </div>
@@ -53,9 +53,9 @@ export function NewItemForm({ action, orgSlug, kinds }: { action: Action; orgSlu
       </label>
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink-muted">Wanted by (optional)</span>
-        <Input type="date" name="due_date" className={`${FIELD} max-w-xs`} />
+        <Input type="date" name="due_date" className={`${FIELD} sm:max-w-xs`} />
       </label>
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SubmitButton>{kinds.length === 1 && kinds[0] === 'request' ? 'Send the request' : 'Add it'}</SubmitButton>
         <ActionMessage state={state} />
       </div>
@@ -90,7 +90,7 @@ export function StatusForm({ action, orgSlug, itemId, options }: {
 export function MarkAllReadForm({ action, orgSlug }: { action: Action; orgSlug: string }) {
   const [state, submit] = useActionState(action, null);
   return (
-    <form action={submit} className="flex items-center gap-3">
+    <form action={submit} className="flex flex-wrap items-center gap-3">
       <input type="hidden" name="org_slug" value={orgSlug} />
       <SubmitButton tone="quiet">Mark all as read</SubmitButton>
       <ActionMessage state={state} />

@@ -33,17 +33,17 @@ export default async function ProductsPage({ params, searchParams }: { params: P
             {!view || view.products.length === 0 ? (
               <p className="px-5 py-4 text-sm text-ink-muted">Nothing recorded yet. Add a product or service below{mayEdit ? '' : ' — an owner or admin can'}, then split an invoice into lines on a customer’s page.</p>
             ) : (
-              <TableWrap>
+              <TableWrap stack>
                 <caption className="sr-only">Revenue by product</caption>
                 <THead columns={['Product or service', 'Revenue', 'Cost', 'Contribution', 'Margin']} />
                 <TBody>
                   {view.products.map((p) => (
                     <TR key={p.id}>
                       <TD><Link href={p.href} className="text-ink underline underline-offset-2">{p.name}</Link>{!p.isActive ? <Badge tone="neutral">inactive</Badge> : null}<span className="ml-2 text-xs text-ink-muted">{p.kind}</span></TD>
-                      <TD className="whitespace-nowrap text-right tabular">{p.revenue}</TD>
-                      <TD className="whitespace-nowrap text-right tabular">{p.cost ?? <span className="text-ink-faint">—</span>}</TD>
-                      <TD className="whitespace-nowrap text-right tabular">{p.contribution ?? <span className="text-xs text-ink-muted">{p.note}</span>}</TD>
-                      <TD className="whitespace-nowrap text-right tabular">{p.margin ?? '—'}</TD>
+                      <TD className="whitespace-nowrap text-right tabular" label="Revenue">{p.revenue}</TD>
+                      <TD className="whitespace-nowrap text-right tabular" label="Cost">{p.cost ?? <span className="text-ink-faint">—</span>}</TD>
+                      <TD className="whitespace-nowrap text-right tabular max-sm:whitespace-normal" label="Contribution">{p.contribution ?? <span className="text-xs text-ink-muted">{p.note}</span>}</TD>
+                      <TD className="whitespace-nowrap text-right tabular" label="Margin">{p.margin ?? '—'}</TD>
                     </TR>
                   ))}
                 </TBody>

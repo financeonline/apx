@@ -210,7 +210,7 @@ function ForecastFigure({ metric }: { metric: ForecastMetricView }) {
   const currency = metric.currency ?? 'GBP';
   return (
     <>
-      <div className="mt-2 flex items-baseline gap-2">
+      <div className="mt-2 flex flex-wrap items-baseline gap-2">
         <span className="font-mono text-2xl tabular-nums text-ink">
           {formatMoney(metric.value, { currency })}
         </span>

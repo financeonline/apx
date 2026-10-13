@@ -13,7 +13,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@
 export function PackTableView({ table, bleed = true }: { table: PackTable; bleed?: boolean }) {
   return (
     // In a card the table spans it edge to edge, and scrolls inside itself on a narrow screen.
-    <div className={bleed ? '-mx-6' : undefined}>
+    // The card's side padding is 16px on a phone and 24px from `sm` (`ui/shadcn/card.tsx`).
+    <div className={bleed ? '-mx-6 max-sm:-mx-4' : undefined}>
       <Table>
         <caption className="sr-only">{table.caption}</caption>
         <TableHeader>

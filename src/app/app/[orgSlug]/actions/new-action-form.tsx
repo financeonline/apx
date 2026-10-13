@@ -28,7 +28,7 @@ export function NewActionForm({ orgSlug }: { orgSlug: string }) {
   }
 
   return (
-    <form action={submit} className="panel flex min-w-0 flex-col gap-3 rounded-card p-4">
+    <form action={submit} className="panel flex min-w-0 max-w-2xl flex-col gap-3 rounded-card p-4">
       <label className="flex flex-col gap-1 text-sm">
         <span className="text-ink-muted">What needs doing?</span>
         <Input
@@ -47,7 +47,8 @@ export function NewActionForm({ orgSlug }: { orgSlug: string }) {
         />
       </label>
 
-      <div className="flex flex-wrap gap-4">
+      {/* Side by side from `sm`; stacked on a phone. */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
         <label className="flex flex-col gap-1 text-sm">
           <span className="text-ink-muted">How urgent?</span>
           <NativeSelect name="priority" defaultValue="medium">
@@ -66,7 +67,7 @@ export function NewActionForm({ orgSlug }: { orgSlug: string }) {
 
       <input type="hidden" name="org_slug" value={orgSlug} />
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SubmitButton>Add it</SubmitButton>
         <Button
           type="button"

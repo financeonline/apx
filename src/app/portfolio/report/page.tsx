@@ -1,10 +1,10 @@
-import Link from 'next/link';
 import {
   Building2, CircleCheck, CircleDashed, ClipboardCheck, Download, Lightbulb, Siren, TriangleAlert,
 } from 'lucide-react';
 import { getPortfolioContext, hrefs, loadPortfolioReport } from '@/modules/portfolio';
 import { Badge, Card, CardBody, EmptyState, IconBadge, PageHeader, StatTile } from '@/components/ui/surfaces';
 import { Disclaimer } from '@/components/dashboard';
+import { CLICKABLE_CARD, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 
 export const dynamic = 'force-dynamic';
 
@@ -33,7 +33,7 @@ export default async function PortfolioReportPage() {
         eyebrow="Command Centre"
         title="Portfolio Report"
         description={`${report.today} · ${c.clients} ${c.clients === 1 ? 'client' : 'clients'} · from the figures current now.`}
-        action={<a href="/portfolio/report/pdf" className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"><Download aria-hidden="true" className="size-4" />Download the PDF</a>}
+        action={<a href="/portfolio/report/pdf" className={`inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft ${TOUCH_TARGET}`}><Download aria-hidden="true" className="size-4" />Download the PDF</a>}
       />
 
       <div className="mb-8 grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 lg:grid-cols-3">
@@ -45,17 +45,18 @@ export default async function PortfolioReportPage() {
         <StatTile label="Open actions (overdue)" value={<>{c.openActions} ({c.overdueActions})</>} icon={<ClipboardCheck />} tint="pink" />
       </div>
 
-      <ol className="flex flex-col gap-4">
+      {/* Each client's card opens the client from anywhere on it (owner, 2026-10-14): its name is the one link. */}
+      <ol className="flex max-w-5xl flex-col gap-4">
         {report.clients.map((client) => {
           const org = orgById.get(client.organizationId);
           return (
             <li key={client.organizationId}>
-              <Card><CardBody>
+              <Card className={org === undefined ? '' : CLICKABLE_CARD}><CardBody>
                 <div className="flex flex-wrap items-center justify-between gap-2">
                   <div className="flex min-w-0 items-center gap-3">
                     <IconBadge tint="violet" size="sm"><Building2 /></IconBadge>
                     <h2 className="min-w-0 font-serif text-lg text-ink [overflow-wrap:anywhere]">
-                      {org === undefined ? client.name : <Link href={hrefs(org).client} className="underline-offset-2 hover:underline">{client.name}</Link>}
+                      {org === undefined ? client.name : <CardLink href={hrefs(org).client} className="underline-offset-2 hover:underline group-hover:underline">{client.name}</CardLink>}
                       {client.suspended ? <span className="ml-2 text-sm text-ink-muted">(suspended)</span> : null}
                     </h2>
                   </div>

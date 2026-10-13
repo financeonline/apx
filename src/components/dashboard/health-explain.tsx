@@ -41,7 +41,7 @@ export function HealthExplainPanel({
       <Card>
         <CardBody>
           <div className="flex items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <h2 className="text-lg text-ink">What makes up your score</h2>
               <p className="mt-1 text-sm text-ink-muted">
                 {periodLabel} · every area, every check and the points it scored.
@@ -112,7 +112,7 @@ function DimensionPanel({
       <Card>
         <CardBody>
           <div className="flex items-start justify-between gap-3">
-            <div>
+            <div className="min-w-0">
               <h3 className="text-ink">{label}</h3>
               <p className="mt-1 text-sm text-ink-muted">{DIMENSION_DESCRIPTIONS[dimension.key]}</p>
             </div>
@@ -132,11 +132,11 @@ function DimensionPanel({
     <Card>
       <CardBody>
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <h3 className="text-ink">{label}</h3>
             <p className="mt-1 text-sm text-ink-muted">{DIMENSION_DESCRIPTIONS[dimension.key]}</p>
           </div>
-          <div className="text-right">
+          <div className="shrink-0 text-right">
             <p className="tabular text-2xl text-ink">{dimension.score}</p>
             <p className="tabular text-xs text-ink-faint">
               {dimension.weight_applied}% of the score

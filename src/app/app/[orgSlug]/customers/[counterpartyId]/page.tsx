@@ -144,7 +144,7 @@ export default async function CustomerPage({
             tint="pink"
           />
           <CardBody className="px-0 py-0">
-            <TableWrap>
+            <TableWrap className="min-w-0">
               <caption className="sr-only">
                 Monthly revenue from {view.counterparty.name}
               </caption>
@@ -175,7 +175,7 @@ export default async function CustomerPage({
                 No sales invoices for this customer yet.
               </p>
             ) : (
-              <TableWrap>
+              <TableWrap stack>
                 <caption className="sr-only">
                   Sales invoices for {view.counterparty.name}
                 </caption>
@@ -186,13 +186,13 @@ export default async function CustomerPage({
                     const net = commercial.invoiceNets.get(invoice.id) ?? null;
                     return (
                       <TR key={invoice.id}>
-                        <TD className="tabular">{invoice.number}</TD>
-                        <TD className="whitespace-nowrap tabular">{formatDate(invoice.issueDate)}</TD>
-                        <TD className="whitespace-nowrap tabular">
+                        <TD className="tabular max-sm:font-medium">{invoice.number}</TD>
+                        <TD className="whitespace-nowrap tabular" label="Issued">{formatDate(invoice.issueDate)}</TD>
+                        <TD className="whitespace-nowrap tabular" label="Due">
                           {invoice.dueDate ? formatDate(invoice.dueDate) : '—'}
                         </TD>
-                        <TD className="whitespace-nowrap">{invoice.bucketLabel}</TD>
-                        <TD className="whitespace-nowrap text-right tabular">{invoice.balanceDue}</TD>
+                        <TD className="whitespace-nowrap" label="Aging">{invoice.bucketLabel}</TD>
+                        <TD className="whitespace-nowrap text-right tabular" label="Outstanding">{invoice.balanceDue}</TD>
                         <TD>
                           {lines.length === 0 ? <span className="text-xs text-ink-muted">Not yet attributed</span> : (
                             <ul className="text-xs" data-testid={`lines-${invoice.number}`}>

@@ -12,6 +12,7 @@ import { HealthScoreInline, Disclaimer } from '@/components/dashboard';
 import { ORG_STATUS_LABELS } from '@/components/labels';
 import { ActionsTable, AlertsTable } from '@/components/portfolio';
 import { ShortcutLink } from '@/components/dashboard/department-card';
+import { TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { TREND_LABELS, reasonTone } from '@/modules/portfolio';
 
 export const dynamic = 'force-dynamic';
@@ -47,7 +48,8 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
         eyebrow="Client"
         title={organisation.name}
         description={organisation.status === 'active' ? undefined : ORG_STATUS_LABELS[organisation.status]}
-        action={<ButtonLink href={links.home} tone="secondary">Open {organisation.name}</ButtonLink>}
+        // A long company name wraps inside the button rather than running off a phone's screen.
+        action={<ButtonLink href={links.home} tone="secondary" className="max-w-[calc(100vw-2rem)] whitespace-normal text-center">Open {organisation.name}</ButtonLink>}
       />
 
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
@@ -73,7 +75,7 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
             icon={<HeartPulse />}
             tint="violet"
             title="Health"
-            action={<Link href={links.overview} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">See how it was scored <ChevronRight aria-hidden="true" className="size-4" /></Link>}
+            action={<Link href={links.overview} className={`inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft ${TOUCH_TARGET}`}>See how it was scored <ChevronRight aria-hidden="true" className="size-4" /></Link>}
           />
           <CardBody>
             {row.health === null ? (
@@ -86,7 +88,7 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
                   dimensionsUsed={row.health.dimensionsUsed}
                   dimensionsTotal={row.health.dimensionsTotal}
                 />
-                <dl className="mt-3 grid grid-cols-2 gap-2 text-sm">
+                <dl className="mt-3 grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-2 text-sm">
                   <dt className="text-ink-muted">Month</dt><dd>{row.health.periodLabel}</dd>
                   <dt className="text-ink-muted">Trend</dt>
                   <dd>{row.trend === null ? '—' : `${TREND_LABELS[row.trend]}${row.health.previous ? ` from ${row.health.previous.score ?? '—'} (${bandLabel(row.health.previous.band) ?? 'not enough data'}) in ${row.health.previous.periodLabel}` : ''}`}</dd>

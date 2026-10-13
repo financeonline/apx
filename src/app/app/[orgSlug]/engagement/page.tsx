@@ -1,9 +1,9 @@
-import Link from 'next/link';
 import { can } from '@/core/permissions';
 import { ENGAGEMENT_STATUS_LABELS, listEngagementItems, type EngagementItemView } from '@/modules/engagement';
 import { getAccessContext } from '@/modules/tenancy';
 import { CircleCheck, Inbox, MessageSquarePlus, PackageCheck } from 'lucide-react';
 import { Badge, Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
+import { CardLink } from '@/components/ui/clickable-card';
 import { NewItemForm } from '@/components/engagement/forms';
 import { requirePermission } from '@/app/_lib/authz';
 import { createEngagementItemAction } from './actions';
@@ -17,13 +17,20 @@ export const dynamic = 'force-dynamic';
  * in the product.
  */
 
+/**
+ * A row opens its item from anywhere on it (owner, 2026-10-14), as a clickable card does
+ * (`ui/clickable-card`): the title is the one link, stretched over the row; the status beside it is
+ * text. The row highlights on hover and on keyboard focus.
+ */
+const ROW = 'relative -mx-2 rounded-xl px-2 transition-colors hover:bg-accent-soft/40 focus-within:ring-2 focus-within:ring-accent/50';
+
 function List({ orgSlug, items, empty }: { orgSlug: string; items: readonly EngagementItemView[]; empty: string }) {
   if (items.length === 0) return <p className="text-sm text-ink-muted">{empty}</p>;
   return (
     <ul className="flex flex-col divide-y divide-line">
       {items.map((item) => (
-        <li key={item.id} className="flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm">
-          <Link href={`/app/${orgSlug}/engagement/${item.id}`} className="min-w-0 font-medium text-ink underline-offset-2 hover:text-accent hover:underline">{item.title}</Link>
+        <li key={item.id} className={`${ROW} flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm`}>
+          <CardLink href={`/app/${orgSlug}/engagement/${item.id}`} className="min-w-0 font-medium text-ink underline-offset-2 [overflow-wrap:anywhere] after:rounded-xl hover:text-accent hover:underline">{item.title}</CardLink>
           <span className="flex flex-wrap items-center gap-2 text-ink-muted">
             {item.dueDate === null ? null : <span>by {item.dueDate}</span>}
             <Badge tone={item.status === 'delivered' ? 'accent' : item.status === 'closed' ? 'neutral' : 'warn'}>
@@ -69,7 +76,7 @@ export default async function EngagementPage({ params }: { params: Promise<{ org
           <IconBadge tint="violet" size="sm"><MessageSquarePlus /></IconBadge>
           <h2 className="min-w-0 font-serif text-lg text-ink">{team ? 'Add a request or deliverable' : 'Ask the team for something'}</h2>
         </div>
-        <div className="mt-3">
+        <div className="mt-3 max-w-2xl">
           <NewItemForm action={createEngagementItemAction} orgSlug={orgSlug} kinds={team ? ['request', 'deliverable'] : ['request']} />
         </div>
       </CardBody></Card>

@@ -45,6 +45,7 @@ export default async function AlertPage({
       <div className="mt-8 flex flex-col gap-6">
         <AlertCard
           alert={detail.alert}
+          linked={false}
           actions={can(ctx, 'alerts.manage') ? (
             <AlertActions
               orgSlug={orgSlug}

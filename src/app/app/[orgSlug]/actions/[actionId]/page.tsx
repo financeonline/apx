@@ -49,13 +49,14 @@ export default async function ActionPage({
   return (
     <>
       <p className="mb-2 text-sm">
-        <Link href={`/app/${orgSlug}/actions`} className="text-accent underline underline-offset-2">
+        <Link href={`/app/${orgSlug}/actions`} className="inline-flex items-center text-accent underline underline-offset-2 pointer-coarse:min-h-10">
           Back to the Action Centre
         </Link>
       </p>
       <PageHeader eyebrow={ACTION_SOURCE_LABELS[action.sourceType]} title={action.title} />
 
-      <div className="mt-8 flex flex-col gap-6">
+      {/* A readable measure on a very wide screen. */}
+      <div className="mt-8 flex max-w-4xl flex-col gap-6">
         <Card>
           <CardBody>
             <div className="flex flex-wrap items-center gap-2">
@@ -88,7 +89,7 @@ export default async function ActionPage({
                     <IconBadge tint="violet" size="sm"><TriangleAlert /></IconBadge>
                     <h2 className="min-w-0 font-serif text-lg text-ink">What prompted it</h2>
                   </div>
-                  <p className="mt-1 text-sm text-ink">{action.issue}</p>
+                  <p className="mt-1 text-sm text-ink [overflow-wrap:anywhere]">{action.issue}</p>
                 </>
               )}
               {action.recommendation === null ? null : (
@@ -97,7 +98,7 @@ export default async function ActionPage({
                     <IconBadge tint="pink" size="sm"><Lightbulb /></IconBadge>
                     <h2 className="min-w-0 font-serif text-lg text-ink">What was suggested</h2>
                   </div>
-                  <p className="mt-1 text-sm text-ink">{action.recommendation}</p>
+                  <p className="mt-1 text-sm text-ink [overflow-wrap:anywhere]">{action.recommendation}</p>
                 </>
               )}
             </CardBody>
@@ -118,7 +119,7 @@ export default async function ActionPage({
               <p className="mt-3 text-sm">
                 <Link
                   href={`/app/${orgSlug}/evidence/${action.evidenceBundleId}`}
-                  className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
+                  className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10"
                 >
                   Open the evidence
                   <ChevronRight aria-hidden="true" className="size-4" />
@@ -136,7 +137,7 @@ export default async function ActionPage({
                 <h2 className="min-w-0 font-serif text-lg text-ink">What came of it</h2>
               </div>
               {action.outcomeNotes === null ? null : (
-                <p className="mt-1 text-sm text-ink">{action.outcomeNotes}</p>
+                <p className="mt-1 text-sm text-ink [overflow-wrap:anywhere]">{action.outcomeNotes}</p>
               )}
               {action.outcomeValue === null ? null : (
                 <p className="mt-2 font-serif text-2xl text-ink">
@@ -187,7 +188,7 @@ export default async function ActionPage({
             {comments.length === 0 ? <p className="mt-2 text-sm text-ink-muted">No comments yet.</p> : (
               <ol className="mt-3 flex flex-col gap-3 text-sm">
                 {comments.map((c) => (
-                  <li key={c.id} className="border-b border-line pb-2 last:border-0">
+                  <li key={c.id} className="border-b border-line pb-2 [overflow-wrap:anywhere] last:border-0">
                     <p className="text-ink">{c.author}<span className="text-ink-muted"> · {c.createdAt.slice(0, 16).replace('T', ' ')} UTC</span></p>
                     <p className="mt-1 whitespace-pre-line text-ink-muted">{c.body}</p>
                   </li>

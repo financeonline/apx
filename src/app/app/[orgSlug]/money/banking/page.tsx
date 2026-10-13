@@ -6,6 +6,7 @@ import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState, Badge, Banner, DetailList, IconBadge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
+import { CLICKABLE_CARD, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { formatDate } from '@/components/labels';
 import { MetricCard, DATA_QUALITY_NOTE_TEXT, StatusBadgeView } from '@/components/dashboard';
 import {
@@ -143,7 +144,7 @@ export default async function BankingPage({
           <CardHeader
             title="Accounts"
             description="Balances are the ones printed on your statements; money in and out leave transfers between your own accounts out, the same way your cash figures do."
-            action={<Link href={txHref} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">All transactions ({view.counts.transactions}) <ChevronRight aria-hidden="true" className="size-4" /></Link>}
+            action={<Link href={txHref} className={`inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft ${TOUCH_TARGET}`}>All transactions ({view.counts.transactions}) <ChevronRight aria-hidden="true" className="size-4" /></Link>}
             icon={<Landmark />}
           />
           <CardBody>
@@ -176,7 +177,7 @@ export default async function BankingPage({
             {view.recurring.length === 0 ? (
               <p className="px-5 py-4 text-sm text-ink-muted">APX needs at least three occurrences of a payment before it calls it regular. Nothing qualifies yet.</p>
             ) : (
-              <TableWrap>
+              <TableWrap stack>
                 <caption className="sr-only">Regular payments detected from your statements</caption>
                 <THead columns={['What', 'How often', 'Usually', 'Last time', 'Status']} />
                 <TBody>
@@ -186,10 +187,10 @@ export default async function BankingPage({
                         <Link href={r.href} className="text-ink hover:underline">{r.description}</Link>
                         <span className="block text-xs text-ink-muted">{r.direction === 'in' ? 'Money in' : 'Money out'} · {r.accountName} · seen {r.occurrences} times</span>
                       </TD>
-                      <TD className="text-ink-muted">{r.cadenceLabel}</TD>
-                      <TD className="whitespace-nowrap tabular">{r.expected}</TD>
-                      <TD className="whitespace-nowrap tabular">{r.last}{r.changed ? <span className="ml-2 text-xs text-warn">changed</span> : null}<span className="block text-xs text-ink-muted">{formatDate(r.lastSeen)}</span></TD>
-                      <TD><Badge tone={r.status === 'changed' ? 'warn' : r.status === 'stopped' ? 'neutral' : 'accent'}>{r.statusLabel}</Badge></TD>
+                      <TD className="text-ink-muted" label="How often">{r.cadenceLabel}</TD>
+                      <TD className="whitespace-nowrap tabular" label="Usually">{r.expected}</TD>
+                      <TD className="whitespace-nowrap tabular" label="Last time">{r.last}{r.changed ? <span className="ml-2 text-xs text-warn">changed</span> : null}<span className="block text-xs text-ink-muted">{formatDate(r.lastSeen)}</span></TD>
+                      <TD label="Status"><Badge tone={r.status === 'changed' ? 'warn' : r.status === 'stopped' ? 'neutral' : 'accent'}>{r.statusLabel}</Badge></TD>
                     </TR>
                   ))}
                 </TBody>
@@ -205,16 +206,16 @@ export default async function BankingPage({
             {view.categories.length === 0 ? (
               <p className="px-5 py-4 text-sm text-ink-muted">No movements in {scope.period.label}.</p>
             ) : (
-              <TableWrap>
+              <TableWrap stack>
                 <caption className="sr-only">Money out by category for {scope.period.label}</caption>
                 <THead columns={['Category', 'Money out', 'Share', 'Money in']} />
                 <TBody>
                   {view.categories.map((c) => (
                     <TR key={c.category}>
                       <TD>{c.category === 'uncategorised' ? <Badge tone="warn">{c.label}</Badge> : c.label}</TD>
-                      <TD className="whitespace-nowrap text-right tabular">{c.outflow}</TD>
-                      <TD className="whitespace-nowrap text-right tabular text-ink-muted">{c.share ?? '—'}</TD>
-                      <TD className="whitespace-nowrap text-right tabular text-ink-muted">{c.inflow}</TD>
+                      <TD className="whitespace-nowrap text-right tabular" label="Money out">{c.outflow}</TD>
+                      <TD className="whitespace-nowrap text-right tabular text-ink-muted" label="Share">{c.share ?? '—'}</TD>
+                      <TD className="whitespace-nowrap text-right tabular text-ink-muted" label="Money in">{c.inflow}</TD>
                     </TR>
                   ))}
                 </TBody>
@@ -280,9 +281,14 @@ function NoticeItem({ notice }: { notice: NoticeView }) {
   );
 }
 
+/**
+ * One account. The whole card opens its transactions (owner, 2026-10-14): "See transactions" is its
+ * one link, stretched over it (`ui/clickable-card`). In, out and net sit three abreast where there is
+ * room and wrap where there is not, so a large figure never runs out of its box.
+ */
 function AccountCard({ account }: { account: BankAccountCardView }) {
   return (
-    <li className="rounded-2xl border border-line bg-surface p-4">
+    <li className={`rounded-2xl border border-line bg-surface p-4 ${CLICKABLE_CARD}`}>
       <div className="flex flex-wrap items-start justify-between gap-2">
         <div className="flex min-w-0 gap-3">
           <IconBadge tint="pink" size="sm"><Landmark /></IconBadge>
@@ -301,7 +307,7 @@ function AccountCard({ account }: { account: BankAccountCardView }) {
           ? `Balance on the statement at ${formatDate(account.statementBalance.asAt)}`
           : account.freshness ? 'The statement carries no running balance' : 'No statement for this month'}
       </p>
-      <dl className="mt-3 grid grid-cols-3 gap-2 rounded-xl bg-surface-sunken p-3 text-sm">
+      <dl className="mt-3 grid grid-cols-[repeat(auto-fit,minmax(6.5rem,1fr))] gap-2 rounded-xl bg-surface-sunken p-3 text-sm">
         <div><dt className="text-xs uppercase tracking-wide text-ink-faint">In</dt><dd className="tabular">{account.moneyIn}</dd></div>
         <div><dt className="text-xs uppercase tracking-wide text-ink-faint">Out</dt><dd className="tabular">{account.moneyOut}</dd></div>
         <div><dt className="text-xs uppercase tracking-wide text-ink-faint">Net</dt><dd className="tabular">{account.net}</dd></div>
@@ -313,7 +319,7 @@ function AccountCard({ account }: { account: BankAccountCardView }) {
           : 'No statement covers this month.'}
         {account.needsOpeningBalance ? ' Opening balance not entered yet.' : ''}
       </p>
-      <p className="mt-2 text-sm"><Link href={account.href} className="text-ink-muted hover:text-ink">See transactions ({account.rowCount}{account.uncategorisedCount > 0 ? `, ${account.uncategorisedCount} uncategorised` : ''})</Link></p>
+      <p className="mt-2 text-sm"><CardLink href={account.href} className="text-ink-muted after:rounded-2xl hover:text-ink group-hover:text-ink">See transactions ({account.rowCount}{account.uncategorisedCount > 0 ? `, ${account.uncategorisedCount} uncategorised` : ''})</CardLink></p>
     </li>
   );
 }

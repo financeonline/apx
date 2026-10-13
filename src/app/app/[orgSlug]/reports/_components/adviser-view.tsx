@@ -39,8 +39,8 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
           <dl className="mt-4 flex flex-col gap-3">
             {content.dimensions.map((d) => (
               <div key={d.key} className="border-b border-line pb-3 last:border-0">
-                <dt className="flex justify-between text-sm text-ink">
-                  <span>{REPORT_DIMENSION_LABELS[d.key]}</span>
+                <dt className="flex justify-between gap-3 text-sm text-ink">
+                  <span className="min-w-0">{REPORT_DIMENSION_LABELS[d.key]}</span>
                   <span className="font-serif text-lg">{d.score === null ? '—' : d.score}</span>
                 </dt>
                 <dd className="mt-1 text-sm text-ink-muted">
@@ -91,7 +91,7 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
             <ul className="mt-2 flex flex-col gap-1 text-sm">
               {content.actions.completedRecently.items.map((action) => (
                 <li key={action.id} className="flex flex-wrap justify-between gap-2">
-                  <Link href={resolveHref(action.href, orgSlug)} className="text-ink underline-offset-2 hover:underline">{action.title}</Link>
+                  <Link href={resolveHref(action.href, orgSlug)} className="min-w-0 text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline">{action.title}</Link>
                   <span className="text-ink-muted">
                     {action.at?.slice(0, 10)}
                     {action.outcomeValue === null ? '' : ` · outcome ${formatMoney(action.outcomeValue, { currency: action.outcomeCurrency ?? content.currency })}`}
@@ -114,7 +114,7 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
           </p>
           <ul className="mt-2 flex flex-col gap-1 text-sm text-ink-muted">
             {content.dataQuality.bankAccounts.map((account) => (
-              <li key={account.name}>
+              <li key={account.name} className="[overflow-wrap:anywhere]">
                 {account.name}: {account.latestDate === null ? 'no transactions imported' : `statements reach ${account.latestDate}`}
               </li>
             ))}

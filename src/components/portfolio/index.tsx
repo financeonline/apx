@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Building2, ChevronRight } from 'lucide-react';
 import { Badge, Card, CardBody, EmptyState, IconBadge } from '@/components/ui/surfaces';
+import { ABOVE_CARD_LINK, CLICKABLE_CARD, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { THead, TBody, TR, TD } from '@/components/ui/table';
 import { Table } from '@/components/ui/shadcn';
 import { HealthScoreInline } from '@/components/dashboard';
@@ -54,6 +55,10 @@ export function CountsStrip({ counts }: { counts: PortfolioCounts }) {
 /**
  * The attention queue (ADR-112), as the reference's cards (ADR-155): an icon tile, the client's
  * name and health, its reasons, and an outlined "Why, and what next" in the footer.
+ *
+ * The whole card opens the client (owner, 2026-10-14): "Why, and what next" is its one link,
+ * stretched over the card (`ui/clickable-card`), so the client's name is a heading rather than a
+ * second link to the same page; "Open" the organisation sits above the card's link.
  */
 export function AttentionQueue({ rows, today, now }: { rows: readonly ClientRow[]; today: string; now: Date }) {
   void today; void now;
@@ -70,14 +75,14 @@ export function AttentionQueue({ rows, today, now }: { rows: readonly ClientRow[
         const links = hrefs(row.organisation);
         return (
           <li key={row.organisation.id} className="min-w-0">
-            <div className="panel flex h-full flex-col rounded-card p-4">
+            <div className={`panel flex h-full flex-col rounded-card p-4 ${CLICKABLE_CARD}`}>
               <div className="flex gap-3.5">
                 <IconBadge tint="violet"><Building2 /></IconBadge>
                 <div className="min-w-0 flex-1">
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <Link href={links.client} className="min-w-0 font-semibold text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline">
+                    <h3 className="min-w-0 text-base text-ink [overflow-wrap:anywhere] group-hover:underline underline-offset-2">
                       {row.organisation.name}
-                    </Link>
+                    </h3>
                     <HealthScoreInline
                       score={row.health?.score ?? null}
                       band={row.health?.band ?? null}
@@ -95,13 +100,13 @@ export function AttentionQueue({ rows, today, now }: { rows: readonly ClientRow[
                 </div>
               </div>
               <p className="mt-auto flex flex-wrap items-center gap-x-4 gap-y-2 pt-3 text-sm">
-                <Link
+                <CardLink
                   href={links.client}
-                  className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"
+                  className={`inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors group-hover:border-accent group-hover:bg-accent-soft ${TOUCH_TARGET}`}
                 >
-                  Why, and what next <ChevronRight aria-hidden="true" className="size-4" />
-                </Link>
-                <Link href={links.home} className="text-ink-muted [overflow-wrap:anywhere] hover:text-ink">Open {row.organisation.name}</Link>
+                  Why, and what next<span className="sr-only"> for {row.organisation.name}</span> <ChevronRight aria-hidden="true" className="size-4" />
+                </CardLink>
+                <Link href={links.home} className={`inline-flex items-center text-ink-muted [overflow-wrap:anywhere] hover:text-ink ${TOUCH_TARGET} ${ABOVE_CARD_LINK}`}>Open {row.organisation.name}</Link>
               </p>
             </div>
           </li>
@@ -114,17 +119,21 @@ export function AttentionQueue({ rows, today, now }: { rows: readonly ClientRow[
 export function ClientTable({ rows }: { rows: readonly ClientRow[] }) {
   return (
     <>
-      {/* Small screens: one card per client, so nothing scrolls sideways (brief §15). */}
-      <ul className="grid gap-3 md:hidden">
+      {/*
+        * Small screens: one card per client, so nothing scrolls sideways (brief §15). The whole card
+        * opens the client (owner, 2026-10-14): the name is its one link, stretched over it; "Open" the
+        * organisation and the latest change sit above.
+        */}
+      <ul className="grid grid-cols-1 gap-3 md:hidden">
         {rows.map((row) => {
           const links = hrefs(row.organisation);
           return (
-            <li key={row.organisation.id}>
-              <Card>
+            <li key={row.organisation.id} className="min-w-0">
+              <Card className={CLICKABLE_CARD}>
                 <CardBody>
                   <div className="flex flex-wrap items-start justify-between gap-2">
-                    <Link href={links.client} className="font-medium text-ink underline-offset-2 hover:underline">{row.organisation.name}</Link>
-                    <Link href={links.home} className="text-sm text-accent underline underline-offset-2">Open</Link>
+                    <CardLink href={links.client} className="min-w-0 font-medium text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline group-hover:underline">{row.organisation.name}</CardLink>
+                    <Link href={links.home} className={`inline-flex items-center text-sm text-accent underline underline-offset-2 ${TOUCH_TARGET} ${ABOVE_CARD_LINK}`} aria-label={`Open ${row.organisation.name}`}>Open</Link>
                   </div>
                   {row.organisation.status !== 'active' ? (
                     <p className="mt-1"><Badge tone="warn">{ORG_STATUS_LABELS[row.organisation.status]}</Badge></p>
@@ -145,7 +154,7 @@ export function ClientTable({ rows }: { rows: readonly ClientRow[] }) {
                     {row.latestChange !== null ? (
                       <>
                         <dt className="text-ink-muted">Latest change</dt>
-                        <dd><Link href={row.latestChange.href} className="text-ink-muted hover:text-ink">{row.latestChange.label}</Link></dd>
+                        <dd className="min-w-0"><Link href={row.latestChange.href} className={`text-ink-muted [overflow-wrap:anywhere] hover:text-ink ${ABOVE_CARD_LINK}`}>{row.latestChange.label}</Link></dd>
                       </>
                     ) : null}
                   </dl>
@@ -285,13 +294,14 @@ export function RecentChanges({ changes, organisations, now }: { changes: readon
     alert_raised: 'Alert raised', action_completed: 'Action completed', action_dismissed: 'Action dismissed', month_scored: 'Month scored',
   };
   return (
+    // A change opens from anywhere on its row (owner, 2026-10-14): its link is stretched over the row.
     <ul className="divide-y divide-line">
       {changes.map((change) => (
-        <li key={`${change.kind}-${change.href}`} className="flex flex-wrap items-baseline gap-x-3 gap-y-1 py-2 text-sm">
+        <li key={`${change.kind}-${change.href}`} className="relative -mx-2 flex flex-wrap items-baseline gap-x-3 gap-y-1 rounded-xl px-2 py-2 text-sm transition-colors hover:bg-accent-soft/40 focus-within:ring-2 focus-within:ring-accent/50">
           <span className="text-ink-faint">{ageLabel(change.at, now)}</span>
           <span className="text-ink-muted">{KIND[change.kind]}</span>
-          <span className="font-medium">{orgs.get(change.organizationId)?.name ?? '—'}</span>
-          <Link href={change.href} className="text-accent underline underline-offset-2">{change.label}</Link>
+          <span className="min-w-0 font-medium [overflow-wrap:anywhere]">{orgs.get(change.organizationId)?.name ?? '—'}</span>
+          <CardLink href={change.href} className="min-w-0 text-accent underline underline-offset-2 [overflow-wrap:anywhere] after:rounded-xl">{change.label}</CardLink>
         </li>
       ))}
     </ul>

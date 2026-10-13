@@ -1,6 +1,6 @@
-import Link from 'next/link';
 import { ClipboardCheck } from 'lucide-react';
 import { Badge, Card, CardBody, IconBadge, type BadgeTone } from '@/components/ui/surfaces';
+import { ABOVE_CARD_LINK, CLICKABLE_CARD, CardLink } from '@/components/ui/clickable-card';
 import { ownerLabel, type Action, type ActionPriority, type ActionStatus } from '@/modules/actions';
 
 /**
@@ -10,6 +10,9 @@ import { ownerLabel, type Action, type ActionPriority, type ActionStatus } from 
  * not with where it came from. The source matters — an action born of an alert carries the figures
  * that prompted it — but it is provenance, and provenance belongs beside the claim rather than in
  * front of it.
+ *
+ * The whole card opens the action (owner, 2026-10-14): its title is the one link, stretched over the
+ * card (`ui/clickable-card`), and the status controls sit above it with their own targets.
  */
 
 const PRIORITY_LABELS: Readonly<Record<ActionPriority, string>> = {
@@ -60,16 +63,16 @@ export function ActionCard({
     && action.dueDate < today;
 
   return (
-    <Card>
+    <Card className={CLICKABLE_CARD}>
       <CardBody>
         <div className="flex flex-wrap items-start justify-between gap-3">
           {/* The reference's icon tile (ADR-155). Decorative; pink while overdue. */}
           <IconBadge tint={overdue ? 'pink' : 'violet'} size="sm"><ClipboardCheck /></IconBadge>
           <div className="min-w-0 flex-1">
             <h3 className="text-ink">
-              <Link href={href} className="underline-offset-2 hover:underline">
+              <CardLink href={href} className="underline-offset-2 hover:underline group-hover:underline">
                 {action.title}
-              </Link>
+              </CardLink>
             </h3>
             {compact || action.issue === null ? null : (
               <p className="mt-1 text-sm text-ink-muted">{action.issue}</p>
@@ -101,7 +104,7 @@ export function ActionCard({
           </div>
         </dl>
 
-        {children === undefined ? null : <div className="mt-4">{children}</div>}
+        {children === undefined ? null : <div className={`mt-4 ${ABOVE_CARD_LINK}`}>{children}</div>}
       </CardBody>
     </Card>
   );

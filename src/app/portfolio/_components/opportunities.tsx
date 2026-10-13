@@ -2,11 +2,16 @@ import Link from 'next/link';
 import { ChevronRight, Lightbulb } from 'lucide-react';
 import { hrefs, type OpportunityEntry, type PortfolioOrganisation } from '@/modules/portfolio';
 import { Card, CardBody, EmptyState, IconBadge } from '@/components/ui/surfaces';
+import { ABOVE_CARD_LINK, CLICKABLE_CARD, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { RecordOpportunity } from './record-opportunity';
 
 /**
  * Advisory opportunities (SOW §20; ADR-148). Each one names the scores and rule results that
  * triggered it, from the client's latest complete month; nothing here is worked out on screen.
+ *
+ * On the overview each card opens its client from anywhere on it (owner, 2026-10-14): the client's
+ * name is the one link, stretched over the card (`ui/clickable-card`), and the evidence link sits
+ * above it. On a client's own page the card is not a link: it holds the "Record as an action" buttons.
  */
 export function OpportunityList({
   entries, organisations, withActions,
@@ -32,13 +37,13 @@ export function OpportunityList({
         const links = hrefs(org);
         return (
           <li key={entry.organizationId}>
-            <Card>
+            <Card className={withActions ? '' : CLICKABLE_CARD}>
               <CardBody>
                 {withActions ? null : (
                   <div className="flex flex-wrap items-center justify-between gap-2">
                     <span className="flex min-w-0 items-center gap-3">
                       <IconBadge tint="pink" size="sm"><Lightbulb /></IconBadge>
-                      <Link href={links.client} className="min-w-0 font-semibold text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline">{org.name}</Link>
+                      <CardLink href={links.client} className="min-w-0 font-semibold text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline group-hover:underline">{org.name}</CardLink>
                     </span>
                     <span className="text-xs text-ink-faint">{entry.periodLabel}</span>
                   </div>
@@ -55,7 +60,7 @@ export function OpportunityList({
                 </ul>
                 {entry.evidenceBundleId === null ? null : (
                   <p className="mt-3 text-sm">
-                    <Link href={links.evidence(entry.evidenceBundleId)} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">
+                    <Link href={links.evidence(entry.evidenceBundleId)} className={`inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft ${TOUCH_TARGET} ${withActions ? '' : ABOVE_CARD_LINK}`}>
                       See the {entry.periodLabel} Health Score these rest on <ChevronRight aria-hidden="true" className="size-4" />
                     </Link>
                   </p>

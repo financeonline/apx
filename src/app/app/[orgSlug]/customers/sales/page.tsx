@@ -38,7 +38,7 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
               <Card>
                 <CardHeader title="Pipeline by stage" description="Estimated values are what you entered — not forecasts." icon={<Target />} />
                 <CardBody className="px-0 py-0">
-                  <TableWrap>
+                  <TableWrap className="min-w-0">
                     <caption className="sr-only">Opportunities by stage</caption>
                     <THead columns={['Stage', 'Count', 'Estimated value']} />
                     <TBody>{view.stages.map((s) => <TR key={s.stage}><TD>{s.label}</TD><TD className="text-right tabular">{s.count}</TD><TD className="text-right tabular">{s.valueText}</TD></TR>)}</TBody>
@@ -64,10 +64,10 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
             <Card>
               <CardHeader title="Won against revenue" description="What was marked won each month, next to the revenue the engine recorded for that month. They are different things: a win is a promise, revenue is an invoice." icon={<ChartColumn />} />
               <CardBody className="px-0 py-0">
-                <TableWrap>
+                <TableWrap stack>
                   <caption className="sr-only">Won opportunities and revenue by month</caption>
                   <THead columns={['Month', 'Won', 'Won value', 'Lost', 'Revenue']} />
-                  <TBody>{view.byPeriod.map((p) => <TR key={p.periodId}><TD>{p.label}</TD><TD className="text-right tabular">{p.won}</TD><TD className="text-right tabular">{p.wonValueText}</TD><TD className="text-right tabular">{p.lost}</TD><TD className="text-right tabular">{p.revenue ?? <span className="text-ink-faint">—</span>}</TD></TR>)}</TBody>
+                  <TBody>{view.byPeriod.map((p) => <TR key={p.periodId}><TD className="max-sm:font-medium">{p.label}</TD><TD className="text-right tabular" label="Won">{p.won}</TD><TD className="text-right tabular" label="Won value">{p.wonValueText}</TD><TD className="text-right tabular" label="Lost">{p.lost}</TD><TD className="text-right tabular" label="Revenue">{p.revenue ?? <span className="text-ink-faint">—</span>}</TD></TR>)}</TBody>
                 </TableWrap>
               </CardBody>
             </Card>
@@ -76,17 +76,17 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
               <CardHeader title="Opportunities" description={view.total > SALES_LIST_LIMIT ? `Showing the latest ${SALES_LIST_LIMIT} of ${view.total}.` : undefined} icon={<Handshake />} tint="pink" />
               <CardBody className="px-0 py-0">
                 {view.opportunities.length === 0 ? <p className="px-5 py-4 text-sm text-ink-muted">Nothing recorded yet{mayEdit ? ' — add the first below' : ''}.</p> : (
-                  <TableWrap>
+                  <TableWrap stack>
                     <caption className="sr-only">Opportunities</caption>
                     <THead columns={['Opportunity', 'Customer', 'Campaign', 'Estimated value', 'Created', 'Stage']} />
                     <TBody>
                       {view.opportunities.map((o) => (
                         <TR key={o.id}>
-                          <TD>{o.name}</TD>
-                          <TD>{o.customerId ? <Link href={`/app/${orgSlug}/customers/${o.customerId}`} className="underline underline-offset-2">{o.customer}</Link> : <span className="text-ink-faint">—</span>}</TD>
-                          <TD>{o.campaign ?? <span className="text-ink-faint">—</span>}</TD>
-                          <TD className="text-right tabular">{o.value ?? '—'}</TD>
-                          <TD className="whitespace-nowrap tabular">{formatDate(o.createdOn)}</TD>
+                          <TD className="max-sm:font-medium">{o.name}</TD>
+                          <TD label="Customer">{o.customerId ? <Link href={`/app/${orgSlug}/customers/${o.customerId}`} className="underline underline-offset-2">{o.customer}</Link> : <span className="text-ink-faint">—</span>}</TD>
+                          <TD label="Campaign">{o.campaign ?? <span className="text-ink-faint">—</span>}</TD>
+                          <TD className="text-right tabular" label="Estimated value">{o.value ?? '—'}</TD>
+                          <TD className="whitespace-nowrap tabular" label="Created">{formatDate(o.createdOn)}</TD>
                           <TD>{mayEdit ? <MoveStageForm orgSlug={orgSlug} opportunityId={o.id} stage={o.stage} customerId={o.customerId} customers={view.customers} /> : <span data-testid={`stage-${o.id}`}>{o.stageLabel}{o.wonOn ? <span className="ml-1 text-xs text-ink-muted">{formatDate(o.wonOn)}</span> : null}</span>}</TD>
                         </TR>
                       ))}

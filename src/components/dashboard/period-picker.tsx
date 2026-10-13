@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { toPeriodOptions, type PeriodOptionInput } from './presentation';
 
 /**
@@ -43,7 +44,7 @@ export function PeriodPicker({
           href={hrefFor(option.id)}
           aria-current={option.isCurrent ? 'page' : undefined}
           className={
-            'rounded-md border px-2.5 py-1 text-sm transition-colors duration-100 '
+            `inline-flex items-center rounded-md border px-2.5 py-1 text-sm transition-colors duration-100 ${TOUCH_TARGET} `
             + (option.isCurrent
               ? 'border-accent bg-accent-soft text-accent'
               : 'border-line bg-surface text-ink-muted hover:bg-surface-sunken hover:text-ink')

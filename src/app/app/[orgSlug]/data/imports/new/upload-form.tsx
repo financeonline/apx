@@ -122,7 +122,7 @@ export function UploadForm({
         />
       </Field>
 
-      <div className="flex items-center gap-3">
+      <div className="flex flex-wrap items-center gap-3">
         <SubmitButton pendingLabel="Reading your file…">Upload and check</SubmitButton>
         <span className="text-sm text-ink-muted">Nothing is imported until you review it.</span>
       </div>

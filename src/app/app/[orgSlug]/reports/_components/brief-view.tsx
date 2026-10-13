@@ -49,7 +49,7 @@ export function AlertList({ list, orgSlug, empty }: { list: Capped<BriefAlertLin
               <Badge tone={alert.severity === 'critical' ? 'danger' : alert.severity === 'high' ? 'warn' : 'neutral'}>
                 {REPORT_SEVERITY_LABELS[alert.severity]}
               </Badge>
-              <Link href={resolveHref(alert.href, orgSlug)} className="text-ink underline-offset-2 hover:underline">
+              <Link href={resolveHref(alert.href, orgSlug)} className="min-w-0 text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline">
                 {alert.title}
               </Link>
             </div>
@@ -70,7 +70,7 @@ export function ActionList({ list, orgSlug, empty }: { list: Capped<BriefActionL
       <ul className="flex flex-col gap-2">
         {list.items.map((action) => (
           <li key={action.id} className="flex flex-wrap justify-between gap-2 text-sm">
-            <Link href={resolveHref(action.href, orgSlug)} className="text-ink underline-offset-2 hover:underline">
+            <Link href={resolveHref(action.href, orgSlug)} className="min-w-0 text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline">
               {action.title}
             </Link>
             <span className="text-ink-muted">
@@ -104,7 +104,7 @@ function FigureRow({ row, currency, orgSlug, period }: { row: BriefComparisonRow
       <dd className="mt-1 text-xs text-ink-faint">{INTERIM_NOTES[figure.key]}</dd>
       {figure.records.length === 0 ? null : (
         <details className="mt-2 text-sm">
-          <summary className="cursor-pointer text-accent">
+          <summary className="cursor-pointer py-1 text-accent pointer-coarse:py-2.5">
             What this is made of ({figure.recordCount} record{figure.recordCount === 1 ? '' : 's'})
           </summary>
           <ul className="mt-2 flex flex-col gap-1">
@@ -112,7 +112,7 @@ function FigureRow({ row, currency, orgSlug, period }: { row: BriefComparisonRow
               <li key={`${record.kind}:${record.id}`} className="flex flex-wrap justify-between gap-2">
                 <Link
                   href={`/app/${encodeURIComponent(orgSlug)}/evidence/record/${record.kind}/${record.id}`}
-                  className="text-ink underline-offset-2 hover:underline"
+                  className="min-w-0 text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline"
                 >
                   {record.date} · {record.label}
                 </Link>
@@ -163,7 +163,7 @@ export function MonthSection({ month, orgSlug, title }: { month: BriefMonth; org
             <ul className="mt-2 flex flex-col gap-1 text-sm">
               {movements.map((m) => (
                 <li key={`${m.label}|${m.dimensionLabel ?? ''}`} className="flex flex-wrap justify-between gap-2">
-                  <Link href={resolveHref(m.href, orgSlug)} className="text-ink underline-offset-2 hover:underline">
+                  <Link href={resolveHref(m.href, orgSlug)} className="min-w-0 text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline">
                     {m.label}{m.dimensionLabel === null ? '' : ` · ${m.dimensionLabel}`}
                   </Link>
                   <span className="text-ink-muted">{m.change}{m.percent === null ? '' : ` (${m.percent})`} · {m.comparison} → {m.current}</span>

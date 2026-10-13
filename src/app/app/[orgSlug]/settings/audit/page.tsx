@@ -87,11 +87,11 @@ export default async function AuditPage({
         {(pageIndex > 0 || hasOlder) && (
           <nav className="mt-4 flex flex-wrap items-center justify-between gap-2 text-sm" aria-label="Audit log pages">
             {pageIndex > 0
-              ? <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={href(pageIndex - 1)}>← Newer</a>
+              ? <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href={href(pageIndex - 1)}>← Newer</a>
               : <span className="px-3 py-1 text-ink-faint">← Newer</span>}
             <span className="text-ink-muted">Page {pageIndex + 1}</span>
             {hasOlder
-              ? <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={href(pageIndex + 1)}>Older →</a>
+              ? <a className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10" href={href(pageIndex + 1)}>Older →</a>
               : <span className="px-3 py-1 text-ink-faint">Older →</span>}
           </nav>
         )}

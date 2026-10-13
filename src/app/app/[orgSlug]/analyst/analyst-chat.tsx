@@ -224,7 +224,7 @@ export function AnalystChat({
               }}
             />
           </label>
-          <div className="flex items-center justify-between gap-3">
+          <div className="flex flex-wrap items-center justify-between gap-3">
             <span className="text-xs text-ink-faint">{remainingLine(remaining)}</span>
             <Button type="submit" disabled={busy || question.trim() === ''}>
               {busy ? 'Asking…' : 'Ask'}

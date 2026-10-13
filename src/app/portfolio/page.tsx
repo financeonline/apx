@@ -6,10 +6,14 @@ import {
 import { ATTENTION_CAP, OPPORTUNITY_CAP, getPortfolioContext, loadOpportunities, loadPortfolio } from '@/modules/portfolio';
 import { PageHeader, Card, CardBody, CardHeader, EmptyState, IconBadge, StatTile } from '@/components/ui/surfaces';
 import { Disclaimer } from '@/components/dashboard';
+import { CLICKABLE_CARD, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { AttentionQueue, ClientTable, RecentChanges } from '@/components/portfolio';
 import { OpportunityList } from './_components/opportunities';
 
 export const dynamic = 'force-dynamic';
+
+/** A count that opens its list: the whole tile is the link, with a clickable card's glow. */
+const TILE_LINK = `block h-full rounded-card ${CLICKABLE_CARD}`;
 
 /**
  * The Command Centre's first screen answers "what needs my attention?" before anything else
@@ -42,7 +46,7 @@ export default async function PortfolioPage() {
           ? `All ${view.counts.clients} ${view.counts.clients === 1 ? 'client is' : 'clients are'} clear`
           : `${view.counts.needingAttention} of ${view.counts.clients} ${view.counts.clients === 1 ? 'client needs' : 'clients need'} attention`}
         description="Health, alerts and actions across the organisations you advise, from APX's own figures. Nothing here is worked out on the way to the screen."
-        action={<Link href="/portfolio/analyst" className="inline-flex items-center gap-1.5 rounded-xl border border-accent/45 bg-surface px-3 py-1.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"><Sparkles aria-hidden="true" className="size-4" />Ask the adviser analyst</Link>}
+        action={<Link href="/portfolio/analyst" className={`inline-flex items-center gap-1.5 rounded-xl border border-accent/45 bg-surface px-3 py-1.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft ${TOUCH_TARGET}`}><Sparkles aria-hidden="true" className="size-4" />Ask the adviser analyst</Link>}
       />
 
       <section aria-labelledby="attention" className="mb-10">
@@ -97,7 +101,7 @@ export default async function PortfolioPage() {
             <StatTile label="Not yet scored" value={view.counts.unscored.toLocaleString('en-GB')} icon={<CircleDashed />} tint="pink" />
           </li>
           <li className="min-w-0">
-            <Link href="/portfolio/alerts" className="block rounded-card transition-shadow hover:ring-2 hover:ring-accent/30">
+            <Link href="/portfolio/alerts" className={TILE_LINK}>
               <StatTile
                 label="Critical alerts"
                 value={view.counts.criticalAlerts.toLocaleString('en-GB')}
@@ -108,7 +112,7 @@ export default async function PortfolioPage() {
             </Link>
           </li>
           <li className="min-w-0">
-            <Link href="/portfolio/alerts" className="block rounded-card transition-shadow hover:ring-2 hover:ring-accent/30">
+            <Link href="/portfolio/alerts" className={TILE_LINK}>
               <StatTile
                 label="High alerts"
                 value={view.counts.highAlerts.toLocaleString('en-GB')}
@@ -119,12 +123,12 @@ export default async function PortfolioPage() {
             </Link>
           </li>
           <li className="min-w-0">
-            <Link href="/portfolio/actions" className="block rounded-card transition-shadow hover:ring-2 hover:ring-accent/30">
+            <Link href="/portfolio/actions" className={TILE_LINK}>
               <StatTile label="Open actions" value={view.counts.openActions.toLocaleString('en-GB')} icon={<ClipboardCheck />} tint="violet" />
             </Link>
           </li>
           <li className="min-w-0">
-            <Link href="/portfolio/actions?view=overdue" className="block rounded-card transition-shadow hover:ring-2 hover:ring-accent/30">
+            <Link href="/portfolio/actions?view=overdue" className={TILE_LINK}>
               <StatTile
                 label="Overdue actions"
                 value={view.counts.overdueActions.toLocaleString('en-GB')}

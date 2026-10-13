@@ -1,5 +1,5 @@
-import Link from 'next/link';
 import { Badge, Card, CardBody } from '@/components/ui/surfaces';
+import { CLICKABLE_CARD, CardLink } from '@/components/ui/clickable-card';
 import type { HealthCardView } from '@/modules/health';
 import {
   CHANGE_TONE_CLASS, HEALTH_DISCLAIMER, NOT_ENOUGH_DATA_BODY, NOT_ENOUGH_DATA_TITLE,
@@ -15,6 +15,9 @@ import {
  *
  * The SOW §9 disclaimer is part of the card rather than a page-level footnote, so it cannot be left
  * off a screen that shows the score. It is the difference between an indicator and a claim.
+ *
+ * With `explainHref` the whole card opens the breakdown (owner, 2026-10-14): "What makes up this
+ * score?" is its one link, stretched over the card (`ui/clickable-card`).
  */
 export function HealthScoreCard({
   view,
@@ -46,10 +49,10 @@ export function HealthScoreCard({
   const tone = changeTone(view.changeVsPrevious);
 
   return (
-    <Card>
+    <Card className={explainHref ? CLICKABLE_CARD : undefined}>
       <CardBody>
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <p className="text-xs uppercase tracking-wide text-ink-muted">
               Business health · {periodLabel}
             </p>
@@ -74,9 +77,9 @@ export function HealthScoreCard({
 
         {explainHref ? (
           <p className="mt-3 text-sm">
-            <Link href={explainHref} className="text-accent underline underline-offset-2">
+            <CardLink href={explainHref} className="text-accent underline underline-offset-2 group-hover:text-accent-hover">
               What makes up this score?
-            </Link>
+            </CardLink>
           </p>
         ) : null}
 
