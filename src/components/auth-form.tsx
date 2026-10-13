@@ -8,6 +8,7 @@ import { SESSION_ALIVE_COOKIE, SESSION_ONLY_COOKIE, safeNextPath } from '@/core/
 import { supabaseBrowser } from '@/components/supabase-browser';
 import { Label } from '@/components/ui/shadcn';
 import { NAV_COOKIE } from '@/components/dashboard/nav-cookie';
+import { startNavigationLoading } from '@/components/loading/page-loading';
 
 type Mode = 'sign-in' | 'sign-up' | 'forgot' | 'reset';
 
@@ -119,6 +120,7 @@ export function AuthForm({ mode }: { mode: Mode }) {
         const { error: err } = await supabase.auth.signInWithPassword({ email, password });
         if (err) throw err;
         rememberSessionChoice(form.get('keep_signed_in') === 'on');
+        startNavigationLoading();
         router.push(safeNext);
         router.refresh();
         return;
