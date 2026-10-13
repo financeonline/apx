@@ -2,18 +2,20 @@ import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { cache } from 'react';
 import { createUserClient } from '@/core/db/user-client';
-import { permissionsFor, type EffectiveRole } from '@/core/permissions';
+import { permissionsFor, type EffectiveRole, type Permission } from '@/core/permissions';
 import { NotFound, toMotionError } from '@/core/errors';
-import { newRequestId } from '@/core/logging';
+import { log, newRequestId } from '@/core/logging';
 import type { AccessContext } from '../context';
 import type { ActorType, OrgStatus } from '../domain/types';
 import { enabledModules } from '../domain/modules';
+import { agreedPermissions } from '../domain/permissions';
 
 /**
  * Builds the AccessContext for a request (SERVICE_ARCHITECTURE.md §3).
  *
- * The role comes from api.my_context(), which uses app.accessible_org_roles() — the same function
- * RLS uses — so the application and the database cannot disagree at runtime. The organization is
+ * The role comes from api.my_access() (api.my_context() plus the per-person switches, ADR-172), which
+ * uses app.accessible_org_roles() — the same function RLS uses — so the application and the database
+ * cannot disagree at runtime. The organization is
  * addressed by the slug in the URL and is never taken from a request body (ADR-014).
  *
  * A caller with no access gets NotFound, never Forbidden: a 403 would confirm the organization
@@ -32,13 +34,32 @@ async function loadSessionUser(): Promise<SessionUser | null> {
   return { id: data.user.id, email: data.user.email ?? null };
 }
 
-interface MyContextRow {
+interface MyAccessRow {
   organization_id: string;
   slug: string;
   name: string;
   status: OrgStatus;
   role: EffectiveRole;
   actor_type: ActorType;
+  features: Record<string, unknown> | null;
+  overrides: unknown;
+  permissions: string[] | null;
+}
+
+/** Logs a disagreement between the TypeScript and SQL twins; the caller keeps only what both grant. */
+function effectivePermissionsFrom(
+  role: EffectiveRole,
+  rawOverrides: unknown,
+  databasePermissions: readonly string[] | null,
+  requestId?: string,
+): ReadonlySet<Permission> {
+  const result = agreedPermissions(role, rawOverrides, databasePermissions);
+  if (result.onlyComputed.length > 0 || result.onlyDatabase.length > 0) {
+    log.warn('tenancy.permissions_disagree', {
+      requestId, role, onlyComputed: result.onlyComputed, onlyDatabase: result.onlyDatabase,
+    });
+  }
+  return result.agreed;
 }
 
 /**
@@ -56,22 +77,27 @@ export async function resolveAccessFresh(orgSlug: string): Promise<AccessContext
   if (!user) throw new NotFound();
 
   const db = await createUserClient();
-  const { data, error } = await db.schema('api').rpc('my_context', { p_slug: orgSlug });
+  /*
+   * ONE round trip (ADR-172): the role, as api.my_context resolves it through the same
+   * app.accessible_org_roles() every policy uses; the organisation's systems (ADR-158); the caller's
+   * per-person switches; and the effective permissions the database computes from them. Nothing is
+   * looked up again per check — `can(ctx, …)` reads the set built here.
+   */
+  const { data, error } = await db.schema('api').rpc('my_access', { p_slug: orgSlug });
   if (error) throw toMotionError(error, requestId);
 
-  const row = (data as MyContextRow[] | null)?.[0];
+  const row = (data as MyAccessRow[] | null)?.[0];
   if (!row || !row.role) throw new NotFound();
 
   // ADR-158: the systems the super admin switched on for this organisation.
-  const { data: org } = await db.from('organizations').select('features').eq('id', row.organization_id).maybeSingle();
-  const modules = enabledModules((org?.features ?? {}) as Record<string, unknown>);
+  const modules = enabledModules((row.features ?? {}) as Record<string, unknown>);
 
   return {
     userId: user.id,
     orgId: row.organization_id,
     orgSlug: row.slug,
     effectiveRole: row.role,
-    permissions: permissionsFor(row.role),
+    permissions: effectivePermissionsFrom(row.role, row.overrides, row.permissions, requestId),
     actorType: row.actor_type,
     organizationStatus: row.status,
     modules,

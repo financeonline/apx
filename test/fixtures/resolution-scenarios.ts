@@ -29,7 +29,7 @@ export interface FixturePlatformUser {
 }
 
 export interface FixtureMembership {
-  readonly role: 'owner' | 'admin' | 'client';
+  readonly role: 'owner' | 'admin' | 'accountant' | 'client' | 'third_party';
   readonly status: 'active' | 'suspended';
 }
 
@@ -95,6 +95,58 @@ export const RESOLUTION_SCENARIOS: readonly ResolutionScenario[] = [
     assignment: null,
     organizationStatus: 'active',
     expected: 'client',
+    dbRepresentable: true,
+  },
+  // ADR-172: the two new company roles resolve to themselves, and freeze and vanish exactly as a
+  // client does — neither is a widening of anything.
+  {
+    id: 'member-accountant-active-org-active',
+    description: 'active accountant of an active organization',
+    platformUser: null,
+    membership: { role: 'accountant', status: 'active' },
+    assignment: null,
+    organizationStatus: 'active',
+    expected: 'accountant',
+    dbRepresentable: true,
+  },
+  {
+    id: 'member-third-party-active-org-active',
+    description: 'active 3rd party of an active organization',
+    platformUser: null,
+    membership: { role: 'third_party', status: 'active' },
+    assignment: null,
+    organizationStatus: 'active',
+    expected: 'third_party',
+    dbRepresentable: true,
+  },
+  {
+    id: 'member-third-party-suspended-org-active',
+    description: 'a deactivated 3rd party resolves to none',
+    platformUser: null,
+    membership: { role: 'third_party', status: 'suspended' },
+    assignment: null,
+    organizationStatus: 'active',
+    expected: 'none',
+    dbRepresentable: true,
+  },
+  {
+    id: 'member-accountant-org-suspended',
+    description: 'a suspended organization freezes its accountant to suspended_member',
+    platformUser: null,
+    membership: { role: 'accountant', status: 'active' },
+    assignment: null,
+    organizationStatus: 'suspended',
+    expected: 'suspended_member',
+    dbRepresentable: true,
+  },
+  {
+    id: 'member-third-party-org-suspended',
+    description: 'a suspended organization freezes its 3rd party to suspended_member',
+    platformUser: null,
+    membership: { role: 'third_party', status: 'active' },
+    assignment: null,
+    organizationStatus: 'suspended',
+    expected: 'suspended_member',
     dbRepresentable: true,
   },
   {

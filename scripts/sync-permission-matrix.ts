@@ -11,9 +11,15 @@ import { writeFileSync, readFileSync, existsSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { matrixRows } from '../src/core/permissions/matrix';
 
+/*
+ * The generated mirror now lives in its own, newer migration (ADR-172 added two roles). Migrations
+ * that have run are never edited — re-rendering the Phase 1 file would change nothing in a database
+ * that already applied it — so the matrix is re-rendered here, in full (delete + insert), and the
+ * newest copy wins. When the matrix changes again, point this at a new file.
+ */
 const MIGRATION = resolve(
   process.cwd(),
-  'supabase/migrations/20260905000011_role_permissions.sql',
+  'supabase/migrations/20261018000018_role_permissions_tenant_roles.sql',
 );
 
 function render(): string {
@@ -22,12 +28,14 @@ function render(): string {
     .map((r) => `  ('${r.role}', '${r.permission}')`)
     .join(',\n');
 
-  return `-- MOTION — Phase 1 · GENERATED FILE. Do not edit by hand.
--- Source: src/core/permissions/matrix.ts (ADR-003).
+  return `-- APX — GENERATED FILE. Do not edit by hand.
+-- Source: src/core/permissions/matrix.ts (ADR-003; ADR-172 adds the accountant and third_party rows).
 -- Regenerate with: npm run permissions:sync
 --
 -- This is the read-only mirror of ROLE_MATRIX used by app.has_permission() inside every api.*
 -- mutation function. The pgTAP parity test fails CI if this table and the TypeScript matrix differ.
+-- These are the ROLE DEFAULTS; per-person switches (member_permission_overrides) are applied on top
+-- of them by app.has_permission / app.org_ids_with_permission (20261018000019).
 
 delete from public.role_permissions;
 

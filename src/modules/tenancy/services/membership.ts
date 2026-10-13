@@ -6,8 +6,11 @@ import { PermissionDenied, ValidationError } from '@/core/errors';
 import { callApi } from '../data/rpc';
 import type { AccessContext } from '../context';
 import type { MembershipRole } from '../domain/types';
+import { TENANT_ROLES } from '../domain/member-access';
 
-const Role = z.enum(['owner', 'admin', 'client']);
+// Every company role, ADR-172's accountant and 3rd party included. Who may grant which is the
+// ceiling (canInviteRole / canChangeRole here, app.ceiling_allows in the api.* function).
+const Role = z.enum(TENANT_ROLES);
 const Email = z.string().trim().toLowerCase().email('Enter a valid email address');
 const Uuid = z.string().uuid();
 

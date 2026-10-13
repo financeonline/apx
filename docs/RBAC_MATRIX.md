@@ -5,6 +5,8 @@ Consumed by: `SECURITY_MODEL.md`, `SERVICE_ARCHITECTURE.md`, `ROUTE_ARCHITECTURE
 
 > **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-026 (every permission re-checked inside `api.*` functions; no direct table writes), ADR-037 (Data menu; Employee `users.view` ✗), ADR-038 (suspension at the database, sole-owner disable guard, invitation email binding, MFA and re-authentication for platform users, audited `/platform` tenant views, signed-URL-only Storage). Findings addressed: F-A-01, F-A-02, F-A-04, F-A-06, F-A-07, F-A-10, F-A-12, F-D-07, F-D-14. See `RED_TEAM_REVIEW.md`.
 
+> **Revision 1.3 (ADR-172, 2026-10-14).** Two new company roles, `accountant` and `third_party`; the platform `employee` is shown as **Financial Analyst**; per-person permission switches set by the owner or an admin (§7); "Request more information" (§7.3); and every tenant-data read policy now names a PERMISSION instead of a list of roles, so a switch opens or closes a table for one person (§8). Contract: `src/modules/tenancy/domain/member-access.ts`. Migrations `20261018000017`–`20261018000019`.
+
 > **Revision 1.2 (red-team round 2, 2026-09-05).** Applies ADR-043 (`api` vs `api_server`), ADR-044 (MFA at the database for employees, ownership-transfer invariants, allow-list principle, throttles, `suspended_member` in the code type). Findings addressed: R2-A-01, R2-A-03, R2-A-07, R2-A-08, R2-A-11. See `RED_TEAM_REVIEW.md §6`.
 
 ## 1. Roles
@@ -14,12 +16,14 @@ MOTION has two role families. A user may hold at most one platform role and at m
 | Internal role key | User-facing name (from brief) | Family | Stored in | Scope |
 |---|---|---|---|---|
 | `platform_super_admin` | Super Admin | Platform | `platform_users.platform_role = 'super_admin'` | Whole platform |
-| `platform_employee` | My Employee | Platform | `platform_users.platform_role = 'employee'` + rows in `organization_assignments` | Only explicitly assigned organizations |
+| `platform_employee` | Financial Analyst (was "My Employee"; ADR-172 — the label only, the key stays `employee`) | Platform | `platform_users.platform_role = 'employee'` + rows in `organization_assignments` | Only explicitly assigned organizations |
 | `tenant_owner` | Owner | Tenant | `organization_memberships.role = 'owner'` | One organization per row |
 | `tenant_admin` | Admin | Tenant | `organization_memberships.role = 'admin'` | One organization per row |
+| `tenant_accountant` | Accountant (ADR-172) — the company's own or outside accountant: data capture and compliance | Tenant | `organization_memberships.role = 'accountant'` | One organization per row |
 | `tenant_client` | Client | Tenant | `organization_memberships.role = 'client'` | One organization per row |
+| `tenant_third_party` | 3rd party (ADR-172) — a lender, investor or partner: a read-only overview | Tenant | `organization_memberships.role = 'third_party'` | One organization per row |
 
-**Effective role.** Inside a given organization a user resolves to exactly one of `super_admin | employee | owner | admin | client | suspended_member | none`. Resolution order (first match wins):
+**Effective role.** Inside a given organization a user resolves to exactly one of `super_admin | employee | owner | admin | accountant | client | third_party | suspended_member | none`. Resolution order (first match wins):
 
 1. Active `platform_users` row with `super_admin` **and** a session at `aal2` → `super_admin` (access audited, CD-13).
 2. Active `platform_users` row with `employee` **and** a session at `aal2` **and** an active `organization_assignments` row for this organization (status active, now within `starts_at`/`ends_at`) → `employee`. A platform user at `aal1` resolves to `none` everywhere (ADR-044.1).
@@ -36,42 +40,42 @@ All keys live in `src/core/permissions/catalogue.ts` as a `const` union; the rol
 
 ✓ = granted · ◐ = granted with the restriction in the notes column · ✗ = denied
 
-| Permission | super_admin | employee | owner | admin | client | Notes |
-|---|---|---|---|---|---|---|
-| `dashboard.view` | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| `financials.view` | ✓ | ✓ | ✓ | ✓ | ✓ | Metric snapshots, ledger, invoices, period balances |
-| `financials.edit` | ✓ | ✓ | ✓ | ✓ | ✗ | Recategorise, correct, soft-reject records, map accounts |
-| `imports.create` | ✓ | ✓ | ✓ | ✓ | ✗ | Upload files, start batches |
-| `imports.review` | ✓ | ✓ | ✓ | ✓ | ✗ | Map, resolve issues, commit, roll back |
-| `banking.view` | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| `banking.reconcile` | ✓ | ✓ | ✓ | ✓ | ✗ | Categorise, pair/unpair transfers on the transaction page (Phase 13); line matching post-MVP. Adding a bank account is `financials.edit`; opening the statement itself is `documents.view`; the banking pages and tools 20–23 need only `banking.view` |
-| `customers.view` | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| `customers.edit` | ✓ | ✓ | ✓ | ✓ | ✗ | Merge/rename counterparties, set kind; Phase 14 (ADR-102): record products, invoice lines, channels, campaigns, spend and opportunities |
-| `reports.view` | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| `reports.generate` | ✓ | ✓ | ✓ | ✓ | ✗ | Enqueue report render |
-| `ai.use` | ✓ | ✓ | ✓ | ✓ | ✓ | Subject to org quota (CD-24) |
-| `actions.view` | ✓ | ✓ | ✓ | ✓ | ✓ | |
-| `actions.create` | ✓ | ✓ | ✓ | ✓ | ✗ | |
-| `actions.assign` | ✓ | ✓ | ✓ | ✓ | ✗ | Assignee must be a member/employee of the org |
-| `actions.update_own` | ✓ | ✓ | ✓ | ✓ | ✓ | Status + outcome on actions where `owner_user_id = self` |
-| `alerts.manage` | ✓ | ✓ | ✓ | ✓ | ◐ | Acknowledge/resolve/dismiss alerts; client may acknowledge only |
-| `intelligence.recompute` | ✓ | ✓ | ✓ | ✓ | ✗ | Trigger a manual calculation run |
-| `users.view` | ✓ | ✗ | ✓ | ✓ | ✗ | Employee has no member-list page; member names appear only in assignee pickers via `org_member_profiles` (ADR-037) |
-| `users.invite` | ✓ | ✗ | ✓ | ◐ | ✗ | Admin may invite `admin` or `client`, never `owner` |
-| `users.manage` | ✓ | ✗ | ✓ | ◐ | ✗ | Admin may change/remove `admin`/`client`; cannot touch owners; cannot promote to owner |
-| `assignments.view` | ✓ | ◐ | ✓ | ✓ | ✗ | Employee sees own assignments only, served by `/portfolio` (ADR-037) |
-| `assignments.manage` | ✓ | ✗ | ◐ | ✗ | ✗ | Only super admin creates; owner may **revoke** an employee's assignment to their org |
-| `documents.view` | ✓ | ✓ | ✓ | ✓ | ✗ | Open/download source documents; audited |
-| `data.export` | ✓ | ✓ | ✓ | ✓ | ✗ | CSV/XLSX export; audited |
-| `audit.view` | ✓ | ✗ | ✓ | ✓ | ✗ | Org-scoped audit log; super admin sees all |
-| `settings.manage` | ✓ | ✗ | ✓ | ✓ | ✗ | Org name, fiscal year, currency, alert prefs |
-| `billing.manage` | ✓ | ✗ | ✓ | ✗ | ✗ | Plan, invoices (billing itself is post-MVP) |
-| `org.delete` | ✓ | ✗ | ✓ | ✗ | ✗ | Soft delete + purge job (CD-23) |
-| `system.manage` | ✓ | ✗ | ✗ | ✗ | ✗ | Everything under `/platform` |
-| `platform.orgs.manage` | ✓ | ✗ | ✗ | ✗ | ✗ | Create/suspend/feature-flag organizations |
-| `platform.users.manage` | ✓ | ✗ | ✗ | ✗ | ✗ | Grant/revoke platform roles |
-| `platform.ai_feedback.review` | ✓ | ◐ | ✗ | ✗ | ✗ | Employee reviews feedback for assigned orgs only |
-| `platform.jobs.view` | ✓ | ✗ | ✗ | ✗ | ✗ | |
+| Permission | super_admin | employee | owner | admin | accountant | client | third_party | Notes |
+|---|---|---|---|---|---|---|---|---|
+| `dashboard.view` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Home: the Business Health Score and the CURRENT headline figures (undimensioned and by standard category) — §8 |
+| `financials.view` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | Ledger, invoices, period balances, bank lines, evidence, forecasts, every metric snapshot (§8) |
+| `financials.edit` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Recategorise, correct, soft-reject records, map accounts |
+| `imports.create` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Upload files, start batches |
+| `imports.review` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Map, resolve issues, commit, roll back |
+| `banking.view` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |  |
+| `banking.reconcile` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Categorise, pair/unpair transfers on the transaction page (Phase 13); line matching post-MVP. Adding a bank account is `financials.edit`; opening the statement itself is `documents.view`; the banking pages and tools 20–23 need only `banking.view` |
+| `customers.view` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |  |
+| `customers.edit` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Merge/rename counterparties, set kind; Phase 14 (ADR-102): record products, invoice lines, channels, campaigns, spend and opportunities |
+| `reports.view` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | Funding Readiness, the Monthly Management Report, Marketing and Investment; the daily, weekly and adviser reports also need `financials.view` (§8.3) |
+| `reports.generate` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Enqueue report render |
+| `ai.use` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | Subject to org quota (CD-24) |
+| `actions.view` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |  |
+| `actions.create` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |  |
+| `actions.assign` | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | Assignee must be a member/employee of the org |
+| `actions.update_own` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | Status + outcome on actions where `owner_user_id = self` |
+| `alerts.manage` | ✓ | ✓ | ✓ | ✓ | ◐ | ◐ | ✗ | Acknowledge/resolve/dismiss alerts; client and accountant may acknowledge only (a 3rd party too, if switched on) |
+| `intelligence.recompute` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Trigger a manual calculation run |
+| `users.view` | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Employee has no member-list page; member names appear only in assignee pickers via `org_member_profiles` (ADR-037) |
+| `users.invite` | ✓ | ✗ | ✓ | ◐ | ✗ | ✗ | ✗ | Admin may invite `admin`, `accountant`, `client` or `third_party`, never `owner` |
+| `users.manage` | ✓ | ✗ | ✓ | ◐ | ✗ | ✗ | ✗ | Admin may change/remove `admin`/`accountant`/`client`/`third_party`; cannot touch owners; cannot promote to owner. Also: per-person switches and answering access requests (§7) |
+| `assignments.view` | ✓ | ◐ | ✓ | ✓ | ✗ | ✗ | ✗ | Employee sees own assignments only, served by `/portfolio` (ADR-037) |
+| `assignments.manage` | ✓ | ✗ | ◐ | ✗ | ✗ | ✗ | ✗ | Only super admin creates; owner may **revoke** an employee's assignment to their org |
+| `documents.view` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Open/download source documents; audited. Switchable: e.g. on for one client (§7) |
+| `data.export` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | CSV/XLSX export; audited |
+| `audit.view` | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Org-scoped audit log; super admin sees all |
+| `settings.manage` | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Org name, fiscal year, currency, alert prefs |
+| `billing.manage` | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Plan, invoices (billing itself is post-MVP) |
+| `org.delete` | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Soft delete + purge job (CD-23) |
+| `system.manage` | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Everything under `/platform` |
+| `platform.orgs.manage` | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Create/suspend/feature-flag organizations |
+| `platform.users.manage` | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Grant/revoke platform roles |
+| `platform.ai_feedback.review` | ✓ | ◐ | ✗ | ✗ | ✗ | ✗ | ✗ | Employee reviews feedback for assigned orgs only |
+| `platform.jobs.view` | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ |  |
 
 Every permission in this table is checked twice on a write: by `assertCan` in the TypeScript service and again inside the `api.*` SECURITY DEFINER function that performs the write (`DATABASE_ARCHITECTURE.md §14`, ADR-026). `authenticated` holds no INSERT/UPDATE/DELETE privilege on any table, so there is no write that a permission bit alone can authorise.
 
@@ -79,16 +83,18 @@ Every permission in this table is checked twice on a write: by `assertCan` in th
 
 | Question | Answer |
 |---|---|
-| Who can invite users | Owner (any tenant role), Admin (admin/client only), Super Admin (any). Employees cannot. |
-| Who can remove users | Owner (anyone except last owner), Admin (admins and clients), Super Admin. Users may leave an org themselves unless they are the last owner. |
-| Who can change roles | Owner (any, including promote to owner and demote another owner), Admin (between admin ↔ client only), Super Admin (break-glass, audited). |
+| Who can invite users | Owner (any tenant role), Admin (admin, accountant, client, 3rd party — never owner), Super Admin (any). Employees, accountants, clients and 3rd parties cannot. |
+| Who can remove users | Owner (anyone except last owner), Admin (admins, accountants, clients, 3rd parties), Super Admin. Users may leave an org themselves unless they are the last owner. |
+| Who can change roles | Owner (any, including promote to owner and demote another owner), Admin (among admin, accountant, client and 3rd party), Super Admin (break-glass, audited). A role change clears the person's per-person switches (§7.2). |
+| Who can switch a person's permissions | The owner and admins (`users.manage`), for any member within their ceiling except an owner and except themselves, and only ever switching ON what they hold themselves (§7). |
+| Who answers "Request more information" | The owner and admins, under the same rules as a switch; the requester may withdraw (§7.3). |
 | Who can assign employees to clients | Super Admin only. Owner can revoke. Admin can see. |
-| Who can access financial source documents | Owner, Admin, Employee, Super Admin. Client sees evidence down to transaction level but not the file. |
-| Who can export data | Owner, Admin, Employee, Super Admin. All exports audited. |
-| Who can use AI | Every effective role except `none`, within organization quota. |
-| Who can view audit logs | Owner and Admin for their organization; Super Admin for all. Employees and Clients cannot. |
+| Who can access financial source documents | Owner, Admin, Accountant, Employee, Super Admin — and anyone the owner or an admin switches `documents.view` on for. Client sees evidence down to transaction level but not the file; a 3rd party sees neither. |
+| Who can export data | Owner, Admin, Accountant, Employee, Super Admin. All exports audited; an export reads under the exporter's RLS. |
+| Who can use AI | Owner, Admin, Client, Employee, Super Admin, within organization quota — not an Accountant or a 3rd party unless switched on. |
+| Who can view audit logs | Owner and Admin for their organization; Super Admin for all; anyone `audit.view` is switched on for. Employees, Accountants, Clients and 3rd parties cannot by default. |
 | Who can change organization settings | Owner, Admin, Super Admin. |
-| Who can access platform administration | Super Admin only. Employees get `/portfolio`, not `/platform`. Since ADR-112 `/portfolio` is the Command Centre for every adviser-capable role (super admin, employee, owner, admin), each over the organisations they already reach; a client never has one. |
+| Who can access platform administration | Super Admin only. Employees get `/portfolio`, not `/platform`. `/portfolio` is the Command Centre (ADR-112) and is APX staff only (owner, 2026-10-14; ADR-112 addendum): the super admin over every organisation and employees over their assigned ones. Company logins (owner, admin, client and any other company role) never have one — the uniform 404, even over their own companies — and the database's `api.portfolio_*` functions return them nothing. |
 
 ## 3. Role-specific constraints beyond the matrix
 
@@ -100,12 +106,15 @@ These cannot be expressed as a permission bit and are enforced in services (and 
 4. **Employee write scope.** `role_permissions` grants `employee` the data-table permissions in §2.1 and none of the governance permissions, so the `api.*` functions that write memberships, assignments, settings and organizations refuse an employee; there is no other write path (ADR-026).
 5. **Platform staff exclusivity.** A user with an active `platform_users` row cannot be inserted into `organization_memberships` (trigger). If a platform employee needs to be a customer, they use a separate account.
 6. **Super admin reads are audited.** Every `/app/[orgSlug]/*` request served to a super admin writes one `audit_events` row (`actor_type = 'platform_admin'`, `action = 'org.data_viewed'`, target = route). Under `/platform`, any surface that renders tenant content — opening an item in `/platform/ai-feedback`, expanding an audit row's `before/after`, viewing `/platform/organizations/[orgId]` — writes `org.data_viewed {surface, target_id}` as well; list views that show only organization names, types and dates do not (ADR-038.6).
-7. **Suspended state — one semantic, enforced at the database.** `app.org_role()` returns `suspended_member` for members and assigned employees of an organization whose `status = 'suspended'`; `role_permissions` maps it to `dashboard.view` only; the accessible set still contains the organization, but only the frozen-Home tables admit `suspended_member` — `organizations`, `metric_current`, `health_current`, `health_scores`, `alerts`, plus (ADR-068) `fiscal_periods` and the `metric_snapshots` rows `metric_current` points at, because the two pointer tables hold no figures and no month — every other tenant-data policy is an allow-list of the five real roles, so RLS reads actually shrink to the frozen Home and every `api.*` write is refused (ADR-044.4). Role checks in policies and in code are **allow-lists**, never `<> 'client'`, so suspension can never widen a client's access. `organization_memberships.status = 'suspended'` resolves to NULL/`none`. The UI adds the banner.
+7. **Suspended state — one semantic, enforced at the database.** `app.org_role()` returns `suspended_member` for members and assigned employees of an organization whose `status = 'suspended'`; `role_permissions` maps it to `dashboard.view` only; the accessible set still contains the organization, but only the frozen-Home tables admit `suspended_member` — `organizations`, `metric_current`, `health_current`, `health_scores`, `alerts`, plus (ADR-068) `fiscal_periods` and the `metric_snapshots` rows `metric_current` points at, because the two pointer tables hold no figures and no month — every other tenant-data policy names a permission `suspended_member` does not hold (since ADR-172; before, an allow-list of the five real roles), so RLS reads actually shrink to the frozen Home and every `api.*` write is refused (ADR-044.4). Role checks in policies and in code are **allow-lists**, never `<> 'client'`, so suspension can never widen a client's access. `organization_memberships.status = 'suspended'` resolves to NULL/`none`. The UI adds the banner.
 9. **Sole-owner disable guard.** `api.disable_user` refuses to disable a user who is the only active owner of any organization unless another owner exists; a super admin must reassign ownership first (ADR-038.12).
 10. **Invitation binding.** `api.accept_invitation` compares `invitations.email` with `auth.jwt()->>'email'` (confirmed) — never with `profiles.email`, which users cannot edit (ADR-038.3) — and re-checks that the inviter is still an active owner/admin with a ceiling ≥ the invited role (F-A-02).
 11. **Platform users need MFA — at the database.** Super admins and employees must enrol TOTP before any `/platform` or `/portfolio` access; `app.is_platform_user()` (active row **and** `aal2`) gates both the super-admin and the employee branches of `app.accessible_org_ids()` and `app.org_role()`, so an employee's password alone yields a JWT that reads nothing and can execute no data function (ADR-044.1; R2-A-03); magic-link sign-in is refused for platform users; `platform.users.manage`, suspend, `org.delete` and creating assignments require re-authentication within 10 minutes, checked against the latest `amr` entry with method `totp`/`password` (ADR-044.3).
 12. **User-intent vs server-asserted writes.** `api.*` functions accept only what the user legitimately chooses; anything the server observed (a grounding result, a scan result, a tool-call log, a download) is written through `api_server.*`, executable only by the service role from `core/db/server-rpc.ts` with the human actor passed explicitly (ADR-043; R2-A-01). A user JWT can never write a "passed" AI answer or register an unscanned document.
 13. **Throttled at the database.** Every `api.*` function starts with `app.throttle()`; the RPC surface is reachable on the Supabase host without passing the Vercel edge, so edge limits alone are not limits (ADR-044.5; R2-A-08).
+14. **Per-person switches never reach an owner, APX staff or a suspended organisation (ADR-172).** `app.effective_permission` applies a switch only for `admin`, `accountant`, `client` and `third_party` (`app.overridable_role`, an allow-list), so a switch stored against anyone else is ignored, and `api.set_member_permission` refuses to store one. A suspended organisation resolves everyone to `suspended_member`, whose one permission no switch changes.
+15. **Never beyond one's own rights (ADR-172).** Switching a permission ON, approving a request for it, or resetting a switch to a default that would give it, needs the caller to hold that permission at that moment (`app.apply_member_permission`). Switching OFF does not — taking access away is always within an owner's or admin's remit for the members they govern.
+16. **A role change starts the person again (ADR-172).** The `member_role_changed` trigger deletes every switch of a member whose role changes and closes their waiting request; removal deletes both (foreign keys). A deactivation keeps them (it resolves to no access anyway).
 8. **AI acts as the user.** Tool calls run with the asking user's `AccessContext`. A client asking the AI for a source document link is refused by the tool exactly as the UI would refuse.
 
 ## 4. Permission enforcement points
@@ -116,7 +125,7 @@ These cannot be expressed as a permission bit and are enforced in services (and 
 | Layout / page | Effective role ≠ `none` for the org; feature flag for the module | Server component throws `NotFound` (not `Forbidden`, to avoid org enumeration) |
 | Server action / route handler | `assertCan(ctx, key)` before any service call | Throws `PermissionDenied`, mapped to 403 JSON / toast |
 | Service | Re-checks permission for privileged operations and applies row-level constraints (§3) | Explicit checks; services never trust callers |
-| Database — reads | RLS bounds every read to the accessible set with allow-list role checks (narrower per table where stated); column privileges hide raw imported text; suspended organizations expose only the frozen-Home tables; platform users at `aal1` read nothing | `DATABASE_ARCHITECTURE.md §11` (ADR-044) |
+| Database — reads | RLS bounds every read to the accessible set and to the PERMISSION the table's pages need, evaluated per person with their switches (§8; ADR-172) — never a list of roles; column privileges hide raw imported text; suspended organizations expose only the frozen-Home tables; platform users at `aal1` read nothing | `DATABASE_ARCHITECTURE.md §11` (ADR-044, ADR-172) |
 | Database — user-intent writes | **no direct table writes** for `authenticated`; every write is an `api.*` SECURITY DEFINER function that throttles, re-checks the permission, the role ceiling and the row invariants, and writes the audit event in the same transaction; platform functions require `aal2` and, where marked, step-up re-authentication | `DATABASE_ARCHITECTURE.md §14.1` (ADR-026, ADR-044) |
 | Database — server-asserted writes | facts the server observed are written only by `api_server.*`, executable by the service role alone, with the human actor passed and re-validated | `DATABASE_ARCHITECTURE.md §14.2` (ADR-043) |
 | Storage | No Storage policies for `authenticated`; every document or report read is a 60-second signed URL minted by the server after `documents.view`/`reports.view` and an audit event | `TENANCY_MODEL.md §8`, `SECURITY_MODEL.md §7` (ADR-038.1) |
@@ -126,7 +135,7 @@ A request must pass all applicable layers. Tests in `TEST_STRATEGY.md §2` asser
 
 ## 5. UI behaviour per role
 
-- Navigation items are hidden when the role lacks the *view* permission for the whole section (never partially rendered). The header **Data** menu (Add data · Imports · Documents · Accounts) is shown to roles with `imports.review` — Owner, Admin, Employee, Super Admin — and never to Client (ADR-037); the Settings gear is shown only with `settings.manage`.
+- Navigation items are hidden when the role lacks the *view* permission for the whole section (never partially rendered). The header **Data** menu (Add data · Imports · Documents · Accounts) is shown to whoever holds `imports.review` — by default Owner, Admin, Accountant, Employee, Super Admin, never Client or 3rd party (ADR-037; ADR-172: a switch can change it for one person, and the menu follows `can()`); the Settings gear is shown only with `settings.manage`.
 - Action buttons (Upload, Invite, Export, Assign) are hidden, not disabled, for roles without the permission; the server still enforces.
 - Permission-denied on a deep link shows the friendly "You don't have access to this" state (`UX_ARCHITECTURE.md §8`) with a link back to Home. Organization existence is never confirmed to a non-member (404, not 403).
 
@@ -137,7 +146,7 @@ A request must pass all applicable layers. Tests in `TEST_STRATEGY.md §2` asser
 export const PERMISSIONS = ['dashboard.view', 'financials.view', /* … */ 'platform.jobs.view'] as const;
 export type Permission = (typeof PERMISSIONS)[number];
 // src/core/permissions/matrix.ts — the single source of the matrix above; deny-by-default.
-export type EffectiveRole = 'super_admin' | 'employee' | 'owner' | 'admin' | 'client' | 'suspended_member' | 'none';
+export type EffectiveRole = 'super_admin' | 'employee' | 'owner' | 'admin' | 'accountant' | 'client' | 'third_party' | 'suspended_member' | 'none';
 export const ROLE_MATRIX: Record<Exclude<EffectiveRole,'none'>, ReadonlySet<Permission>>; // ROLE_MATRIX.suspended_member = {'dashboard.view'}
 // Code tests can(ctx, permission), never role === 'client' — a `<> 'client'` branch would widen access for suspended_member (R2-A-07).
 // src/core/permissions/check.ts
@@ -145,6 +154,95 @@ export function can(ctx: AccessContext, p: Permission): boolean;
 export function assertCan(ctx: AccessContext, p: Permission): void; // throws PermissionDenied
 ```
 
-`scripts/sync-permission-matrix.ts` renders `ROLE_MATRIX` into a migration that fills the read-only `role_permissions (role, permission)` table used by `app.has_permission(org_id, permission)` inside every `api.*` mutation function (ADR-026). The pgTAP parity test fails CI if the table and the TypeScript matrix differ.
+`AccessContext.permissions` is NOT `ROLE_MATRIX[role]` any more (ADR-172): it is the role's row with the person's switches applied (`resolvePermissions` in `modules/tenancy/domain/permissions.ts`), intersected with the database's own answer from `api.my_access` — §7.4.
+
+`scripts/sync-permission-matrix.ts` renders `ROLE_MATRIX` into a migration (since ADR-172, `20261018000018_role_permissions_tenant_roles.sql`; applied migrations are never edited) that fills the read-only `role_permissions (role, permission)` table used by `app.has_permission(org_id, permission)` inside every `api.*` mutation function (ADR-026). The pgTAP parity test fails CI if the table and the TypeScript matrix differ.
 
 The ◐ restrictions are implemented as named guards next to the matrix (`canInviteRole(actorRole, targetRole)`, `canChangeRole(actorRole, fromRole, toRole)`, `canRevokeAssignment(ctx, assignment)`), each with its own unit tests.
+
+## 7. Per-person permissions and "Request more information" (ADR-172)
+
+Contract: `src/modules/tenancy/domain/member-access.ts` (`SWITCHABLE_PERMISSIONS`, `MemberPermissions`, `AccessRequest`). Services: `src/modules/tenancy/services/member-access.ts`. Database: `member_permission_overrides`, `access_requests`, migration `20261018000019`.
+
+### 7.1 Switches
+
+Each role has the defaults in §2.1. The owner or an admin may switch an individual **switchable** permission on or off for one member of their company — the 21 keys in `SWITCHABLE_PERMISSIONS`: everything a page or tool needs, and `audit.view`. Never switchable: the team keys (`users.*` — making someone a team manager is a role change), analyst assignments, settings, billing, deleting the company and every platform key.
+
+| Rule | Where it is enforced |
+|---|---|
+| The caller holds `users.manage` | `assertCan` in `setMemberPermission`; `app.require_permission` in `api.set_member_permission` |
+| The member is an ACTIVE member of this company, within the caller's ceiling (an admin may switch another admin, an accountant, a client or a 3rd party; a super admin anyone but an owner) | `app.apply_member_permission` (row-locked) |
+| Never an owner — an owner holds everything | the same, and `app.overridable_role` ignores any switch stored against an owner |
+| Never oneself | `setMemberPermission`; `app.apply_member_permission` |
+| Never beyond one's own rights: switching ON, or resetting to a default that gives the permission back, needs the caller to hold it. Switching OFF does not | `withinOwnRights` (for drawing the page); `app.apply_member_permission` |
+| Only for company roles: never platform staff (they are not members), never a suspended organisation | `app.effective_permission` |
+| Audited `member.permission_changed` with the switch and the effective answer before and after; throttled | `app.apply_member_permission`; `api.set_member_permission` |
+
+### 7.2 Lifecycle
+
+A **role change** clears every switch of that member and closes their waiting request (trigger `member_role_changed`, audited `member.permissions_reset`): switches were chosen against the old role, and carrying them into a new one would mean something nobody chose. **Removal** deletes switches and requests (foreign keys to the membership). **Deactivation** keeps them; the member resolves to no access while deactivated and gets exactly their old access back when switched on again.
+
+### 7.3 "Request more information"
+
+Any member whose role takes switches (admin, accountant, client, 3rd party) may ask for permissions they lack and/or write a message (≤ 1,000 characters). Permissions they already hold are dropped. One waiting request per person per company (a second is refused, never merged); five a day. Every owner and admin is told in their inbox (`access_request`, linking `/app/<slug>/settings/team#requests`). The owner or an admin approves — switching on the chosen permissions, a subset of those asked, each one they hold, all or nothing — or declines, with a note the requester reads (`access_decision`). The requester may withdraw a waiting request. A role change closes a waiting request as declined. Owners cannot ask (they hold everything); APX staff and a suspended organisation cannot either. Audited `member.access_requested`, `member.access_request_decided`, `member.access_request_withdrawn`.
+
+### 7.4 Effective permissions everywhere
+
+`AccessContext.permissions` = the role's defaults ± the person's switches, built once per request from ONE round trip (`api.my_access`: role, switches, the organisation's systems, and the database's own effective set). The TypeScript twin (`resolvePermissions`) and the SQL (`app.effective_permission`) are the same rule; the resolver keeps only permissions BOTH grant and logs any difference, so the interface can only ever show less than the database allows. `can(ctx, …)` therefore hides and shows by itself; no page or service compares role names (lint `motion/no-role-name-literals`; identity predicates live in `core/permissions` and `modules/tenancy/domain`). The AI's per-tool re-resolution (`resolveAccessFresh`) sees a switch made mid-turn and aborts the turn.
+
+`/portfolio` (the Command Centre) is APX staff only; an accountant or a 3rd party never has one, whatever their switches (`app.adviser_org_ids()` is a role allow-list of `super_admin` and `employee`).
+
+## 8. Who reads which table (ADR-172)
+
+Every tenant-data SELECT policy names the permission its pages need, through `app.org_ids_with_permission(p)` or `app.org_ids_with_any_permission(p, …)` (switch-aware, set-shaped, evaluated once per statement). Before ADR-172 most of these were the five-role list `owner, admin, employee, super_admin, client`. Under the defaults, owner, admin, employee, super admin and client read exactly what they read before (all hold every permission named below except where stated); the accountant reads the detail; a 3rd party reads only the rows marked **3P**.
+
+### 8.1 Detail (no 3rd party by default)
+
+| Table | Before | After |
+|---|---|---|
+| `ledger_entries`, `period_balances`, `account_category_history`, `record_status_events`, `budget_lines` | five roles | `financials.view` |
+| `forecast_runs`, `forecast_values`, `scenario_runs`, `scenario_values` | five roles | `financials.view` |
+| `accounts` | five roles | `financials.view` or `banking.view` (bank lines show their category) |
+| `bank_accounts`, `bank_transactions`, `recurring_payment_groups`, `category_history` | five roles | `banking.view` or `financials.view` (the cash pages) |
+| `invoices`, `invoice_lines` | five roles | `financials.view` or `customers.view` |
+| `counterparties` | five roles | `financials.view`, `banking.view` or `customers.view` |
+| `products`, `campaigns`, `campaign_spend`, `marketing_channels`, `opportunities` | five roles | `customers.view` or `financials.view` |
+| `source_documents` | owner, admin, employee, super admin | `documents.view` or `imports.review` (the review pages name the file; opening it is a signed URL after `documents.view`) |
+| `evidence_bundles` (and `evidence_items` through it) | five roles; `ai_response` bundles owner/admin/super admin or the message's own author | `financials.view`; the `ai_response` rule unchanged |
+| `alerts` | every resolved role | `financials.view` or `alerts.manage`, plus `suspended_member` (frozen Home). Alert sentences name customers and suppliers |
+| `alert_revisions` | five roles | `financials.view` or `alerts.manage` |
+| `actions` | five roles | `actions.view` |
+| `audit_events` | owner, admin, super admin | `audit.view` (switchable); platform events super admin |
+| `ai_conversations`, `ai_feedback` | own, or owner/admin/employee/super admin | `ai.use` AND (own, or owner/admin/employee/super admin) |
+| `ai_tool_calls` | owner/admin/employee/super admin | the same AND `ai.use` |
+| `org_member_profiles` (view: member names) | every member | `users.view` or `actions.view` holders |
+| `import_batches`, `import_rows`, `import_mappings`, `report_completeness_attestations` | `imports.review` | unchanged (now switch-aware) |
+| `action_comments`, `engagement_items`, `engagement_events` | `actions.view` | unchanged (now switch-aware) |
+
+### 8.2 The overview (3P)
+
+| Table | Before | After |
+|---|---|---|
+| `organizations` | every resolved role | unchanged **3P** |
+| `fiscal_periods` | five roles + `suspended_member` | every resolved role **3P** (months hold no figures) |
+| `metric_current` (pointers, no figures) | every resolved role | unchanged **3P** |
+| `metric_snapshots` | five roles; `suspended_member` the current rows | `financials.view`: every snapshot; `customers.view`: also the per-customer rows; `dashboard.view`: the CURRENT rows of undimensioned and standard-category figures only **3P** — never per account or per counterparty; `suspended_member` every current row, as before |
+| `health_scores`, `health_current` | every resolved role | `dashboard.view` **3P** (`suspended_member` holds it) |
+| `calculation_runs` | five roles | `financials.view` or `reports.view` **3P** |
+
+### 8.3 Reports (3P where stated)
+
+| Table | Before | After |
+|---|---|---|
+| `reports` | `reports.view`; custom AI report its author's; Funding Readiness while Funding is on | the same, AND the Daily Brief, Weekly Intelligence and Accountant/CFO (adviser) reports also need `financials.view` — they are lists of the day's alerts and overdue actions, movements by account and customer and bank account names. **3P**: Funding Readiness |
+| `report_files` | `reports.view` and the report readable | unchanged — follows `reports`; the Monthly Management Report PDF (no report row) **3P** |
+| `funding_assessments`, `funding_current` | five roles while Funding is on | `reports.view` while Funding is on **3P** |
+| `marketing_reports`, `investment_reports` | `reports.view` while the system is on | unchanged **3P** |
+| `organization_profiles` | five roles | `reports.view` or `customers.view` **3P** (the company description Marketing and Investment show) |
+
+**What `reports.view` shows a 3rd party, and what to watch.** Funding Readiness, Marketing and Investment are written for exactly this reader. Three things in them are commercially sensitive and are shown to a 3rd party by the owner's decision ("reports"): the **Monthly Management Report PDF** carries the month's alerts (their sentences can name a customer or supplier) and the titles of open actions; the **Marketing report** carries sales by product line and the largest cost lines by name; the **Investment pack** carries the surplus and the proposed allocation. If the owner wants a 3rd-party-safe Monthly Management Report, the render job needs a variant without alerts and actions; the database cannot redact inside a stored PDF.
+
+### 8.4 Governance (unchanged)
+
+`invitations`, `organization_memberships` (plus one's own row), `organization_assignments` (plus one's own), `ownership_transfers` (plus the nominee): owner, admin, super admin — the holders of `users.view`, which is never switched. `member_permission_overrides`: one's own, and `users.view` holders. `access_requests`: one's own, and `users.manage` holders.
+

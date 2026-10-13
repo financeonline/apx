@@ -49,3 +49,35 @@ export {
   type Adviser,
 } from './services/membership';
 export { listOrgAuditEvents, type AuditEntry } from './services/audit';
+// ADR-172: company roles, per-person permissions and "Request more information".
+export {
+  TENANT_ROLES,
+  ROLE_NAMES,
+  SWITCHABLE_PERMISSIONS,
+  PERMISSION_WORDS,
+  type TenantRole,
+  type SwitchablePermission,
+  type MemberPermissions,
+  type AccessRequest,
+  type AccessRequestStatus,
+} from './domain/member-access';
+export {
+  isSwitchable,
+  takesSwitches,
+  mayRequestAccess,
+  parseOverrides,
+  agreedPermissions,
+  resolvePermissions,
+  switchableDefaults,
+  switchableEffective,
+  withinOwnRights,
+  type PermissionOverride,
+} from './domain/permissions';
+export {
+  listMemberPermissions,
+  setMemberPermission,
+  requestAccess,
+  listAccessRequests,
+  decideAccessRequest,
+  withdrawAccessRequest,
+} from './services/member-access';

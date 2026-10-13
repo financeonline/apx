@@ -1,0 +1,279 @@
+import 'server-only';
+import { z } from 'zod';
+import { assertCan, can, ceilingAllows } from '@/core/permissions';
+import { NotFound, PermissionDenied, ValidationError } from '@/core/errors';
+import { callApi } from '../data/rpc';
+import type { AccessContext } from '../context';
+import {
+  SWITCHABLE_PERMISSIONS,
+  TENANT_ROLES,
+  type AccessRequest,
+  type AccessRequestStatus,
+  type MemberPermissions,
+  type SwitchablePermission,
+  type TenantRole,
+} from '../domain/member-access';
+import {
+  isSwitchable,
+  mayRequestAccess,
+  parseOverrides,
+  switchableDefaults,
+  switchableEffective,
+  takesSwitches,
+} from '../domain/permissions';
+
+/**
+ * Per-person permissions and "Request more information" (ADR-172), against the contract in
+ * `domain/member-access.ts`.
+ *
+ * Every service checks in TypeScript first — for a fast, plain refusal and so the page can hide what
+ * would be refused — and the `api.*` function re-checks everything in SQL, which is the authority
+ * (ADR-026): `users.manage`, the ceiling, never an owner, never oneself, only switchable permissions,
+ * and never beyond the caller's own rights. Nothing here trusts the page that called it.
+ */
+
+const Uuid = z.string().uuid();
+const MESSAGE_MAX = 1000;
+const TENANT_ROLE_SET: ReadonlySet<string> = new Set(TENANT_ROLES);
+const STATUSES = ['pending', 'approved', 'declined', 'withdrawn'] as const satisfies readonly AccessRequestStatus[];
+
+function uuid(value: unknown, path: string): string {
+  const r = Uuid.safeParse(value);
+  if (!r.success) throw new ValidationError('Some details need fixing.', [{ path, message: 'Not a valid id.' }]);
+  return r.data;
+}
+
+function orgOf(ctx: AccessContext): string {
+  if (!ctx.orgId) throw new NotFound();
+  return ctx.orgId;
+}
+
+/** Switchable permissions only, each once, in the contract's order. Anything else is refused. */
+function switchables(values: readonly unknown[], path: string): SwitchablePermission[] {
+  const wanted = new Set<string>();
+  for (const value of values) {
+    if (typeof value !== 'string' || !isSwitchable(value)) {
+      throw new ValidationError('Some details need fixing.', [{ path, message: 'That permission cannot be switched.' }]);
+    }
+    wanted.add(value);
+  }
+  return SWITCHABLE_PERMISSIONS.filter((p) => wanted.has(p));
+}
+
+/** Trimmed free text, NULL when empty, refused over 1,000 characters. */
+function optionalText(value: string | null | undefined, path: string, label: string): string | null {
+  const trimmed = (value ?? '').trim();
+  if (trimmed.length === 0) return null;
+  if (trimmed.length > MESSAGE_MAX) {
+    throw new ValidationError('Some details need fixing.', [
+      { path, message: `Keep the ${label} to ${MESSAGE_MAX.toLocaleString('en-GB')} characters.` },
+    ]);
+  }
+  return trimmed;
+}
+
+function asTenantRole(value: unknown): TenantRole | null {
+  return typeof value === 'string' && TENANT_ROLE_SET.has(value) ? (value as TenantRole) : null;
+}
+
+interface MemberPermissionRow {
+  user_id: string;
+  full_name: string | null;
+  email: string;
+  role: string;
+  status: string;
+  overrides: unknown;
+}
+
+/**
+ * Every member of the organisation with their role's defaults, their switches and the result, and
+ * what the viewer may do about it — the team page (`users.view`).
+ *
+ * `editable` is the TypeScript copy of the SQL refusals: the viewer manages the team, the member is
+ * active, is not an owner, is not the viewer, and is within the viewer's ceiling. `grantable` is what
+ * the viewer holds themselves. A deactivated member is listed, not editable.
+ */
+export async function listMemberPermissions(ctx: AccessContext): Promise<MemberPermissions[]> {
+  assertCan(ctx, 'users.view');
+  const rows = await callApi<MemberPermissionRow[] | null>(
+    ctx.db, 'org_member_permissions', { p_org: orgOf(ctx) }, ctx.requestId,
+  );
+  const mayManage = can(ctx, 'users.manage');
+  const viewerHolds = SWITCHABLE_PERMISSIONS.filter((p) => can(ctx, p));
+
+  return (rows ?? []).flatMap((row): MemberPermissions[] => {
+    const role = asTenantRole(row.role);
+    if (role === null) return [];
+    const overrides = takesSwitches(role) ? parseOverrides(row.overrides) : [];
+    const editable = mayManage
+      && row.status === 'active'
+      && takesSwitches(role)
+      && row.user_id !== ctx.userId
+      && ceilingAllows(ctx.effectiveRole, role);
+    return [{
+      userId: row.user_id,
+      name: row.full_name ?? null,
+      email: row.email,
+      role,
+      defaults: switchableDefaults(role),
+      overrides,
+      effective: switchableEffective(role, overrides),
+      editable,
+      grantable: editable ? viewerHolds : [],
+    }];
+  });
+}
+
+/**
+ * Switch one permission on (`true`) or off (`false`) for one member, or put it back to the role's
+ * default (`null`). Audited `member.permission_changed` by the database.
+ */
+export async function setMemberPermission(
+  ctx: AccessContext,
+  input: { userId: string; permission: SwitchablePermission; granted: boolean | null },
+): Promise<void> {
+  assertCan(ctx, 'users.manage');
+  const orgId = orgOf(ctx);
+  const userId = uuid(input.userId, 'userId');
+  const [permission] = switchables([input.permission], 'permission');
+  if (!permission) throw new ValidationError('Choose a permission to change.');
+  if (input.granted !== true && input.granted !== false && input.granted !== null) {
+    throw new ValidationError('Choose on, off or the role’s default.');
+  }
+  if (userId === ctx.userId) throw new PermissionDenied('change your own access');
+  // Never beyond the viewer's own rights. The database also refuses a reset that would give the
+  // person something the viewer lacks; that case needs the member's current switch to judge.
+  if (input.granted === true && !can(ctx, permission)) throw new PermissionDenied(permission);
+
+  await callApi(
+    ctx.db,
+    'set_member_permission',
+    { p_org: orgId, p_user: userId, p_permission: permission, p_granted: input.granted },
+    ctx.requestId,
+  );
+}
+
+/**
+ * "Request more information": ask the owner and admins for permissions one lacks, with an optional
+ * message (at least one of the two). Any company member except an owner — who holds everything — and
+ * except APX staff and a suspended organisation. One waiting request at a time; five a day. Every
+ * owner and admin is told in their inbox.
+ */
+export async function requestAccess(
+  ctx: AccessContext,
+  input: { permissions: SwitchablePermission[]; message: string | null },
+): Promise<{ id: string }> {
+  const orgId = orgOf(ctx);
+  if (!mayRequestAccess(ctx.effectiveRole)) throw new PermissionDenied('ask for more access');
+  const asked = switchables(Array.isArray(input.permissions) ? input.permissions : [], 'permissions');
+  const message = optionalText(input.message, 'message', 'message');
+  const lacking = asked.filter((p) => !can(ctx, p));
+  if (lacking.length === 0 && message === null) {
+    throw new ValidationError(
+      asked.length > 0
+        ? 'You already have the access you asked for.'
+        : 'Choose what you need, or say what you need in a message.',
+    );
+  }
+
+  const id = await callApi<string>(
+    ctx.db,
+    'request_access',
+    { p_org: orgId, p_permissions: lacking, p_message: message },
+    ctx.requestId,
+  );
+  return { id };
+}
+
+interface AccessRequestRow {
+  id: string;
+  requester_id: string;
+  requester_name: string | null;
+  requester_email: string;
+  requester_role: string;
+  permissions: string[] | null;
+  message: string | null;
+  status: string;
+  created_at: string;
+  decided_by: string | null;
+  decided_at: string | null;
+  granted: string[] | null;
+  note: string | null;
+}
+
+function onlySwitchable(values: readonly string[] | null): SwitchablePermission[] {
+  const set = new Set((values ?? []).filter(isSwitchable));
+  return SWITCHABLE_PERMISSIONS.filter((p) => set.has(p));
+}
+
+/**
+ * Requests, newest first. Whoever manages the team (`users.manage`) reads the organisation's; anyone
+ * else reads only their own — the database decides which, and RLS on `access_requests` agrees.
+ */
+export async function listAccessRequests(
+  ctx: AccessContext,
+  input?: { status?: AccessRequestStatus | 'all' },
+): Promise<AccessRequest[]> {
+  const orgId = orgOf(ctx);
+  const status = input?.status ?? 'all';
+  if (status !== 'all' && !(STATUSES as readonly string[]).includes(status)) {
+    throw new ValidationError('Unknown request status.');
+  }
+  const rows = await callApi<AccessRequestRow[] | null>(
+    ctx.db, 'access_requests_list', { p_org: orgId, p_status: status }, ctx.requestId,
+  );
+  return (rows ?? []).flatMap((row): AccessRequest[] => {
+    const role = asTenantRole(row.requester_role);
+    const rowStatus = (STATUSES as readonly string[]).includes(row.status) ? (row.status as AccessRequestStatus) : null;
+    if (role === null || rowStatus === null) return [];
+    return [{
+      id: row.id,
+      requesterId: row.requester_id,
+      requesterName: row.requester_name ?? null,
+      requesterEmail: row.requester_email,
+      requesterRole: role,
+      permissions: onlySwitchable(row.permissions),
+      message: row.message ?? null,
+      status: rowStatus,
+      createdAt: row.created_at,
+      decidedBy: row.decided_by ?? null,
+      decidedAt: row.decided_at ?? null,
+      granted: onlySwitchable(row.granted),
+      note: row.note ?? null,
+    }];
+  });
+}
+
+/**
+ * Approve or decline a waiting request. Approval switches on the chosen permissions — a subset of
+ * those asked (all of them when none are named), each one the decider holds; a message-only request
+ * is approved with none. The note goes to the requester.
+ */
+export async function decideAccessRequest(
+  ctx: AccessContext,
+  input: { id: string; approve: boolean; permissions?: SwitchablePermission[]; note?: string | null },
+): Promise<void> {
+  assertCan(ctx, 'users.manage');
+  orgOf(ctx);
+  const id = uuid(input.id, 'id');
+  if (typeof input.approve !== 'boolean') throw new ValidationError('Choose approve or decline.');
+  const permissions = input.permissions === undefined ? null : switchables(input.permissions, 'permissions');
+  const note = optionalText(input.note ?? null, 'note', 'note');
+  if (input.approve && permissions) {
+    const missing = permissions.find((p) => !can(ctx, p));
+    if (missing) throw new PermissionDenied(missing);
+  }
+
+  await callApi(
+    ctx.db,
+    'decide_access_request',
+    { p_id: id, p_approve: input.approve, p_permissions: input.approve ? permissions : null, p_note: note },
+    ctx.requestId,
+  );
+}
+
+/** Take back one's own waiting request. Anybody else's request is NOT FOUND. */
+export async function withdrawAccessRequest(ctx: AccessContext, id: string): Promise<void> {
+  orgOf(ctx);
+  await callApi(ctx.db, 'withdraw_access_request', { p_id: uuid(id, 'id') }, ctx.requestId);
+}

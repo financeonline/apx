@@ -5,26 +5,51 @@ import type { EffectiveRole } from '@/core/permissions';
  * mapped here, once, to the plain UK-English phrase for it. Lookups only: code never branches on a
  * role name (ADR-003, R2-A-07) — it asks `can(ctx, permission)`.
  */
-export const ROLE_LABELS: Record<EffectiveRole, string> = {
+/*
+ * Role names follow ADR-172 (`ROLE_NAMES` in the tenancy contract): the platform `employee` is a
+ * **Financial Analyst** wherever a person reads it — the key stays `employee`. The two company roles
+ * ADR-172 adds, `accountant` and `third_party`, are listed here too, and the index signature lets
+ * them stand before every role type knows them. A unit test holds these to the contract's words.
+ */
+export const ROLE_LABELS: Readonly<Record<EffectiveRole, string>> & Readonly<Record<string, string>> = {
   super_admin: 'APX administrator',
-  employee: 'APX adviser',
+  employee: 'Financial Analyst',
   owner: 'Owner',
   admin: 'Admin',
+  accountant: 'Accountant',
   client: 'Client',
+  third_party: '3rd party',
   suspended_member: 'Read only',
   none: 'No access',
 };
 
+/** The plural, for headings and counts ("Financial Analysts", "3rd parties"). */
+export const ROLE_PLURAL_LABELS: Record<string, string> = {
+  super_admin: 'APX administrators',
+  employee: 'Financial Analysts',
+  owner: 'Owners',
+  admin: 'Admins',
+  accountant: 'Accountants',
+  client: 'Clients',
+  third_party: '3rd parties',
+};
+
+/** The company roles, in the order the team page lists them (ADR-172). */
 export const MEMBERSHIP_ROLE_LABELS: Record<string, string> = {
   owner: 'Owner',
   admin: 'Admin',
+  accountant: 'Accountant',
   client: 'Client',
+  third_party: '3rd party',
 };
 
+/** One line on what each company role starts with. Per-person switches can change it (ADR-172). */
 export const MEMBERSHIP_ROLE_HINTS: Record<string, string> = {
-  owner: 'Everything, including billing, the audit log and deleting the organisation.',
-  admin: 'Everything except billing, ownership and deletion. Cannot invite or change owners.',
-  client: 'Read the numbers, ask the analyst, update actions assigned to them.',
+  owner: 'Everything, including billing, the audit log and deleting the company.',
+  admin: 'Everything except billing, ownership and deletion; cannot invite or change owners.',
+  accountant: 'Data capture and compliance; no AI, team or settings.',
+  client: 'A limited view of the business.',
+  third_party: 'A lender, investor or partner: a read-only overview; can ask for more.',
 };
 
 export const ORG_STATUS_LABELS: Record<string, string> = {
@@ -36,12 +61,20 @@ export const ORG_STATUS_LABELS: Record<string, string> = {
 
 export const PLATFORM_ROLE_LABELS: Record<string, string> = {
   super_admin: 'APX administrator',
-  employee: 'APX adviser',
+  employee: 'Financial Analyst',
 };
 
 export const MEMBER_STATUS_LABELS: Record<string, string> = {
   active: 'Active',
   suspended: 'Deactivated',
+};
+
+/** "Request more information" (ADR-172), as the requester and the owner or admin read it. */
+export const ACCESS_REQUEST_STATUS_LABELS: Record<string, string> = {
+  pending: 'Waiting',
+  approved: 'Approved',
+  declined: 'Declined',
+  withdrawn: 'Withdrawn',
 };
 
 /**
@@ -65,8 +98,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'ownership.transfer_initiated': 'Ownership transfer started',
   'ownership.transfer_accepted': 'Ownership transferred',
   'ownership.transfer_cancelled': 'Ownership transfer cancelled',
-  'assignment.created': 'APX adviser given access',
-  'assignment.revoked': 'APX adviser access removed',
+  'assignment.created': 'Financial Analyst given access',
+  'assignment.revoked': 'Financial Analyst access removed',
   'platform.role_granted': 'Platform role granted',
   'platform.role_revoked': 'Platform role removed',
   'profile.updated': 'Profile updated',
@@ -85,7 +118,7 @@ export function auditActionLabel(action: string): string {
 
 export const ACTOR_TYPE_LABELS: Record<string, string> = {
   user: 'Member',
-  employee: 'APX adviser',
+  employee: 'Financial Analyst',
   platform_admin: 'APX administrator',
   system: 'APX',
   ai: 'AI analyst',

@@ -6,13 +6,27 @@ import type { EffectiveRole } from './matrix';
  * (ADR-026), so a bug here cannot become a privilege escalation.
  */
 
-export type MembershipRole = 'owner' | 'admin' | 'client';
+/**
+ * Every company role (ADR-172 adds `accountant` and `third_party`). The same five strings as
+ * `TENANT_ROLES` in the tenancy contract; spelled here because core must not import modules (ADR-022).
+ */
+export type MembershipRole = 'owner' | 'admin' | 'accountant' | 'client' | 'third_party';
 
+/**
+ * The ceiling ranks, mirrored exactly by `app.role_rank` (20261018000019).
+ *
+ * `accountant` and `third_party` rank with `client` at 1: none of the three governs anything (no
+ * `users.*` — and `users.*` cannot be switched on per person), so the ceiling only needs them BELOW
+ * admin. That is what lets an owner or an admin invite them, move a member between them and remove
+ * them, and what keeps self-elevation impossible: nobody at rank 1 holds `users.manage`.
+ */
 const RANK: Record<string, number> = {
   super_admin: 4,
   owner: 3,
   admin: 2,
+  accountant: 1,
   client: 1,
+  third_party: 1,
 };
 
 export function roleRank(role: string): number {
@@ -89,7 +103,12 @@ export function canSetAlertStatus(actorRole: EffectiveRole, status: string): boo
    * The negation reads correctly and is wrong: `suspended_member` is not `client`, so it would fall
    * through to full access — precisely the failure R2-A-07 and ADR-003 are about. Written this way,
    * a role nobody thought of gets nothing.
+   *
+   * ADR-172: the accountant's `alerts.manage` is the client's — acknowledge only — and so is a 3rd
+   * party's when the owner switches it on for them. Deciding that a concern is dealt with stays with
+   * the organisation's owner, its admins and its Financial Analyst.
    */
-  if (actorRole === 'client') return status === 'acknowledged';
-  return ['owner', 'admin', 'employee', 'super_admin'].includes(actorRole);
+  if (['owner', 'admin', 'employee', 'super_admin'].includes(actorRole)) return true;
+  if (['accountant', 'client', 'third_party'].includes(actorRole)) return status === 'acknowledged';
+  return false;
 }
