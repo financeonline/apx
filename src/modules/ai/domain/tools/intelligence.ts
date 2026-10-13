@@ -456,7 +456,7 @@ void RECORD_KINDS;
 export const getForecast: ToolDefinition<{ metric_key?: string }, unknown> = {
   name: 'get_forecast',
   description:
-    'What MOTION expects for the months ahead: revenue, running costs, operating profit, cash, and what is owed. These are estimates worked out from finished months, never results. Use this for "what will…", "how much will…" and "what is the forecast" questions. It cannot answer "what if" questions.',
+    'What APX expects for the months ahead: revenue, running costs, operating profit, cash, and what is owed. These are estimates worked out from finished months, never results. Use this for "what will…", "how much will…" and "what is the forecast" questions. It cannot answer "what if" questions.',
   permission: 'dashboard.view',
   input: z.object({ metric_key: z.string().max(60).optional() }),
   async run(input, call) {
@@ -547,7 +547,7 @@ function percentAsRatio(value: string): ReturnType<typeof ratio> {
 export const getScenario: ToolDefinition<{ scenario_id?: string }, unknown> = {
   name: 'get_scenario',
   description:
-    'A what-if scenario somebody has already saved in MOTION: what it assumed, and what it expects to happen to sales, costs, profit and cash if those assumptions hold. Use it when the question is about a scenario that exists. It CANNOT work a new scenario out — if the person is asking what would happen under assumptions they have just given you, say that MOTION works what-ifs out on its What-if page and that you can read one back once it is saved.',
+    'A what-if scenario somebody has already saved in APX: what it assumed, and what it expects to happen to sales, costs, profit and cash if those assumptions hold. Use it when the question is about a scenario that exists. It CANNOT work a new scenario out — if the person is asking what would happen under assumptions they have just given you, say that APX works what-ifs out on its What-if page and that you can read one back once it is saved.',
   permission: 'dashboard.view',
   input: z.object({ scenario_id: uuid.optional() }),
   async run(input, call) {

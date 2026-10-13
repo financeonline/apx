@@ -107,7 +107,7 @@ export function UploadForm({
         label="The file"
         htmlFor="file"
         hint={aiReadTypes.includes(importType)
-          ? 'CSV or Excel, or a photo (JPEG or PNG, up to 5 MB) or PDF of receipts, which MOTION can read with AI when you ask.'
+          ? 'CSV or Excel, or a photo (JPEG or PNG, up to 5 MB) or PDF of receipts, which APX can read with AI when you ask.'
           : pdfReadTypes.includes(importType)
             ? 'CSV, Excel or a PDF statement, up to 25 MB.'
             : 'CSV or Excel, up to 25 MB. A PDF is stored as a document, but its figures are not read.'}

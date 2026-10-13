@@ -59,13 +59,13 @@ export default async function AccountsPage({ params }: { params: Promise<{ orgSl
           description={
             canEdit
               ? 'Changing a category updates every month that account appears in.'
-              : 'Owners, admins and MOTION advisers can change a category here.'
+              : 'Owners, admins and APX advisers can change a category here.'
           }
         />
         <CardBody className="px-0 py-0">
           {hasLoans ? (
             <p className="px-6 pt-4 text-sm text-ink-muted">
-              Mark each loan as secured or unsecured — MOTION never guesses it from the name.
+              Mark each loan as secured or unsecured — APX never guesses it from the name.
             </p>
           ) : null}
           <TableWrap>

@@ -25,7 +25,7 @@ export function CategoryForm({
     <form action={action} className="flex flex-col gap-4">
       <input type="hidden" name="org_slug" value={orgSlug} />
       <input type="hidden" name="transaction_id" value={transactionId} />
-      <Field label="Which category does this belong to?" htmlFor="category_account_id" hint="Your choice stands: MOTION’s rules will not change it later.">
+      <Field label="Which category does this belong to?" htmlFor="category_account_id" hint="Your choice stands: APX’s rules will not change it later.">
         <Select id="category_account_id" name="category_account_id" defaultValue={current ?? ''}>
           <option value="">Not categorised</option>
           {options.map((option) => (

@@ -19,7 +19,7 @@ export default async function InvitePage({ params }: { params: Promise<{ token: 
   return (
     <BrandedScreen width="lg">
       <PageHeader
-        title="You have been invited to MOTION"
+        title="You have been invited to APX"
         description="Accepting adds your account to the organisation that invited you."
       />
       <AcceptInvitation token={token} />

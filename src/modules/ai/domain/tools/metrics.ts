@@ -244,7 +244,7 @@ export const getMetric: ToolDefinition<{ metric_key: string; period?: string; di
   }),
   async run(input, call) {
     if (!isMetricKey(input.metric_key)) {
-      return fail({ code: 'NOT_FOUND', message: 'That is not a metric MOTION calculates.' });
+      return fail({ code: 'NOT_FOUND', message: 'That is not a metric APX calculates.' });
     }
     const resolved = resolvePeriodArg(input.period, call);
     if (!resolved.ok) return fail(resolved.error);
@@ -308,7 +308,7 @@ export const getMetricTrend: ToolDefinition<{ metric_key: string; from: string; 
     metric_key: z.string().min(1), from: z.string(), to: z.string(), dimension: DimensionSchema.optional(),
   }),
   async run(input, call) {
-    if (!isMetricKey(input.metric_key)) return fail({ code: 'NOT_FOUND', message: 'That is not a metric MOTION calculates.' });
+    if (!isMetricKey(input.metric_key)) return fail({ code: 'NOT_FOUND', message: 'That is not a metric APX calculates.' });
     const from = resolvePeriodArg(input.from, call); if (!from.ok) return fail(from.error);
     const to = resolvePeriodArg(input.to, call); if (!to.ok) return fail(to.error);
     const { ctx } = call;

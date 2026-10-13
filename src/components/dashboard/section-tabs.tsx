@@ -25,7 +25,7 @@ export function SectionTabs({ label, tabs }: { label: string; tabs: readonly { l
           aria-current={tab.href === current ? 'page' : undefined}
           className={`rounded-xl px-4 py-2 font-medium transition-colors ${
             tab.href === current
-              ? 'bg-accent text-on-accent shadow-[0_8px_20px_-10px_rgb(106_69_229/0.7)]'
+              ? 'bg-accent bg-brand-gradient font-semibold text-on-accent shadow-[0_8px_20px_-10px_rgb(255_45_85/0.7)]'
               : 'text-ink hover:bg-accent-soft hover:text-accent'
           }`}
         >

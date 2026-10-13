@@ -45,7 +45,7 @@ export default async function HeldNamesPage({ params }: { params: Promise<{ orgS
       <PageHeader
         eyebrow="Customers"
         title="Name decisions"
-        description="Customers and suppliers whose names MOTION now reads as the same name. Imports naming them are held until you decide."
+        description="Customers and suppliers whose names APX now reads as the same name. Imports naming them are held until you decide."
       />
       <div className="mt-8 flex flex-col gap-6">
         {groups.size === 0 ? (

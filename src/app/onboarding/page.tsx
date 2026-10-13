@@ -19,7 +19,7 @@ export default async function OnboardingPage() {
       <div>
         <h1 className="text-3xl">Set up your organisation</h1>
         <p className="mt-2 text-ink-muted">
-          This is the business MOTION will report on. You can change these details later in Settings.
+          This is the business APX will report on. You can change these details later in Settings.
         </p>
       </div>
       <OnboardingForm />

@@ -57,7 +57,7 @@ export default async function WhatIfPage({
           actionHref={`/app/${orgSlug}/forecast`}
           actionLabel="Go to the forecast"
         >
-          A what-if works by changing what MOTION already expects, so it needs a forecast first. Work
+          A what-if works by changing what APX already expects, so it needs a forecast first. Work
           one out and this page will be ready.
         </EmptyState>
       </>
@@ -104,7 +104,7 @@ export default async function WhatIfPage({
       <PageHeader
         eyebrow="What if"
         title="What if things change?"
-        description={`Against what MOTION expects for ${months.map((m) => m.label).join(', ')}.`}
+        description={`Against what APX expects for ${months.map((m) => m.label).join(', ')}.`}
       />
 
       <AffordabilityCard orgSlug={orgSlug} months={months} asked={asked} check={affordability} />
@@ -115,7 +115,7 @@ export default async function WhatIfPage({
             title="What would you like to change?"
             icon={<SlidersHorizontal />}
             tint="violet"
-            description="Tick the ones you want to try. Everything else stays as MOTION expects it."
+            description="Tick the ones you want to try. Everything else stays as APX expects it."
           />
           <CardBody>
             <ScenarioForm

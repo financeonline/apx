@@ -36,6 +36,6 @@ export async function renderPortfolioPdf(content: PortfolioReportContent): Promi
 
   pdf.gap(8);
   pdf.text(content.disclaimer, { size: 8.5, muted: true });
-  pdf.text(`Produced ${content.generatedAt.slice(0, 16).replace('T', ' ')} UTC by MOTION from the figures current at that moment.`, { size: 8.5, muted: true });
+  pdf.text(`Produced ${content.generatedAt.slice(0, 16).replace('T', ' ')} UTC by APX from the figures current at that moment.`, { size: 8.5, muted: true });
   return pdf.save();
 }

@@ -87,7 +87,7 @@ export function CustomView({
       {(content.sections ?? []).length === 0 ? null : (
         <>
           <p className="text-xs text-ink-faint">
-            These figures are MOTION&apos;s own, worked out when the report was produced — not the AI Analyst&apos;s.
+            These figures are APX&apos;s own, worked out when the report was produced — not the AI Analyst&apos;s.
           </p>
           {(content.sections ?? []).map((section) => <SectionCard key={section.area} section={section} />)}
         </>
@@ -96,7 +96,7 @@ export function CustomView({
         <p className="text-sm text-ink-muted">No question was answered by the AI Analyst in this report.</p>
       ) : (
         <p className="text-xs text-ink-faint">
-          Every answer below is the AI Analyst&apos;s, under its usual checks: figures come from MOTION&apos;s
+          Every answer below is the AI Analyst&apos;s, under its usual checks: figures come from APX&apos;s
           calculations, and each statement says whether it is a fact, a calculation, an estimate, analysis
           or a recommendation.
         </p>

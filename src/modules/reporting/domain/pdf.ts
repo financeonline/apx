@@ -90,8 +90,8 @@ export async function renderReportPdf(report: ReportViewModel): Promise<Uint8Arr
   };
 
   doc.setTitle(`Monthly Management Report — ${report.organisationName} — ${report.period.label}`);
-  doc.setProducer('MOTION');
-  doc.setCreator('MOTION');
+  doc.setProducer('APX');
+  doc.setCreator('APX');
 
   const page = doc.addPage([A4.width, A4.height]);
   const cursor: Cursor = { page, y: A4.height - MARGIN };
@@ -151,11 +151,11 @@ export async function renderReportPdf(report: ReportViewModel): Promise<Uint8Arr
   cursor.y -= 6;
   rule(cursor);
   const asOf = report.asOf.finishedAt === null
-    ? 'Figures as last calculated by MOTION.'
+    ? 'Figures as last calculated by APX.'
     : `Figures as calculated on ${report.asOf.finishedAt.slice(0, 10)}`
       + `${report.asOf.engineVersion === null ? '' : ` by engine ${report.asOf.engineVersion}`}.`;
   line(cursor, doc, fonts, asOf, { size: 9, colour: MUTED, gap: 12 });
-  line(cursor, doc, fonts, `Produced ${report.generatedAt.slice(0, 10)} by MOTION.`,
+  line(cursor, doc, fonts, `Produced ${report.generatedAt.slice(0, 10)} by APX.`,
     { size: 9, colour: MUTED, gap: 12 });
 
   return doc.save();

@@ -73,7 +73,7 @@ describe('an assumption is accepted only when MOTION can read every part of it',
 
   it('refuses an amount larger than MOTION can model rather than overflowing quietly', () => {
     const issues = issuesOf([revenue({ mode: 'amount', value: String(MAX_AMOUNT + 1) })]);
-    expect(issues[0]!.message).toMatch(/larger than MOTION can model/);
+    expect(issues[0]!.message).toMatch(/larger than APX can model/);
   });
 
   it('refuses a month outside the three the forecast speaks about', () => {

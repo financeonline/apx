@@ -12,7 +12,7 @@ export const dynamic = 'force-dynamic';
 export default async function PlatformLayout({ children }: { children: React.ReactNode }) {
   const ctx = await getPlatformContext();
   if (!can(ctx, 'system.manage')) notFound();
-  const user = await shellUser(ctx.db, ROLE_LABELS[ctx.effectiveRole] ?? 'MOTION administrator', ctx.requestId);
+  const user = await shellUser(ctx.db, ROLE_LABELS[ctx.effectiveRole] ?? 'APX administrator', ctx.requestId);
 
   return (
     <AppShell

@@ -218,7 +218,7 @@ export async function loadDepartments(ctx: AccessContext): Promise<DepartmentsVi
     system: {
       dataRefreshed: lastData === null ? 'No data has been added yet.' : `Data last added ${lastData.slice(0, 10)}.`,
       lastCalculation: run === null
-        ? 'MOTION has not calculated anything yet.'
+        ? 'APX has not calculated anything yet.'
         : `Last calculation ${run.status === 'succeeded' ? 'finished' : run.status} ${run.finishedAt?.slice(0, 16).replace('T', ' ') ?? ''} UTC${run.engineVersion === null ? '' : `, engine ${run.engineVersion}`}.`,
       imports: imports === null ? null : `${plural(imports.awaitingReview, 'import')} waiting for review, ${imports.failed} failed.`,
       schedule: [

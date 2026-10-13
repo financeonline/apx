@@ -292,14 +292,14 @@ export function parseCsv(text: string, options: CsvParseOptions = {}): ParsedTab
     warnings.push({
       code: 'F-B-18',
       message:
-        'No line in this file looks like a header row, so MOTION has numbered the columns. ' +
+        'No line in this file looks like a header row, so APX has numbered the columns. ' +
         'Confirm the columns before importing.',
     });
   } else if (header.confirmationRequired) {
     warnings.push({
       code: 'F-B-18',
       message:
-        `Line ${(headerRecord as CsvRecord).line} is MOTION's best guess at the header row, but ` +
+        `Line ${(headerRecord as CsvRecord).line} is APX's best guess at the header row, but ` +
         'none of its columns matched a known heading. Confirm it before importing.',
     });
   }

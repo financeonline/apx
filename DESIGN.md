@@ -1,4 +1,6 @@
-# MOTION — Design
+# APX — Design
+
+> **Current look: ADR-169** (2026-10-13) — the client's APX design: dark only, near-black ground `#09090b`, cards `#141417`, white text, hot-red accent `#ff2d55`, orange `#ff8a4c`, the pink-and-orange `--brand-gradient` on primary buttons and the current navigation item, the client's logo (`public/brand/apx-logo.png`) and sign-in background (`public/brand/apx-background.webp`). Tokens live in `src/app/globals.css`. The palette below is the original direction, kept for history.
 
 MOTION is read by business owners who are not accountants, and by advisers who are. The interface
 has to feel like a well-kept ledger: quiet, ordered, and confident enough that a number on screen is

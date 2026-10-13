@@ -5,7 +5,6 @@ export default function Page() {
   return (
     <Suspense fallback={<p className="text-sm text-ink-muted">Loading…</p>}>
       <AuthForm mode="reset" />
-      <p className="text-sm text-ink-muted"><a className="underline" href="/sign-in">Back to sign in</a></p>
     </Suspense>
   );
 }

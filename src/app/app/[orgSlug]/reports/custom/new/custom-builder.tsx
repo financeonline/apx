@@ -171,7 +171,7 @@ export function CustomBuilder({
           {fixedAreas.length === 0 ? null : (
             <p className="mt-2 text-xs text-ink-faint">
               {dimensions.filter((d) => fixedAreas.includes(d.value)).map((d) => d.label).join(', ')} also add a
-              table of MOTION&apos;s own figures to the report, whether or not the analyst can answer.
+              table of APX&apos;s own figures to the report, whether or not the analyst can answer.
             </p>
           )}
         </div>
@@ -201,7 +201,7 @@ export function CustomBuilder({
       {phase === 'composing' ? (
         <div>
           <Button type="button" onClick={() => void run()} disabled={(questions.length === 0 && !hasFixed) || tooMany || tooLong || periodId === ''}>
-            {questions.length === 0 && hasFixed ? 'Build the report with MOTION\'s figures' : 'Ask the analyst and build the report'}
+            {questions.length === 0 && hasFixed ? 'Build the report with APX\'s figures' : 'Ask the analyst and build the report'}
           </Button>
         </div>
       ) : null}
@@ -223,7 +223,7 @@ export function CustomBuilder({
       {phase === 'stopped' && stopped !== null ? (
         <div>
           <Button type="button" tone="secondary" onClick={() => void save(stopped.conversationId, stopped.answered)}>
-            {stopped.answered.length === 0 ? 'Save the report with MOTION\'s figures only' : (
+            {stopped.answered.length === 0 ? 'Save the report with APX\'s figures only' : (
               <>Save the report with the {stopped.answered.length} answered question{stopped.answered.length === 1 ? '' : 's'}</>
             )}
           </Button>

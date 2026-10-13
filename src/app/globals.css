@@ -1,7 +1,7 @@
 @import "tailwindcss";
 
 /*
- * MOTION design tokens — the single source of truth for colour and type.
+ * APX design tokens — the single source of truth for colour and type.
  * Every value here is documented in DESIGN.md. Components use the generated Tailwind utilities
  * (bg-paper, text-ink, border-line, font-serif …) and never a literal hex value.
  */
@@ -18,131 +18,81 @@
   --font-mono: ui-monospace, "SF Mono", "JetBrains Mono", Menlo, Consolas, monospace;
 
   /*
-   * Colour (ADR-155): the owner's reference dashboard — white cards on the faintest lavender, a
-   * vivid violet brand, pink and violet icon tiles, near-black text with grey-violet secondary text.
-   * Every text colour measured at WCAG AA on white, the page and the soft violet panel.
+   * Colour (ADR-169): the client's APX reference — near-black ground, white text, and one brand
+   * gradient running from coral red to orange. The app is dark only, as the reference; every text
+   * colour measured at WCAG AA on the page, the card and the sunken surface.
    */
 
   /* Ground */
-  --color-paper: #faf9ff;
-  --color-surface: #ffffff;
-  --color-surface-sunken: #f6f4fd;
+  --color-paper: #09090b;
+  --color-surface: #141417;
+  --color-surface-sunken: #1c1c20;
 
   /* Text */
-  --color-ink: #110d1f;
-  --color-ink-muted: #5e5873;
-  --color-ink-faint: #5e5873;
+  --color-ink: #f6f6f7;
+  --color-ink-muted: #a9a9b2;
+  --color-ink-faint: #8f8f99;
 
   /* Rules */
-  --color-line: #eeebf6;
-  --color-line-strong: #ddd7ee;
+  --color-line: #27272d;
+  --color-line-strong: #3a3a42;
 
-  /* Accent — violet. */
-  --color-accent: #6a45e5;
-  --color-accent-hover: #5b37d6;
-  /* The wordmark's deep indigo. */
-  --color-brand-ink: #3b2d96;
-  --color-accent-soft: #f3eeff;
-  --color-on-accent: #ffffff;
+  /* Accent — APX hot red (the reference's links). */
+  --color-accent: #ff2d55;
+  --color-accent-hover: #ff5272;
+  /* The wordmark's ink: white, as the reference's "AP". */
+  --color-brand-ink: #ffffff;
+  --color-accent-soft: rgb(255 45 85 / 0.13);
+  /* Text on the coral/orange gradient: near-black, as the reference's "Log in". */
+  --color-on-accent: #140a0c;
 
-  /* The second brand colour — pink, for icon tiles. */
-  --color-pink: #be185d;
-  --color-pink-icon: #db2777;
-  --color-pink-soft: #fdf0f6;
+  /* The second brand colour — orange (kept under the old token name, used for icon tiles). */
+  --color-pink: #ff8a4c;
+  --color-pink-icon: #ff8a4c;
+  --color-pink-soft: rgb(255 122 47 / 0.13);
 
   /* Status */
-  --color-good: #15803d;
-  --color-good-dot: #22c55e;
-  --color-good-soft: #ecfdf3;
-  --color-warn: #b45309;
-  --color-warn-dot: #f59e0b;
-  --color-warn-soft: #fffbeb;
-  --color-danger: #be123c;
-  --color-danger-soft: #fff1f2;
+  --color-good: #4ade80;
+  --color-good-dot: #4ade80;
+  --color-good-soft: rgb(74 222 128 / 0.1);
+  --color-warn: #fbbf24;
+  --color-warn-dot: #fbbf24;
+  --color-warn-soft: rgb(251 191 36 / 0.1);
+  --color-danger: #ff7070;
+  --color-danger-soft: rgb(255 80 80 / 0.12);
 
   /* Platform shell identity (UX_ARCHITECTURE.md §9.5) */
-  --color-platform: #110d1f;
-  --color-platform-accent: #a78bfa;
+  --color-platform: #09090b;
+  --color-platform-accent: #ff8a4c;
 
-  /* Chart palette — six categorical series, ordered for use */
-  --color-chart-1: #6a45e5;
-  --color-chart-2: #db2777;
-  --color-chart-3: #0ea5e9;
-  --color-chart-4: #f59e0b;
-  --color-chart-5: #10b981;
-  --color-chart-6: #64748b;
+  /* Chart palette — six categorical series, ordered for use, legible on the dark ground */
+  --color-chart-1: #ff2d55;
+  --color-chart-2: #ff8a4c;
+  --color-chart-3: #38bdf8;
+  --color-chart-4: #c084fc;
+  --color-chart-5: #34d399;
+  --color-chart-6: #a1a1aa;
 
   --radius-card: 1rem;
 }
 
-/* Elevation and the page's glow (ADR-155). Not theme colours; the dark scheme swaps them. */
+/* Elevation, the page's glow and the brand gradient (ADR-169). Not theme colours. */
 :root {
-  --panel-shadow: 0 1px 2px rgb(76 29 149 / 0.04), 0 12px 32px -16px rgb(76 29 149 / 0.16);
-  --page-glow-1: rgb(167 139 250 / 0.14);
-  --page-glow-2: rgb(244 114 182 / 0.08);
-}
-
-/*
- * The dark scheme keeps every token's role and swaps only its value, so no component needs a
- * dark: variant to stay legible.
- */
-@media (prefers-color-scheme: dark) {
-  :root {
-    --color-paper: #0d0b17;
-    --color-surface: #16131f;
-    --color-surface-sunken: #1e1a2b;
-
-    --color-ink: #f5f3ff;
-    --color-ink-muted: #b3abc9;
-    --color-ink-faint: #b3abc9;
-
-    --color-line: #2a2540;
-    --color-line-strong: #3a3354;
-
-    --color-accent: #a78bfa;
-    --color-accent-hover: #c4b5fd;
-    --color-brand-ink: #e4ddff;
-    --color-accent-soft: rgb(167 139 250 / 0.12);
-    --color-on-accent: #120d1f;
-
-    --color-pink: #f472b6;
-    --color-pink-icon: #f472b6;
-    --color-pink-soft: rgb(244 114 182 / 0.12);
-
-    --color-good: #4ade80;
-    --color-good-dot: #4ade80;
-    --color-good-soft: rgb(74 222 128 / 0.1);
-    --color-warn: #fbbf24;
-    --color-warn-dot: #fbbf24;
-    --color-warn-soft: rgb(251 191 36 / 0.1);
-    --color-danger: #fb7185;
-    --color-danger-soft: rgb(251 113 133 / 0.1);
-
-    --color-platform: #0d0b17;
-    --color-platform-accent: #c4b5fd;
-
-    --color-chart-1: #a78bfa;
-    --color-chart-2: #f472b6;
-    --color-chart-3: #38bdf8;
-    --color-chart-4: #fbbf24;
-    --color-chart-5: #34d399;
-    --color-chart-6: #94a3b8;
-
-    --panel-shadow: 0 1px 2px rgb(0 0 0 / 0.4), 0 12px 32px -16px rgb(0 0 0 / 0.7);
-    --page-glow-1: rgb(167 139 250 / 0.1);
-    --page-glow-2: rgb(244 114 182 / 0.06);
-  }
+  --panel-shadow: 0 1px 2px rgb(0 0 0 / 0.5), 0 16px 40px -20px rgb(0 0 0 / 0.8);
+  --page-glow-1: rgb(255 45 85 / 0.1);
+  --page-glow-2: rgb(255 122 47 / 0.07);
+  --brand-gradient: linear-gradient(100deg, #ff6b3d 0%, #ff4058 20%, #ff6a3c 46%, #ff2d55 76%, #ff6b3d 100%);
 }
 
 @layer base {
   html {
-    color-scheme: light dark;
+    color-scheme: dark;
     -webkit-text-size-adjust: 100%;
   }
 
   body {
     background-color: var(--color-paper);
-    /* A faint violet glow top right, a hint of pink low left (ADR-155). */
+    /* A faint coral glow top right, a hint of orange low left (ADR-169). */
     background-image:
       radial-gradient(48rem 32rem at 100% 0%, var(--page-glow-1), transparent 70%),
       radial-gradient(40rem 30rem at 0% 100%, var(--page-glow-2), transparent 70%);
@@ -202,13 +152,18 @@
 
 @layer components {
   /*
-   * The card surface (ADR-155): white, one soft violet-tinted shadow, a faint hairline. In the
-   * components layer so a utility on the same element (a background, a radius) wins.
+   * The card surface (ADR-169): a dark card, one soft shadow, a faint hairline. In the components
+   * layer so a utility on the same element (a background, a radius) wins.
    */
   .panel {
     background-color: var(--color-surface);
     border: 1px solid var(--color-line);
     box-shadow: var(--panel-shadow);
+  }
+
+  /* The APX brand gradient: primary buttons, the current sidebar item, the brand's underlines. */
+  .bg-brand-gradient {
+    background-image: var(--brand-gradient);
   }
 
   /* Skeletons hold the exact space of the content they stand in for (UX_ARCHITECTURE.md §7.1). */

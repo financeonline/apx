@@ -137,7 +137,7 @@ const SOURCES: Readonly<Record<ExportKind, Source>> = {
 };
 
 export function exportFilename(kind: ExportKind, today: string): string {
-  return `motion-${SOURCES[kind].filename}-${today}.csv`;
+  return `apx-${SOURCES[kind].filename}-${today}.csv`;
 }
 
 /**

@@ -165,7 +165,7 @@ export async function parseAndValidate(
   try {
     if (input.table.rows.length > SYNC_ROW_LIMIT * 10) {
       throw new ValidationError(
-        'That file has more rows than MOTION can import in one go. Split it by period.',
+        'That file has more rows than APX can import in one go. Split it by period.',
       );
     }
 

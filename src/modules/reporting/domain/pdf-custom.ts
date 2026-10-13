@@ -31,7 +31,7 @@ export async function renderCustomPdf(content: CustomReportContent): Promise<Uin
   }
   const sections = content.sections ?? [];
   if (sections.length > 0) {
-    pdf.text('The tables below are MOTION\'s own figures, worked out when the report was produced - not the AI Analyst\'s.',
+    pdf.text('The tables below are APX\'s own figures, worked out when the report was produced - not the AI Analyst\'s.',
       { size: 8.5, muted: true, after: 4 });
     for (const section of sections) sectionPdf(pdf, section);
     pdf.gap(6);
@@ -39,7 +39,7 @@ export async function renderCustomPdf(content: CustomReportContent): Promise<Uin
   if (content.entries.length === 0) {
     pdf.text('No question was answered by the AI Analyst in this report.', { size: 9.5, muted: true, after: 6 });
   } else {
-    pdf.text('Every answer below is the AI Analyst\'s, under its usual checks: figures come from MOTION\'s calculations, '
+    pdf.text('Every answer below is the AI Analyst\'s, under its usual checks: figures come from APX\'s calculations, '
       + 'and each statement says whether it is a fact, a calculation, an estimate, analysis or a recommendation.',
     { size: 8.5, muted: true, after: 6 });
   }
@@ -79,6 +79,6 @@ export async function renderCustomPdf(content: CustomReportContent): Promise<Uin
   });
 
   pdf.gap(8);
-  pdf.text(`Produced ${content.composedAt.slice(0, 16).replace('T', ' ')} UTC by MOTION.`, { size: 8.5, muted: true });
+  pdf.text(`Produced ${content.composedAt.slice(0, 16).replace('T', ' ')} UTC by APX.`, { size: 8.5, muted: true });
   return pdf.save();
 }

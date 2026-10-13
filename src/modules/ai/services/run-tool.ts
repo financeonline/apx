@@ -123,7 +123,7 @@ export async function runTool(input: RunToolInput): Promise<RunToolOutput> {
   const system = toolModule(tool.name);
   if (system !== null && !moduleOn(ctx, system)) {
     return finish(
-      errorOutcome('NOT_FOUND', 'That part of MOTION is not switched on for this organisation.'),
+      errorOutcome('NOT_FOUND', 'That part of APX is not switched on for this organisation.'),
       { authorized: false, denial_reason: `module_off:${system}` },
     );
   }

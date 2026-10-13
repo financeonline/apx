@@ -1,18 +1,18 @@
 import Link from 'next/link';
 import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { CornerSprig, SidebarSprig, Wordmark } from './brand';
+import { CornerBlob, Wordmark } from './brand';
 import { SidebarNav, type SidebarGroup } from './sidebar';
 import { SignOutButton } from './sign-out-button';
 
 /**
- * The application shell (ADR-155), as the owner's reference: a white sidebar with the mark, the
+ * The application shell (ADR-155; APX look, ADR-169): a dark sidebar with the wordmark, the
  * sections and the account links from `lg`; below it, a top bar with a menu. Both carry the same
  * links and the one not in use is display:none, so it is out of the accessibility tree.
  */
 export function AppShell({
   homeHref,
-  homeLabel = 'MOTION home',
+  homeLabel = 'APX home',
   area,
   groups,
   user,
@@ -49,26 +49,26 @@ export function AppShell({
     <div className="min-h-dvh lg:flex">
       <aside className="isolate sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface/80 px-4 pt-6 lg:flex">
         <Link href={homeHref} className="mb-8 px-2" aria-label={homeLabel}>
-          <Wordmark />
-          {area ? <span className="mt-2 block pl-[3.25rem] text-xs font-semibold tracking-[0.12em] text-ink-muted uppercase">{area}</span> : null}
+          <Wordmark idPrefix="sidebar-logo" />
+          {area ? <span className="mt-3 block text-xs font-semibold tracking-[0.12em] text-ink-muted uppercase">{area}</span> : null}
         </Link>
         <SidebarNav groups={groups} />
         <div className="mt-auto flex flex-col gap-2 pt-6 pb-6">
           {person}
           {footer ? <div className="px-3">{footer}</div> : null}
           <SignOutButton />
-          <p className="mt-16 px-3 text-sm leading-snug font-medium text-brand-ink/80">
-            Smarter finance
+          <p className="mt-16 px-3 text-[0.6875rem] leading-relaxed font-semibold tracking-[0.24em] text-ink-muted uppercase">
+            Analyse · Plan
             <br />
-            brighter possibilities.
+            Execute · Grow
           </p>
         </div>
-        {/* The reference's foot: a sprig behind the sidebar's last lines. */}
-        <SidebarSprig className="absolute bottom-0 left-0 -z-10 w-full opacity-60" />
+        {/* The reference's corner shape behind the sidebar's last lines. */}
+        <CornerBlob idPrefix="sidebar-blob" className="absolute bottom-0 left-0 -z-10 w-full -scale-y-100 opacity-35" />
       </aside>
 
       <header className="panel sticky top-0 z-20 flex items-center justify-between gap-3 border-x-0 border-t-0 px-4 py-3 lg:hidden">
-        <Link href={homeHref} aria-label={homeLabel}><Wordmark tagline={false} /></Link>
+        <Link href={homeHref} aria-label={homeLabel}><Wordmark tagline={false} idPrefix="topbar-logo" /></Link>
         <details className="relative">
           <summary className="cursor-pointer list-none rounded-xl border border-accent/45 px-3 py-1.5 text-sm font-medium text-accent">
             Menu
@@ -82,7 +82,7 @@ export function AppShell({
         </details>
       </header>
 
-      <CornerSprig className="fixed top-0 right-0 -z-10 hidden w-[34rem] max-w-[55vw] opacity-80 md:block xl:right-24" />
+      <CornerBlob idPrefix="page-blob" className="fixed top-0 right-0 -z-10 hidden w-[26rem] max-w-[45vw] -scale-x-100 opacity-25 md:block" />
 
       <main className="mx-auto w-full min-w-0 max-w-[100rem] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
     </div>

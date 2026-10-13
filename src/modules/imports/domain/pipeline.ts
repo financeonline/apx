@@ -612,12 +612,12 @@ function heldIssue(kind: 'account' | 'counterparty', name: string, records: read
   return kind === 'counterparty'
     ? {
         code: 'IMP-CP-019', severity: 'error', field: 'customer',
-        message: `"${name}" matches ${listed}, which MOTION holds apart until someone decides whether they are the same customer or supplier.`,
+        message: `"${name}" matches ${listed}, which APX holds apart until someone decides whether they are the same customer or supplier.`,
         suggestion: 'Rename or merge those records under Customers, then upload the file again.',
       }
     : {
         code: 'IMP-ACCT-019', severity: 'error', field: 'account',
-        message: `"${name}" matches the accounts ${listed}, which MOTION holds apart until someone decides whether they are the same account.`,
+        message: `"${name}" matches the accounts ${listed}, which APX holds apart until someone decides whether they are the same account.`,
         suggestion: 'Rename one of those accounts under Accounts, then upload the file again.',
       };
 }

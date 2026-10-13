@@ -31,7 +31,7 @@ test('a receipt photo is stored, waits, and is read only when a reviewer asks', 
 
   // Stored and waiting — said in the information tone, not as a failure; and nothing sent anywhere.
   await expect(page.getByText('These receipts are stored and waiting to be read.')).toBeVisible();
-  await expect(page.getByText('MOTION could not read this file.')).toHaveCount(0);
+  await expect(page.getByText('APX could not read this file.')).toHaveCount(0);
   await expect(page.getByText(/AI reading of documents is switched off/)).toBeVisible();
   const orgId = sql(`select id from public.organizations where slug = '${slug}'`);
   expect(sql(`select count(*) from public.audit_events where organization_id = '${orgId}' and action = 'document.sent_to_ai'`)).toBe('0');

@@ -6,8 +6,8 @@ import type { EffectiveRole } from '@/core/permissions';
  * role name (ADR-003, R2-A-07) — it asks `can(ctx, permission)`.
  */
 export const ROLE_LABELS: Record<EffectiveRole, string> = {
-  super_admin: 'MOTION administrator',
-  employee: 'MOTION adviser',
+  super_admin: 'APX administrator',
+  employee: 'APX adviser',
   owner: 'Owner',
   admin: 'Admin',
   client: 'Client',
@@ -35,8 +35,8 @@ export const ORG_STATUS_LABELS: Record<string, string> = {
 };
 
 export const PLATFORM_ROLE_LABELS: Record<string, string> = {
-  super_admin: 'MOTION administrator',
-  employee: 'MOTION adviser',
+  super_admin: 'APX administrator',
+  employee: 'APX adviser',
 };
 
 export const MEMBER_STATUS_LABELS: Record<string, string> = {
@@ -65,8 +65,8 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'ownership.transfer_initiated': 'Ownership transfer started',
   'ownership.transfer_accepted': 'Ownership transferred',
   'ownership.transfer_cancelled': 'Ownership transfer cancelled',
-  'assignment.created': 'MOTION adviser given access',
-  'assignment.revoked': 'MOTION adviser access removed',
+  'assignment.created': 'APX adviser given access',
+  'assignment.revoked': 'APX adviser access removed',
   'platform.role_granted': 'Platform role granted',
   'platform.role_revoked': 'Platform role removed',
   'profile.updated': 'Profile updated',
@@ -85,9 +85,9 @@ export function auditActionLabel(action: string): string {
 
 export const ACTOR_TYPE_LABELS: Record<string, string> = {
   user: 'Member',
-  employee: 'MOTION adviser',
-  platform_admin: 'MOTION administrator',
-  system: 'MOTION',
+  employee: 'APX adviser',
+  platform_admin: 'APX administrator',
+  system: 'APX',
   ai: 'AI analyst',
 };
 

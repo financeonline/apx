@@ -139,7 +139,7 @@ export function pdfHandling(importType: ImportType): 'read' | 'read_on_request' 
 }
 
 export function storedNotReadMessage(importType: ImportType): string {
-  return `The PDF is stored as a source document, but MOTION reads figures from PDF bank statements only. `
+  return `The PDF is stored as a source document, but APX reads figures from PDF bank statements only. `
     + `To import the figures, export the ${TYPE_NOUN[importType]} as CSV or Excel and upload that.`;
 }
 
@@ -154,10 +154,10 @@ type Parsed =
 
 /** ADR-150: what a receipt upload says until a reviewer asks for it to be read. */
 export const RECEIPT_WAITING_MESSAGE =
-  'The receipt is stored. MOTION reads receipts with AI when you ask: choose the expense account and press "Read receipts with AI".';
+  'The receipt is stored. APX reads receipts with AI when you ask: choose the expense account and press "Read receipts with AI".';
 
 const PDF_UNPARSED_MESSAGE =
-  'MOTION could not find a transaction table in this PDF. The file is stored; '
+  'APX could not find a transaction table in this PDF. The file is stored; '
   + 'export the same statement as CSV or Excel from your bank and upload that.';
 
 async function parseTable(file: File, bytes: Uint8Array): Promise<Parsed> {
@@ -240,7 +240,7 @@ async function resolveTransforms(
   const bankSign = accountType === null ? null : resolveBankSign(undefined, accountType);
   if (bankSign === null) {
     throw new ValidationError(
-      'This statement has a single amount column, so MOTION cannot tell whether payments out are '
+      'This statement has a single amount column, so APX cannot tell whether payments out are '
       + 'shown as negative. Export it again with separate money-in and money-out columns.',
     );
   }
@@ -441,7 +441,7 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
   } catch (cause) {
     // The document and the batch exist by now: a refusal here must leave the batch FAILED with a
     // reason, never half-prepared — and the reader gets a sentence, not a SQLSTATE.
-    const reason = 'MOTION could not add the accounts or customers this file names. Check the names, then upload it again.';
+    const reason = 'APX could not add the accounts or customers this file names. Check the names, then upload it again.';
     await failImportBatch(actor, organizationId, batchId, 'mapping', reason).catch(() => undefined);
     throw new ValidationError(reason, [{ path: 'file', message: cause instanceof Error ? cause.message : String(cause) }]);
   }

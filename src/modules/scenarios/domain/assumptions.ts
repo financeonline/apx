@@ -121,7 +121,7 @@ function amountIssue(
     return { path, message: `${label} must be more than zero.` };
   }
   if (parsed.abs().greaterThan(MAX_AMOUNT)) {
-    return { path, message: `${label} is larger than MOTION can model.` };
+    return { path, message: `${label} is larger than APX can model.` };
   }
   return null;
 }
@@ -227,7 +227,7 @@ export function parseAssumptions(input: unknown): Assumption[] {
   if (!list.success) {
     throw new ValidationError('Some of these changes need fixing.', list.error.issues.map((issue) => ({
       path: issue.path.map(String).join('.'),
-      message: 'This change is not one MOTION can read. Check the numbers and try again.',
+      message: 'This change is not one APX can read. Check the numbers and try again.',
     })));
   }
 

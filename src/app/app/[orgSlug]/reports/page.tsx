@@ -102,7 +102,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
       <PageHeader
         eyebrow="Reports"
         title="Reports"
-        description="Briefs and reports from the figures MOTION has already calculated. Nothing here is recalculated for the page."
+        description="Briefs and reports from the figures APX has already calculated. Nothing here is recalculated for the page."
       />
 
       <div className="flex flex-col gap-6">
@@ -116,7 +116,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
             Today so far
           </Link>
           <StoredList orgSlug={orgSlug} reports={of('daily_brief', DAYS_OFFERED)}
-            empty="No brief yet. Each day's brief is produced shortly after midnight once MOTION has figures." />
+            empty="No brief yet. Each day's brief is produced shortly after midnight once APX has figures." />
           {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="daily_brief" label="Produce a brief" windows={days} /> : null}
         </Section>
 
@@ -134,7 +134,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
           {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="weekly_intelligence" label="Produce a weekly report" windows={weeks} /> : null}
         </Section>
 
-        <Section title="Monthly Management Report" icon={<FileText />} tint="violet" description="One report a month, from the figures MOTION has already calculated.">
+        <Section title="Monthly Management Report" icon={<FileText />} tint="violet" description="One report a month, from the figures APX has already calculated.">
           {monthly.length === 0 ? (
             <ReportsBeforeFirstMonthEmpty addDataHref={`/app/${orgSlug}/data/imports/new`} />
           ) : (

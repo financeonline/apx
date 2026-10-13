@@ -34,7 +34,7 @@ export async function renderFundingPdf(content: FundingReportContent): Promise<U
   for (const x of a.actions) pdf.item(x.text, null, x.priority);
 
   pdf.gap(8);
-  pdf.text(`Rules ${a.rulesVersion}; engine ${a.engineVersion}; assessed ${a.assessedAt.slice(0, 16).replace('T', ' ')} UTC from calculation ${a.calculationRunId.slice(0, 8)}. Produced ${content.composedAt.slice(0, 16).replace('T', ' ')} UTC by MOTION.`,
+  pdf.text(`Rules ${a.rulesVersion}; engine ${a.engineVersion}; assessed ${a.assessedAt.slice(0, 16).replace('T', ' ')} UTC from calculation ${a.calculationRunId.slice(0, 8)}. Produced ${content.composedAt.slice(0, 16).replace('T', ' ')} UTC by APX.`,
     { size: 8.5, muted: true });
   return pdf.save();
 }

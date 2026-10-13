@@ -213,7 +213,7 @@ function fieldsFor(kind: string): ReactNode {
           <Field
             label="Interest each month (optional)"
             htmlFor="debt_repayment.monthlyInterest"
-            hint="Leave this empty if you do not know it — MOTION will not work one out."
+            hint="Leave this empty if you do not know it — APX will not work one out."
           >
             <Input
               id="debt_repayment.monthlyInterest"

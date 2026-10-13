@@ -287,7 +287,7 @@ export function validateRow(
     if (parsed === null) {
       issues.push({
         code: 'IMP-AMT-002', severity: 'error', field,
-        message: `"${raw}" is not an amount MOTION can read.`,
+        message: `"${raw}" is not an amount APX can read.`,
       });
       continue;
     }
@@ -373,7 +373,7 @@ export function validateRow(
     if (status && !(INVOICE_STATUSES as readonly string[]).includes(status)) {
       issues.push({
         code: 'IMP-INV-013', severity: 'error', field: 'status',
-        message: `MOTION does not recognise the invoice status "${status}".`,
+        message: `APX does not recognise the invoice status "${status}".`,
         suggestion: 'Use Open, Part paid, Paid or Void, or skip the row. A draft invoice has not been issued.',
       });
     }

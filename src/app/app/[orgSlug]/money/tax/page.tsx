@@ -21,9 +21,9 @@ export const dynamic = 'force-dynamic';
 
 const SCHEME_LABEL = { standard: 'Standard (invoice basis)', cash_accounting: 'Cash accounting', flat_rate: 'Flat Rate Scheme' } as const;
 const NOT_CALCULATED = {
-  flat_rate: 'The Flat Rate Scheme return uses your flat-rate percentage, which MOTION does not hold, so it is not calculated here.',
+  flat_rate: 'The Flat Rate Scheme return uses your flat-rate percentage, which APX does not hold, so it is not calculated here.',
   not_registered: 'Settings say this business is not VAT registered, so there is no VAT return.',
-  country: 'MOTION calculates VAT returns for UK and UAE businesses. Set the country in Settings.',
+  country: 'APX calculates VAT returns for UK and UAE businesses. Set the country in Settings.',
 } as const;
 
 function longDate(iso: string): string {
@@ -77,7 +77,7 @@ function VatSection({ vat, orgSlug, canSet }: { vat: VatView; orgSlug: string; c
         <CardHeader title={title} icon={<Receipt />} />
         <CardBody>
           <p className="text-sm text-ink">
-            Tell MOTION which months your VAT quarters end in, and the return for each quarter appears here.{' '}
+            Tell APX which months your VAT quarters end in, and the return for each quarter appears here.{' '}
             <SettingsLink orgSlug={orgSlug} canSet={canSet}>Set your VAT quarters in Settings</SettingsLink>.
           </p>
         </CardBody>
@@ -150,7 +150,7 @@ function VatSection({ vat, orgSlug, canSet }: { vat: VatView; orgSlug: string; c
           </>
         )}
         <p className="text-xs text-ink-muted">
-          Indicative: MOTION does not file VAT returns. Check against your records before submitting
+          Indicative: APX does not file VAT returns. Check against your records before submitting
           {isUae ? ' to the Federal Tax Authority.' : ' to HMRC.'}
         </p>
       </CardBody>
@@ -197,7 +197,7 @@ function CorporationTaxSection({ ct, orgSlug, canSet }: { ct: CorporationTaxView
         {e.kind === 'not_estimated' ? (
           <p className="text-sm text-ink">
             {e.reason === 'country'
-              ? <>MOTION estimates Corporation Tax for UK and UAE businesses. <SettingsLink orgSlug={orgSlug} canSet={canSet}>Set the country in Settings</SettingsLink>.</>
+              ? <>APX estimates Corporation Tax for UK and UAE businesses. <SettingsLink orgSlug={orgSlug} canSet={canSet}>Set the country in Settings</SettingsLink>.</>
               : 'This financial year began before the current rates applied, so no estimate is made.'}
           </p>
         ) : (

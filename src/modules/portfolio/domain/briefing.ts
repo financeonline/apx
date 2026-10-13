@@ -25,7 +25,7 @@ import { PRIORITY_LABELS, SEVERITY_LABELS, TREND_LABELS, dueLabel } from './pres
 import type { AttentionReasonKind, PortfolioAction, PortfolioAlert, PortfolioView } from './types';
 
 export const BRIEFING_TOOL = 'submit_briefing';
-export const BRIEFING_PROMPT_VERSION = 'adviser-v4.0';
+export const BRIEFING_PROMPT_VERSION = 'adviser-v4.1';
 export const MAX_QUESTION_CHARS = 1_000;
 
 // ---------------------------------------------------------------------------------------------

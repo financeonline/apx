@@ -83,7 +83,7 @@ export function readZipDirectory(bytes: Uint8Array): ZipReadResult {
     // Unreachable under the 25 MB cap (`IMP-FILE-002`), which is checked first: ZIP64 only appears
     // past 4 GB or 65,535 entries. Refused rather than guessed at, so a future cap change surfaces
     // here instead of silently reading the wrong offsets.
-    return { ok: false, detail: 'This ZIP uses ZIP64 extensions, which MOTION does not read.' };
+    return { ok: false, detail: 'This ZIP uses ZIP64 extensions, which APX does not read.' };
   }
   if (directoryOffset + directorySize > bytes.length) {
     return { ok: false, detail: 'The ZIP central directory points outside the file.' };

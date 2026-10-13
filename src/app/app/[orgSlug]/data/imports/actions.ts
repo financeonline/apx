@@ -239,7 +239,7 @@ export async function requestAiReadingAction(_previous: ActionResult | null, for
       organizationId: ctx.orgId, jobType: 'document.extract', payload: { document_id: documentId, batch_id: batchId },
     });
     revalidatePath(`/app/${orgSlug}/data/imports/${batchId}`);
-    return done('MOTION is reading the document. This page will show the rows when it is done.');
+    return done('APX is reading the document. This page will show the rows when it is done.');
   } catch (error) {
     return fail(error, { requestId, action: 'imports.aiReading' });
   }
@@ -272,7 +272,7 @@ export async function requestReceiptReadingAction(_previous: ActionResult | null
       organizationId: ctx.orgId, jobType: 'document.extract', payload: { document_id: documentId, batch_id: batchId, account_id: accountId },
     });
     revalidatePath(`/app/${orgSlug}/data/imports/${batchId}`);
-    return done('MOTION is reading the receipts. This page will show them when it is done.');
+    return done('APX is reading the receipts. This page will show them when it is done.');
   } catch (error) {
     return fail(error, { requestId, action: 'imports.receiptReading' });
   }

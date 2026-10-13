@@ -20,7 +20,7 @@ import { tokenisePdf } from './pdf-text';
 
 /** §5.5, verbatim. */
 export const SCANNED_PDF_MESSAGE =
-  'This PDF is a scanned image. MOTION has stored it as a source document. ' +
+  'This PDF is a scanned image. APX has stored it as a source document. ' +
   'Please upload the same statement as CSV or XLSX from your bank.';
 
 export interface ScannedPdfReport {

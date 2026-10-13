@@ -13,8 +13,8 @@ export type CardTint = 'violet' | 'pink';
 
 /** The hover/focus glow on a clickable card: a violet edge and a soft violet halo. */
 const GLOW =
-  'hover:border-accent/70 hover:shadow-[0_0_0_2px_rgb(106_69_229/0.5),0_0_36px_2px_rgb(106_69_229/0.4),0_0_80px_-10px_rgb(219_39_119/0.3)] ' +
-  'focus-within:border-accent/70 focus-within:shadow-[0_0_0_2px_rgb(106_69_229/0.65),0_0_36px_2px_rgb(106_69_229/0.4)]';
+  'hover:border-accent/70 hover:shadow-[0_0_0_2px_rgb(255_45_85/0.5),0_0_36px_2px_rgb(255_45_85/0.4),0_0_80px_-10px_rgb(255_122_47/0.3)] ' +
+  'focus-within:border-accent/70 focus-within:shadow-[0_0_0_2px_rgb(255_45_85/0.65),0_0_36px_2px_rgb(255_45_85/0.4)]';
 export type CardStatus = 'good' | 'attention' | 'quiet';
 
 const TINT: Readonly<Record<CardTint, string>> = {
@@ -144,7 +144,7 @@ export function DepartmentCard({
 /** A quick link with an icon tile, title and one line, as the reference's "Data capture" row. */
 export function QuickLink({ href, title, line, icon, tint }: { href: string; title: string; line: string; icon: ReactNode; tint: CardTint }) {
   return (
-    <Link href={href} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3 transition-[box-shadow,border-color,background-color] duration-200 hover:border-accent/60 hover:bg-accent-soft/40 hover:shadow-[0_0_0_1px_rgb(106_69_229/0.4),0_0_20px_-4px_rgb(106_69_229/0.45)]">
+    <Link href={href} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3 transition-[box-shadow,border-color,background-color] duration-200 hover:border-accent/60 hover:bg-accent-soft/40 hover:shadow-[0_0_0_1px_rgb(255_45_85/0.4),0_0_20px_-4px_rgb(255_45_85/0.45)]">
       <IconTile tint={tint} size="sm">{icon}</IconTile>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-ink">{title}</span>
@@ -158,7 +158,7 @@ export function QuickLink({ href, title, line, icon, tint }: { href: string; tit
 /** A small icon button-link, as the reference's report shortcuts. */
 export function ShortcutLink({ href, label, icon }: { href: string; label: string; icon: ReactNode }) {
   return (
-    <Link href={href} className="flex items-center gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm font-medium whitespace-nowrap text-ink transition-[box-shadow,border-color,background-color] duration-200 hover:border-accent/60 hover:bg-accent-soft hover:text-accent hover:shadow-[0_0_0_1px_rgb(106_69_229/0.4),0_0_20px_-4px_rgb(106_69_229/0.45)] [&_svg]:size-4 [&_svg]:text-accent">
+    <Link href={href} className="flex items-center gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm font-medium whitespace-nowrap text-ink transition-[box-shadow,border-color,background-color] duration-200 hover:border-accent/60 hover:bg-accent-soft hover:text-accent hover:shadow-[0_0_0_1px_rgb(255_45_85/0.4),0_0_20px_-4px_rgb(255_45_85/0.45)] [&_svg]:size-4 [&_svg]:text-accent">
       {icon}
       {label}
     </Link>

@@ -80,7 +80,7 @@ test('an owner adds an account, imports a statement, and reads their banking; a 
   await page.goto(`/app/${slug}/money/banking?period=${august}`);
   await expect(page.getByRole('heading', { name: /^banking/i })).toBeVisible();
   const overview = await mainText(page);
-  expect(overview).toContain('MOTION is not connected to your bank');
+  expect(overview).toContain('APX is not connected to your bank');
   expect(overview).toMatch(/based on imported statements/i);
   expect(overview).toMatch(/last statement imported/i);
   expect(claimsLiveBank(overview)).toBe(false);
@@ -110,7 +110,7 @@ test('an owner adds an account, imports a statement, and reads their banking; a 
   await expect(page.getByRole('heading', { name: 'PAYROLL ACME LTD' })).toBeVisible();
   await expect(page.getByTestId('txn-amount')).toContainText('2,500.00');
   const detail = await mainText(page);
-  expect(detail).toMatch(/set by motion.s rules/i);
+  expect(detail).toMatch(/set by apx.s rules/i);
   expect(detail).toMatch(/counted in your figures/i);
   expect(detail).toMatch(/where this line came from/i);
   expect(detail).not.toMatch(/[0-9a-f]{8}-[0-9a-f]{4}-/i); // no ids on screen
@@ -138,7 +138,7 @@ test('an owner adds an account, imports a statement, and reads their banking; a 
   const response = await page.goto(`/app/${slug}/money/banking?period=${august}`);
   expect(response?.status()).toBe(200);
   const clientView = await mainText(page);
-  expect(clientView).toContain('MOTION is not connected to your bank');
+  expect(clientView).toContain('APX is not connected to your bank');
   expect(clientView).not.toMatch(/add a bank account/i);
   await page.goto(transactionUrl);
   const clientDetail = await mainText(page);

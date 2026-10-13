@@ -56,7 +56,7 @@ function Item({ link, current }: { link: SidebarLink; current: boolean }) {
       aria-current={current ? 'page' : undefined}
       className={`flex items-center gap-3 rounded-xl px-3 py-2 text-[0.9375rem] transition-colors ${
         current
-          ? 'bg-accent font-medium text-on-accent shadow-[0_10px_24px_-12px_rgb(106_69_229/0.7)]'
+          ? 'bg-accent bg-brand-gradient font-semibold text-on-accent shadow-[0_10px_24px_-12px_rgb(255_45_85/0.7)]'
           : 'text-ink hover:bg-accent-soft hover:text-accent'
       }`}
     >

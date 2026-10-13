@@ -42,7 +42,7 @@ const PRIMARY: readonly NavItem[] = [
     // ADR-143: the Departmental Dashboard (Agreement §4). Gated on `financials.view`, not
     // `dashboard.view`: a suspended member keeps the frozen Home and nothing else (ADR-044.4).
     label: 'Departments', path: 'departments', permission: 'financials.view',
-    hint: 'Every part of the business at a glance, and how MOTION is running',
+    hint: 'Every part of the business at a glance, and how APX is running',
     built: true,
   },
   {

@@ -17,7 +17,7 @@ export default async function PlatformOverviewPage() {
 
   return (
     <>
-      <PageHeader title="Platform" description="Operating MOTION itself." />
+      <PageHeader title="Platform" description="Operating APX itself." />
       <div className="mt-8">
         <Card>
           <CardHeader icon={<Activity />} tint="violet" title="At a glance" />

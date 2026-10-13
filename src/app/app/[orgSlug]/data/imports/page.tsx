@@ -38,7 +38,7 @@ export default async function ImportsPage({ params }: { params: Promise<{ orgSlu
         {history.length === 0 ? (
           <EmptyState title="You have not imported anything yet">
             <p>
-              Upload a bank statement, ledger or invoice list and MOTION will check every row before
+              Upload a bank statement, ledger or invoice list and APX will check every row before
               anything becomes a figure.
             </p>
             {can(ctx, 'imports.create') ? (

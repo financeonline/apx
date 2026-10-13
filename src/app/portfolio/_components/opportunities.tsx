@@ -19,7 +19,7 @@ export function OpportunityList({
   if (entries.length === 0) {
     return (
       <EmptyState title="No advisory opportunities in the latest figures">
-        None of MOTION&apos;s opportunity rules is met by a client&apos;s latest complete month. That changes as their figures do.
+        None of APX&apos;s opportunity rules is met by a client&apos;s latest complete month. That changes as their figures do.
       </EmptyState>
     );
   }

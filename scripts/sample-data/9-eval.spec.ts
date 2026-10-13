@@ -11,9 +11,9 @@ for (const q of QUESTIONS) {
   test(q, async ({ page }) => {
     test.setTimeout(200_000);
     await page.goto('/sign-in');
-    await page.getByLabel(/email/i).fill(process.env.MOTION_SAMPLE_EMAIL!);
-    await page.getByLabel(/password/i).fill(process.env.MOTION_SAMPLE_PASSWORD!);
-    await page.getByRole('button', { name: /sign in/i }).click();
+    await page.getByLabel('Email', { exact: true }).fill(process.env.MOTION_SAMPLE_EMAIL!);
+    await page.getByLabel('Password', { exact: true }).fill(process.env.MOTION_SAMPLE_PASSWORD!);
+    await page.getByRole('button', { name: /log in/i }).click();
     await page.waitForURL(/\/(onboarding|app|select-organization|portfolio)/, { timeout: 30_000 });
     await page.goto('/app/a-org/analyst');
     await page.getByLabel(/ask a question about the numbers/i).fill(q);

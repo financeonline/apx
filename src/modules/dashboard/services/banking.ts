@@ -114,7 +114,7 @@ export const RECURRING_STATUS_LABELS: Readonly<Record<RecurringGroupRow['status'
  * no live provider; saying so plainly is part of the product, not a caveat.
  */
 export const BANK_SOURCE_SENTENCE =
-  'Bank figures come from the statements you have uploaded. MOTION is not connected to your bank.';
+  'Bank figures come from the statements you have uploaded. APX is not connected to your bank.';
 
 export type ReconciliationStatus = 'reconciled' | 'unreconciled' | 'balances_missing' | 'no_statement';
 
@@ -128,7 +128,7 @@ export const RECONCILIATION_LABELS: Readonly<Record<ReconciliationStatus, string
 const RECONCILIATION_TEXT: Readonly<Record<ReconciliationStatus, string>> = {
   reconciled: 'The rows on the statement add up to the opening and closing balances printed on it.',
   unreconciled: 'The rows on the statement did not add up to its printed balances when it was imported, so the figures from it are marked as needing a check.',
-  balances_missing: 'The balances printed on the statement were not captured, so MOTION could not check the rows against them. They can be typed in on the import page.',
+  balances_missing: 'The balances printed on the statement were not captured, so APX could not check the rows against them. They can be typed in on the import page.',
   no_statement: 'No uploaded statement covers this month for this account.',
 };
 
@@ -437,7 +437,7 @@ function noticesFrom(
 function trendOf(closings: readonly (string | null)[]): LiquidityView['trend'] {
   const known = closings.filter((v): v is string => v !== null).map((v) => new Decimal(v));
   if (known.length < 3) {
-    return { direction: 'insufficient', sentence: 'MOTION needs three months of cash balances to describe a trend.' };
+    return { direction: 'insufficient', sentence: 'APX needs three months of cash balances to describe a trend.' };
   }
   const [a, b, c] = known.slice(-3) as [Decimal, Decimal, Decimal];
   if (a.lessThan(b) && b.lessThan(c)) return { direction: 'rising', sentence: 'Cash has risen for three months in a row.' };
@@ -455,7 +455,7 @@ function concentrationOf(accounts: readonly BankAccountCardView[], summary: Peri
     return { account: a, value: s?.last_balance_after ?? null };
   });
   if (balances.some((b) => b.value === null)) {
-    return { share: null, accountName: null, sentence: 'Not every account has a statement balance for this month, so MOTION cannot say how your cash is spread.' };
+    return { share: null, accountName: null, sentence: 'Not every account has a statement balance for this month, so APX cannot say how your cash is spread.' };
   }
   const total = balances.reduce((acc, b) => acc.plus(b.value!), new Decimal(0));
   if (!total.greaterThan(0)) {
@@ -472,7 +472,7 @@ function concentrationOf(accounts: readonly BankAccountCardView[], summary: Peri
 
 function orgReconciliation(closing: SnapshotRow | undefined, currency: string): OrgReconciliationView {
   if (!closing || closing.value === null) {
-    return { statementClosing: null, motionClosing: null, delta: null, status: 'unchecked', sentence: 'MOTION has no cash balance for this month to check against the statements.' };
+    return { statementClosing: null, motionClosing: null, delta: null, status: 'unchecked', sentence: 'APX has no cash balance for this month to check against the statements.' };
   }
   const stated = closing.components.statement_closing_cash;
   const delta = closing.components.statement_delta;
@@ -489,8 +489,8 @@ function orgReconciliation(closing: SnapshotRow | undefined, currency: string): 
     delta: money(delta, currency, true),
     status: differs ? 'differs' : 'matches',
     sentence: differs
-      ? `The statements say ${money(stated, currency)} and MOTION works out ${money(closing.value, currency)} — a difference of ${money(delta, currency, true)}. The difference usually means an opening balance or a missing statement.`
-      : `The statements and MOTION agree: ${money(closing.value, currency)} at the end of the month.`,
+      ? `The statements say ${money(stated, currency)} and APX works out ${money(closing.value, currency)} — a difference of ${money(delta, currency, true)}. The difference usually means an opening balance or a missing statement.`
+      : `The statements and APX agree: ${money(closing.value, currency)} at the end of the month.`,
   };
 }
 
@@ -711,7 +711,7 @@ export interface BankTransactionDetail {
 
 const SOURCE_LABELS: Readonly<Record<BankTransaction['categorySource'], string>> = {
   user: 'Chosen by you',
-  rule: 'Set by MOTION’s rules',
+  rule: 'Set by APX’s rules',
   ai_suggested: 'Suggested',
   none: 'Not set',
 };

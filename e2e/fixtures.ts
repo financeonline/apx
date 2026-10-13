@@ -77,9 +77,9 @@ export function seedUser(localPart: string): SeededUser {
 
 export async function signIn(page: Page, user: SeededUser): Promise<void> {
   await page.goto('/sign-in');
-  await page.getByLabel(/email/i).fill(user.email);
-  await page.getByLabel(/password/i).fill(user.password);
-  await page.getByRole('button', { name: /sign in/i }).click();
+  await page.getByLabel('Email', { exact: true }).fill(user.email);
+  await page.getByLabel('Password', { exact: true }).fill(user.password);
+  await page.getByRole('button', { name: /log in/i }).click();
   // The app decides where to land — onboarding, an org, or the picker — so wait for any of them.
   await page.waitForURL(/\/(onboarding|app|select-organization|portfolio)/, { timeout: 30_000 });
 }

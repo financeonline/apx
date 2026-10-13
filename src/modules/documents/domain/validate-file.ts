@@ -171,7 +171,7 @@ export function checkRowCap(dataRows: number): FileScanFinding | null {
   if (dataRows <= MAX_DATA_ROWS) return null;
   return finding(
     'IMP-FILE-004',
-    `This file has ${dataRows.toLocaleString('en-GB')} rows; MOTION imports up to ` +
+    `This file has ${dataRows.toLocaleString('en-GB')} rows; APX imports up to ` +
       `${MAX_DATA_ROWS.toLocaleString('en-GB')} in one file.`,
     'Split the export by period and upload one file per range.',
   );
@@ -201,7 +201,7 @@ function validateXlsx(bytes: Uint8Array): readonly FileScanFinding[] {
     findings.push(
       finding(
         'IMP-FILE-003',
-        'This workbook contains macros, which MOTION does not open.',
+        'This workbook contains macros, which APX does not open.',
         'Save it as a macro-free .xlsx (Excel Workbook, not Macro-Enabled Workbook) and upload that.',
       ),
     );
@@ -252,7 +252,7 @@ function validatePdf(bytes: Uint8Array): {
     findings.push(
       finding(
         'IMP-FILE-007',
-        'This PDF is password-protected, so MOTION cannot read it.',
+        'This PDF is password-protected, so APX cannot read it.',
         'Open it, save an unprotected copy, and upload that.',
       ),
     );
@@ -261,7 +261,7 @@ function validatePdf(bytes: Uint8Array): {
     findings.push(
       finding(
         'IMP-FILE-007',
-        `This PDF has ${probe.pageCount} pages; MOTION reads up to ${MAX_PDF_PAGES}.`,
+        `This PDF has ${probe.pageCount} pages; APX reads up to ${MAX_PDF_PAGES}.`,
         'Split it by statement period and upload one file per period.',
       ),
     );
@@ -271,7 +271,7 @@ function validatePdf(bytes: Uint8Array): {
     findings.push(
       finding(
         'IMP-FILE-008',
-        'This PDF contains active content, so MOTION has quarantined it.',
+        'This PDF contains active content, so APX has quarantined it.',
         `Found: ${probe.activeContent.join(', ')}.`,
       ),
     );
@@ -297,7 +297,7 @@ function validateCsv(bytes: Uint8Array): CsvOutcome {
           'IMP-FILE-005',
           decoded.reason === 'nul_byte'
             ? 'This file contains characters that cannot appear in a CSV.'
-            : 'This file is not text that MOTION can read.',
+            : 'This file is not text that APX can read.',
           decoded.detail,
         ),
       ],
@@ -310,7 +310,7 @@ function validateCsv(bytes: Uint8Array): CsvOutcome {
       findings: [
         finding(
           'IMP-FILE-006',
-          'MOTION could not work out how this file separates its columns.',
+          'APX could not work out how this file separates its columns.',
           sniffed.detail,
         ),
       ],
@@ -382,7 +382,7 @@ export function validateFile(input: FileToValidate): DocumentValidation {
     return refuse(sanitisedFilename, null, [
       finding(
         'IMP-FILE-001',
-        'This is an older Excel file (.xls), which MOTION does not read.',
+        'This is an older Excel file (.xls), which APX does not read.',
         SAVE_AS_XLSX,
       ),
     ]);
@@ -391,7 +391,7 @@ export function validateFile(input: FileToValidate): DocumentValidation {
     return refuse(sanitisedFilename, null, [
       finding(
         'IMP-FILE-001',
-        'MOTION reads CSV, Excel (.xlsx) and PDF files, and JPEG or PNG photos of receipts.',
+        'APX reads CSV, Excel (.xlsx) and PDF files, and JPEG or PNG photos of receipts.',
         `"${input.filename}" is none of those.`,
       ),
     ]);

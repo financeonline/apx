@@ -17,7 +17,7 @@ export default async function PlatformUsersPage() {
     <>
       <PageHeader
         title="Platform accounts"
-        description="Super admins and MOTION advisers. A platform account can never be a member of a customer organisation."
+        description="Super admins and APX advisers. A platform account can never be a member of a customer organisation."
       />
       <div className="mt-8 flex flex-col gap-6">
         <Card>

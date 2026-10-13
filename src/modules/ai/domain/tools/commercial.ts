@@ -67,7 +67,7 @@ export const getProductContribution: ToolDefinition<{ period?: string; limit?: n
 // -----------------------------------------------------------------------------------------------
 export const getCampaignPerformance: ToolDefinition<{ period?: string; limit?: number }, unknown> = {
   name: 'get_campaign_performance',
-  description: 'Marketing campaigns over the twelve months to a given month: spend a person recorded, customers won through the campaign (an opportunity marked won that names it), revenue credited (MOTION’s customer revenue for those customers from the month they were won), and cost per customer won = spend ÷ customers won. A campaign with no won opportunity has no revenue credited and no cost per customer — report that, never spread revenue across campaigns or channels.',
+  description: 'Marketing campaigns over the twelve months to a given month: spend a person recorded, customers won through the campaign (an opportunity marked won that names it), revenue credited (APX’s customer revenue for those customers from the month they were won), and cost per customer won = spend ÷ customers won. A campaign with no won opportunity has no revenue credited and no cost per customer — report that, never spread revenue across campaigns or channels.',
   permission: 'customers.view',
   input: z.object({ period: z.string().optional(), limit: z.number().int().min(1).max(50).optional() }),
   async run(input, call) {

@@ -58,7 +58,7 @@ function readMoneyCell(
         code: 'IMP-AMT-002',
         severity: 'error',
         field,
-        message: `"${value}" is not an amount MOTION can read.`,
+        message: `"${value}" is not an amount APX can read.`,
       },
     };
   }

@@ -284,10 +284,10 @@ export default async function ReviewBatchPage({
         )}
         {receiptWaiting ? (
           <Banner tone="info" title="These receipts are stored and waiting to be read.">
-            {review.batch.errorSummary?.message ?? 'Choose the expense account and ask MOTION to read them.'}
+            {review.batch.errorSummary?.message ?? 'Choose the expense account and ask APX to read them.'}
           </Banner>
         ) : review.batch.status === 'failed' ? (
-          <Banner tone="danger" title="MOTION could not read this file.">
+          <Banner tone="danger" title="APX could not read this file.">
             {review.batch.errorSummary?.message ?? 'Nothing was imported. The file is stored as a source document.'}
           </Banner>
         ) : null}
@@ -299,7 +299,7 @@ export default async function ReviewBatchPage({
                 <h2 className="min-w-0 font-serif text-lg text-ink">Read this statement with AI</h2>
               </div>
               <p className="mt-1 text-sm text-ink-muted">
-                MOTION could not find the table on its own. AI can read the rows for you; every row it reads will
+                APX could not find the table on its own. AI can read the rows for you; every row it reads will
                 need your confirmation against the page before it counts (CD-11).
               </p>
               <div className="mt-3">
@@ -327,14 +327,14 @@ export default async function ReviewBatchPage({
                 </>
               ) : (
                 <p className="mt-1 text-sm text-ink-muted">
-                  AI reading of documents is switched off for this organisation. A MOTION administrator can switch it on; until then, enter the receipts as a CSV.
+                  AI reading of documents is switched off for this organisation. An APX administrator can switch it on; until then, enter the receipts as a CSV.
                 </p>
               )}
             </CardBody>
           </Card>
         ) : null}
         {review.batch.extractionMethod === 'pdf_claude' && review.batch.status === 'parsing' ? (
-          <Banner tone="info" title="MOTION is reading this document with AI.">
+          <Banner tone="info" title="APX is reading this document with AI.">
             {review.batch.extractionStats.pages_extracted?.length ?? 0} of {review.batch.extractionStats.pages_total ?? '?'} pages read so far. Refresh to see progress.
           </Banner>
         ) : null}
@@ -346,7 +346,7 @@ export default async function ReviewBatchPage({
                 <h2 className="min-w-0 font-serif text-lg text-ink">The balances printed on the statement</h2>
               </div>
               <p className="mt-1 text-sm text-ink-muted">
-                MOTION checks that the transactions add up to the difference between them. Type them from the page,
+                APX checks that the transactions add up to the difference between them. Type them from the page,
                 not from anywhere else.
               </p>
               <div className="mt-3">

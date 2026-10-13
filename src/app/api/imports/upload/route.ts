@@ -77,7 +77,7 @@ export async function POST(request: NextRequest) {
     // surfaced as a Postgres error rather than a sentence.
     const documentKind = String(form.get('documentKind') ?? 'unknown');
     if (!isDocumentKind(documentKind)) {
-      throw new ValidationError('That is not a kind of document MOTION keeps.');
+      throw new ValidationError('That is not a kind of document APX keeps.');
     }
     const bytes = new Uint8Array(await file.arrayBuffer());
 

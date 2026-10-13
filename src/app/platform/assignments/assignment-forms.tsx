@@ -13,7 +13,7 @@ export function CreateAssignmentForm() {
       <Field label="Organisation id" htmlFor="organization_id">
         <Input id="organization_id" name="organization_id" required />
       </Field>
-      <Field label="Adviser user id" htmlFor="employee_user_id" hint="Must already hold the MOTION adviser platform role.">
+      <Field label="Adviser user id" htmlFor="employee_user_id" hint="Must already hold the APX adviser platform role.">
         <Input id="employee_user_id" name="employee_user_id" required />
       </Field>
       <Field label="Access ends" htmlFor="ends_at" hint="Leave blank for the default of twelve months.">

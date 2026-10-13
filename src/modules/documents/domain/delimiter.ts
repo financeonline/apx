@@ -168,7 +168,7 @@ export function sniffDelimiter(text: string): SniffedDelimiter | UnsniffableDeli
     return {
       ok: false,
       detail:
-        'None of the delimiters MOTION reads (comma, semicolon, tab, pipe) gives a consistent ' +
+        'None of the delimiters APX reads (comma, semicolon, tab, pipe) gives a consistent ' +
         'number of columns across the first 20 lines.',
     };
   }

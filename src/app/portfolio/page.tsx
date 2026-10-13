@@ -23,7 +23,7 @@ export default async function PortfolioPage() {
       <>
         <PageHeader eyebrow="Command Centre" title="Your client organisations" />
         <EmptyState title="You haven't been assigned to any organisations yet.">
-          A MOTION administrator assigns organisations to you. When that happens they&apos;ll appear here, with their health, alerts and actions.
+          An APX administrator assigns organisations to you. When that happens they&apos;ll appear here, with their health, alerts and actions.
         </EmptyState>
       </>
     );
@@ -41,7 +41,7 @@ export default async function PortfolioPage() {
         title={view.counts.needingAttention === 0
           ? `All ${view.counts.clients} ${view.counts.clients === 1 ? 'client is' : 'clients are'} clear`
           : `${view.counts.needingAttention} of ${view.counts.clients} ${view.counts.clients === 1 ? 'client needs' : 'clients need'} attention`}
-        description="Health, alerts and actions across the organisations you advise, from MOTION's own figures. Nothing here is worked out on the way to the screen."
+        description="Health, alerts and actions across the organisations you advise, from APX's own figures. Nothing here is worked out on the way to the screen."
         action={<Link href="/portfolio/analyst" className="inline-flex items-center gap-1.5 rounded-xl border border-accent/45 bg-surface px-3 py-1.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft"><Sparkles aria-hidden="true" className="size-4" />Ask the adviser analyst</Link>}
       />
 

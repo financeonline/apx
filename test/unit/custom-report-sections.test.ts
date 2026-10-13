@@ -95,7 +95,7 @@ describe('VAT', () => {
     expect(section.rows[0]).toEqual({ label: 'VAT due on sales and other outputs', box: '1', value: '£200.00', reason: null });
     const box2 = section.rows.find((r) => r.box === '2')!;
     expect(box2.value).toBeNull();
-    expect(box2.reason).toMatch(/Not recorded in MOTION/);
+    expect(box2.reason).toMatch(/Not recorded in APX/);
     expect(section.rows.find((r) => r.box === '6')!.value).toBe('£1,000');
     const net = section.rows[section.rows.length - 1]!;
     expect(net).toEqual({ label: 'Net VAT to pay', value: '£100.00', reason: null });

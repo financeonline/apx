@@ -167,7 +167,7 @@ export function ScenarioComparison({
             ))}
           </ul>
           <p className="mt-4 text-sm text-ink-muted">
-            MOTION changes only what these say. It does not assume anything else follows from them —
+            APX changes only what these say. It does not assume anything else follows from them —
             no extra sales from marketing, no change to when money arrives, and no interest that was
             not given.
           </p>
@@ -205,7 +205,7 @@ export function ScenarioComparison({
         <summary className="cursor-pointer text-sm font-medium text-accent">How was this worked out?</summary>
         <div className="mt-3 flex flex-col gap-3 text-sm text-ink-muted">
           <p>
-            MOTION starts from what it already expects for the next three months, changes only the
+            APX starts from what it already expects for the next three months, changes only the
             things listed above, and then works the rest out the same way it always does: profit
             from sales less costs, and cash from your last real balance plus each month&rsquo;s
             movement. Nothing is worked out twice and nothing is worked out differently on the two

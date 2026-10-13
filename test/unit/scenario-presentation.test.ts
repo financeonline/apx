@@ -113,7 +113,7 @@ describe('nothing reaches the reader as a raw enum or a table name (§15)', () =
     }
     expect(unavailableText('starts_after_horizon')).toMatch(/choose an earlier month/i);
     expect(unavailableText('something_new_later'))
-      .toBe('MOTION cannot work this one out from the figures it has.');
+      .toBe('APX cannot work this one out from the figures it has.');
   });
 
   it('separates a scenario from a forecast and from a result, in one sentence (§16)', () => {

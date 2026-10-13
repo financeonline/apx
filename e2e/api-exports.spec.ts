@@ -16,7 +16,7 @@ test.describe('CSV export', () => {
     const response = await page.request.get(`/api/exports/ledger?org=${slug}`);
     expect(response.status(), await response.text()).toBe(200);
     expect(response.headers()['content-type']).toContain('text/csv');
-    expect(response.headers()['content-disposition']).toMatch(/attachment; filename="motion-ledger-\d{4}-\d{2}-\d{2}\.csv"/);
+    expect(response.headers()['content-disposition']).toMatch(/attachment; filename="apx-ledger-\d{4}-\d{2}-\d{2}\.csv"/);
 
     const body = await response.text();
     const lines = body.split('\r\n').filter((l) => l.length > 0);

@@ -101,7 +101,7 @@ export default async function OrgLayout({
     <AppShell homeHref={`${base}/home`} groups={groups} user={user}>
         <div className="mb-6 flex flex-col gap-3 empty:mb-0">
           {isSuperAdmin(ctx) && (
-            <Banner tone="warn" title="You are viewing this organisation as MOTION staff">
+            <Banner tone="warn" title="You are viewing this organisation as APX staff">
               This visit is recorded in the organisation&rsquo;s own audit log.
             </Banner>
           )}

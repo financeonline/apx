@@ -29,7 +29,7 @@ export default async function PortfolioAnalystPage() {
       <PageHeader
         eyebrow="Command Centre"
         title="Adviser analyst"
-        description="Summaries of what MOTION has already established about the clients you advise: health, alerts, actions and what needs attention. The analyst does not work out figures; for a figure, open the client."
+        description="Summaries of what APX has already established about the clients you advise: health, alerts, actions and what needs attention. The analyst does not work out figures; for a figure, open the client."
       />
       <Card>
         <CardBody>

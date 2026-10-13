@@ -42,7 +42,7 @@ export const ASSUMPTION_NOTE: Readonly<Record<AssumptionKind, string>> = {
   payroll_change: 'This changes your running costs.',
   supplier_cost_change: 'This changes the direct cost of what you sell, so it changes your profit after direct costs.',
   marketing_change:
-    'This changes your running costs. It does not add any sales: MOTION has no figure that says what your marketing brings in, so it will not invent one.',
+    'This changes your running costs. It does not add any sales: APX has no figure that says what your marketing brings in, so it will not invent one.',
   hiring: 'Give the full monthly cost of each person, including everything you pay on top of their wage.',
   pricing_change:
     'A price change on its own is not a sales change. Say what you think happens to the number of sales — nothing is assumed.',
@@ -61,20 +61,20 @@ export const UNAVAILABLE_TEXT: Readonly<Record<UnavailableReason, string>> = {
   no_forecast:
     'There is no forecast to change yet. Work one out on the forecast page first, and this will be able to use it.',
   metric_not_forecast:
-    'MOTION cannot forecast the figure this change would move, so it cannot say what the change would do to it.',
+    'APX cannot forecast the figure this change would move, so it cannot say what the change would do to it.',
   no_category_baseline:
-    'MOTION does not know what this has been running at, so it cannot work out a percentage of it. Give an amount instead.',
+    'APX does not know what this has been running at, so it cannot work out a percentage of it. Give an amount instead.',
   no_direct_costs:
     'Your books have no direct costs, so there is nothing here for this change to move.',
   no_revenue_baseline:
-    'Your forecast sales are zero, so MOTION cannot work out what share of them this amount is.',
+    'Your forecast sales are zero, so APX cannot work out what share of them this amount is.',
   starts_after_horizon:
-    'This change would start after the last month MOTION can see, so it would not touch any figure in this scenario. Choose an earlier month.',
+    'This change would start after the last month APX can see, so it would not touch any figure in this scenario. Choose an earlier month.',
 };
 
 export function unavailableText(reason: string): string {
   return UNAVAILABLE_TEXT[reason as UnavailableReason]
-    ?? 'MOTION cannot work this one out from the figures it has.';
+    ?? 'APX cannot work this one out from the figures it has.';
 }
 
 /** The headline sentence shown whenever a scenario is refused (§7). */
@@ -88,7 +88,7 @@ export const UNAVAILABLE_HEADLINE =
  * the assumptions hold. The three words are kept apart deliberately.
  */
 export const SCENARIO_DISCLAIMER =
-  'These are not results and not a forecast. They are what MOTION expects if the changes below '
+  'These are not results and not a forecast. They are what APX expects if the changes below '
   + 'turn out to be true, worked out from your own finished months.';
 
 /**

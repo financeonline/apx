@@ -38,8 +38,8 @@ export class PdfWriter {
   static async create(title: string): Promise<PdfWriter> {
     const doc = await PDFDocument.create();
     doc.setTitle(drawable(title));
-    doc.setProducer('MOTION');
-    doc.setCreator('MOTION');
+    doc.setProducer('APX');
+    doc.setCreator('APX');
     return new PdfWriter(doc, await doc.embedFont(StandardFonts.Helvetica), await doc.embedFont(StandardFonts.HelveticaBold));
   }
 

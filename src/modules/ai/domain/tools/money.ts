@@ -50,7 +50,7 @@ const ref = (p: { id: string; label: string }): PeriodRef => ({ id: p.id, label:
 
 export const getCustomerProfitability: ToolDefinition<{ period: string | { from: string; to: string }; limit?: number; order?: string }, unknown> = {
   name: 'get_customer_profitability',
-  description: 'Customers ranked by revenue and share of revenue for a month or a range, with how concentrated revenue is in the top customers. In MOTION today contribution means revenue contribution.',
+  description: 'Customers ranked by revenue and share of revenue for a month or a range, with how concentrated revenue is in the top customers. In APX today contribution means revenue contribution.',
   permission: 'customers.view',
   input: z.object({
     period: PeriodOrRange, limit: z.number().int().min(1).max(20).optional(),
@@ -113,9 +113,9 @@ export const getCustomerProfitability: ToolDefinition<{ period: string | { from:
       rows: rows.slice(0, input.limit ?? 10),
       not_attributed_to_a_customer: unattributed,
       concentration: { top1: conc('customer_concentration_top1'), top5: conc('customer_concentration_top5'), hhi: conc('revenue_concentration_hhi') },
-      note: 'Contribution is revenue contribution in MOTION today; cost allocation per customer is not available yet.'
+      note: 'Contribution is revenue contribution in APX today; cost allocation per customer is not available yet.'
         + (unattributed.length > 0
-          ? ' Revenue under `not_attributed_to_a_customer` belongs to no customer MOTION could identify; it is a gap in the data, never a customer, and must not be named or ranked as one.'
+          ? ' Revenue under `not_attributed_to_a_customer` belongs to no customer APX could identify; it is a gap in the data, never a customer, and must not be named or ranked as one.'
           : ''),
     }, { periods: scope.periods.map(ref), calculation_run_id: null }, call);
   },

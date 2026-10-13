@@ -26,7 +26,7 @@ test.describe('the analyst page', () => {
     // The question is shown as asked, and the turn ends one way or the other.
     const conversation = page.getByRole('region', { name: /^conversation$/i });
     await expect(conversation.getByText('How was revenue in May 2026?')).toBeVisible();
-    const outcome = page.getByText(/the analyst isn't available right now|the analyst's answer didn't pass motion's checks|see the evidence behind this answer/i).first();
+    const outcome = page.getByText(/the analyst isn't available right now|the analyst's answer didn't pass apx's checks|see the evidence behind this answer/i).first();
     await expect(outcome).toBeVisible({ timeout: 60_000 });
 
     // Either way the page now addresses the recorded conversation, and the rail lists it.
@@ -34,7 +34,7 @@ test.describe('the analyst page', () => {
     const conversationId = page.url().match(/\/analyst\/([0-9a-f-]{36})$/)![1]!;
     expect(sql(`select count(*) from public.ai_messages where conversation_id = '${conversationId}' and role = 'assistant'`)).toBe('1');
 
-    if (await page.getByText(/the analyst isn't available right now|the analyst's answer didn't pass motion's checks/i).first().isVisible()) {
+    if (await page.getByText(/the analyst isn't available right now|the analyst's answer didn't pass apx's checks/i).first().isVisible()) {
       // §7.2: the facts card, from current snapshots, deterministic.
       await expect(page.getByText(/facts we can show you/i)).toBeVisible();
       await expect(page.getByText('£40,000').first()).toBeVisible();

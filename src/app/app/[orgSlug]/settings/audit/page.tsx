@@ -43,7 +43,7 @@ export default async function AuditPage({
     <>
       <PageHeader
         title="Audit log"
-        description="Important changes, and every time MOTION staff opened this organisation."
+        description="Important changes, and every time APX staff opened this organisation."
       />
       <div className="mt-8">
         <Card>
@@ -69,7 +69,7 @@ export default async function AuditPage({
                       </TD>
                       <TD>{event.actorName ?? '—'}</TD>
                       <TD>
-                        {event.actorType === 'platform_admin' && <Badge tone="warn">MOTION staff</Badge>}
+                        {event.actorType === 'platform_admin' && <Badge tone="warn">APX staff</Badge>}
                         {event.actorType !== 'platform_admin' && (
                           <span className="text-ink-muted">
                             {ACTOR_TYPE_LABELS[event.actorType] ?? event.actorType}

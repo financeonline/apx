@@ -156,7 +156,7 @@ function FirstRun({ orgSlug, canImport }: { orgSlug: string; canImport: boolean 
       <CardBody className="p-8">
         <h2 className="font-serif text-2xl text-ink">Let’s get your first numbers on screen.</h2>
         <p className="mt-3 max-w-prose text-ink-muted">
-          MOTION works from files you already have. Upload a bank statement (CSV or PDF) or an export
+          APX works from files you already have. Upload a bank statement (CSV or PDF) or an export
           from your accounting software and we’ll show you how the business is doing, what’s changed
           and what needs attention.
         </p>

@@ -298,7 +298,7 @@ export async function createCompanyAsPlatform(ctx: AccessContext, input: unknown
       email: value.ownerEmail, password: value.ownerPassword, email_confirm: true,
     });
     if (error?.code === 'email_exists' || /already (been )?registered/i.test(error?.message ?? '')) {
-      throw new ConflictError('That email already has a MOTION login. Leave the password empty and send them the invitation link instead.');
+      throw new ConflictError('That email already has an APX login. Leave the password empty and send them the invitation link instead.');
     }
     if (error || !data.user) {
       throw new ValidationError(error?.message ? `The login was not created: ${error.message}` : 'The login was not created.');
@@ -580,7 +580,7 @@ export async function setAiModel(
   const refusal = await trialRefusal(provider, key, wantedModel, wantedEffort);
   if (refusal) {
     if (/tool_choice|tool choice|function/i.test(refusal)) {
-      throw new ValidationError(`${option.name} cannot give MOTION the structured answers it needs yet, so it cannot be used. Choose another model.`);
+      throw new ValidationError(`${option.name} cannot give APX the structured answers it needs yet, so it cannot be used. Choose another model.`);
     }
     throw new ValidationError(`${provider === 'openai' ? 'OpenAI' : 'Anthropic'} refused that choice: ${refusal}`);
   }

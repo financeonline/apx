@@ -28,7 +28,7 @@ export function AffordabilityCard({
         title="Can we afford it?"
         icon={<Calculator />}
         tint="pink"
-        description="Enter a spend you are thinking about. MOTION checks it against the cash it expects over the forecast months."
+        description="Enter a spend you are thinking about. APX checks it against the cash it expects over the forecast months."
       />
       <CardBody>
         <form method="get" action={`/app/${orgSlug}/what-if`} className="flex flex-wrap items-end gap-3">

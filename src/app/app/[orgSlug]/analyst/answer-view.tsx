@@ -26,7 +26,7 @@ import { Button, NativeSelect, Textarea } from '@/components/ui/shadcn';
 
 export const FALLBACK_TITLE = "The analyst isn't available right now";
 /** An answer was written but did not pass the checks (§7): withheld, not "unavailable". */
-export const WITHHELD_TITLE = "The analyst's answer didn't pass MOTION's checks";
+export const WITHHELD_TITLE = "The analyst's answer didn't pass APX's checks";
 
 type Statement = SubmitAnswer['direct_answer'];
 

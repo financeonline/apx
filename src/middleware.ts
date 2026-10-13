@@ -1,6 +1,6 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createServerClient } from '@supabase/ssr';
-import { safeNextPath } from '@/core/routing';
+import { SESSION_ONLY_COOKIE, safeNextPath, sessionVisitEnded } from '@/core/routing';
 
 /**
  * Route-family gatekeeper (ROUTE_ARCHITECTURE.md §8).
@@ -116,9 +116,17 @@ export async function middleware(request: NextRequest) {
   if (url.pathname === '/api/health') return finish();
 
   // 1. Refresh the session (this is what writes the rotated cookies through setAll above).
-  const {
+  let {
     data: { user },
   } = await supabase.auth.getUser();
+
+  // 1a. "Keep me signed in" was left unticked and this is a later visit: end the session here,
+  //     then treat the request as signed out (ADR-169).
+  if (user && sessionVisitEnded(request.cookies)) {
+    await supabase.auth.signOut({ scope: 'local' });
+    response.cookies.set(SESSION_ONLY_COOKIE, '', { path: '/', maxAge: 0 });
+    user = null;
+  }
 
   // 2. No session: public passes, everything else goes to sign-in with a relative `next`.
   if (!user) {

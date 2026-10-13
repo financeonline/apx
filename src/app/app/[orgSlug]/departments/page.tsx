@@ -145,7 +145,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
         </div>
         <div className="flex flex-wrap gap-3">
           {canImport ? (
-            <ButtonLink href={`${base}/data/imports/new`} tone="secondary" className="h-14 rounded-2xl bg-surface/80 px-7 text-lg shadow-[0_8px_24px_-14px_rgb(106_69_229/0.45)] [&_svg]:size-5">
+            <ButtonLink href={`${base}/data/imports/new`} tone="secondary" className="h-14 rounded-2xl bg-surface/80 px-7 text-lg shadow-[0_8px_24px_-14px_rgb(255_45_85/0.45)] [&_svg]:size-5">
               <Upload aria-hidden="true" /> Add data
             </ButtonLink>
           ) : null}
@@ -224,7 +224,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
                 <IconTile tint="violet" size="sm"><FileText /></IconTile>
                 <div>
                   <h2 id="capture-heading" className="text-lg">Data capture</h2>
-                  <p className="text-sm text-ink-muted">Get your data into MOTION.</p>
+                  <p className="text-sm text-ink-muted">Get your data into APX.</p>
                 </div>
               </div>
               <Link href={`${base}/data/imports`} className="text-sm font-medium text-accent hover:underline">Imports &amp; evidence →</Link>
@@ -258,7 +258,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
 
       <Card className="mt-4" id="system">
         <CardBody>
-          <h2 className="text-lg text-ink">How MOTION is running</h2>
+          <h2 className="text-lg text-ink">How APX is running</h2>
           <ul className="mt-3 flex flex-col gap-1 text-sm text-ink">
             <li>{view.system.dataRefreshed}</li>
             <li>{view.system.lastCalculation}</li>

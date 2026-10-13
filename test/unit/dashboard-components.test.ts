@@ -62,7 +62,7 @@ describe('empty-state copy is word for word (UX_ARCHITECTURE.md §6)', () => {
   it('Home, first run', () => {
     expect(HOME_FIRST_RUN.title).toBe("Let's get your first numbers on screen.");
     expect(HOME_FIRST_RUN.body).toBe(
-      "MOTION works from files you already have. Upload a bank statement (CSV or PDF) or an export from your accounting software and we'll show you how the business is doing, what's changed and what needs attention.",
+      "APX works from files you already have. Upload a bank statement (CSV or PDF) or an export from your accounting software and we'll show you how the business is doing, what's changed and what needs attention.",
     );
     expect(HOME_FIRST_RUN.hint).toBe(
       "Start with a bank statement to see your cash position. Add a ledger export, trial balance or invoice list when you can, and we'll add profit and customer figures.",
@@ -178,7 +178,7 @@ describe('empty-state copy is word for word (UX_ARCHITECTURE.md §6)', () => {
       "You haven't been assigned to any organisations yet.",
     );
     expect(PORTFOLIO_NO_ASSIGNMENTS.body).toBe(
-      "A MOTION administrator assigns organisations to you. When that happens they'll appear here.",
+      "An APX administrator assigns organisations to you. When that happens they'll appear here.",
     );
     expect(PORTFOLIO_NO_ASSIGNMENTS.primaryLabel).toBeUndefined();
   });
@@ -269,7 +269,7 @@ describe('loading, error and denied copy (UX_ARCHITECTURE.md §7)', () => {
   });
 
   it('tells a suspended organisation who to contact (§7.4)', () => {
-    expect(SUSPENDED_TITLE).toBe('This organisation is suspended. Contact MOTION support.');
+    expect(SUSPENDED_TITLE).toBe('This organisation is suspended. Contact APX support.');
   });
 });
 

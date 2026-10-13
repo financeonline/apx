@@ -1,62 +1,102 @@
 import Image from 'next/image';
 
 /**
- * MOTION's mark, wordmark and leaf artwork (ADR-155), from the owner's reference: the logo image
- * (four rounded petals, violet above and pink below); "MOTION" in deep indigo with a violet
- * tagline; translucent lavender sprigs for the sidebar foot and the page's top corner. The images
- * are decorative, so hidden from assistive technology — the text beside the mark carries the name.
+ * APX's logo and brand shapes (ADR-169), from the client's reference.
+ *
+ * The logo is the client's own, recreated at high resolution in ChatGPT from their artwork (owner,
+ * 2026-10-13), cropped and cut out of its black ground so it sits on any dark surface
+ * (public/brand/apx-logo.png with the tagline, apx-letters.png without). The sign-in
+ * background is the client's too, recreated the same way (public/brand/apx-background.webp; see
+ * BrandedScreen). Decorative parts are hidden from assistive technology; the logo carries
+ * the name "APX".
  */
 
-/**
- * The mark: the owner's logo, generated in ChatGPT from the reference and cut out onto transparency
- * (public/brand/motion-logo.png, 256px; also the browser-tab icon, src/app/icon.png).
- */
+/** The reference's colours, sampled from the client's image. */
+const RED = '#f0143c';
+const RED_DOT = '#ff2445';
+const ORANGE = '#ff6a35';
+
+function XGradient({ id }: { id: string }) {
+  return (
+    <linearGradient id={id} gradientUnits="userSpaceOnUse" x1="597" y1="0" x2="1013" y2="0">
+      <stop offset="0" stopColor={RED} />
+      <stop offset="0.5" stopColor={RED_DOT} />
+      <stop offset="1" stopColor={ORANGE} />
+    </linearGradient>
+  );
+}
+
+/** The client's logo: "APX" and, by default, "FINANCE IN MOTION" beneath. Height sets the size. */
+export function ApxLogo({
+  className = 'h-16 w-auto',
+  tagline = true,
+  priority = false,
+}: {
+  className?: string;
+  tagline?: boolean;
+  priority?: boolean;
+}) {
+  return tagline ? (
+    <Image src="/brand/apx-logo.png" alt="APX, finance in motion" width={1200} height={353} priority={priority} className={className} />
+  ) : (
+    <Image src="/brand/apx-letters.png" alt="APX" width={1200} height={248} priority={priority} className={className} />
+  );
+}
+
+/** The small mark: the X alone (">", dot, "<"). */
 export function BrandMark({ className = 'size-10' }: { className?: string }) {
-  return <Image src="/brand/motion-logo.png" alt="" width={256} height={256} priority className={className} />;
-}
-
-export function Wordmark({ tagline = true }: { tagline?: boolean }) {
   return (
-    <span className="flex items-start gap-3">
-      <BrandMark className="mt-0.5 size-10 shrink-0" />
-      <span className="flex flex-col">
-        <span className="text-[1.65rem] leading-none font-medium tracking-[0.04em] text-brand-ink">MOTION</span>
-        {tagline ? (
-          <span className="mt-1.5 text-[0.8125rem] leading-snug text-accent">
-            Financial intelligence
-            <br />
-            for a brighter tomorrow.
-          </span>
-        ) : null}
-      </span>
-    </span>
+    <svg viewBox="590 40 430 200" className={className} aria-hidden="true">
+      <defs>
+        <XGradient id="apx-mark-x" />
+      </defs>
+      <g fill="none" stroke="url(#apx-mark-x)" strokeWidth="56" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M625 75 L715 140 L625 205" />
+        <path d="M985 75 L893 140 L985 205" />
+      </g>
+      <circle cx="804" cy="140" r="29" fill={RED_DOT} />
+    </svg>
   );
 }
 
-/**
- * The leaf artwork: the owner's ChatGPT-generated sprigs (same style as the reference), cut out onto
- * transparency and compressed (public/brand/*.webp). Decorative: empty alt.
- */
-
-/** The sidebar's foot: a sprig rising from the bottom-left. */
-export function SidebarSprig({ className = '' }: { className?: string }) {
-  return (
-    <Image
-      src="/brand/sidebar-leaves.webp" alt="" width={560} height={840} sizes="256px"
-      className={`pointer-events-none h-auto select-none ${className}`}
-    />
-  );
+export function Wordmark({
+  tagline = true,
+  size = 'md',
+}: {
+  tagline?: boolean;
+  size?: 'md' | 'lg';
+  /** Kept for callers from the drawn logo; unused. */
+  idPrefix?: string;
+}) {
+  const height = size === 'lg' ? (tagline ? 'h-[4.25rem] sm:h-[4.75rem]' : 'h-12') : tagline ? 'h-10' : 'h-6';
+  return <ApxLogo className={`${height} w-auto`} tagline={tagline} priority />;
 }
 
-/** The page's top corner: a sprig fanning up and to the left, behind the header's buttons. */
-export function CornerSprig({ className = '' }: { className?: string }) {
+/** A coral/orange blob for a page corner, as the reference's top-left and bottom-left. */
+export function CornerBlob({ className = '', idPrefix = 'apx-blob' }: { className?: string; idPrefix?: string }) {
+  const fill = `${idPrefix}-fill`;
+  const shade = `${idPrefix}-shade`;
   return (
-    <Image
-      src="/brand/corner-leaves.webp" alt="" width={960} height={640} sizes="480px" priority
-      className={`pointer-events-none h-auto select-none ${className}`}
-    />
+    <svg viewBox="0 0 400 400" aria-hidden="true" focusable="false" className={`pointer-events-none select-none ${className}`}>
+      <defs>
+        <linearGradient id={fill} x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#ff2a5c" />
+          <stop offset="0.6" stopColor="#ff3d48" />
+          <stop offset="1" stopColor="#ff6a35" />
+        </linearGradient>
+        <radialGradient id={shade} cx="0.9" cy="0.4" r="0.7">
+          <stop offset="0" stopColor="#7a0016" stopOpacity="0.55" />
+          <stop offset="1" stopColor="#7a0016" stopOpacity="0" />
+        </radialGradient>
+      </defs>
+      <path
+        fill={`url(#${fill})`}
+        d="M0 0 H300 C 340 30, 280 90, 200 115 C 130 137, 110 185, 55 205 C 28 215, 10 210, 0 205 Z"
+      />
+      <path
+        fill={`url(#${shade})`}
+        d="M0 0 H300 C 340 30, 280 90, 200 115 C 130 137, 110 185, 55 205 C 28 215, 10 210, 0 205 Z"
+      />
+    </svg>
   );
 }
-
-/** Kept for the earlier corner artwork's callers; now the sprig. */
-export const Petals = CornerSprig;

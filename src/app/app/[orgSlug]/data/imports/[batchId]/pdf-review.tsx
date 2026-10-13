@@ -16,7 +16,7 @@ import { Input, NativeSelect } from '@/components/ui/shadcn';
  */
 
 export const CONSENT_LINE =
-  'MOTION will send the text of this document to its AI provider to read the rows. The file itself is not sent.';
+  'APX will send the text of this document to its AI provider to read the rows. The file itself is not sent.';
 
 export function AiReadingRequest({ orgSlug, batchId, documentId }: { orgSlug: string; batchId: string; documentId: string }) {
   const [state, submit] = useActionState(requestAiReadingAction, null);
@@ -40,7 +40,7 @@ export function AiReadingRequest({ orgSlug, batchId, documentId }: { orgSlug: st
 }
 
 export const RECEIPT_CONSENT_LINE =
-  'MOTION will send this receipt file — the photo or PDF itself — to its AI provider to read the date, who was paid and the total.';
+  'APX will send this receipt file — the photo or PDF itself — to its AI provider to read the date, who was paid and the total.';
 
 /** ADR-150: the consent line, the expense account the receipts post to, and the one button. */
 export function ReceiptReadingRequest({ orgSlug, batchId, documentId, accounts }: {

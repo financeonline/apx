@@ -69,7 +69,7 @@ export default async function BalanceSheetPage({
         </Card>
 
         <Card>
-          <CardHeader title="Secured and unsecured loans" description="As you marked each loan account. MOTION never guesses it from a name." icon={<ShieldCheck />} />
+          <CardHeader title="Secured and unsecured loans" description="As you marked each loan account. APX never guesses it from a name." icon={<ShieldCheck />} />
           <CardBody className="px-0 py-0">
             <FigureTable rows={view.security} caption={`Loans by security at the end of ${scope.period.label}`} comparisonLabel={comparison} />
           </CardBody>

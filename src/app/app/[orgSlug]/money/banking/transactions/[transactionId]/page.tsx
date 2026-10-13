@@ -62,7 +62,7 @@ export default async function BankTransactionPage({
               { label: 'Account', value: `${view.account.name} · ${view.account.reference} · ${view.account.typeLabel}` },
               { label: 'Category', value: <span>{view.category.uncategorised ? <Badge tone="warn">{view.category.label}</Badge> : view.category.label} <span className="text-ink-muted">· {view.category.sourceLabel}</span></span> },
               ...(view.transfer ? [{ label: 'Transfer', value: <span>{view.transfer.label}{view.transfer.pairHref ? <> · <Link href={view.transfer.pairHref} className="underline">see the other half</Link></> : null}</span> }] : []),
-              ...(view.recurring ? [{ label: 'Regular payment', value: <Link href={view.recurring.href} className="underline">Part of a payment MOTION sees regularly</Link> }] : []),
+              ...(view.recurring ? [{ label: 'Regular payment', value: <Link href={view.recurring.href} className="underline">Part of a payment APX sees regularly</Link> }] : []),
               { label: 'Balance printed beside it', value: view.statementBalance ? <span className="tabular">{view.statementBalance}</span> : <span className="text-ink-muted">Not on the statement</span> },
               { label: 'Counted?', value: <span><Badge tone={view.standing.counted ? 'accent' : 'warn'}>{view.standing.label}</Badge> <span className="text-ink-muted">· {view.standing.assurance === 'verified' ? 'Read straight from the statement' : view.standing.assurance === 'calculated' ? 'Read from the statement’s text and checked' : view.standing.assurance === 'inferred' ? 'Read by AI and confirmed page by page' : 'Estimated'}</span></span> },
               { label: 'Statement reconciliation', value: <span><Badge tone={RECONCILIATION_TONE[view.reconciliation.status]}>{view.reconciliation.label}</Badge> <span className="text-ink-muted">· {view.reconciliation.sentence}</span></span> },
@@ -85,7 +85,7 @@ export default async function BankTransactionPage({
       {mayEdit ? (
         <>
           <Card>
-            <CardHeader title="Change the category" description="Changing it here changes your figures; MOTION’s rules never overwrite your choice." icon={<Tags />} />
+            <CardHeader title="Change the category" description="Changing it here changes your figures; APX’s rules never overwrite your choice." icon={<Tags />} />
             <CardBody><CategoryForm orgSlug={orgSlug} transactionId={view.id} current={view.category.accountId} options={view.categoryOptions} /></CardBody>
           </Card>
           <Card>

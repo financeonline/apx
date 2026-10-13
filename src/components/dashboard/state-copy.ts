@@ -131,4 +131,4 @@ export const NOT_FOUND_BODY =
   'It may have moved, or the link may be wrong. If you think you should be able to see it, ask an '
   + 'owner or administrator to check.';
 
-export const SUSPENDED_TITLE = 'This organisation is suspended. Contact MOTION support.';
+export const SUSPENDED_TITLE = 'This organisation is suspended. Contact APX support.';

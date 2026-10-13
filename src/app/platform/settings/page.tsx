@@ -59,7 +59,7 @@ export default async function PlatformSettingsPage() {
                     <SettingForm
                       settingKey={setting.key}
                       label={known?.label ?? setting.key}
-                      hint={known?.hint ?? 'Set by MOTION; edited as JSON.'}
+                      hint={known?.hint ?? 'Set by APX; edited as JSON.'}
                       value={value}
                       numeric={known?.numeric ?? false}
                     />

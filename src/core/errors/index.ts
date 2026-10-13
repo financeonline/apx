@@ -116,7 +116,7 @@ export class UpstreamError extends MotionError {
   readonly status = 502;
   constructor(
     public readonly provider: string,
-    message = 'A service MOTION depends on is unavailable.',
+    message = 'A service APX depends on is unavailable.',
   ) {
     super(message);
   }

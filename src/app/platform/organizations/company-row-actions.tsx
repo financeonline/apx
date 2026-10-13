@@ -27,7 +27,7 @@ export interface CompanyRow {
   readonly owner: { readonly email: string; readonly fullName: string | null; readonly count: number } | null;
 }
 
-const DIALOG = 'm-auto max-h-[calc(100dvh-2rem)] w-[min(36rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-black/40';
+const DIALOG = 'm-auto max-h-[calc(100dvh-2rem)] w-[min(36rem,calc(100vw-2rem))] overflow-y-auto rounded-2xl border border-line bg-surface p-0 text-ink shadow-2xl backdrop:bg-black/70';
 
 /**
  * Edit and Delete for one company in the list (ADR-166). Each opens a dialog; Delete asks

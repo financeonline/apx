@@ -108,7 +108,7 @@ export function AdviserRow(props: { orgSlug: string; adviser: Adviser; canRevoke
   const [state, action] = useActionState(revokeAdviserAction, null);
   return (
     <TR>
-      <TD>{props.adviser.fullName ?? 'MOTION adviser'}</TD>
+      <TD>{props.adviser.fullName ?? 'APX adviser'}</TD>
       <TD>{new Date(props.adviser.assignedAt).toLocaleDateString('en-GB')}</TD>
       <TD>{props.adviser.endsAt ? new Date(props.adviser.endsAt).toLocaleDateString('en-GB') : '—'}</TD>
       <TD>

@@ -161,7 +161,7 @@ export default async function MonthlyReportPage({
         */}
         <p className="text-xs text-ink-faint">
           {report.asOf.finishedAt === null
-            ? 'Figures as last calculated by MOTION.'
+            ? 'Figures as last calculated by APX.'
             : `Figures as calculated on ${report.asOf.finishedAt.slice(0, 10)}`
               + `${report.asOf.engineVersion === null ? '' : ` by engine ${report.asOf.engineVersion}`}.`}
         </p>

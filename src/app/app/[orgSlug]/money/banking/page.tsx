@@ -107,7 +107,7 @@ export default async function BankingPage({
           {cash ? (
             <MetricCard card={cash} />
           ) : (
-            <Card><CardBody><p className="text-sm text-ink-muted">MOTION cannot show a cash balance for {scope.period.label} yet — usually because an opening balance is missing. The movements below are still real.</p></CardBody></Card>
+            <Card><CardBody><p className="text-sm text-ink-muted">APX cannot show a cash balance for {scope.period.label} yet — usually because an opening balance is missing. The movements below are still real.</p></CardBody></Card>
           )}
         </section>
 
@@ -126,7 +126,7 @@ export default async function BankingPage({
 
         {/* Level 3 — things to notice */}
         <Card>
-          <CardHeader title="Things to notice" description={view.notices.length === 0 ? undefined : 'Worked out from your statements by MOTION’s rules — nothing here was guessed.'} icon={<CircleAlert />} tint="pink" />
+          <CardHeader title="Things to notice" description={view.notices.length === 0 ? undefined : 'Worked out from your statements by APX’s rules — nothing here was guessed.'} icon={<CircleAlert />} tint="pink" />
           <CardBody>
             {view.notices.length === 0 ? (
               <p className="text-sm text-ink-muted">Nothing unusual in {scope.period.label}.</p>
@@ -172,7 +172,7 @@ export default async function BankingPage({
           </summary>
           <div className="border-t border-line">
             {view.recurring.length === 0 ? (
-              <p className="px-5 py-4 text-sm text-ink-muted">MOTION needs at least three occurrences of a payment before it calls it regular. Nothing qualifies yet.</p>
+              <p className="px-5 py-4 text-sm text-ink-muted">APX needs at least three occurrences of a payment before it calls it regular. Nothing qualifies yet.</p>
             ) : (
               <TableWrap>
                 <caption className="sr-only">Regular payments detected from your statements</caption>
@@ -235,13 +235,13 @@ export default async function BankingPage({
         </details>
 
         <details className="panel rounded-card" data-testid="banking-reconciliation">
-          <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 font-serif text-lg text-ink"><IconBadge tint="violet" size="sm"><Scale /></IconBadge>Do the statements and MOTION agree?</summary>
+          <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 font-serif text-lg text-ink"><IconBadge tint="violet" size="sm"><Scale /></IconBadge>Do the statements and APX agree?</summary>
           <div className="border-t border-line px-5 py-5 flex flex-col gap-4 text-sm">
             <p>{view.reconciliation.sentence}</p>
             {view.reconciliation.statementClosing ? (
               <DetailList items={[
                 { label: 'Statements say', value: <span className="tabular">{view.reconciliation.statementClosing}</span> },
-                { label: 'MOTION works out', value: <span className="tabular">{view.reconciliation.motionClosing}</span> },
+                { label: 'APX works out', value: <span className="tabular">{view.reconciliation.motionClosing}</span> },
                 { label: 'Difference', value: <span className="tabular">{view.reconciliation.delta}</span> },
               ]} />
             ) : null}
@@ -254,7 +254,7 @@ export default async function BankingPage({
                 </li>
               ))}
             </ul>
-            <p className="text-xs text-ink-faint">A line on a statement is never marked reconciled just because it was imported. Matching lines to your accounting records one by one is not part of MOTION yet.</p>
+            <p className="text-xs text-ink-faint">A line on a statement is never marked reconciled just because it was imported. Matching lines to your accounting records one by one is not part of APX yet.</p>
           </div>
         </details>
 

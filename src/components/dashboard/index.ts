@@ -11,7 +11,7 @@ export { WidgetCards, type WidgetCard } from './widget-cards';
 export { BrandedScreen } from "./branded-screen";
 export { AppShell } from "./app-shell";
 export { SectionTabs } from "./section-tabs";
-export { BrandMark, Petals, Wordmark } from "./brand";
+export { ApxLogo, BrandMark, CornerBlob, Wordmark } from "./brand";
 export { SidebarNav, type SidebarGroup, type SidebarIcon, type SidebarLink } from "./sidebar";
 export { AlertCard, type AlertCardVariant } from './alert-card';
 export {

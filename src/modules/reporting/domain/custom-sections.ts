@@ -72,18 +72,18 @@ export const SNAPSHOT_ROWS = {
 
 /** A figure the month was calculated without — computed by an engine before this figure existed. */
 export const NOT_CALCULATED_REASON =
-  'This month was calculated before MOTION worked this figure out. It appears when the month is next recalculated.';
+  'This month was calculated before APX worked this figure out. It appears when the month is next recalculated.';
 
 export const NO_PERMISSION_REASON = 'Your role cannot see the tax figures, so this section is left out.';
 
 export const VAT_NOT_CALCULATED_TEXT: Readonly<Record<'flat_rate' | 'country' | 'not_registered', string>> = {
-  flat_rate: 'You use the Flat Rate Scheme, which needs your flat-rate percentage. MOTION does not hold it, so the return is not calculated.',
-  country: 'MOTION prepares the VAT return for businesses in the UK and the UAE only. Set your country in Settings if it is one of these.',
+  flat_rate: 'You use the Flat Rate Scheme, which needs your flat-rate percentage. APX does not hold it, so the return is not calculated.',
+  country: 'APX prepares the VAT return for businesses in the UK and the UAE only. Set your country in Settings if it is one of these.',
   not_registered: 'Your business is recorded as not registered for VAT, so there is no VAT return.',
 };
 
 export const CT_NOT_ESTIMATED_TEXT: Readonly<Record<'country' | 'period_before_rules', string>> = {
-  country: 'MOTION estimates Corporation Tax for businesses in the UK and the UAE only. Set your country in Settings if it is one of these.',
+  country: 'APX estimates Corporation Tax for businesses in the UK and the UAE only. Set your country in Settings if it is one of these.',
   period_before_rules: 'This financial year began before the current rules (UK: 1 April 2023; UAE: 1 June 2023), so no estimate is made.',
 };
 
@@ -165,13 +165,13 @@ export function buildVatSection(input: {
 
   const ret = input.vatReturn;
   if (ret === null || ret.quarter.end !== quarter.end) {
-    return { ...base, rows: [], notes: ['That quarter is too far back for MOTION to prepare its VAT return here.'] };
+    return { ...base, rows: [], notes: ['That quarter is too far back for APX to prepare its VAT return here.'] };
   }
   if (ret.kind === 'not_calculated') return { ...base, rows: [], notes: [VAT_NOT_CALCULATED_TEXT[ret.reason]] };
 
   const notes: string[] = [];
   const rows: CustomSectionRow[] = ret.boxes.map((box) => {
-    if (box.value === null) return notAvailable(box.label, box.note ?? 'Not recorded in MOTION.', box.box);
+    if (box.value === null) return notAvailable(box.label, box.note ?? 'Not recorded in APX.', box.box);
     if (box.note !== undefined) notes.push(`Box ${box.box}: ${box.note}`);
     const shown = box.value.includes('.') ? money(box.value, input.currency) : wholeMoney(box.value, input.currency);
     return { label: box.label, box: box.box, value: shown, reason: null };
@@ -192,7 +192,7 @@ export function buildVatSection(input: {
     const n = ret.vatNotStated.length;
     notes.push(`${n} invoice${n === 1 ? ' does' : 's do'} not state ${n === 1 ? 'its' : 'their'} VAT, so ${n === 1 ? 'its' : 'their'} VAT is not counted. Correct ${n === 1 ? 'it' : 'them'} to complete the return.`);
   }
-  notes.push('MOTION does not file your return; you file it with the tax authority.');
+  notes.push('APX does not file your return; you file it with the tax authority.');
   return { ...base, rows, notes };
 }
 
@@ -240,7 +240,7 @@ export function buildCorporationTaxSection(input: {
     notes.push(`The figures reach ${sectionDate(view.coveredTo)}; the estimate is for those months only, and the full year's tax will differ.`);
   }
   notes.push(
-    'Estimated on the profit MOTION calculated before tax. Taxable profit can differ — capital allowances instead of '
+    'Estimated on the profit APX calculated before tax. Taxable profit can differ — capital allowances instead of '
     + 'depreciation, expenses that are not allowed, losses brought forward — so this is not a tax computation.',
   );
   if (estimated?.country === 'AE') {

@@ -315,7 +315,7 @@ describe('a PDF statement goes in through the same wizard', () => {
     const batch = one(`
       select b.status::text || '|' || b.extraction_method::text || '|' || coalesce(b.error_summary ->> 'message', '-')
         from public.import_batches b where b.id = '${result.batchId}'`);
-    expect(batch).toMatch(/^failed\|pdf_text\|MOTION could not find a transaction table/);
+    expect(batch).toMatch(/^failed\|pdf_text\|APX could not find a transaction table/);
     expect(one(`select status::text from public.source_documents where id = '${result.documentId}'`)).toBe('ready');
   });
 

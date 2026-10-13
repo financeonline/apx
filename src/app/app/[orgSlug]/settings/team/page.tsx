@@ -91,13 +91,13 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
             <CardHeader
               icon={<Briefcase />}
               tint="pink"
-              title="MOTION advisers"
+              title="APX advisers"
               description="Staff assigned to help with this organisation. You can remove access at any time."
             />
             <CardBody>
               {advisers.length === 0 ? (
-                <EmptyState title="No MOTION adviser is assigned">
-                    If you ask MOTION for help with your figures, the person assigned will appear here by name.
+                <EmptyState title="No APX adviser is assigned">
+                    If you ask APX for help with your figures, the person assigned will appear here by name.
                   </EmptyState>
               ) : (
                 <TableWrap>

@@ -24,9 +24,9 @@ const PAGES = [
 
 async function signIn(page: Page) {
   await page.goto('/sign-in');
-  await page.getByLabel(/email/i).fill(EMAIL);
-  await page.getByLabel(/password/i).fill(PASSWORD);
-  await page.getByRole('button', { name: /sign in/i }).click();
+  await page.getByLabel('Email', { exact: true }).fill(EMAIL);
+  await page.getByLabel('Password', { exact: true }).fill(PASSWORD);
+  await page.getByRole('button', { name: /log in/i }).click();
   await page.waitForURL(/\/(onboarding|app|select-organization|portfolio)/, { timeout: 30_000 });
 }
 

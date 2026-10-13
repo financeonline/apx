@@ -73,7 +73,7 @@ export default async function StoredReportPage({ params }: { params: Promise<{ o
       </div>
       <div className="mt-8">
         {body === null ? (
-          <Banner tone="warn" title="This report was produced by a newer or older version of MOTION">
+          <Banner tone="warn" title="This report was produced by a newer or older version of APX">
             It cannot be shown here. Produce it again to read it.
           </Banner>
         ) : body.view}

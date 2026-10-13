@@ -136,7 +136,7 @@ export async function renderBriefPdf(content: BriefContent): Promise<Uint8Array>
   if (content.latestMonth !== null) monthSection(pdf, content.latestMonth, `The latest complete month: ${content.latestMonth.label}`);
 
   pdf.gap(8);
-  pdf.text(`Produced ${content.composedAt.slice(0, 16).replace('T', ' ')} UTC by MOTION. Days are ${content.timezone} days. `
+  pdf.text(`Produced ${content.composedAt.slice(0, 16).replace('T', ' ')} UTC by APX. Days are ${content.timezone} days. `
     + (content.dataRefreshedAt === null ? '' : `Data last added ${content.dataRefreshedAt.slice(0, 10)}.`), { size: 8.5, muted: true });
   return pdf.save();
 }
@@ -194,6 +194,6 @@ export async function renderAdviserPdf(content: AdviserContent): Promise<Uint8Ar
   }
 
   pdf.gap(8);
-  pdf.text(`Produced ${content.composedAt.slice(0, 16).replace('T', ' ')} UTC by MOTION.`, { size: 8.5, muted: true });
+  pdf.text(`Produced ${content.composedAt.slice(0, 16).replace('T', ' ')} UTC by APX.`, { size: 8.5, muted: true });
   return pdf.save();
 }

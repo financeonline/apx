@@ -40,7 +40,7 @@ const BANKING_RULE_KEYS = [
 // -----------------------------------------------------------------------------------------------
 export const getBankAccounts: ToolDefinition<{ period?: string }, unknown> = {
   name: 'get_bank_accounts',
-  description: 'The organisation’s bank accounts for one month: the balance printed on each statement, money in and out with transfers between own accounts left out, whether the statement reconciled, and when the last statement was imported. Bank data comes from uploaded statements; MOTION is not connected to any bank.',
+  description: 'The organisation’s bank accounts for one month: the balance printed on each statement, money in and out with transfers between own accounts left out, whether the statement reconciled, and when the last statement was imported. Bank data comes from uploaded statements; APX is not connected to any bank.',
   permission: 'banking.view',
   input: z.object({ period: z.string().optional() }),
   async run(input, call) {
@@ -89,7 +89,7 @@ export const getBankAccounts: ToolDefinition<{ period?: string }, unknown> = {
 // -----------------------------------------------------------------------------------------------
 export const getRecurringPayments: ToolDefinition<{ status?: 'active' | 'changed' | 'stopped'; limit?: number }, unknown> = {
   name: 'get_recurring_payments',
-  description: 'Payments and receipts MOTION has seen at least three times on a regular cadence, from bank statements: what they usually are, what the last one was, whether the amount changed, and whether they have stopped. Use it for "which regular payments went up" or "what subscriptions do we pay".',
+  description: 'Payments and receipts APX has seen at least three times on a regular cadence, from bank statements: what they usually are, what the last one was, whether the amount changed, and whether they have stopped. Use it for "which regular payments went up" or "what subscriptions do we pay".',
   permission: 'banking.view',
   input: z.object({
     status: z.enum(['active', 'changed', 'stopped']).optional(),
@@ -127,7 +127,7 @@ export const getRecurringPayments: ToolDefinition<{ status?: 'active' | 'changed
 // -----------------------------------------------------------------------------------------------
 export const getUnusualTransactions: ToolDefinition<{ period?: string; limit?: number }, unknown> = {
   name: 'get_unusual_transactions',
-  description: 'Bank transactions MOTION’s deterministic rules flagged for a month: unusually large payments, possible duplicates, regular payments that changed or stopped — each as an alert with its evidence — plus how many transactions look like transfers between own accounts without a matching leg. MOTION decides what is unusual; you report it.',
+  description: 'Bank transactions APX’s deterministic rules flagged for a month: unusually large payments, possible duplicates, regular payments that changed or stopped — each as an alert with its evidence — plus how many transactions look like transfers between own accounts without a matching leg. APX decides what is unusual; you report it.',
   permission: 'banking.view',
   input: z.object({ period: z.string().optional(), limit: z.number().int().min(1).max(20).optional() }),
   async run(input, call) {
@@ -142,7 +142,7 @@ export const getUnusualTransactions: ToolDefinition<{ period?: string; limit?: n
     if (banking.length === 0 && lookalikes === 0) {
       return sample.length === 0 ? noData('bank transaction') : ok({
         ...SOURCE, period: ref(r.period), unusual: [], transfer_lookalikes: count(0),
-        note: 'Nothing in this month tripped MOTION’s banking rules.',
+        note: 'Nothing in this month tripped APX’s banking rules.',
       }, { periods: [ref(r.period)], basis: 'bank', calculation_run_id: null }, call);
     }
     return ok({

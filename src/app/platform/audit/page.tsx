@@ -66,7 +66,7 @@ export default async function PlatformAuditPage({
 
   return (
     <>
-      <PageHeader title="Audit" description="Everything MOTION recorded, newest first." />
+      <PageHeader title="Audit" description="Everything APX recorded, newest first." />
 
       <nav aria-label="Filter by what happened" className="mt-4 flex flex-wrap gap-2 text-sm">
         {FAMILIES.map((family) => (

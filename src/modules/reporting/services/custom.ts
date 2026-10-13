@@ -97,7 +97,7 @@ export async function finishCustomReport(ctx: AccessContext, input: {
   if (!orgId) throw new NotFound();
 
   const dimensions = [...new Set(input.dimensions)];
-  if (!dimensions.every(isCustomDimension)) throw new ValidationError('That analytical dimension is not one MOTION offers.');
+  if (!dimensions.every(isCustomDimension)) throw new ValidationError('That analytical dimension is not one APX offers.');
   const fixed = FIXED_AREAS.filter((area) => dimensions.includes(area));
 
   // With a Loans, Assets, VAT or Corporation Tax area chosen the report has MOTION's own figures,

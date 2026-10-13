@@ -2,8 +2,8 @@ import type { Metadata } from 'next';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'MOTION',
-  description: 'Financial intelligence for your business.',
+  title: 'APX',
+  description: 'APX — finance in motion. Financial intelligence for your business.',
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

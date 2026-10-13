@@ -36,7 +36,7 @@ export function TaxForm(props: {
       <Field
         label="VAT scheme"
         htmlFor="vat_scheme"
-        hint="The Flat Rate Scheme's return is not calculated by MOTION."
+        hint="The Flat Rate Scheme's return is not calculated by APX."
       >
         <Select id="vat_scheme" name="vat_scheme" defaultValue={props.vatScheme}>
           <option value="standard">Standard (invoice basis)</option>

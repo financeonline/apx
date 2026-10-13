@@ -205,4 +205,4 @@ export const AFFORDABILITY_UNAVAILABLE_TEXT: Readonly<Record<AffordabilityUnavai
 };
 
 export const AFFORDABILITY_RULE_TEXT =
-  'This is about cash only, over the forecast months, against the forecast MOTION already holds. It does not look at profit, at how the spend is treated in the accounts, or beyond the last forecast month, and it is not financial advice.';
+  'This is about cash only, over the forecast months, against the forecast APX already holds. It does not look at profit, at how the spend is treated in the accounts, or beyond the last forecast month, and it is not financial advice.';

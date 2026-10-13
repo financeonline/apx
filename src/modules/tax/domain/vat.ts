@@ -177,7 +177,7 @@ export function computeVatReturn(input: {
   }
 
   const net = outputVat.minus(inputVat);
-  const notCovered = 'Not recorded in MOTION — add it yourself if it applies.';
+  const notCovered = 'Not recorded in APX — add it yourself if it applies.';
   const boxes: VatBox[] = input.country === 'GB'
     ? [
         { box: '1', label: 'VAT due on sales and other outputs', value: money(outputVat) },
@@ -191,7 +191,7 @@ export function computeVatReturn(input: {
         { box: '9', label: 'Acquisitions of goods from the EU excluding VAT', value: null, note: notCovered },
       ]
     : [
-        { box: '1', label: 'Standard-rated supplies (all emirates)', value: money(salesNet), note: 'The split by emirate is not recorded in MOTION.' },
+        { box: '1', label: 'Standard-rated supplies (all emirates)', value: money(salesNet), note: 'The split by emirate is not recorded in APX.' },
         { box: '1', label: 'VAT on standard-rated supplies (output VAT)', value: money(outputVat) },
         { box: '9', label: 'Standard-rated expenses', value: money(purchasesNet) },
         { box: '9', label: 'Recoverable VAT on expenses (input VAT)', value: money(inputVat) },
