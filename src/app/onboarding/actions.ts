@@ -32,5 +32,5 @@ export async function createOrganizationAction(
     return fail(error, { requestId, action: 'onboarding.createOrganization' });
   }
   // redirect() throws, so it must sit outside the try/catch that maps errors.
-  redirect(slug ? `/app/${slug}/home` : '/select-organization');
+  redirect(slug ? `/app/${slug}/departments` : '/select-organization');
 }

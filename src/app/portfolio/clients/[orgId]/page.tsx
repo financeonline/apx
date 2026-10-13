@@ -73,7 +73,7 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
             icon={<HeartPulse />}
             tint="violet"
             title="Health"
-            action={<Link href={links.home} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">See how it was scored <ChevronRight aria-hidden="true" className="size-4" /></Link>}
+            action={<Link href={links.overview} className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft">See how it was scored <ChevronRight aria-hidden="true" className="size-4" /></Link>}
           />
           <CardBody>
             {row.health === null ? (

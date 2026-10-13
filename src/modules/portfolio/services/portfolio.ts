@@ -25,7 +25,10 @@ const ZERO: ClientCounts = {
 
 export function hrefs(org: PortfolioOrganisation) {
   return {
-    home: `/app/${org.slug}/home`,
+    // Entering a company lands on its Departments page (owner, 2026-10-14).
+    home: `/app/${org.slug}/departments`,
+    /** The company's Home page itself — where its Business Health Score is shown. */
+    overview: `/app/${org.slug}/home`,
     alert: (alertId: string) => `/app/${org.slug}/insights/alerts/${alertId}`,
     action: (actionId: string) => `/app/${org.slug}/actions/${actionId}`,
     evidence: (bundleId: string) => `/app/${org.slug}/evidence/${bundleId}`,

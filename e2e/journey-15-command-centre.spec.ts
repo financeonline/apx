@@ -28,7 +28,7 @@ test('an owner of two organisations sees both on the Command Centre; a client se
     await page.goto('/onboarding');
     await page.getByLabel(/name/i).first().fill(name);
     await page.getByRole('button', { name: /create|continue|get started/i }).first().click();
-    await page.waitForURL(/\/app\/[^/]+\/home/, { timeout: 30_000 });
+    await page.waitForURL(/\/app\/[^/]+\/departments/, { timeout: 30_000 });
     return page.url().match(/\/app\/([^/]+)\//)![1]!;
   };
   const slugA = await onboard(ORG_A);

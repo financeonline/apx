@@ -7,6 +7,7 @@ import { ArrowRight, Eye, EyeOff, Lock, Mail, User, type LucideIcon } from 'luci
 import { SESSION_ALIVE_COOKIE, SESSION_ONLY_COOKIE, safeNextPath } from '@/core/routing';
 import { supabaseBrowser } from '@/components/supabase-browser';
 import { Label } from '@/components/ui/shadcn';
+import { NAV_COOKIE } from '@/components/dashboard/nav-cookie';
 
 type Mode = 'sign-in' | 'sign-up' | 'forgot' | 'reset';
 
@@ -73,6 +74,8 @@ function IconField({
 /** Remember, for the middleware, whether this sign-in should end when the browser closes. */
 function rememberSessionChoice(keep: boolean) {
   const secure = window.location.protocol === 'https:' ? '; secure' : '';
+  // Each sign-in starts with the menu hidden (owner, 2026-10-14; `ShellFrame`).
+  document.cookie = `${NAV_COOKIE}=; path=/; max-age=0; samesite=lax`;
   if (keep) {
     document.cookie = `${SESSION_ONLY_COOKIE}=; path=/; max-age=0; samesite=lax${secure}`;
     return;

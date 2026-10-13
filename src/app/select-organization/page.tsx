@@ -17,7 +17,7 @@ export default async function SelectOrganizationPage() {
 
   const organizations = await listMyOrganizations(db);
   if (organizations.length === 0) redirect('/onboarding');
-  if (organizations.length === 1) redirect(`/app/${organizations[0]!.slug}/home`);
+  if (organizations.length === 1) redirect(`/app/${organizations[0]!.slug}/departments`);
 
   const advises = adviserOrganisations(organizations).length > 0;
 
@@ -40,7 +40,7 @@ export default async function SelectOrganizationPage() {
       <ul className="flex flex-col gap-3">
         {organizations.map((organization) => (
           <li key={organization.organizationId}>
-            <Link href={`/app/${organization.slug}/home`} className="block">
+            <Link href={`/app/${organization.slug}/departments`} className="block">
               <Card className="transition-colors hover:border-line-strong">
                 <CardBody className="flex items-center justify-between gap-4">
                   <span>

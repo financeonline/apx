@@ -106,7 +106,7 @@ export default async function OrgLayout({
   };
 
   return (
-    <AppShell homeHref={`${base}/home`} groups={groups} user={user}>
+    <AppShell homeHref={`${base}/departments`} groups={groups} user={user}>
         <div className="mb-6 flex flex-col gap-3 empty:mb-0">
           {isSuperAdmin(ctx) && (
             <Banner tone="warn" title="You are viewing this organisation as APX staff">

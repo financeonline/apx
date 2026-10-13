@@ -25,7 +25,7 @@ test('a new owner uploads a ledger and sees their own figures', async ({ page })
   await page.goto('/onboarding');
   await page.getByLabel(/name/i).first().fill(orgName);
   await page.getByRole('button', { name: /create|continue|get started/i }).first().click();
-  await page.waitForURL(/\/app\/[^/]+\/home/, { timeout: 30_000 });
+  await page.waitForURL(/\/app\/[^/]+\/departments/, { timeout: 30_000 });
 
   const slug = page.url().match(/\/app\/([^/]+)\//)?.[1];
   expect(slug, 'the owner lands in their new organisation').toBeTruthy();

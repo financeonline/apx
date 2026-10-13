@@ -11,6 +11,7 @@ import { getMarketingView, marketingEnabled, summariseMarketing, type MarketingS
 import { getInvestmentView, investmentEnabled, summariseInvestment, type InvestmentSummary } from '@/modules/investment';
 import { can } from '@/core/permissions';
 import { isMotionError } from '@/core/errors';
+import { listBatches } from '@/modules/imports';
 import { ButtonLink } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/surfaces';
 import {
@@ -119,6 +120,26 @@ async function investmentSummary(ctx: AccessContext): Promise<InvestmentSummary 
   }
 }
 
+/**
+ * Data capture (SOW "Department Dashboard": "Data entry and data capture into the system"), first on
+ * the page (owner, 2026-10-14). Its status is the uploads' real state: uploads waiting for a review,
+ * else when data was last added, else nothing yet. Null for a viewer who may not upload.
+ */
+async function dataCaptureStatus(ctx: AccessContext): Promise<{ tone: TileTone; label: string; headline: string } | null> {
+  if (!ctx.orgId || !can(ctx, 'imports.create')) return null;
+  const batches = await listBatches(ctx.db, ctx.orgId, { offset: 0, limit: 50 }, ctx.requestId);
+  const waiting = batches.filter((b) => b.status === 'awaiting_review').length;
+  if (waiting > 0) {
+    return { tone: 'attention', label: 'Needs attention', headline: `${waiting} upload${waiting === 1 ? '' : 's'} waiting for a review` };
+  }
+  const last = batches.map((b) => b.committedAt).filter((d): d is string => d !== null).sort().at(-1);
+  if (last) {
+    const when = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric' }).format(new Date(last));
+    return { tone: 'good', label: STATUS.good, headline: `Data last added ${when}` };
+  }
+  return { tone: 'quiet', label: STATUS.quiet, headline: 'No data added yet' };
+}
+
 /** Order as the reference: the money departments first, then risk, actions and the rest. */
 const ORDER = ['finance', 'banking', 'planning', 'analyst', 'alerts', 'actions', 'customers', 'reports'];
 
@@ -129,7 +150,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
   requirePermission(ctx, 'financials.view');
   const view = await loadDepartments(ctx);
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
-  const [marketing, investment] = await Promise.all([marketingSummary(ctx), investmentSummary(ctx)]);
+  const [marketing, investment, capture] = await Promise.all([marketingSummary(ctx), investmentSummary(ctx), dataCaptureStatus(ctx)]);
   const base = `/app/${orgSlug}`;
 
   // ADR-158: a department of a system the super admin switched off is absent.
@@ -203,6 +224,22 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
       <section aria-labelledby="departments-heading">
         <h2 id="departments-heading" className="sr-only">Business departments</h2>
         <ul className="grid grid-cols-1 gap-4 md:grid-cols-2 min-[1440px]:grid-cols-3 min-[2200px]:grid-cols-4">
+          {capture === null ? null : (
+            <li>
+              <DepartmentCard
+                title="Data capture" href={`${base}/data/imports/new`} icon={<FileUp />} tint="pink"
+                description={['Upload statements, ledgers and invoices', 'Documents & accounts']}
+                headline={capture.headline}
+                pills={[
+                  { label: 'Uploads', href: `${base}/data/imports` },
+                  { label: 'Documents', href: `${base}/data/documents` },
+                  { label: 'Accounts', href: `${base}/data/accounts` },
+                ]}
+                status={{ tone: capture.tone, label: capture.label }}
+              />
+            </li>
+          )}
+
           {ordered.map(tileCard)}
 
           {/* ADR-156: VAT and Corporation Tax, and assets and loans. */}

@@ -21,5 +21,5 @@ export async function acceptInvitationAction(
   } catch (error) {
     return fail(error, { requestId, action: 'invite.accept' });
   }
-  redirect(slug ? `/app/${slug}/home` : '/select-organization');
+  redirect(slug ? `/app/${slug}/departments` : '/select-organization');
 }

@@ -1,16 +1,19 @@
 import Link from 'next/link';
+import { cookies } from 'next/headers';
 import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
 import { CornerBlob, Wordmark } from './brand';
 import { SidebarNav, type SidebarGroup } from './sidebar';
+import { NAV_COOKIE } from './nav-cookie';
+import { ShellFrame } from './shell-frame';
 import { SignOutButton } from './sign-out-button';
 
 /**
- * The application shell (ADR-155; APX look, ADR-169): a dark sidebar with the wordmark, the
- * sections and the account links from `lg`; below it, a top bar with a menu. Both carry the same
- * links and the one not in use is display:none, so it is out of the accessibility tree.
+ * The application shell (ADR-155; APX look, ADR-169): the wordmark, the sections, the signed-in
+ * person and Sign out, in a sidebar that is hidden by default and shown on request from `lg`, and in
+ * a hamburger drawer below `lg` (`ShellFrame`, owner 2026-10-14).
  */
-export function AppShell({
+export async function AppShell({
   homeHref,
   homeLabel = 'APX home',
   area,
@@ -45,46 +48,39 @@ export function AppShell({
       <ChevronRight aria-hidden="true" className="size-4 shrink-0 text-ink-muted" />
     </Link>
   ) : null;
+  const sidebar = (
+    <>
+      <SidebarNav groups={groups} />
+      <div className="mt-auto flex flex-col gap-2 pt-6 pb-6">
+        {person}
+        {footer ? <div className="px-3">{footer}</div> : null}
+        <SignOutButton />
+        <p className="mt-16 px-3 text-[0.6875rem] leading-relaxed font-semibold tracking-[0.24em] text-ink-muted uppercase">
+          Analyse · Plan
+          <br />
+          Execute · Grow
+        </p>
+      </div>
+      {/* The reference's corner shape behind the menu's last lines. */}
+      <CornerBlob idPrefix="sidebar-blob" className="pointer-events-none absolute bottom-0 left-0 -z-10 w-full -scale-y-100 opacity-35" />
+    </>
+  );
+  const brand = (
+    <Link href={homeHref} className="px-2" aria-label={homeLabel}>
+      <Wordmark idPrefix="sidebar-logo" />
+      {area ? <span className="mt-3 block text-xs font-semibold tracking-[0.12em] text-ink-muted uppercase">{area}</span> : null}
+    </Link>
+  );
+  const compactBrand = (
+    <Link href={homeHref} aria-label={homeLabel}><Wordmark tagline={false} idPrefix="topbar-logo" /></Link>
+  );
+  // Hidden by default; shown while this browser session asked for it (`ShellFrame`).
+  const docked = (await cookies()).get(NAV_COOKIE)?.value === 'shown';
+
   return (
-    <div className="min-h-dvh lg:flex">
-      <aside className="isolate sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface/80 px-4 pt-6 lg:flex">
-        <Link href={homeHref} className="mb-8 px-2" aria-label={homeLabel}>
-          <Wordmark idPrefix="sidebar-logo" />
-          {area ? <span className="mt-3 block text-xs font-semibold tracking-[0.12em] text-ink-muted uppercase">{area}</span> : null}
-        </Link>
-        <SidebarNav groups={groups} />
-        <div className="mt-auto flex flex-col gap-2 pt-6 pb-6">
-          {person}
-          {footer ? <div className="px-3">{footer}</div> : null}
-          <SignOutButton />
-          <p className="mt-16 px-3 text-[0.6875rem] leading-relaxed font-semibold tracking-[0.24em] text-ink-muted uppercase">
-            Analyse · Plan
-            <br />
-            Execute · Grow
-          </p>
-        </div>
-        {/* The reference's corner shape behind the sidebar's last lines. */}
-        <CornerBlob idPrefix="sidebar-blob" className="absolute bottom-0 left-0 -z-10 w-full -scale-y-100 opacity-35" />
-      </aside>
-
-      <header className="panel sticky top-0 z-20 flex items-center justify-between gap-3 border-x-0 border-t-0 px-4 py-3 lg:hidden">
-        <Link href={homeHref} aria-label={homeLabel}><Wordmark tagline={false} idPrefix="topbar-logo" /></Link>
-        <details className="relative">
-          <summary className="cursor-pointer list-none rounded-xl border border-accent/45 px-3 py-1.5 text-sm font-medium text-accent">
-            Menu
-          </summary>
-          <div className="panel absolute right-0 z-30 mt-2 max-h-[80dvh] w-64 overflow-y-auto rounded-card p-3">
-            <SidebarNav groups={groups} />
-            {person ? <div className="mt-4">{person}</div> : null}
-            {footer ? <div className="mt-2 px-3">{footer}</div> : null}
-            <SignOutButton className="mt-2" />
-          </div>
-        </details>
-      </header>
-
+    <ShellFrame initiallyDocked={docked} brand={brand} compactBrand={compactBrand} sidebar={sidebar}>
       <CornerBlob idPrefix="page-blob" className="fixed top-0 right-0 -z-10 hidden w-[26rem] max-w-[45vw] -scale-x-100 opacity-25 md:block" />
-
       <main className="mx-auto w-full min-w-0 max-w-[100rem] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
-    </div>
+    </ShellFrame>
   );
 }

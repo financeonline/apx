@@ -142,7 +142,7 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
                 Opening this customer&rsquo;s pages is recorded in <em>their</em> audit log, and they can see it (CD-13).
               </p>
               <p className="mt-3 text-sm">
-                <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={`/app/${org.slug}/home`}>Open {org.name} <ChevronRight aria-hidden="true" className="size-4" /></Link>
+                <Link className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft" href={`/app/${org.slug}/departments`}>Open {org.name} <ChevronRight aria-hidden="true" className="size-4" /></Link>
               </p>
               <p className="mt-3 text-sm">
                 <Link className="underline" href={`/platform/audit?org=${org.id}`}>This organisation&rsquo;s audit trail</Link>
