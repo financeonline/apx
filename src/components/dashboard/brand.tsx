@@ -100,3 +100,23 @@ export function CornerBlob({ className = '', idPrefix = 'apx-blob' }: { classNam
     </svg>
   );
 }
+
+/**
+ * The loading mark (owner, 2026-10-14: a loading screen for every page): the X — ">", the dot, "<" —
+ * with the chevrons closing in on the dot and the dot pulsing (`.apx-loader-*` in globals.css; still
+ * under reduced motion). Decorative: the "Loading" text beside it carries the meaning.
+ */
+export function LoaderMark({ className = 'h-12 w-auto' }: { className?: string }) {
+  return (
+    <svg viewBox="590 40 430 200" className={className} aria-hidden="true" focusable="false">
+      <defs>
+        <XGradient id="apx-loader-x" />
+      </defs>
+      <g fill="none" stroke="url(#apx-loader-x)" strokeWidth="56" strokeLinecap="round" strokeLinejoin="round">
+        <path className="apx-loader-left" d="M625 75 L715 140 L625 205" />
+        <path className="apx-loader-right" d="M985 75 L893 140 L985 205" />
+      </g>
+      <circle className="apx-loader-dot" cx="804" cy="140" r="29" fill={RED_DOT} />
+    </svg>
+  );
+}
