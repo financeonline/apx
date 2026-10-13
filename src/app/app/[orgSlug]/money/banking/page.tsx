@@ -158,7 +158,9 @@ export default async function BankingPage({
         </Card>
 
         {mayAddAccount ? (
-          <details className="panel rounded-card">
+          // Open when there is no account yet, and reachable by link (`#add-account`) from the upload form,
+          // so "add a bank account first" leads straight to the form (owner, 2026-10-14).
+          <details id="add-account" className="panel scroll-mt-6 rounded-card" open={view.accounts.length === 0}>
             <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 font-serif text-lg text-ink"><IconBadge tint="violet" size="sm"><Plus /></IconBadge>Add a bank account</summary>
             <div className="border-t border-line px-5 py-5"><AddAccountForm orgSlug={orgSlug} currency={currency} /></div>
           </details>

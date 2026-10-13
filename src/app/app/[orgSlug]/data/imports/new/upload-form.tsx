@@ -1,5 +1,6 @@
 'use client';
 
+import Link from 'next/link';
 import { useActionState, useState } from 'react';
 import { Field, Input, Select } from '@/components/ui/field';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
@@ -74,7 +75,7 @@ export function UploadForm({
           label="Which account is it for?"
           htmlFor="bank_account_id"
           hint={bankAccounts.length === 0
-            ? 'Add a bank account on the Banking page first.'
+            ? <>No bank account yet. <Link href={`/app/${orgSlug}/money/banking#add-account`} className="font-medium text-accent underline underline-offset-2">Add a bank account</Link> first, then come back to upload the statement.</>
             : undefined}
         >
           <Select id="bank_account_id" name="bank_account_id" defaultValue={bankAccounts[0]?.id ?? ''}>
