@@ -1,4 +1,4 @@
-import { Building2, Globe, Landmark, Receipt, ScrollText, TriangleAlert, Users } from 'lucide-react';
+import { Building2, Globe, Landmark, Receipt, ScrollText, Store, TriangleAlert, Users } from 'lucide-react';
 import { getAccessContext, taxSettingsOf, vatStatusOf } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody } from '@/components/ui/surfaces';
@@ -32,6 +32,10 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
       />
       <nav className="mt-4 flex flex-wrap gap-3 text-sm">
         <ShortcutLink href={`/app/${orgSlug}/settings/team`} label="Team" icon={<Users aria-hidden="true" />} />
+        {/* ADR-170: what the Marketing report is written from. */}
+        {can(ctx, 'customers.edit') && (
+          <ShortcutLink href={`/app/${orgSlug}/settings/company-profile`} label="Company profile" icon={<Store aria-hidden="true" />} />
+        )}
         {can(ctx, 'audit.view') && (
           <ShortcutLink href={`/app/${orgSlug}/settings/audit`} label="Audit log" icon={<ScrollText aria-hidden="true" />} />
         )}

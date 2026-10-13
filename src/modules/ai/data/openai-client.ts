@@ -154,13 +154,28 @@ export function fromOpenAiResponse(reply: OpenAiReply, fallbackModel: string): M
 
 const TIMEOUT_MS = 90_000;
 
+export interface OpenAiCallOptions {
+  /** How long one request may take; 90 s unless a caller writing a long document asks for more. */
+  readonly timeoutMs?: number;
+  /**
+   * Whether a request that ran out of time is sent again. Yes by default, as before; a long report
+   * says no (ADR-170): a request that timed out may still have been billed, and a second one would
+   * only run out of the job's time too.
+   */
+  readonly retryOnTimeout?: boolean;
+}
+
 /** One call to OpenAI, one retry on a transient error (429, 5xx, network), as for Anthropic. */
 export async function callOpenAi(
   call: ModelCall, key: string, model: string, effort: string | null, maxTokens: number,
+  options: OpenAiCallOptions = {},
 ): Promise<ModelResponse> {
   const body = JSON.stringify(toOpenAiRequest(call, model, effort, maxTokens));
+  const timeoutMs = options.timeoutMs ?? TIMEOUT_MS;
+  const retryOnTimeout = options.retryOnTimeout ?? true;
   const attempt = async (): Promise<{ transient: boolean; response?: ModelResponse; error?: string }> => {
-    const signals = [AbortSignal.timeout(TIMEOUT_MS), ...(call.signal ? [call.signal] : [])];
+    const timeout = AbortSignal.timeout(timeoutMs);
+    const signals = [timeout, ...(call.signal ? [call.signal] : [])];
     let res: Response;
     try {
       res = await fetch('https://api.openai.com/v1/chat/completions', {
@@ -170,7 +185,11 @@ export async function callOpenAi(
         signal: AbortSignal.any(signals),
       });
     } catch (error) {
-      return { transient: !call.signal?.aborted, error: error instanceof Error ? error.message : String(error) };
+      const timedOut = timeout.aborted && !call.signal?.aborted;
+      return {
+        transient: !call.signal?.aborted && (retryOnTimeout || !timedOut),
+        error: error instanceof Error ? error.message : String(error),
+      };
     }
     if (!res.ok) {
       const detail = ((await res.json().catch(() => null)) as { error?: { message?: string } } | null)?.error?.message ?? `HTTP ${res.status}`;

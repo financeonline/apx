@@ -37,7 +37,7 @@ export function ActionMessage({ state }: { state: ActionState }) {
 
   if (state.ok) {
     return (
-      <p className="text-sm text-accent" role="status">
+      <p className="text-sm text-good" role="status">
         {state.message ?? 'Saved.'}
       </p>
     );

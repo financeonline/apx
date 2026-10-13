@@ -2,12 +2,14 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   Building2, CalendarDays, ChartColumn, ClipboardCheck, FileText, FileUp, HandCoins, Landmark, ListChecks,
-  Plus, Receipt, ShieldCheck, Sparkles, TrendingUp, Upload, Users, UsersRound,
+  Megaphone, Plus, Receipt, ShieldCheck, Sparkles, TrendingUp, Upload, Users, UsersRound,
 } from 'lucide-react';
 import { loadDepartments, type DepartmentTile, type TileTone } from '@/modules/departments';
-import { getAccessContext, moduleOn, type ModuleKey } from '@/modules/tenancy';
+import { getAccessContext, moduleOn, type AccessContext, type ModuleKey } from '@/modules/tenancy';
 import { fundingEnabled } from '@/modules/funding';
+import { getMarketingView, marketingEnabled, summariseMarketing, type MarketingSummary } from '@/modules/marketing';
 import { can } from '@/core/permissions';
+import { isMotionError } from '@/core/errors';
 import { ButtonLink } from '@/components/ui/button';
 import { Card, CardBody } from '@/components/ui/surfaces';
 import {
@@ -15,6 +17,7 @@ import {
 } from '@/components/dashboard/department-card';
 import { SectionTabs } from '@/components/dashboard/section-tabs';
 import { requirePermission } from '@/app/_lib/authz';
+import { CompetitiveReadinessCard } from '../marketing/_components/competitive-readiness-card';
 
 export const dynamic = 'force-dynamic';
 
@@ -86,6 +89,20 @@ const PRESENTATION: Readonly<Record<string, Presentation>> = {
   },
 };
 
+/**
+ * Marketing's line (ADR-170), or null when the viewer may not see it or the system is switched off for
+ * the company (ADR-158). The status is the report's real state, never a placeholder.
+ */
+async function marketingSummary(ctx: AccessContext): Promise<MarketingSummary | null> {
+  if (!can(ctx, 'reports.view') || !marketingEnabled(ctx)) return null;
+  try {
+    return summariseMarketing(await getMarketingView(ctx));
+  } catch (error) {
+    if (isMotionError(error) && error.code === 'NOT_FOUND') return null;
+    throw error;
+  }
+}
+
 /** Order as the reference: the money departments first, then risk, actions and the rest. */
 const ORDER = ['finance', 'banking', 'planning', 'analyst', 'alerts', 'actions', 'customers', 'reports'];
 
@@ -96,6 +113,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
   requirePermission(ctx, 'financials.view');
   const view = await loadDepartments(ctx);
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
+  const marketing = await marketingSummary(ctx);
   const base = `/app/${orgSlug}`;
 
   // ADR-158: a department of a system the super admin switched off is absent.
@@ -202,6 +220,20 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
             </li>
           ) : null}
 
+          {marketing === null ? null : (
+            <>
+              <li>
+                <DepartmentCard
+                  title="Marketing" href={`${base}/marketing`} icon={<Megaphone />} tint="violet"
+                  description={['Marketing strategy report', 'Competitors, campaigns & figures']}
+                  headline={marketing.headline ?? undefined}
+                  status={{ tone: marketing.tone, label: marketing.label }}
+                />
+              </li>
+              <li><CompetitiveReadinessCard href={`${base}/marketing#section-01`} summary={marketing} /></li>
+            </>
+          )}
+
           {view.system.team !== null ? (
             <li>
               <DepartmentCard
@@ -250,6 +282,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
               <li><ShortcutLink href={`${base}/reports`} label="All reports" icon={<CalendarDays />} /></li>
               {can(ctx, 'ai.use') && moduleOn(ctx, 'analyst') ? <li><ShortcutLink href={`${base}/reports/custom/new`} label="Custom" icon={<Sparkles />} /></li> : null}
               {showFunding ? <li><ShortcutLink href={`${base}/funding`} label="Funding" icon={<HandCoins />} /></li> : null}
+              {marketing === null ? null : <li><ShortcutLink href={`${base}/marketing`} label="Marketing" icon={<Megaphone />} /></li>}
               {can(ctx, 'assignments.view') ? <li><ShortcutLink href="/portfolio/report" label="Portfolio" icon={<Building2 />} /></li> : null}
             </ul>
           </section>

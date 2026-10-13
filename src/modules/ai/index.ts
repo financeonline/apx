@@ -203,3 +203,6 @@ export {
 
 export { TOOL_MODULES, toolModule } from './domain/tool-modules';
 export { OPENAI_EFFORTS, isOpenAiChatModel, isOpenAiReasoningModel } from './data/openai-client';
+export {
+  openAiReportTransport, reportOutputCeiling, REPORT_MAX_TOKENS, NO_OPENAI_KEY, NO_OPENAI_MODEL,
+} from './data/openai-report-transport';

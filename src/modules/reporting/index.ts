@@ -124,3 +124,5 @@ export type { AdviserCompletedAction, AdviserDimensionLine } from './domain/advi
 export { FUNDING_REPORT_VERSION, type FundingReportContent } from './domain/funding-report';
 export { renderFundingPdf } from './domain/pdf-funding';
 export { renderPortfolioPdf } from './domain/pdf-portfolio';
+/** The composed reports' PDF ink and text cleaning, shared with the Marketing report's PDF (ADR-170). */
+export { INK as PDF_INK, MUTED as PDF_MUTED, drawable as pdfDrawable } from './domain/pdf-kit';

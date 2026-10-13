@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Activity, ArrowLeftRight, Bell, Briefcase, Building2, ChartColumn, CircleUser, Database, FileText, FileUp,
-  House, Inbox, Landmark, LayoutGrid, Lightbulb, ListChecks, Settings, ShieldAlert, Sparkles, Users, Wallet,
+  House, Inbox, Landmark, LayoutGrid, Lightbulb, ListChecks, Megaphone, Settings, ShieldAlert, Sparkles, Users, Wallet,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -16,12 +16,12 @@ import {
 
 export type SidebarIcon =
   | 'home' | 'departments' | 'insights' | 'money' | 'customers' | 'actions' | 'engagement' | 'reports'
-  | 'analyst' | 'funding' | 'add-data' | 'imports' | 'documents' | 'accounts' | 'notifications' | 'settings'
+  | 'analyst' | 'funding' | 'marketing' | 'add-data' | 'imports' | 'documents' | 'accounts' | 'notifications' | 'settings'
   | 'portfolio' | 'switch' | 'account' | 'alerts' | 'assignments' | 'jobs' | 'audit' | 'users';
 
 const ICONS: Readonly<Record<SidebarIcon, LucideIcon>> = {
   home: House, departments: LayoutGrid, insights: Lightbulb, money: Wallet, customers: Users,
-  actions: ListChecks, engagement: Inbox, reports: ChartColumn, analyst: Sparkles, funding: Landmark,
+  actions: ListChecks, engagement: Inbox, reports: ChartColumn, analyst: Sparkles, funding: Landmark, marketing: Megaphone,
   'add-data': FileUp, imports: Database, documents: FileText, accounts: ListChecks,
   notifications: Bell, settings: Settings, portfolio: Building2, switch: ArrowLeftRight, account: CircleUser,
   alerts: ShieldAlert, assignments: Briefcase, jobs: Activity, audit: FileText, users: Users,

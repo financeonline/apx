@@ -11,6 +11,7 @@ import { Banner } from '@/components/ui/surfaces';
 import { ROLE_LABELS } from '@/components/labels';
 import { unreadCount } from '@/modules/engagement';
 import { fundingEnabled } from '@/modules/funding';
+import { marketingEnabled } from '@/modules/marketing';
 
 export const dynamic = 'force-dynamic';
 
@@ -60,6 +61,8 @@ export default async function OrgLayout({
   const unread = can(ctx, 'financials.view') ? await unreadCount(ctx) : null;
   // Phase 16 (U-5): the Funding link exists only while the flag is on, for those with `reports.view`.
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
+  // ADR-170: Marketing, for `reports.view`, unless the super admin switched it off (ADR-158).
+  const showMarketing = can(ctx, 'reports.view') && marketingEnabled(ctx);
 
   const base = `/app/${orgSlug}`;
   const groups: SidebarGroup[] = [
@@ -68,6 +71,7 @@ export default async function OrgLayout({
       links: [
         ...sectionLinks(ctx).map((l) => ({ label: l.label, href: `${base}/${l.path}`, hint: l.hint, icon: l.path as SidebarIcon })),
         ...(showFunding ? [{ label: 'Funding', href: `${base}/funding`, icon: 'funding' as const }] : []),
+        ...(showMarketing ? [{ label: 'Marketing', href: `${base}/marketing`, icon: 'marketing' as const }] : []),
       ],
     },
     // As the reference: one "Data & Forms" item; the data pages carry their own tabs (data/layout).

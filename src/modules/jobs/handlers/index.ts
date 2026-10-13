@@ -16,6 +16,7 @@ import { runFundingAssessJob } from './funding-assess';
 import { runStorageCleanupJob } from './storage-cleanup';
 import { runAiEvalJob } from './ai-eval';
 import { runDocumentExtractJob } from './document-extract';
+import { runMarketingGenerateJob } from './marketing-generate';
 
 /**
  * Wiring the queue (ADR-013, IMPLEMENTATION_PLAN.md — "handlers arrive with the phases that own
@@ -43,6 +44,8 @@ const HANDLERS: ReadonlyArray<readonly [ClaimedJob['jobType'], (job: ClaimedJob,
   ['org.purge', runOrgPurgeJob],
   ['ai.eval', runAiEvalJob],
   ['document.extract', runDocumentExtractJob],
+  // ADR-170: the marketing report, one paid attempt per request.
+  ['marketing.generate', runMarketingGenerateJob],
 ];
 
 let registered = false;
@@ -77,3 +80,4 @@ export { evaluateAlertsJob } from './alerts-evaluate';
 export { commitLargeBatchJob } from './import-commit-large';
 export { runAiEvalJob, evalDeps } from './ai-eval';
 export { runDocumentExtractJob, extractDeps, lineCountAgrees, AI_ROW_ISSUE, LINE_COUNT_ISSUE } from './document-extract';
+export { runMarketingGenerateJob } from './marketing-generate';

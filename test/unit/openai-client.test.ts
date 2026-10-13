@@ -2,7 +2,7 @@ import { describe, expect, it, vi } from 'vitest';
 
 vi.mock('server-only', () => ({}));
 
-const { fromOpenAiResponse, isOpenAiChatModel, isOpenAiReasoningModel, toOpenAiRequest } = await import('@/modules/ai/data/openai-client');
+const { callOpenAi, fromOpenAiResponse, isOpenAiChatModel, isOpenAiReasoningModel, toOpenAiRequest } = await import('@/modules/ai/data/openai-client');
 
 /**
  * ADR-164: an Anthropic-shaped call becomes an OpenAI Chat Completions request, and the reply comes
@@ -101,5 +101,29 @@ describe('which models are offered', () => {
       expect(isOpenAiChatModel(m)).toBe(false);
     expect(isOpenAiReasoningModel('o3')).toBe(true);
     expect(isOpenAiReasoningModel('gpt-4.1')).toBe(false);
+  });
+});
+
+describe('running out of time (ADR-170)', () => {
+  const call = { system: [{ text: 'Rules.', cached: false }], messages: [{ role: 'user' as const, content: 'Hi.' }], tools: [], toolChoice: { type: 'auto' as const } };
+  /** A fetch that never answers until its signal gives up, as a request that runs out of time does. */
+  const hangingFetch = () => vi.fn((_url: string, init: { signal: AbortSignal }) => new Promise((_resolve, reject) => {
+    init.signal.addEventListener('abort', () => reject(init.signal.reason));
+  }));
+
+  it('sends a request that ran out of time once more by default, as before', async () => {
+    const fetch = hangingFetch();
+    vi.stubGlobal('fetch', fetch);
+    await expect(callOpenAi(call, 'sk-test', 'gpt-4.1', null, 100, { timeoutMs: 10 })).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
+  it('never sends a report request twice after it ran out of time', async () => {
+    const fetch = hangingFetch();
+    vi.stubGlobal('fetch', fetch);
+    await expect(callOpenAi(call, 'sk-test', 'gpt-4.1', null, 100, { timeoutMs: 10, retryOnTimeout: false })).rejects.toThrow();
+    expect(fetch).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
   });
 });

@@ -17,7 +17,10 @@ import { log } from '@/core/logging';
  * `force-dynamic` because a cached response would mean the queue silently stops draining.
  */
 export const dynamic = 'force-dynamic';
-export const maxDuration = 60;
+// Five minutes (ADR-170): a marketing report is one ChatGPT call that can take up to three and a half
+// minutes, inside its job's five-minute budget (`app.job_max_runtime`). Sixty seconds would end the
+// worker mid-report on the host. Needs a hosting plan that allows 300 s.
+export const maxDuration = 300;
 
 export async function GET(request: NextRequest) {
   if (!cronAuthorised(request)) {
