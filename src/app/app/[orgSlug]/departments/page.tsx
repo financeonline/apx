@@ -2,12 +2,13 @@ import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
   Building2, CalendarDays, ChartColumn, ClipboardCheck, FileText, FileUp, HandCoins, Landmark, ListChecks,
-  Megaphone, Plus, Receipt, ShieldCheck, Sparkles, TrendingUp, Upload, Users, UsersRound,
+  Megaphone, PiggyBank, Plus, Receipt, ShieldCheck, Sparkles, TrendingUp, Upload, Users, UsersRound,
 } from 'lucide-react';
 import { loadDepartments, type DepartmentTile, type TileTone } from '@/modules/departments';
 import { getAccessContext, moduleOn, type AccessContext, type ModuleKey } from '@/modules/tenancy';
 import { fundingEnabled } from '@/modules/funding';
 import { getMarketingView, marketingEnabled, summariseMarketing, type MarketingSummary } from '@/modules/marketing';
+import { getInvestmentView, investmentEnabled, summariseInvestment, type InvestmentSummary } from '@/modules/investment';
 import { can } from '@/core/permissions';
 import { isMotionError } from '@/core/errors';
 import { ButtonLink } from '@/components/ui/button';
@@ -103,6 +104,21 @@ async function marketingSummary(ctx: AccessContext): Promise<MarketingSummary | 
   }
 }
 
+/**
+ * Investment's line (ADR-171), as Marketing's: null when the viewer may not see it or the system is
+ * switched off for the company (ADR-158). The status is the pack's real state — "Pack ready", "No
+ * figures yet" — never a placeholder.
+ */
+async function investmentSummary(ctx: AccessContext): Promise<InvestmentSummary | null> {
+  if (!can(ctx, 'reports.view') || !investmentEnabled(ctx)) return null;
+  try {
+    return summariseInvestment(await getInvestmentView(ctx));
+  } catch (error) {
+    if (isMotionError(error) && error.code === 'NOT_FOUND') return null;
+    throw error;
+  }
+}
+
 /** Order as the reference: the money departments first, then risk, actions and the rest. */
 const ORDER = ['finance', 'banking', 'planning', 'analyst', 'alerts', 'actions', 'customers', 'reports'];
 
@@ -113,7 +129,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
   requirePermission(ctx, 'financials.view');
   const view = await loadDepartments(ctx);
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
-  const marketing = await marketingSummary(ctx);
+  const [marketing, investment] = await Promise.all([marketingSummary(ctx), investmentSummary(ctx)]);
   const base = `/app/${orgSlug}`;
 
   // ADR-158: a department of a system the super admin switched off is absent.
@@ -234,6 +250,17 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
             </>
           )}
 
+          {investment === null ? null : (
+            <li>
+              <DepartmentCard
+                title="Investment" href={`${base}/investment`} icon={<PiggyBank />} tint="pink"
+                description={['Investment pack', 'Reinvestment & diversified investments']}
+                headline={investment.headline ?? undefined}
+                status={{ tone: investment.tone, label: investment.label }}
+              />
+            </li>
+          )}
+
           {view.system.team !== null ? (
             <li>
               <DepartmentCard
@@ -283,6 +310,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
               {can(ctx, 'ai.use') && moduleOn(ctx, 'analyst') ? <li><ShortcutLink href={`${base}/reports/custom/new`} label="Custom" icon={<Sparkles />} /></li> : null}
               {showFunding ? <li><ShortcutLink href={`${base}/funding`} label="Funding" icon={<HandCoins />} /></li> : null}
               {marketing === null ? null : <li><ShortcutLink href={`${base}/marketing`} label="Marketing" icon={<Megaphone />} /></li>}
+              {investment === null ? null : <li><ShortcutLink href={`${base}/investment`} label="Investment" icon={<PiggyBank />} /></li>}
               {can(ctx, 'assignments.view') ? <li><ShortcutLink href="/portfolio/report" label="Portfolio" icon={<Building2 />} /></li> : null}
             </ul>
           </section>

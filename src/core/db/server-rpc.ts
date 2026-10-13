@@ -1020,6 +1020,43 @@ export async function failMarketingReport(
   });
 }
 
+/*
+ * ADR-171 · Investment. The `investment.generate` job's three writes, Marketing's in shape, made on the
+ * job's scoped client (`app.require_scope`). The attempt row — with the assumptions it was asked for —
+ * was created by `api.request_investment_report` in the same transaction as the job; these only move
+ * it forward.
+ */
+
+/** Marks the attempt running; null when there is nothing to do (already finished, or Investment off). */
+export async function startInvestmentReport(organizationId: string, reportId: string): Promise<string | null> {
+  const id = await serverRpc<string | null>('start_investment_report', { p_org: organizationId, p_report: reportId });
+  return typeof id === 'string' && id.length > 0 ? id : null;
+}
+
+/** Stores the finished pack (an `investment-v1` document) with what it cost, and tells the requester. */
+export async function finishInvestmentReport(
+  organizationId: string,
+  reportId: string,
+  input: { report: unknown; model: string; promptVersion: string; inputTokens: number; outputTokens: number },
+): Promise<void> {
+  await serverRpc<string>('finish_investment_report', {
+    p_org: organizationId, p_report: reportId, p_content: input.report, p_model: input.model,
+    p_prompt_version: input.promptVersion, p_input_tokens: input.inputTokens, p_output_tokens: input.outputTokens,
+  });
+}
+
+/** Records a failed attempt with the sentence the person is shown. Idempotent on a finished attempt. */
+export async function failInvestmentReport(
+  organizationId: string,
+  reportId: string,
+  input: { failure: string; model?: string | null; promptVersion?: string | null; inputTokens?: number; outputTokens?: number },
+): Promise<void> {
+  await serverRpc<string | null>('fail_investment_report', {
+    p_org: organizationId, p_report: reportId, p_failure: input.failure, p_model: input.model ?? null,
+    p_prompt_version: input.promptVersion ?? null, p_input_tokens: input.inputTokens ?? 0, p_output_tokens: input.outputTokens ?? 0,
+  });
+}
+
 /**
  * ADR-170: ONE provider's own model choice — `{ provider, model, effort }` from that provider's card
  * on Account — whichever provider is active; null when that provider has no model chosen. The

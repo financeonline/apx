@@ -30,6 +30,9 @@ export { runOrgPurgeJob, runTriggerRef } from './handlers';
 /** ADR-170: the marketing report's job, by name, so a test can drive it as the worker does. */
 export { runMarketingGenerateJob } from './handlers';
 
+/** ADR-171: the Investment Pack's job, by name, so a test can drive it as the worker does. */
+export { runInvestmentGenerateJob } from './handlers';
+
 /** The ai.eval handler's one seam, for its own test: the model transport (ADR-081). */
 export { evalDeps } from './handlers';
 export { extractDeps, lineCountAgrees, AI_ROW_ISSUE, LINE_COUNT_ISSUE } from './handlers';

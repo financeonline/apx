@@ -3,7 +3,7 @@
 export type JobType =
   | 'calculation.run' | 'document.extract' | 'import.commit_large' | 'alerts.evaluate'
   | 'org.purge' | 'report.render' | 'report.compose' | 'funding.assess' | 'ai.eval' | 'storage.cleanup_orphans'
-  | 'snapshots.compact' | 'marketing.generate';
+  | 'snapshots.compact' | 'marketing.generate' | 'investment.generate';
 
 export type JobStatus =
   | 'queued' | 'running' | 'succeeded' | 'failed' | 'dead' | 'cancelled' | 'deferred_upstream';

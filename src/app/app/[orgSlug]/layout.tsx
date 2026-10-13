@@ -12,6 +12,7 @@ import { ROLE_LABELS } from '@/components/labels';
 import { unreadCount } from '@/modules/engagement';
 import { fundingEnabled } from '@/modules/funding';
 import { marketingEnabled } from '@/modules/marketing';
+import { investmentEnabled } from '@/modules/investment';
 
 export const dynamic = 'force-dynamic';
 
@@ -63,6 +64,8 @@ export default async function OrgLayout({
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
   // ADR-170: Marketing, for `reports.view`, unless the super admin switched it off (ADR-158).
   const showMarketing = can(ctx, 'reports.view') && marketingEnabled(ctx);
+  // ADR-171: Investment, gated as Marketing is.
+  const showInvestment = can(ctx, 'reports.view') && investmentEnabled(ctx);
 
   const base = `/app/${orgSlug}`;
   const groups: SidebarGroup[] = [
@@ -72,6 +75,7 @@ export default async function OrgLayout({
         ...sectionLinks(ctx).map((l) => ({ label: l.label, href: `${base}/${l.path}`, hint: l.hint, icon: l.path as SidebarIcon })),
         ...(showFunding ? [{ label: 'Funding', href: `${base}/funding`, icon: 'funding' as const }] : []),
         ...(showMarketing ? [{ label: 'Marketing', href: `${base}/marketing`, icon: 'marketing' as const }] : []),
+        ...(showInvestment ? [{ label: 'Investment', href: `${base}/investment`, icon: 'investment' as const }] : []),
       ],
     },
     // As the reference: one "Data & Forms" item; the data pages carry their own tabs (data/layout).

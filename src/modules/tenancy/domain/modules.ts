@@ -15,6 +15,7 @@
 
 export const MODULE_KEYS = [
   'banking', 'customers', 'actions', 'reports', 'analyst', 'planning', 'tax', 'funding', 'documents_ai', 'marketing',
+  'investment',
 ] as const;
 export type ModuleKey = (typeof MODULE_KEYS)[number];
 
@@ -41,6 +42,9 @@ export const MODULES: readonly ModuleDefinition[] = [
   // ADR-170: on for every company unless the super admin switches it off. `app.marketing_enabled` reads
   // the same key the same way, so the page and the database agree on whether Marketing exists.
   { key: 'marketing', label: 'Marketing', description: 'The marketing strategy report and Competitive Readiness.', featureKey: 'module_marketing', defaultOn: true },
+  // ADR-171: on for every company unless the super admin switches it off; `app.investment_enabled`
+  // reads the same key the same way, so the page and the database agree on whether Investment exists.
+  { key: 'investment', label: 'Investment', description: 'The Investment Pack: surplus allocation, growth and investment scenarios.', featureKey: 'module_investment', defaultOn: true },
 ];
 
 const BY_KEY = new Map(MODULES.map((m) => [m.key, m]));
