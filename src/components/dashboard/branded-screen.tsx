@@ -3,26 +3,26 @@ import type { ReactNode } from 'react';
 import { CornerBlob, Wordmark } from './brand';
 
 /**
- * "Analyse, Plan, Execute, Grow" (ADR-169), one word on each fold of the background's sculpture,
- * reading upwards like growth: Analyse on the burgundy fold, Plan on the red, Execute on the orange,
- * Grow on the gold (owner's new background, 2026-10-14). In the image's own 1280 × 720 coordinates,
+ * "Analyse, Plan, Execute, Grow" (ADR-169), one word on each turn of the background's four-turn
+ * spiral, reading upwards like growth: Analyse on the crimson bottom turn, Plan on the coral, Execute
+ * on the orange, Grow on the top (owner, 2026-10-14). In the image's own 1280 × 720 coordinates,
  * drawn in an SVG that crops exactly as the image does (`slice` = `cover`, both centred), so each
- * word stays on its fold at every screen size. White with a soft shadow: they sit on colour now.
+ * word stays on its turn at every screen size. White with a soft shadow: they sit on colour.
  */
 const WORDS = [
-  { word: 'GROW', x: 985, y: 72 },
-  { word: 'EXECUTE', x: 1030, y: 228 },
-  { word: 'PLAN', x: 1010, y: 392 },
-  { word: 'ANALYSE', x: 1060, y: 618 },
+  { word: 'GROW', x: 990, y: 74 },
+  { word: 'EXECUTE', x: 925, y: 212 },
+  { word: 'PLAN', x: 915, y: 380 },
+  { word: 'ANALYSE', x: 905, y: 552 },
 ] as const;
 
 /**
  * A page outside the app shell, in the client's APX reference (ADR-169).
  *
  * `auth` (sign-in, sign-up, password pages): the reference's screen — the client's full-bleed
- * background (black, with a soft gold-to-burgundy ribbon sculpture at the right), the wordmark and
- * the form over its black left-centre, and "Analyse, Plan, Execute, Grow" on the sculpture's folds
- * from `lg`. Below `lg` the image shifts to its black middle, so the form sits on black.
+ * background (black, with a four-turn red-to-orange spiral at the right), the wordmark and the
+ * form over its black left-centre, and "Analyse, Plan, Execute, Grow" on the spiral's turns from
+ * `lg`. Below `lg` the image shifts to its black middle, so the form sits on black.
  *
  * Otherwise (choosing an organisation, an invitation, Account, the legal pages): the wordmark and the
  * content on a dark panel, with the corner shapes.
@@ -51,17 +51,17 @@ export function BrandedScreen({
   if (auth) {
     return (
       <div className="relative isolate min-h-dvh overflow-hidden bg-black">
-        {/* The owner's background (2026-10-14): soft matte folded ribbons, gold to burgundy, in the
-            style of their sample, generated in ChatGPT and cleaned here ("neat and clean, high
-            resolution with proper pixels"): the dark block-grid faded to pure black,
+        {/* The owner's background (2026-10-14): a four-turn matte spiral in the APX red → orange,
+            with a soft data core (charts, nodes) inside, generated in ChatGPT and cleaned here
+            ("neat and clean, high resolution with proper pixels"): the dark block-grid faded to pure black,
             flat and glowing areas smoothed edge-aware, upscaled to 2880 × 1620 without sharpening,
             a fine dither against banding, near-lossless WebP. Served as prepared — never through
             the image optimiser, which re-encodes at quality 75 and brings the blocks back — with a
             1600 px copy for screens up to 1023 px. */}
         <picture>
-          <source media="(max-width: 1023px)" srcSet="/brand/apx-background-v6-1600.webp" type="image/webp" />
+          <source media="(max-width: 1023px)" srcSet="/brand/apx-background-v7-1600.webp" type="image/webp" />
           <img
-            src="/brand/apx-background-v6.webp" alt="" fetchPriority="high" decoding="async"
+            src="/brand/apx-background-v7.webp" alt="" fetchPriority="high" decoding="async"
             className="absolute inset-0 -z-10 size-full object-cover object-[32%_center] lg:object-center"
           />
         </picture>
