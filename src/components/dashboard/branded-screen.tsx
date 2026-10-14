@@ -1,27 +1,28 @@
-import Image from 'next/image';
 import Link from 'next/link';
 import type { ReactNode } from 'react';
 import { CornerBlob, Wordmark } from './brand';
 
 /**
- * The reference's four words and their short rules, in the background image's own 1280 × 720
- * coordinates (ADR-169). Drawn in an SVG that crops exactly as the image does (`slice` = `cover`,
- * both centred), so each word stays on its black pool at every screen size.
+ * "Analyse, Plan, Execute, Grow" (ADR-169), one word on each fold of the background's sculpture,
+ * reading upwards like growth: Analyse on the burgundy fold, Plan on the red, Execute on the orange,
+ * Grow on the gold (owner's new background, 2026-10-14). In the image's own 1280 × 720 coordinates,
+ * drawn in an SVG that crops exactly as the image does (`slice` = `cover`, both centred), so each
+ * word stays on its fold at every screen size. White with a soft shadow: they sit on colour now.
  */
 const WORDS = [
-  { word: 'PLAN', x: 1128, y: 162, rule: 'var(--color-accent)' },
-  { word: 'ANALYSE', x: 768, y: 276, rule: 'var(--color-accent)' },
-  { word: 'EXECUTE', x: 1060, y: 428, rule: 'var(--color-pink-icon)' },
-  { word: 'GROW', x: 855, y: 672, rule: '#ffffff' },
+  { word: 'GROW', x: 985, y: 72 },
+  { word: 'EXECUTE', x: 1030, y: 228 },
+  { word: 'PLAN', x: 1010, y: 392 },
+  { word: 'ANALYSE', x: 1060, y: 618 },
 ] as const;
 
 /**
  * A page outside the app shell, in the client's APX reference (ADR-169).
  *
  * `auth` (sign-in, sign-up, password pages): the reference's screen — the client's full-bleed
- * background (black, with the flowing pink-to-orange ribbons at the right and the corners), the
- * wordmark and the form over its black left-centre, and "Analyse, Plan, Execute, Grow" on the ribbons'
- * pools from `lg`. Below `lg` the image shifts to its black middle, so the form sits on black.
+ * background (black, with a soft gold-to-burgundy ribbon sculpture at the right), the wordmark and
+ * the form over its black left-centre, and "Analyse, Plan, Execute, Grow" on the sculpture's folds
+ * from `lg`. Below `lg` the image shifts to its black middle, so the form sits on black.
  *
  * Otherwise (choosing an organisation, an invitation, Account, the legal pages): the wordmark and the
  * content on a dark panel, with the corner shapes.
@@ -50,24 +51,35 @@ export function BrandedScreen({
   if (auth) {
     return (
       <div className="relative isolate min-h-dvh overflow-hidden bg-black">
-        {/* The client's background, generated in ChatGPT and cleaned and upscaled to 2880 × 1620 here
-            (owner, 2026-10-14: "neat and clean, high resolution with proper pixels"). `unoptimized`:
-            served exactly as prepared — the image optimiser would re-encode it at quality 75 and
-            bring the blockiness back. */}
-        <Image
-          src="/brand/apx-background-v4.webp" alt="" fill priority unoptimized sizes="100vw"
-          className="-z-10 object-cover object-[32%_center] lg:object-center"
-        />
+        {/* The owner's background (2026-10-14): soft matte folded ribbons, gold to burgundy, in the
+            style of their sample, generated in ChatGPT and cleaned here ("neat and clean, high
+            resolution with proper pixels"): the dark block-grid faded to pure black,
+            flat and glowing areas smoothed edge-aware, upscaled to 2880 × 1620 without sharpening,
+            a fine dither against banding, near-lossless WebP. Served as prepared — never through
+            the image optimiser, which re-encodes at quality 75 and brings the blocks back — with a
+            1600 px copy for screens up to 1023 px. */}
+        <picture>
+          <source media="(max-width: 1023px)" srcSet="/brand/apx-background-v6-1600.webp" type="image/webp" />
+          <img
+            src="/brand/apx-background-v6.webp" alt="" fetchPriority="high" decoding="async"
+            className="absolute inset-0 -z-10 size-full object-cover object-[32%_center] lg:object-center"
+          />
+        </picture>
         <svg
           aria-hidden="true" focusable="false" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid slice"
           className="pointer-events-none absolute inset-0 -z-10 hidden size-full select-none lg:block"
         >
-          {WORDS.map(({ word, x, y, rule }) => (
-            <g key={word}>
+          <defs>
+            <filter id="apx-word-shadow" x="-20%" y="-50%" width="140%" height="200%">
+              <feDropShadow dx="0" dy="1" stdDeviation="2.5" floodColor="#000000" floodOpacity="0.55" />
+            </filter>
+          </defs>
+          {WORDS.map(({ word, x, y }) => (
+            <g key={word} filter="url(#apx-word-shadow)">
               <text x={x} y={y} textAnchor="middle" fill="#ffffff" fontSize="15" fontWeight="600" letterSpacing="4" className="font-sans">
                 {word}
               </text>
-              <rect x={x - 23} y={y + 16} width="46" height="4" rx="2" fill={rule} />
+              <rect x={x - 23} y={y + 16} width="46" height="4" rx="2" fill="#ffffff" fillOpacity="0.9" />
             </g>
           ))}
         </svg>
