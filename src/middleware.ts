@@ -216,6 +216,6 @@ export const config = {
      * Everything except Next's own static output and file requests. Middleware must see every
      * page and route handler so the session cookie is refreshed on each of them.
      */
-    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|ico|woff2?)$).*)',
+    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webm|ico|woff2?)$).*)',
   ],
 };
