@@ -51,12 +51,6 @@ export function roleOptions(allowed: (role: TenantRole) => boolean): RoleOption[
   }));
 }
 
-/** The role the invitation form starts on: the least a new person can be given, never an owner. */
-export function defaultInviteRole(options: readonly RoleOption[]): TenantRole | undefined {
-  const order: readonly TenantRole[] = ['client', 'third_party', 'accountant', 'admin', 'owner'];
-  return order.find((role) => options.some((option) => option.role === role));
-}
-
 // ---------------------------------------------------------------------------------------------
 // Per-person switches
 // ---------------------------------------------------------------------------------------------

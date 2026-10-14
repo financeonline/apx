@@ -7,8 +7,6 @@ import {
   setVatRegistration,
   setTaxSettings,
   setCurrencyAndCountry,
-  inviteMember,
-  revokeInvitation,
   changeMemberRole,
   removeMember,
   revokeAssignment,
@@ -103,45 +101,6 @@ export async function setTaxSettingsAction(
     return done('Saved.');
   } catch (error) {
     return fail(error, { requestId, action: 'settings.setTaxSettings' });
-  }
-}
-
-export async function inviteMemberAction(
-  _previous: ActionResult | null,
-  form: FormData,
-): Promise<ActionResult> {
-  const orgSlug = text(form, 'org_slug');
-  let requestId: string | undefined;
-  try {
-    const ctx = await getAccessContext(orgSlug);
-    requestId = ctx.requestId;
-    const { token } = await inviteMember(ctx, {
-      email: text(form, 'email'),
-      role: text(form, 'role') as MembershipRole,
-    });
-    revalidatePath(`/app/${orgSlug}/settings/team`);
-    // Phase 1 has no mailer, so the link is shown once to the person doing the inviting. The raw
-    // token is never stored — only its SHA-256 (SECURITY_MODEL.md §3).
-    return done(`Invitation created. Send this link: /invite/${token}`);
-  } catch (error) {
-    return fail(error, { requestId, action: 'settings.inviteMember' });
-  }
-}
-
-export async function revokeInvitationAction(
-  _previous: ActionResult | null,
-  form: FormData,
-): Promise<ActionResult> {
-  const orgSlug = text(form, 'org_slug');
-  let requestId: string | undefined;
-  try {
-    const ctx = await getAccessContext(orgSlug);
-    requestId = ctx.requestId;
-    await revokeInvitation(ctx, text(form, 'invitation_id'));
-    revalidatePath(`/app/${orgSlug}/settings/team`);
-    return done('Invitation withdrawn.');
-  } catch (error) {
-    return fail(error, { requestId, action: 'settings.revokeInvitation' });
   }
 }
 

@@ -127,7 +127,7 @@ export async function createMemberLogin(ctx: AccessContext, input: unknown): Pro
     user_metadata: { full_name: value.fullName },
   });
   if (error?.code === 'email_exists' || /already (been )?registered/i.test(error?.message ?? '')) {
-    throw new ConflictError('That email already has an APX login. Invite them by email instead.');
+    throw new ConflictError('That email already has an APX login. Use a different email for this team member.');
   }
   if (error?.code === 'weak_password') {
     throw new ValidationError('Some details need fixing.', [{ path: 'password', message: 'Choose a stronger password.' }]);

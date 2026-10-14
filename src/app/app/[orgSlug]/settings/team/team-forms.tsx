@@ -3,13 +3,11 @@
 import { useActionState, useId, useState, type ReactNode } from 'react';
 import { ChevronDown } from 'lucide-react';
 import {
-  inviteMemberAction,
-  revokeInvitationAction,
   changeMemberRoleAction,
   removeMemberAction,
   revokeAdviserAction,
 } from '../actions';
-import { Field, Input, Select } from '@/components/ui/field';
+import { Select } from '@/components/ui/field';
 import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 import { Badge } from '@/components/ui/surfaces';
 import { buttonClass } from '@/components/ui/button';
@@ -41,59 +39,6 @@ export function ListHeader({ columns }: { columns: readonly [string, string, str
 /** A field's name: visible above the value on a phone, read out (not shown) on a wider screen. */
 function FieldName({ children }: { children: ReactNode }) {
   return <span className="mb-0.5 block text-xs text-ink-faint md:sr-only">{children}</span>;
-}
-
-export function InviteForm({
-  orgSlug,
-  roles,
-  defaultRole,
-}: {
-  orgSlug: string;
-  roles: readonly RoleOption[];
-  defaultRole: string | undefined;
-}) {
-  const [state, action] = useActionState(inviteMemberAction, null);
-  const emailId = useId();
-  return (
-    <form action={action} className="flex flex-col gap-5">
-      <input type="hidden" name="org_slug" value={orgSlug} />
-      <Field label="Email address" htmlFor={emailId}>
-        <Input id={emailId} name="email" type="email" autoComplete="off" required />
-      </Field>
-      <fieldset>
-        <legend className="text-sm font-medium">What can they do?</legend>
-        <div className="mt-2 grid gap-2 sm:grid-cols-2">
-          {roles.map((option) => (
-            <label
-              key={option.role}
-              className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-line bg-surface-sunken p-3 transition-colors hover:border-line-strong has-checked:border-accent has-checked:bg-accent-soft"
-            >
-              <input
-                type="radio"
-                name="role"
-                value={option.role}
-                defaultChecked={option.role === defaultRole}
-                required
-                className="mt-1 size-4 shrink-0 accent-accent"
-              />
-              <span className="min-w-0">
-                <span className="block text-sm font-medium">{option.name}</span>
-                <span className="block text-xs text-ink-muted">{option.description}</span>
-              </span>
-            </label>
-          ))}
-        </div>
-        <p className="mt-2 text-xs text-ink-muted">
-          Each role starts with its own permissions. Once they have joined, you can switch individual
-          permissions on or off under Access.
-        </p>
-      </fieldset>
-      <ActionMessage state={state} />
-      <div>
-        <SubmitButton pendingLabel="Creating…">Send invitation</SubmitButton>
-      </div>
-    </form>
-  );
 }
 
 export function MemberItem(props: {
@@ -223,49 +168,6 @@ export function MemberItem(props: {
   );
 }
 
-export function InvitationItem(props: {
-  orgSlug: string;
-  invitationId: string;
-  email: string;
-  roleLabel: string;
-  expires: string;
-}) {
-  const [state, action] = useActionState(revokeInvitationAction, null);
-  return (
-    <li className={ITEM}>
-      <div className={`flex flex-col gap-3 ${ROW_GRID}`}>
-        <div className="min-w-0">
-          <FieldName>Email</FieldName>
-          <p className="break-all">{props.email}</p>
-        </div>
-        <div>
-          <FieldName>Role</FieldName>
-          <p>{props.roleLabel}</p>
-        </div>
-        <div>
-          <FieldName>Expires</FieldName>
-          <p>{props.expires}</p>
-        </div>
-        <div className="flex flex-wrap items-start gap-2 md:justify-end">
-          <form action={action}>
-            <input type="hidden" name="org_slug" value={props.orgSlug} />
-            <input type="hidden" name="invitation_id" value={props.invitationId} />
-            <SubmitButton pendingLabel="…" tone="quiet" aria-label={`Withdraw the invitation to ${props.email}`}>
-              Withdraw
-            </SubmitButton>
-          </form>
-          <ActionMessage state={state} />
-        </div>
-      </div>
-    </li>
-  );
-}
-
-/**
- * A Financial Analyst — APX's staff, assigned to this company by the super admin (ADR-172). Not a
- * member: no role to change and no switches; their access is set by the super admin. An owner may
- * still end the assignment (TENANCY_MODEL.md §5.4).
- */
 export function AnalystItem(props: {
   orgSlug: string;
   assignmentId: string;

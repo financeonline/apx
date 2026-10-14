@@ -1,8 +1,7 @@
-import { Hourglass, Inbox, MailPlus, UserPlus, UsersRound } from 'lucide-react';
+import { Inbox, UserPlus, UsersRound } from 'lucide-react';
 import {
   getAccessContext,
   listMembers,
-  listInvitations,
   listAdvisers,
   listMemberPermissions,
   listAccessRequests,
@@ -15,10 +14,10 @@ import {
 import { can, canInviteRole, ceilingAllows } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, Badge, Banner, EmptyState } from '@/components/ui/surfaces';
 import { MEMBERSHIP_ROLE_LABELS, MEMBER_STATUS_LABELS, ROLE_LABELS, formatDate } from '@/components/labels';
-import { InviteForm, MemberItem, InvitationItem, AnalystItem, ListHeader } from './team-forms';
+import { MemberItem, AnalystItem, ListHeader } from './team-forms';
 import { PendingRequest } from './request-forms';
 import {
-  accessPanel, createMemberView, defaultInviteRole, departmentsPanel, departmentsSummary, ownRoleNote, requestView,
+  accessPanel, createMemberView, departmentsPanel, departmentsSummary, ownRoleNote, requestView,
   roleOptions, splitRequests, type RequestView,
 } from './access-view';
 import { CreateMemberForm } from './create-member-form';
@@ -36,8 +35,9 @@ export const dynamic = 'force-dynamic';
  *   has no role selector. A Financial Analyst is the super admin's to manage: no role, no switches.
  * - **Create a team member** (ADR-173) — the company makes the person's login (email and password)
  *   and ticks the departments they can open and what they can do, as far as the viewer's own reach.
- * - **Invite by email** — the company roles, as far as the viewer's ceiling reaches; the person makes
- *   their own password.
+ *   Inviting by email was removed from the team page (owner, 2026-10-14: "remove this completely"):
+ *   a company's team members are created here with a login, never invited. (The super admin still
+ *   invites a new company's owner by link, ADR-158/160.)
  * - **Requests for more information** (`#requests`) — what members have asked to see, for an owner or
  *   admin to approve or decline. A member who is not a manager sees their own on their home page.
  */
@@ -50,9 +50,8 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
   const mayManage = can(ctx, 'users.manage');
   const seesAnalysts = can(ctx, 'assignments.view');
 
-  const [members, invitations, analysts, access, requests, departments] = await Promise.all([
+  const [members, analysts, access, requests, departments] = await Promise.all([
     listMembers(ctx),
-    mayInvite ? listInvitations(ctx) : Promise.resolve([]),
     seesAnalysts ? listAdvisers(ctx) : Promise.resolve([]),
     mayManage ? listMemberPermissions(ctx) : Promise.resolve([]),
     mayManage ? listAccessRequests(ctx, { status: 'all' }) : Promise.resolve([]),
@@ -70,7 +69,6 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
 
   // The ceiling rules the page has always applied (RBAC_MATRIX.md §3.2): never above one's own
   // role, and an owner only by an owner. The service and the api.* function re-check them.
-  const invitableRoles = roleOptions((role) => canInviteRole(ctx.effectiveRole, role));
   const assignableRoles = roleOptions((role) => ceilingAllows(ctx.effectiveRole, role));
 
   const accessByUser = new Map(access.map((person) => [person.userId, person]));
@@ -223,40 +221,6 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
           </Card>
         ) : null}
 
-        {mayInvite ? (
-          <Card>
-            <CardHeader
-              icon={<MailPlus />}
-              tint="pink"
-              title="Or invite by email"
-              description="They make their own password when they accept. You can choose their departments and permissions once they have joined."
-            />
-            <CardBody>
-              <InviteForm orgSlug={orgSlug} roles={invitableRoles} defaultRole={defaultInviteRole(invitableRoles)} />
-            </CardBody>
-          </Card>
-        ) : null}
-
-        {mayInvite && invitations.length > 0 ? (
-          <Card>
-            <CardHeader icon={<Hourglass />} tint="violet" title="Waiting to be accepted" />
-            <CardBody className="px-3 sm:px-6">
-              <ListHeader columns={['Email', 'Role', 'Expires']} />
-              <ul className="flex flex-col gap-3 md:gap-0 md:divide-y md:divide-line">
-                {invitations.map((invitation) => (
-                  <InvitationItem
-                    key={invitation.invitationId}
-                    orgSlug={orgSlug}
-                    invitationId={invitation.invitationId}
-                    email={invitation.email}
-                    roleLabel={MEMBERSHIP_ROLE_LABELS[invitation.role] ?? invitation.role}
-                    expires={formatDate(invitation.expiresAt)}
-                  />
-                ))}
-              </ul>
-            </CardBody>
-          </Card>
-        ) : null}
       </div>
 
       <p className="mt-6 text-sm text-ink-muted">

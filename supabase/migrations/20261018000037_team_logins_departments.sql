@@ -176,7 +176,7 @@ begin
     raise exception 'VALIDATION: enter a valid email address' using errcode = '22023';
   end if;
   if exists (select 1 from public.profiles p where lower(p.email::text) = v_email) then
-    raise exception 'CONFLICT: that email already has an APX login; invite them by email instead'
+    raise exception 'CONFLICT: that email already has an APX login; use a different email'
       using errcode = '23505';
   end if;
 

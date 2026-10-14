@@ -10,7 +10,6 @@ import {
   resetAllMessage,
   resetAllNote,
   asSwitchable,
-  defaultInviteRole,
   grantFrom,
   ownRoleNote,
   requestView,
@@ -418,12 +417,6 @@ describe('roles', () => {
   it('offers only what the ceiling allows', () => {
     const options = roleOptions((role) => role !== 'owner');
     expect(options.map((o) => o.role)).not.toContain('owner');
-  });
-
-  it('starts an invitation on the least a new person can be given', () => {
-    expect(defaultInviteRole(roleOptions(() => true))).toBe('client');
-    expect(defaultInviteRole(roleOptions((role) => role === 'admin' || role === 'third_party'))).toBe('third_party');
-    expect(defaultInviteRole([])).toBeUndefined();
   });
 });
 
