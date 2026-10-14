@@ -14,7 +14,7 @@ import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 import { Badge } from '@/components/ui/surfaces';
 import { buttonClass } from '@/components/ui/button';
 import { AccessPanel } from './access-panel';
-import type { AccessPanelView, RoleOption } from './access-view';
+import type { AccessPanelView, DepartmentsPanelView, RoleOption } from './access-view';
 
 /*
  * The team page's forms (ADR-172). Each list is a list of people rather than a table: on a phone a
@@ -109,6 +109,10 @@ export function MemberItem(props: {
   assignableRoles: readonly RoleOption[];
   /** Present when the viewer may switch this person's permissions (never an owner, never oneself). */
   access: AccessPanelView | null;
+  /** ADR-173: "All departments" or the ticked ones; null for an owner (who sees everything). */
+  departmentsSummary?: string | null;
+  /** ADR-173: the departments editor in the Access panel. */
+  departments?: DepartmentsPanelView | null;
   /**
    * On the viewer's own row, for a viewer who manages the team: why there is no role selector
    * (`ownRoleNote`). Nobody changes their own role (RBAC_MATRIX.md §3.18, rev 1.4).
@@ -132,6 +136,9 @@ export function MemberItem(props: {
             {props.isSelf ? <span className="font-normal text-ink-muted"> (you)</span> : null}
           </p>
           {props.name ? <p className="break-all text-sm text-ink-muted">{props.email}</p> : null}
+          {props.departmentsSummary ? (
+            <p className="mt-0.5 text-xs text-ink-faint">Departments: {props.departmentsSummary}</p>
+          ) : null}
         </div>
 
         <div className="min-w-0">
@@ -209,7 +216,7 @@ export function MemberItem(props: {
 
       {props.access ? (
         <div id={panelId} hidden={!open} className="mt-4">
-          <AccessPanel orgSlug={props.orgSlug} who={who} panel={props.access} />
+          <AccessPanel orgSlug={props.orgSlug} who={who} panel={props.access} departments={props.departments} />
         </div>
       ) : null}
     </li>

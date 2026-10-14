@@ -3,10 +3,10 @@
 import { useActionState, useId, type ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
 import { Lock } from 'lucide-react';
-import { setMemberPermissionAction, resetMemberPermissionsAction } from './actions';
+import { setMemberPermissionAction, resetMemberPermissionsAction, setMemberDepartmentsAction } from './actions';
 import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 import { Badge } from '@/components/ui/surfaces';
-import type { AccessPanelView, SwitchView } from './access-view';
+import type { AccessPanelView, DepartmentsPanelView, SwitchView } from './access-view';
 
 /**
  * One person's permissions, switch by switch (ADR-172). Each switch is its own small form, so a
@@ -16,7 +16,18 @@ import type { AccessPanelView, SwitchView } from './access-view';
  * owner set is drawn locked for a viewer who is not an owner ("Set by the owner"), and an owner sees
  * it as any other (RBAC_MATRIX.md §3.17, rev 1.4).
  */
-export function AccessPanel({ orgSlug, who, panel }: { orgSlug: string; who: string; panel: AccessPanelView }) {
+export function AccessPanel({
+  orgSlug,
+  who,
+  panel,
+  departments,
+}: {
+  orgSlug: string;
+  who: string;
+  panel: AccessPanelView;
+  /** ADR-173: the departments this person can open, when there are any to choose. */
+  departments?: DepartmentsPanelView | null;
+}) {
   const [state, action] = useActionState(setMemberPermissionAction, null);
   const [resetState, resetAction] = useActionState(resetMemberPermissionsAction, null);
   const headingId = useId();
@@ -56,6 +67,10 @@ export function AccessPanel({ orgSlug, who, panel }: { orgSlug: string; who: str
         <ActionMessage state={resetState} />
       </div>
 
+      {departments && departments.choices.length > 0 ? (
+        <DepartmentsForm orgSlug={orgSlug} userId={panel.userId} who={who} view={departments} />
+      ) : null}
+
       <div className="mt-4 grid gap-x-8 gap-y-5 lg:grid-cols-2">
         {panel.groups.map((group) => (
           <SwitchGroup key={group.title} title={group.title}>
@@ -66,6 +81,64 @@ export function AccessPanel({ orgSlug, who, panel }: { orgSlug: string; who: str
         ))}
       </div>
     </section>
+  );
+}
+
+/**
+ * The departments this person can open (ADR-173): ticks and one Save, since a choice of several is
+ * one decision. Locked, with the reason, when an owner chose them and the viewer is not an owner.
+ */
+function DepartmentsForm({
+  orgSlug,
+  userId,
+  who,
+  view,
+}: {
+  orgSlug: string;
+  userId: string;
+  who: string;
+  view: DepartmentsPanelView;
+}) {
+  const [state, action] = useActionState(setMemberDepartmentsAction, null);
+  const headingId = useId();
+  const locked = view.lockedReason !== null;
+  return (
+    <form action={action} aria-labelledby={headingId} className="mt-4 rounded-xl border border-line p-3">
+      <input type="hidden" name="org_slug" value={orgSlug} />
+      <input type="hidden" name="user_id" value={userId} />
+      <input type="hidden" name="role" value={view.role} />
+      <h4 id={headingId} className="text-xs font-semibold uppercase tracking-[0.1em] text-ink-faint">Departments</h4>
+      <p className="text-xs text-ink-muted">Departments that are not ticked are hidden from {who}.</p>
+      {view.lockedReason ? (
+        <p className="mt-1 inline-flex items-start gap-1 text-xs text-warn">
+          <Lock aria-hidden="true" className="mt-px size-3 shrink-0" />
+          <span>{view.lockedReason}</span>
+        </p>
+      ) : null}
+      <div className="mt-2 grid gap-x-4 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
+        {view.choices.map((choice) => (
+          <label key={choice.key} className={`flex min-h-11 items-center gap-2 text-sm ${locked ? 'opacity-60' : 'cursor-pointer'}`}>
+            <input
+              type="checkbox"
+              name="departments"
+              value={choice.key}
+              defaultChecked={choice.checked}
+              disabled={locked}
+              className="size-4 shrink-0 accent-accent"
+            />
+            <span title={choice.detail}>{choice.title}</span>
+          </label>
+        ))}
+      </div>
+      {locked ? null : (
+        <div className="mt-2 flex flex-wrap items-center gap-3">
+          <SubmitButton pendingLabel="Saving…" tone="secondary" aria-label={`Save ${who}’s departments`}>
+            Save departments
+          </SubmitButton>
+          <ActionMessage state={state} />
+        </div>
+      )}
+    </form>
   );
 }
 

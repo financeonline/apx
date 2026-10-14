@@ -1,4 +1,4 @@
-import { Hourglass, Inbox, MailPlus, UsersRound } from 'lucide-react';
+import { Hourglass, Inbox, MailPlus, UserPlus, UsersRound } from 'lucide-react';
 import {
   getAccessContext,
   listMembers,
@@ -7,13 +7,21 @@ import {
   listMemberPermissions,
   listAccessRequests,
   setsOwnerSwitches,
+  listMemberDepartments,
+  departmentsAvailable,
+  switchableDefaults,
+  takesSwitches,
 } from '@/modules/tenancy';
 import { can, canInviteRole, ceilingAllows } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, Badge, Banner, EmptyState } from '@/components/ui/surfaces';
 import { MEMBERSHIP_ROLE_LABELS, MEMBER_STATUS_LABELS, ROLE_LABELS, formatDate } from '@/components/labels';
 import { InviteForm, MemberItem, InvitationItem, AnalystItem, ListHeader } from './team-forms';
 import { PendingRequest } from './request-forms';
-import { accessPanel, defaultInviteRole, ownRoleNote, requestView, roleOptions, splitRequests, type RequestView } from './access-view';
+import {
+  accessPanel, createMemberView, defaultInviteRole, departmentsPanel, departmentsSummary, ownRoleNote, requestView,
+  roleOptions, splitRequests, type RequestView,
+} from './access-view';
+import { CreateMemberForm } from './create-member-form';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
@@ -26,7 +34,10 @@ export const dynamic = 'force-dynamic';
  *   for an owner, never for themselves, never beyond their own rights, and (for an admin) never a
  *   switch an owner set (the service says which; RBAC_MATRIX.md §3.15–18, rev 1.4). One's own row
  *   has no role selector. A Financial Analyst is the super admin's to manage: no role, no switches.
- * - **Invite someone** — the five company roles, as far as the viewer's ceiling reaches.
+ * - **Create a team member** (ADR-173) — the company makes the person's login (email and password)
+ *   and ticks the departments they can open and what they can do, as far as the viewer's own reach.
+ * - **Invite by email** — the company roles, as far as the viewer's ceiling reaches; the person makes
+ *   their own password.
  * - **Requests for more information** (`#requests`) — what members have asked to see, for an owner or
  *   admin to approve or decline. A member who is not a manager sees their own on their home page.
  */
@@ -39,13 +50,23 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
   const mayManage = can(ctx, 'users.manage');
   const seesAnalysts = can(ctx, 'assignments.view');
 
-  const [members, invitations, analysts, access, requests] = await Promise.all([
+  const [members, invitations, analysts, access, requests, departments] = await Promise.all([
     listMembers(ctx),
     mayInvite ? listInvitations(ctx) : Promise.resolve([]),
     seesAnalysts ? listAdvisers(ctx) : Promise.resolve([]),
     mayManage ? listMemberPermissions(ctx) : Promise.resolve([]),
     mayManage ? listAccessRequests(ctx, { status: 'all' }) : Promise.resolve([]),
+    listMemberDepartments(ctx),
   ]);
+  const departmentsByUser = new Map(departments.map((d) => [d.userId, d]));
+  const available = departmentsAvailable(ctx);
+  const viewer = { isOwner: setsOwnerSwitches(ctx.effectiveRole), restricted: (ctx.departments ?? null) !== null };
+  const createView = createMemberView({
+    allowed: (role) => canInviteRole(ctx.effectiveRole, role),
+    holds: (permission) => can(ctx, permission),
+    available,
+    defaults: (role) => switchableDefaults(role),
+  });
 
   // The ceiling rules the page has always applied (RBAC_MATRIX.md §3.2): never above one's own
   // role, and an owner only by an owner. The service and the api.* function re-check them.
@@ -116,6 +137,14 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
                     canManage={mayManage && ceilingAllows(ctx.effectiveRole, member.role)}
                     assignableRoles={assignableRoles}
                     access={permissions && permissions.editable && !isSelf ? accessPanel(permissions) : null}
+                    departmentsSummary={
+                      takesSwitches(member.role) ? departmentsSummary(departmentsByUser.get(member.userId)?.departments ?? null) : null
+                    }
+                    departments={
+                      permissions && permissions.editable && !isSelf
+                        ? departmentsPanel(permissions.role, departmentsByUser.get(member.userId), available, viewer)
+                        : null
+                    }
                     ownRoleNote={isSelf && mayManage ? selfNote : null}
                   />
                 );
@@ -148,7 +177,7 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
               icon={<Inbox />}
               tint="pink"
               title="Requests for more information"
-              description="When someone asks to see more, an owner or admin decides here. Approving switches on what you choose, and only what you have yourself."
+              description="When someone asks to see more, the owner or a team member who manages the team decides here. Approving switches on what you choose, and only what you have yourself."
             />
             <CardBody className="px-3 sm:px-6">
               {waiting.length === 0 ? (
@@ -180,13 +209,27 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
           </Card>
         ) : null}
 
+        {mayInvite && createView.templates.length > 0 ? (
+          <Card id="create" className="scroll-mt-6">
+            <CardHeader
+              icon={<UserPlus />}
+              tint="violet"
+              title="Create a team member"
+              description="Make their login here — their email and a password — and tick what they can open and do. They can log in straight away."
+            />
+            <CardBody>
+              <CreateMemberForm orgSlug={orgSlug} view={createView} />
+            </CardBody>
+          </Card>
+        ) : null}
+
         {mayInvite ? (
           <Card>
             <CardHeader
               icon={<MailPlus />}
               tint="pink"
-              title="Invite someone"
-              description="They will be asked to sign in with the address you enter here."
+              title="Or invite by email"
+              description="They make their own password when they accept. You can choose their departments and permissions once they have joined."
             />
             <CardBody>
               <InviteForm orgSlug={orgSlug} roles={invitableRoles} defaultRole={defaultInviteRole(invitableRoles)} />
@@ -217,9 +260,9 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
       </div>
 
       <p className="mt-6 text-sm text-ink-muted">
-        <Badge tone="neutral">Note</Badge> An admin can manage the other members except owners; only an
-        owner can make or change an owner, or change a switch an owner set. Nobody can change their own
-        role, or switch on a permission they do not have themselves.
+        <Badge tone="neutral">Note</Badge> A team member who manages the team can manage everyone except
+        owners; only an owner can make or change an owner, or change what an owner set. Nobody can change
+        their own access, or give a permission or department they do not have themselves.
       </p>
     </>
   );

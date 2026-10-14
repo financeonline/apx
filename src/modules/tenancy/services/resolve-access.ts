@@ -7,7 +7,8 @@ import { NotFound, toMotionError } from '@/core/errors';
 import { log, newRequestId } from '@/core/logging';
 import type { AccessContext } from '../context';
 import type { ActorType, OrgStatus } from '../domain/types';
-import { enabledModules } from '../domain/modules';
+import { enabledModules, type ModuleKey } from '../domain/modules';
+import { DEPARTMENT_KEYS, isDepartmentKey, type DepartmentKey } from '../domain/member-access';
 import { agreedPermissions } from '../domain/permissions';
 
 /**
@@ -44,6 +45,22 @@ interface MyAccessRow {
   features: Record<string, unknown> | null;
   overrides: unknown;
   permissions: string[] | null;
+  departments: string[] | null;
+}
+
+/**
+ * ADR-173: a member's departments narrow the company's systems for that person. A system that is not
+ * a department (none today) is untouched; a department not ticked is absent, as a system switched
+ * off for the company is. NULL = all of the company's.
+ */
+export function narrowToDepartments(
+  modules: ReadonlySet<ModuleKey>,
+  departments: readonly DepartmentKey[] | null,
+): ReadonlySet<ModuleKey> {
+  if (departments === null) return modules;
+  const allowed = new Set<ModuleKey>(departments);
+  const departmentKeys = new Set<ModuleKey>(DEPARTMENT_KEYS);
+  return new Set([...modules].filter((key) => !departmentKeys.has(key) || allowed.has(key)));
 }
 
 /** Logs a disagreement between the TypeScript and SQL twins; the caller keeps only what both grant. */
@@ -89,8 +106,10 @@ export async function resolveAccessFresh(orgSlug: string): Promise<AccessContext
   const row = (data as MyAccessRow[] | null)?.[0];
   if (!row || !row.role) throw new NotFound();
 
-  // ADR-158: the systems the super admin switched on for this organisation.
-  const modules = enabledModules((row.features ?? {}) as Record<string, unknown>);
+  // ADR-158: the systems the super admin switched on for this organisation; ADR-173: narrowed to the
+  // departments this member was given.
+  const departments = Array.isArray(row.departments) ? row.departments.filter(isDepartmentKey) : null;
+  const modules = narrowToDepartments(enabledModules((row.features ?? {}) as Record<string, unknown>), departments);
 
   return {
     userId: user.id,
@@ -101,6 +120,7 @@ export async function resolveAccessFresh(orgSlug: string): Promise<AccessContext
     actorType: row.actor_type,
     organizationStatus: row.status,
     modules,
+    departments,
     db,
     requestId,
     now: () => new Date(),

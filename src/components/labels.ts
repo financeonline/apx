@@ -15,9 +15,9 @@ export const ROLE_LABELS: Readonly<Record<EffectiveRole, string>> & Readonly<Rec
   super_admin: 'APX administrator',
   employee: 'Financial Analyst',
   owner: 'Owner',
-  admin: 'Admin',
+  admin: 'Team member (manages the team)',
   accountant: 'Accountant',
-  client: 'Client',
+  client: 'Team member',
   third_party: '3rd party',
   suspended_member: 'Read only',
   none: 'No access',
@@ -28,27 +28,27 @@ export const ROLE_PLURAL_LABELS: Record<string, string> = {
   super_admin: 'APX administrators',
   employee: 'Financial Analysts',
   owner: 'Owners',
-  admin: 'Admins',
+  admin: 'Team members who manage the team',
   accountant: 'Accountants',
-  client: 'Clients',
+  client: 'Team members',
   third_party: '3rd parties',
 };
 
 /** The company roles, in the order the team page lists them (ADR-172). */
 export const MEMBERSHIP_ROLE_LABELS: Record<string, string> = {
   owner: 'Owner',
-  admin: 'Admin',
+  admin: 'Team member (manages the team)',
   accountant: 'Accountant',
-  client: 'Client',
+  client: 'Team member',
   third_party: '3rd party',
 };
 
 /** One line on what each company role starts with. Per-person switches can change it (ADR-172). */
 export const MEMBERSHIP_ROLE_HINTS: Record<string, string> = {
   owner: 'Everything, including billing, the audit log and deleting the company.',
-  admin: 'Everything except billing, ownership and deletion; cannot invite or change owners.',
+  admin: 'Also manages the team and the company’s settings; not billing, owners or deleting the company.',
   accountant: 'Data capture and compliance; no AI, team or settings.',
-  client: 'A limited view of the business.',
+  client: 'Sees and does what you tick for them.',
   third_party: 'A lender, investor or partner: a read-only overview; can ask for more.',
 };
 

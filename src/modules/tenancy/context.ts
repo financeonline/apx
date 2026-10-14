@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Permission, EffectiveRole } from '@/core/permissions';
 import type { ActorType, OrgStatus } from './domain/types';
 import type { ModuleKey } from './domain/modules';
+import type { DepartmentKey } from './domain/member-access';
 
 /**
  * Everything a service needs to authorise and act (SERVICE_ARCHITECTURE.md §3).
@@ -25,4 +26,9 @@ export interface AccessContext {
    * contexts, tests) means every default-on system — see `moduleOn`.
    */
   readonly modules?: ReadonlySet<ModuleKey>;
+  /**
+   * ADR-173: the departments this member was given; null (or absent) = all of the company's. Already
+   * applied to `modules`; kept so the team page knows what this person may hand on.
+   */
+  readonly departments?: readonly DepartmentKey[] | null;
 }

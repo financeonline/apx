@@ -6,6 +6,8 @@ import {
   resetMemberPermissions,
   setMemberPermission,
   decideAccessRequest,
+  createMemberLogin,
+  setMemberDepartments,
   type SwitchablePermission,
 } from '@/modules/tenancy';
 import { ValidationError } from '@/core/errors';
@@ -103,5 +105,61 @@ export async function decideAccessRequestAction(
     return done(note ? 'Declined. They will see your note.' : 'Declined.');
   } catch (error) {
     return fail(error, { requestId, action: 'settings.decideAccessRequest' });
+  }
+}
+
+/** Every value of a repeated field (the ticked boxes), as strings. */
+function all(form: FormData, name: string): string[] {
+  return form.getAll(name).filter((value): value is string => typeof value === 'string');
+}
+
+/**
+ * "Create a team member" (ADR-173): a login with the password the creator typed, the departments and
+ * permissions they ticked. The password is read as typed — never trimmed — and never echoed back.
+ */
+export async function createMemberLoginAction(
+  _previous: ActionResult | null,
+  form: FormData,
+): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    const password = form.get('password');
+    await createMemberLogin(ctx, {
+      fullName: text(form, 'full_name'),
+      email: text(form, 'email'),
+      password: typeof password === 'string' ? password : '',
+      role: text(form, 'role'),
+      permissions: all(form, 'permissions'),
+      departments: all(form, 'departments'),
+    });
+    revalidatePath(`/app/${orgSlug}/settings/team`);
+    return done('Team member created. Give them their email and password to log in.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'settings.createMemberLogin' });
+  }
+}
+
+/** A team member's departments (ADR-173), from the ticks in their Access panel. */
+export async function setMemberDepartmentsAction(
+  _previous: ActionResult | null,
+  form: FormData,
+): Promise<ActionResult> {
+  const orgSlug = text(form, 'org_slug');
+  let requestId: string | undefined;
+  try {
+    const ctx = await getAccessContext(orgSlug);
+    requestId = ctx.requestId;
+    await setMemberDepartments(ctx, {
+      userId: text(form, 'user_id'),
+      role: text(form, 'role'),
+      departments: all(form, 'departments'),
+    });
+    revalidatePath(`/app/${orgSlug}/settings/team`);
+    return done('Departments saved.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'settings.setMemberDepartments' });
   }
 }

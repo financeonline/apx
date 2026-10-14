@@ -176,7 +176,7 @@ describe('the access panel', () => {
         effective: [...CLIENT_DEFAULTS.filter((p) => p !== 'ai.use' && p !== 'reports.view'), 'data.export'],
       }),
     );
-    expect(panel.roleName).toBe('Client');
+    expect(panel.roleName).toBe('Team member');
     expect(panel.changedCount).toBe(3);
     // `reports.view` is taken away and the viewer lacks it: putting it back would be a grant.
     expect([...panel.resettable].sort()).toEqual(['ai.use', 'data.export']);
@@ -402,14 +402,14 @@ describe('reading the switch forms', () => {
 });
 
 describe('roles', () => {
-  it('offers the five company roles in order, each with its one line', () => {
+  it('offers the five company roles in reading order, each with its one line', () => {
     const options = roleOptions(() => true);
-    expect(options.map((o) => o.role)).toEqual([...TENANT_ROLES]);
-    expect(options.map((o) => o.name)).toEqual(['Owner', 'Admin', 'Accountant', 'Client', '3rd party']);
+    expect([...options.map((o) => o.role)].sort()).toEqual([...TENANT_ROLES].sort());
+    expect(options.map((o) => o.name)).toEqual(['Owner', 'Team member', 'Team member (manages the team)', 'Accountant', '3rd party']);
     expect(options.find((o) => o.role === 'accountant')?.description).toBe(
       'Data capture and compliance; no AI, team or settings.',
     );
-    expect(options.find((o) => o.role === 'client')?.description).toBe('A limited view of the business.');
+    expect(options.find((o) => o.role === 'client')?.description).toBe('Sees and does what you tick for them.');
     expect(options.find((o) => o.role === 'third_party')?.description).toBe(
       'A lender, investor or partner: a read-only overview; can ask for more.',
     );

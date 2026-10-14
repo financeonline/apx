@@ -5,7 +5,7 @@ export {
 export { moduleOn, requireModule } from './services/modules';
 export type { ActorType, OrgStatus, MembershipRole } from './domain/types';
 export { resolveEffectiveRole, type ResolutionInput } from './domain/resolve';
-export { getAccessContext, getPlatformContext, resolveAccessFresh, resolvePlatformRole } from './services/resolve-access';
+export { getAccessContext, getPlatformContext, resolveAccessFresh, resolvePlatformRole, narrowToDepartments } from './services/resolve-access';
 export { confirmPassword } from './services/confirm-password';
 export {
   createOrganization,
@@ -60,7 +60,21 @@ export {
   type MemberPermissions,
   type AccessRequest,
   type AccessRequestStatus,
+  DEPARTMENT_KEYS,
+  DEPARTMENT_WORDS,
+  isDepartmentKey,
+  type DepartmentKey,
+  type MemberDepartments,
 } from './domain/member-access';
+// ADR-173: a company creates its team members' logins and chooses their departments.
+export {
+  LOGIN_ROLES,
+  createMemberLogin,
+  listMemberDepartments,
+  setMemberDepartments,
+  departmentsAvailable,
+  type LoginRole,
+} from './services/team-logins';
 export {
   isSwitchable,
   takesSwitches,

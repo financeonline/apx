@@ -1,4 +1,5 @@
 import type { Permission } from '@/core/permissions';
+import type { ModuleKey } from './modules';
 
 /**
  * User roles and per-person permissions (ADR-172), from the client's revised SOW §"User Access":
@@ -30,9 +31,12 @@ export const ROLE_NAMES: Readonly<Record<TenantRole | 'super_admin' | 'employee'
   super_admin: 'Super admin',
   employee: 'Financial Analyst',
   owner: 'Owner',
-  admin: 'Admin',
+  // ADR-173 (owner, 2026-10-14: "why are there an owner and an admin?"): a company is its owner and
+  // its team members. The `admin` role is a team member who also manages the team and the company's
+  // settings; `client` is a team member who sees and does what was ticked for them.
+  admin: 'Team member (manages the team)',
   accountant: 'Accountant',
-  client: 'Client',
+  client: 'Team member',
   third_party: '3rd party',
 };
 
@@ -152,3 +156,40 @@ export const PERMISSION_WORDS: Readonly<Record<SwitchablePermission, { readonly 
   'data.export': { title: 'Export data', detail: 'Download CSV and spreadsheet exports' },
   'audit.view': { title: 'Audit log', detail: 'See who did what in the company' },
 };
+
+/**
+ * Departments (ADR-173): the parts of APX a team member may open, ticked per person. Each is one of
+ * ADR-158's systems; a department that is not ticked is absent for that person exactly as a system
+ * switched off is absent for the company. NULL (in the database) means all of the company's.
+ * Home, Money (profit and loss, cash), Insights, Data, Activity and Settings are not departments:
+ * what a person sees of those is their permissions' business.
+ */
+export const DEPARTMENT_KEYS = [
+  'banking', 'planning', 'tax', 'analyst', 'actions', 'customers', 'marketing', 'investment', 'reports', 'funding',
+] as const satisfies readonly ModuleKey[];
+export type DepartmentKey = (typeof DEPARTMENT_KEYS)[number];
+
+export const DEPARTMENT_WORDS: Readonly<Record<DepartmentKey, { readonly title: string; readonly detail: string }>> = {
+  banking: { title: 'Banking', detail: 'Bank accounts, statements and transactions' },
+  planning: { title: 'Planning', detail: 'Forecast, What if and Budget' },
+  tax: { title: 'Tax & Balance sheet', detail: 'VAT, Corporation Tax, assets and loans' },
+  analyst: { title: 'AI Financial Analyst', detail: 'Questions answered by the AI Analyst' },
+  actions: { title: 'Action Centre', detail: 'Actions, requests and deliverables' },
+  customers: { title: 'Customers', detail: 'Customers, products and sales' },
+  marketing: { title: 'Marketing', detail: 'The marketing strategy report' },
+  investment: { title: 'Investment', detail: 'The Investment Pack' },
+  reports: { title: 'Reports', detail: 'Daily, weekly, monthly and custom reports' },
+  funding: { title: 'Funding Readiness', detail: 'The funding readiness assessment' },
+};
+
+export function isDepartmentKey(value: unknown): value is DepartmentKey {
+  return typeof value === 'string' && (DEPARTMENT_KEYS as readonly string[]).includes(value);
+}
+
+/** One member's departments, for the team page: NULL = all of the company's. */
+export interface MemberDepartments {
+  readonly userId: string;
+  readonly departments: readonly DepartmentKey[] | null;
+  /** An owner chose them: an admin may not change them. */
+  readonly setByOwner: boolean;
+}

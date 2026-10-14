@@ -1,4 +1,5 @@
 import {
+  DEPARTMENT_WORDS,
   PERMISSION_WORDS,
   ROLE_NAMES,
   SWITCHABLE_PERMISSIONS,
@@ -9,6 +10,9 @@ import {
   type MemberPermissions,
   type SwitchablePermission,
   type TenantRole,
+  type DepartmentKey,
+  type LoginRole,
+  type MemberDepartments,
 } from '@/modules/tenancy';
 import { ACCESS_REQUEST_STATUS_LABELS, MEMBERSHIP_ROLE_HINTS, formatDate } from '@/components/labels';
 
@@ -32,9 +36,15 @@ export interface RoleOption {
   readonly description: string;
 }
 
-/** The company roles the viewer may give, in the contract's order, each with its one line. */
+/**
+ * The order a person reads the roles in (ADR-173): the owner, then the two kinds of team member side
+ * by side, then the accountant and the 3rd party. Every company role, once.
+ */
+const ROLE_ORDER: readonly TenantRole[] = ['owner', 'client', 'admin', 'accountant', 'third_party'];
+
+/** The company roles the viewer may give, each with its one line. */
 export function roleOptions(allowed: (role: TenantRole) => boolean): RoleOption[] {
-  return TENANT_ROLES.filter(allowed).map((role) => ({
+  return ROLE_ORDER.filter((role) => TENANT_ROLES.includes(role)).filter(allowed).map((role) => ({
     role,
     name: ROLE_NAMES[role],
     description: MEMBERSHIP_ROLE_HINTS[role] ?? '',
@@ -379,5 +389,114 @@ export function splitRequests(requests: readonly AccessRequest[]): {
     decided: requests
       .filter((r) => r.status !== 'pending')
       .sort((a, b) => (b.decidedAt ?? b.createdAt).localeCompare(a.decidedAt ?? a.createdAt)),
+  };
+}
+
+// ---------------------------------------------------------------------------------------------
+// Departments and "Create a team member" (ADR-173)
+// ---------------------------------------------------------------------------------------------
+
+/** "All departments", or the ticked ones by name. */
+export function departmentsSummary(departments: readonly DepartmentKey[] | null): string {
+  if (departments === null) return 'All departments';
+  if (departments.length === 0) return 'No departments';
+  return departments.map((key) => DEPARTMENT_WORDS[key].title).join(', ');
+}
+
+export interface DepartmentChoice {
+  readonly key: DepartmentKey;
+  readonly title: string;
+  readonly detail: string;
+  readonly checked: boolean;
+}
+
+export interface DepartmentsPanelView {
+  readonly role: TenantRole;
+  readonly choices: readonly DepartmentChoice[];
+  /** Why the ticks cannot be changed by this viewer; null when they can. */
+  readonly lockedReason: string | null;
+}
+
+/**
+ * One member's departments as their Access panel draws them: the departments the viewer can see
+ * (and so may give), ticked as the member has them. Locked — with the reason — when an owner chose
+ * them and the viewer is not an owner, or when the member has a department the viewer does not
+ * (saving would take it away; the database would refuse giving it back).
+ */
+export function departmentsPanel(
+  role: TenantRole,
+  member: MemberDepartments | undefined,
+  available: readonly DepartmentKey[],
+  viewer: { readonly isOwner: boolean; readonly restricted: boolean },
+): DepartmentsPanelView {
+  const has = (key: DepartmentKey) => member?.departments == null || member.departments.includes(key);
+  // A viewer with every department can give back anything; a narrowed one must not take away what
+  // they could not give.
+  const beyond = viewer.restricted
+    && (member?.departments == null || member.departments.some((key) => !available.includes(key)));
+  const lockedReason = member?.setByOwner && !viewer.isOwner
+    ? 'The owner chose these departments; only an owner can change them.'
+    : beyond
+      ? 'This person has departments you do not have yourself; only an owner can change them.'
+      : null;
+  return {
+    role,
+    choices: available.map((key) => ({ key, ...DEPARTMENT_WORDS[key], checked: has(key) })),
+    lockedReason,
+  };
+}
+
+export interface PermissionChoice {
+  readonly permission: SwitchablePermission;
+  readonly title: string;
+  readonly detail: string;
+  /** The viewer holds it, so may give it. */
+  readonly held: boolean;
+}
+
+export interface CreateMemberView {
+  /** "Start from": the kinds of team member the viewer may create, with their one line. */
+  readonly templates: readonly { readonly role: LoginRole; readonly name: string; readonly description: string }[];
+  /** The viewer may make someone a team member who manages the team (the admin role). */
+  readonly canMakeManager: boolean;
+  readonly departments: readonly { readonly key: DepartmentKey; readonly title: string; readonly detail: string }[];
+  readonly permissionGroups: readonly { readonly title: string; readonly choices: readonly PermissionChoice[] }[];
+  /** What each kind of team member starts with, among the switchable permissions. */
+  readonly defaults: Readonly<Record<LoginRole, readonly SwitchablePermission[]>>;
+}
+
+const TEMPLATE_WORDS: Readonly<Record<'client' | 'accountant' | 'third_party', string>> = {
+  client: 'Tick the departments and what they can do.',
+  accountant: 'Starts with data capture and compliance.',
+  third_party: 'A lender, investor or partner: a read-only overview.',
+};
+
+export function createMemberView(input: {
+  allowed: (role: LoginRole) => boolean;
+  holds: (permission: SwitchablePermission) => boolean;
+  available: readonly DepartmentKey[];
+  defaults: (role: LoginRole) => readonly SwitchablePermission[];
+}): CreateMemberView {
+  const templates = (['client', 'accountant', 'third_party'] as const)
+    .filter((role) => input.allowed(role))
+    .map((role) => ({ role, name: ROLE_NAMES[role], description: TEMPLATE_WORDS[role] }));
+  return {
+    templates,
+    canMakeManager: input.allowed('admin') && input.allowed('client'),
+    departments: input.available.map((key) => ({ key, ...DEPARTMENT_WORDS[key] })),
+    permissionGroups: PERMISSION_GROUPS.map((group) => ({
+      title: group.title,
+      choices: group.permissions.map((permission) => ({
+        permission,
+        ...PERMISSION_WORDS[permission],
+        held: input.holds(permission),
+      })),
+    })),
+    defaults: {
+      admin: input.defaults('admin'),
+      accountant: input.defaults('accountant'),
+      client: input.defaults('client'),
+      third_party: input.defaults('third_party'),
+    },
   };
 }
