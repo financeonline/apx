@@ -52,7 +52,7 @@ export function BrandedScreen({
       <div className="relative isolate min-h-dvh overflow-hidden bg-black">
         {/* The client's background, recreated at high resolution in ChatGPT (owner, 2026-10-13). */}
         <Image
-          src="/brand/apx-background.webp" alt="" fill priority sizes="100vw"
+          src="/brand/apx-background-v2.webp" alt="" fill priority sizes="100vw"
           className="-z-10 object-cover object-[32%_center] lg:object-center"
         />
         <svg
