@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
+import { AuthArt } from './auth-art';
 import { CornerBlob, Wordmark } from './brand';
 
 /**
@@ -57,32 +58,39 @@ export function BrandedScreen({
             flat and glowing areas smoothed edge-aware, upscaled to 2880 × 1620 without sharpening,
             a fine dither against banding, near-lossless WebP. Served as prepared — never through
             the image optimiser, which re-encodes at quality 75 and brings the blocks back — with a
-            1600 px copy for screens up to 1023 px. */}
-        <picture>
-          <source media="(max-width: 1023px)" srcSet="/brand/apx-background-v7-1600.webp" type="image/webp" />
-          <img
-            src="/brand/apx-background-v7.webp" alt="" fetchPriority="high" decoding="async"
-            className="absolute inset-0 -z-10 size-full object-cover object-[32%_center] lg:object-center"
-          />
-        </picture>
-        <svg
-          aria-hidden="true" focusable="false" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid slice"
-          className="pointer-events-none absolute inset-0 -z-10 hidden size-full select-none lg:block"
-        >
-          <defs>
-            <filter id="apx-word-shadow" x="-20%" y="-50%" width="140%" height="200%">
-              <feDropShadow dx="0" dy="1" stdDeviation="2.5" floodColor="#000000" floodOpacity="0.55" />
-            </filter>
-          </defs>
-          {WORDS.map(({ word, x, y }) => (
-            <g key={word} filter="url(#apx-word-shadow)">
-              <text x={x} y={y} textAnchor="middle" fill="#ffffff" fontSize="15" fontWeight="600" letterSpacing="4" className="font-sans">
-                {word}
-              </text>
-              <rect x={x - 23} y={y + 16} width="46" height="4" rx="2" fill="#ffffff" fillOpacity="0.9" />
-            </g>
-          ))}
-        </svg>
+            1600 px copy for screens up to 1023 px. From `lg`, with WebGL and without "reduce
+            motion", the live motion graphic replaces it (AuthArt, SpiralScene). */}
+        <AuthArt
+          still={(
+            <>
+              <picture>
+                <source media="(max-width: 1023px)" srcSet="/brand/apx-background-v7-1600.webp" type="image/webp" />
+                <img
+                  src="/brand/apx-background-v7.webp" alt="" fetchPriority="high" decoding="async"
+                  className="absolute inset-0 -z-10 size-full object-cover object-[32%_center] lg:object-center"
+                />
+              </picture>
+              <svg
+                aria-hidden="true" focusable="false" viewBox="0 0 1280 720" preserveAspectRatio="xMidYMid slice"
+                className="pointer-events-none absolute inset-0 -z-10 hidden size-full select-none lg:block"
+              >
+                <defs>
+                  <filter id="apx-word-shadow" x="-20%" y="-50%" width="140%" height="200%">
+                    <feDropShadow dx="0" dy="1" stdDeviation="2.5" floodColor="#000000" floodOpacity="0.55" />
+                  </filter>
+                </defs>
+                {WORDS.map(({ word, x, y }) => (
+                  <g key={word} filter="url(#apx-word-shadow)">
+                    <text x={x} y={y} textAnchor="middle" fill="#ffffff" fontSize="15" fontWeight="600" letterSpacing="4" className="font-sans">
+                      {word}
+                    </text>
+                    <rect x={x - 23} y={y + 16} width="46" height="4" rx="2" fill="#ffffff" fillOpacity="0.9" />
+                  </g>
+                ))}
+              </svg>
+            </>
+          )}
+        />
         <main className="flex min-h-dvh w-full flex-col justify-center gap-10 px-6 py-16 sm:px-12 lg:pl-[17.5vw]">
           <div className="w-full max-w-sm">{home}</div>
           <div className="w-full max-w-sm">{children}</div>
