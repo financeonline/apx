@@ -3,7 +3,7 @@
 --
 -- role_permissions is the generated mirror of ROLE_MATRIX; app.has_permission() reads nothing else,
 -- so a drift here silently changes authorisation everywhere. The first assertion is the full
--- 141-pair set comparison transcribed from the markdown table (ADR-172 added the accountant and
+-- 140-pair set comparison transcribed from the markdown table (ADR-172 added the accountant and
 -- third_party columns); the rest are the named
 -- representative pairs the strategy calls out, so a failure names the exact cell that drifted.
 
@@ -51,14 +51,14 @@ select set_eq(
      ('owner|assignments.view'),('owner|assignments.manage'),('owner|documents.view'),
      ('owner|data.export'),('owner|audit.view'),('owner|settings.manage'),
      ('owner|billing.manage'),('owner|org.delete'),
-     -- admin (26): owner minus assignments.manage, billing.manage, org.delete
+     -- admin (25): owner minus assignments.manage, billing.manage, org.delete, users.invite (ADR-174)
      ('admin|dashboard.view'),('admin|financials.view'),('admin|financials.edit'),
      ('admin|imports.create'),('admin|imports.review'),('admin|banking.view'),
      ('admin|banking.reconcile'),('admin|customers.view'),('admin|customers.edit'),
      ('admin|reports.view'),('admin|reports.generate'),('admin|ai.use'),
      ('admin|actions.view'),('admin|actions.create'),('admin|actions.assign'),
      ('admin|actions.update_own'),('admin|alerts.manage'),('admin|intelligence.recompute'),
-     ('admin|users.view'),('admin|users.invite'),('admin|users.manage'),
+     ('admin|users.view'),('admin|users.manage'),
      ('admin|assignments.view'),('admin|documents.view'),('admin|data.export'),
      ('admin|audit.view'),('admin|settings.manage'),
      -- accountant (18, ADR-172): data capture and compliance; no AI, team, settings or assigning
@@ -77,7 +77,7 @@ select set_eq(
      -- suspended_member (1): frozen Home only (ADR-044.4)
      ('suspended_member|dashboard.view')
   $$,
-  'role_permissions equals RBAC_MATRIX.md §2.1 cell for cell (141 pairs)');
+  'role_permissions equals RBAC_MATRIX.md §2.1 cell for cell (140 pairs)');
 
 -- ---------------------------------------------------------------------------
 -- 2. Cardinality per role — a fast locator when the set comparison above fails.
@@ -88,8 +88,8 @@ select is((select count(*)::int from public.role_permissions where role = 'emplo
           'employee holds 22 permissions');
 select is((select count(*)::int from public.role_permissions where role = 'owner'), 29,
           'owner holds 29 permissions');
-select is((select count(*)::int from public.role_permissions where role = 'admin'), 26,
-          'admin holds 26 permissions');
+select is((select count(*)::int from public.role_permissions where role = 'admin'), 25,
+          'admin holds 25 permissions');
 select is((select count(*)::int from public.role_permissions where role = 'client'), 9,
           'client holds 9 permissions');
 select is((select count(*)::int from public.role_permissions where role = 'accountant'), 18,
@@ -171,7 +171,7 @@ from (values
   ('admin',    'platform.ai_feedback.review',  false),
   ('admin',    'platform.jobs.view',           false),
   ('admin',    'users.view',                   true),
-  ('admin',    'users.invite',                 true),
+  ('admin',    'users.invite',                 false),
   ('admin',    'users.manage',                 true),
   ('admin',    'audit.view',                   true),
   ('admin',    'settings.manage',              true),

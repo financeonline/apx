@@ -8,6 +8,7 @@ import {
   setsOwnerSwitches,
   listMemberDepartments,
   departmentsAvailable,
+  mayCreateMembers,
   switchableDefaults,
   takesSwitches,
 } from '@/modules/tenancy';
@@ -35,6 +36,8 @@ export const dynamic = 'force-dynamic';
  *   has no role selector. A Financial Analyst is the super admin's to manage: no role, no switches.
  * - **Create a team member** (ADR-173) — the company makes the person's login (email and password)
  *   and ticks the departments they can open and what they can do, as far as the viewer's own reach.
+ *   Only the owner sees it (ADR-174): a team member who manages the team manages the people the owner
+ *   created, but adds nobody, and is told so.
  *   Inviting by email was removed from the team page (owner, 2026-10-14: "remove this completely"):
  *   a company's team members are created here with a login, never invited. (The super admin still
  *   invites a new company's owner by link, ADR-158/160.)
@@ -46,7 +49,7 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
   const ctx = await getAccessContext(orgSlug);
   requirePermission(ctx, 'users.view');
 
-  const mayInvite = can(ctx, 'users.invite');
+  const mayCreate = mayCreateMembers(ctx);
   const mayManage = can(ctx, 'users.manage');
   const seesAnalysts = can(ctx, 'assignments.view');
 
@@ -207,7 +210,7 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
           </Card>
         ) : null}
 
-        {mayInvite && createView.templates.length > 0 ? (
+        {mayCreate && createView.templates.length > 0 ? (
           <Card id="create" className="scroll-mt-6">
             <CardHeader
               icon={<UserPlus />}
@@ -219,14 +222,19 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
               <CreateMemberForm orgSlug={orgSlug} view={createView} />
             </CardBody>
           </Card>
+        ) : mayManage ? (
+          <p className="text-sm text-ink-muted">
+            Only the company’s owner can create team members, accountants and 3rd parties. Ask the owner to
+            add someone new.
+          </p>
         ) : null}
-
       </div>
 
       <p className="mt-6 text-sm text-ink-muted">
-        <Badge tone="neutral">Note</Badge> A team member who manages the team can manage everyone except
-        owners; only an owner can make or change an owner, or change what an owner set. Nobody can change
-        their own access, or give a permission or department they do not have themselves.
+        <Badge tone="neutral">Note</Badge> Only an owner can create team members. A team member who
+        manages the team can manage everyone except owners; only an owner can make or change an owner, or
+        change what an owner set. Nobody can change their own access, or give a permission or department
+        they do not have themselves.
       </p>
     </>
   );

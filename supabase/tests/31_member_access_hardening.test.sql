@@ -361,31 +361,33 @@ select is(pg_temp.try_as('e4000000-0000-0000-0000-000000000001', $$select api.ch
 select is((select count(*)::int from public.member_permission_overrides where user_id = 'e4000000-0000-0000-0000-000000000020'),
           0, '… which drops their switches (an owner takes none; a kept one would return on a demotion)');
 
--- C (probe p2 "C"): an invitation carries the inviter's ceiling. The raw tokens are kept for the
--- acceptances below (they are returned once and never stored).
+-- C (probe p2 "C"), revised by ADR-174: only the company's owner adds anyone. An admin invites
+-- nobody and creates no login, whatever the role; the owner holds everything, so an owner's
+-- invitation withholds nothing. The raw token is kept for the acceptance below (returned once).
 create temp table tokens (who text primary key, token text) on commit drop;
+select is(pg_temp.try_as('e4000000-0000-0000-0000-000000000002', $$select api.invite_member_with_token('e4a00000-0000-0000-0000-00000000000a', 'mh-13@hardening.motion', 'admin')$$),
+          '42501', 'admin1 cannot invite an admin (ADR-174)');
+select is(pg_temp.try_as('e4000000-0000-0000-0000-000000000006', $$select api.invite_member_with_token('e4a00000-0000-0000-0000-00000000000a', 'mh-13@hardening.motion', 'accountant')$$),
+          '42501', 'admin2 cannot invite an accountant');
+select is(pg_temp.try_as('e4000000-0000-0000-0000-000000000006', $$select api.invite_member_with_token('e4a00000-0000-0000-0000-00000000000a', 'mh-13@hardening.motion', 'third_party')$$),
+          '42501', '… nor a 3rd party');
+select is(pg_temp.try_as('e4000000-0000-0000-0000-000000000006', $$select api.begin_member_login('e4a00000-0000-0000-0000-00000000000a', 'mh-13@hardening.motion', 'client', '{}', null)$$),
+          '42501', '… nor start a login for a team member');
+select is(pg_temp.try_as('e4000000-0000-0000-0000-000000000002', $$select api.begin_member_login('e4a00000-0000-0000-0000-00000000000a', 'mh-13@hardening.motion', 'accountant', '{}', null)$$),
+          '42501', 'admin1 cannot start a login for an accountant');
+select is((select count(*)::int from public.invitations where email = 'mh-13@hardening.motion')
+          + (select count(*)::int from public.member_login_claims where email = 'mh-13@hardening.motion'),
+          0, '… and nothing was recorded for any of those');
 insert into tokens values
-  ('13', pg_temp.invite_as('e4000000-0000-0000-0000-000000000002', 'e4a00000-0000-0000-0000-00000000000a', 'mh-13@hardening.motion', 'admin')),
-  ('14', pg_temp.invite_as('e4000000-0000-0000-0000-000000000006', 'e4a00000-0000-0000-0000-00000000000a', 'mh-14@hardening.motion', 'accountant'));
-select ok((select token from tokens where who = '13') is not null, 'admin1 (financials.view off) invites an admin');
-select is((select withheld_permissions from public.invitations where email = 'mh-13@hardening.motion'),
-          '{financials.view}'::text[], '… and the invitation records what admin1 could not give');
-select ok(pg_temp.invite_as('e4000000-0000-0000-0000-000000000001', 'e4a00000-0000-0000-0000-00000000000a', 'owner-invite@hardening.motion', 'accountant') is not null, 'the owner invites an accountant');
-select is((select withheld_permissions from public.invitations where email = 'owner-invite@hardening.motion'),
+  ('14', pg_temp.invite_as('e4000000-0000-0000-0000-000000000001', 'e4a00000-0000-0000-0000-00000000000a', 'mh-14@hardening.motion', 'accountant'));
+select ok((select token from tokens where who = '14') is not null, 'the owner invites an accountant');
+select is((select withheld_permissions from public.invitations where email = 'mh-14@hardening.motion'),
           '{}'::text[], '… withholding nothing');
--- Acceptance: the invitee holds what the inviter held, then and now.
-select is(pg_temp.try_as('e4000000-0000-0000-0000-000000000013', format('select api.accept_invitation(%L)', (select token from tokens where who = '13'))),
-          'ok', 'the invited admin accepts');
-select ok(not pg_temp.has_perm('e4000000-0000-0000-0000-000000000013', 'e4a00000-0000-0000-0000-00000000000a', 'financials.view'),
-          '… and does NOT hold financials.view, which their inviter lacked');
-select ok(pg_temp.has_perm('e4000000-0000-0000-0000-000000000013', 'e4a00000-0000-0000-0000-00000000000a', 'users.manage'), '… but holds the rest of the admin role');
-select is(pg_temp.try_as('e4000000-0000-0000-0000-000000000001', $$select api.set_member_permission('e4a00000-0000-0000-0000-00000000000a', 'e4000000-0000-0000-0000-000000000006', 'documents.view', false)$$),
-          'ok', 'after admin2 invited an accountant, the owner switches admin2''s documents.view off');
 select is(pg_temp.try_as('e4000000-0000-0000-0000-000000000014', format('select api.accept_invitation(%L)', (select token from tokens where who = '14'))),
           'ok', 'the invited accountant accepts');
-select ok(not pg_temp.has_perm('e4000000-0000-0000-0000-000000000014', 'e4a00000-0000-0000-0000-00000000000a', 'documents.view'),
-          '… and does not hold documents.view, which the inviter lost before acceptance');
-select ok(pg_temp.has_perm('e4000000-0000-0000-0000-000000000014', 'e4a00000-0000-0000-0000-00000000000a', 'financials.view'), '… but holds what the inviter still holds');
+select ok(pg_temp.has_perm('e4000000-0000-0000-0000-000000000014', 'e4a00000-0000-0000-0000-00000000000a', 'documents.view'),
+          '… and holds the accountant''s documents.view');
+select ok(pg_temp.has_perm('e4000000-0000-0000-0000-000000000014', 'e4a00000-0000-0000-0000-00000000000a', 'financials.view'), '… and financials.view');
 
 -- ===========================================================================
 -- B. HIGH 1 — the detail, wherever it is stored

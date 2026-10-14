@@ -514,11 +514,14 @@ describe('"Request more information"', () => {
 });
 
 describe('invitations take the new roles', () => {
-  it('an admin may invite an accountant and a 3rd party, never an owner', async () => {
+  it('an owner may invite an accountant and a 3rd party; an admin may invite nobody (ADR-174)', async () => {
+    const owner = await ctxFor('owner');
+    expect(await outcome(inviteMember(owner, { email: `acc-invite@${DOMAIN}`, role: 'accountant' }))).toBe('ok');
+    expect(await outcome(inviteMember(owner, { email: `lender-invite@${DOMAIN}`, role: 'third_party' }))).toBe('ok');
     const admin = await ctxFor('admin');
-    expect(await outcome(inviteMember(admin, { email: `acc-invite@${DOMAIN}`, role: 'accountant' }))).toBe('ok');
-    expect(await outcome(inviteMember(admin, { email: `lender-invite@${DOMAIN}`, role: 'third_party' }))).toBe('ok');
-    expect(await outcome(inviteMember(admin, { email: `owner-invite@${DOMAIN}`, role: 'owner' }))).toBe('PERMISSION_DENIED');
+    for (const role of ['accountant', 'third_party', 'client', 'owner'] as const) {
+      expect(await outcome(inviteMember(admin, { email: `${role}-by-admin@${DOMAIN}`, role }))).toBe('PERMISSION_DENIED');
+    }
     expect(sqlstate((await rpc('admin', 'invite_member_with_token', {
       p_org: orgA, p_email: `owner-invite2@${DOMAIN}`, p_role: 'owner',
     })).error)).toBe('42501');

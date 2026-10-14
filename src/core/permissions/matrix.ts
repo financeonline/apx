@@ -110,7 +110,8 @@ const GRANTS: Record<Exclude<GrantedRole, 'suspended_member'>, readonly Permissi
     'alerts.manage',
     'intelligence.recompute',
     'users.view',
-    'users.invite', // ◐ admin/client only
+    // Not 'users.invite': only the company's owner creates team members (owner, 2026-10-14: "none
+    // of the other members can create any team member, accountant, or third-party users").
     'users.manage', // ◐ admin/client only, never owners
     'assignments.view',
     'documents.view',

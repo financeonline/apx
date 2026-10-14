@@ -46,7 +46,7 @@ export const MEMBERSHIP_ROLE_LABELS: Record<string, string> = {
 /** One line on what each company role starts with. Per-person switches can change it (ADR-172). */
 export const MEMBERSHIP_ROLE_HINTS: Record<string, string> = {
   owner: 'Everything, including billing, the audit log and deleting the company.',
-  admin: 'Also manages the team and the company’s settings; not billing, owners or deleting the company.',
+  admin: 'Also manages the team and the company’s settings; cannot create team members, and not billing, owners or deleting the company.',
   accountant: 'Data capture and compliance; no AI, team or settings.',
   client: 'Sees and does what you tick for them.',
   third_party: 'A lender, investor or partner: a read-only overview; can ask for more.',

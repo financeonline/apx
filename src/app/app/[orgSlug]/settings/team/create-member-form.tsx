@@ -147,8 +147,9 @@ export function CreateMemberForm({ orgSlug, view }: { orgSlug: string; view: Cre
           <span className="min-w-0">
             <span className="block text-sm font-medium">Can manage the team and company settings</span>
             <span className="block text-xs text-ink-muted">
-              They can create and remove team members and change their access — never an owner, and never
-              more than they have themselves. Not billing or deleting the company.
+              They can change team members’ access and remove them — never an owner, and never more than
+              they have themselves. Only you, the owner, can create team members. Not billing or deleting
+              the company.
             </span>
           </span>
         </label>

@@ -181,3 +181,14 @@ export function agreedPermissions(
     onlyDatabase: [...fromDatabase].filter((p) => !computed.has(p)),
   };
 }
+
+/**
+ * Whether a person in this role creates the company's team members (ADR-174; owner, 2026-10-14:
+ * "only the owner … can generate a user"): an owner, and nobody else — not an admin, not the super
+ * admin. `app.check_member_login_role` is the authority. An allow-list (R2-A-07).
+ */
+const MEMBER_CREATOR_ROLES: ReadonlySet<string> = new Set<EffectiveRole>(['owner']);
+
+export function createsMembers(role: EffectiveRole | string): boolean {
+  return MEMBER_CREATOR_ROLES.has(role);
+}

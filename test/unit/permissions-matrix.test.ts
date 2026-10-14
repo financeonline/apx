@@ -115,9 +115,9 @@ describe('deny by default', () => {
 describe('the answers the brief asked for (RBAC_MATRIX.md §2.2)', () => {
   const holds = (role: GrantedRole, p: Permission) => ROLE_MATRIX[role].has(p);
 
-  it('only owner, admin and super admin can invite users', () => {
+  it('only owner and super admin can invite users; an admin cannot (ADR-174)', () => {
     expect(holds('owner', 'users.invite')).toBe(true);
-    expect(holds('admin', 'users.invite')).toBe(true);
+    expect(holds('admin', 'users.invite')).toBe(false);
     expect(holds('super_admin', 'users.invite')).toBe(true);
     expect(holds('employee', 'users.invite')).toBe(false);
     expect(holds('client', 'users.invite')).toBe(false);

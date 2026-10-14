@@ -249,7 +249,7 @@ select is((select count(*)::int from detail_tables d
 select is(app.role_rank('accountant'), 1, 'accountant ranks with client (1)');
 select is(app.role_rank('third_party'), 1, 'third_party ranks with client (1)');
 select ok(app.ceiling_allows('admin', 'accountant') and app.ceiling_allows('admin', 'third_party'),
-          'an admin may invite, move and remove an accountant and a 3rd party');
+          'an admin may move and remove an accountant and a 3rd party (only the owner adds them, ADR-174)');
 select ok(not app.ceiling_allows('accountant', 'client') and not app.ceiling_allows('third_party', 'client'),
           'neither new role governs anybody');
 
@@ -505,10 +505,10 @@ select is(pg_temp.try_as('e3000000-0000-0000-0000-000000000002',
           'ok', 'an admin may move a member to 3rd party');
 select is(pg_temp.try_as('e3000000-0000-0000-0000-000000000002',
             'select * from api.invite_member_with_token(''e3a00000-0000-0000-0000-00000000000a'', ''new-accountant@test.motion'', ''accountant'')'),
-          'ok', 'an admin may invite an accountant');
+          '42501', 'an admin may NOT invite an accountant (ADR-174: only the owner adds anyone)');
 select is(pg_temp.try_as('e3000000-0000-0000-0000-000000000002',
             'select * from api.invite_member_with_token(''e3a00000-0000-0000-0000-00000000000a'', ''new-lender@test.motion'', ''third_party'')'),
-          'ok', 'an admin may invite a 3rd party');
+          '42501', 'an admin may NOT invite a 3rd party');
 
 -- ---------------------------------------------------------------------------
 -- 8. The shape (ADR-065)

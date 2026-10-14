@@ -15,7 +15,7 @@ import {
   type MemberDepartments,
   type SwitchablePermission,
 } from '../domain/member-access';
-import { isSwitchable, takesSwitches } from '../domain/permissions';
+import { createsMembers, isSwitchable, takesSwitches } from '../domain/permissions';
 
 /**
  * A company creates its team members' logins, and chooses their departments (ADR-173; owner,
@@ -28,6 +28,10 @@ import { isSwitchable, takesSwitches } from '../domain/permissions';
  * that login a member, only if it was made after the claim, for the claim's email. Auth refuses an
  * email that already has a login, so nobody's existing password is ever set; that person is invited
  * by email instead. If the last step fails, the login just made is removed again.
+ *
+ * Only the company's owner creates team members (ADR-174; owner, 2026-10-14: "none of the other
+ * members can create any team member, accountant, or third-party users"): an admin manages the people
+ * the owner created, but adds nobody.
  *
  * Every check is made here first for a plain message, and again in SQL, which is the authority.
  */
@@ -99,8 +103,13 @@ function switchables(values: readonly string[]): SwitchablePermission[] {
   return SWITCHABLE_PERMISSIONS.filter((p) => wanted.has(p));
 }
 
+/** Only the company's owner creates team members (ADR-174); the database refuses anyone else. */
+export function mayCreateMembers(ctx: AccessContext): boolean {
+  return createsMembers(ctx.effectiveRole) && can(ctx, 'users.invite');
+}
+
 export async function createMemberLogin(ctx: AccessContext, input: unknown): Promise<{ userId: string }> {
-  assertCan(ctx, 'users.invite');
+  if (!mayCreateMembers(ctx)) throw new PermissionDenied('create team members — only the owner can');
   const org = orgOf(ctx);
   const value = parse(CreateMemberLoginInput, input);
   if (!canInviteRole(ctx.effectiveRole, value.role)) throw new PermissionDenied(`create a ${value.role} login`);

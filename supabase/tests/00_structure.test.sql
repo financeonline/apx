@@ -252,8 +252,9 @@ select is(
 -- 7. role_permissions — the generated matrix mirror (ADR-003).
 -- ---------------------------------------------------------------------------
 -- ADR-172 added the accountant (18) and third_party (2) rows: 121 → 141 grants, six → eight roles.
-select is((select count(*)::int from public.role_permissions), 141,
-          'role_permissions holds exactly 141 grants');
+-- ADR-174 took users.invite from the admin: 141 → 140.
+select is((select count(*)::int from public.role_permissions), 140,
+          'role_permissions holds exactly 140 grants');
 
 select is((select count(distinct role)::int from public.role_permissions), 8,
           'role_permissions covers exactly eight roles');

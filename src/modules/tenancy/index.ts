@@ -70,6 +70,7 @@ export {
 export {
   LOGIN_ROLES,
   createMemberLogin,
+  mayCreateMembers,
   listMemberDepartments,
   setMemberDepartments,
   departmentsAvailable,

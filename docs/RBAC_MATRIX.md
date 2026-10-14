@@ -11,6 +11,8 @@ Consumed by: `SECURITY_MODEL.md`, `SERVICE_ARCHITECTURE.md`, `ROUTE_ARCHITECTURE
 
 > **Revision 1.5 (ADR-172 addendum, the owner's decision, 2026-10-14).** The Monthly Management Report has two editions. The FULL report (alerts, open action titles) and its stored PDF need `financials.view` as well as `reports.view`; a reader without it — a 3rd party by default, or anyone whose switch is off — gets the SUMMARY EDITION (figures and Business Health Score only), rendered on request from the overview and never stored (§8.3). Migration `20261018000036`; pgTAP `32_report_variants`.
 
+> **Revision 1.6 (ADR-174, the owner's decision, 2026-10-14).** Only the company's owner creates team members: the admin role no longer holds `users.invite`, and `app.check_member_login_role` refuses every creator but an owner. An admin still manages the people the owner created. Migration `20261018000038`.
+
 > **Revision 1.2 (red-team round 2, 2026-09-05).** Applies ADR-043 (`api` vs `api_server`), ADR-044 (MFA at the database for employees, ownership-transfer invariants, allow-list principle, throttles, `suspended_member` in the code type). Findings addressed: R2-A-01, R2-A-03, R2-A-07, R2-A-08, R2-A-11. See `RED_TEAM_REVIEW.md §6`.
 
 ## 1. Roles
@@ -65,7 +67,7 @@ All keys live in `src/core/permissions/catalogue.ts` as a `const` union; the rol
 | `alerts.manage` | ✓ | ✓ | ✓ | ✓ | ◐ | ◐ | ✗ | Acknowledge/resolve/dismiss alerts; client and accountant may acknowledge only (a 3rd party too, if switched on) |
 | `intelligence.recompute` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Trigger a manual calculation run |
 | `users.view` | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Employee has no member-list page; member names appear only in assignee pickers via `org_member_profiles` (ADR-037) |
-| `users.invite` | ✓ | ✗ | ✓ | ◐ | ✗ | ✗ | ✗ | Admin may invite `admin`, `accountant`, `client` or `third_party`, never `owner` |
+| `users.invite` | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Only the owner creates team members (rev 1.6, ADR-174): `api.begin_member_login`/`finish_member_login` refuse anyone but an owner, the super admin included; the super admin invites a new company's owner by link |
 | `users.manage` | ✓ | ✗ | ✓ | ◐ | ✗ | ✗ | ✗ | Admin may change/remove `admin`/`accountant`/`client`/`third_party`; cannot touch owners; cannot promote to owner. Also: per-person switches and answering access requests (§7) |
 | `assignments.view` | ✓ | ◐ | ✓ | ✓ | ✗ | ✗ | ✗ | Employee sees own assignments only, served by `/portfolio` (ADR-037) |
 | `assignments.manage` | ✓ | ✗ | ◐ | ✗ | ✗ | ✗ | ✗ | Only super admin creates; owner may **revoke** an employee's assignment to their org |
@@ -87,7 +89,7 @@ Every permission in this table is checked twice on a write: by `assertCan` in th
 
 | Question | Answer |
 |---|---|
-| Who can invite users | Owner (any tenant role), Admin (admin, accountant, client, 3rd party — never owner), Super Admin (any). Employees, accountants, clients and 3rd parties cannot. |
+| Who can invite users | Only the company's Owner creates team members, accountants and 3rd parties (rev 1.6, ADR-174), as logins with a password (ADR-173). The Super Admin invites a new company's owner. Admins, employees, accountants, clients and 3rd parties cannot. |
 | Who can remove users | Owner (anyone except last owner), Admin (admins, accountants, clients, 3rd parties), Super Admin. Users may leave an org themselves unless they are the last owner. |
 | Who can change roles | Owner (any, including promote to owner and demote another owner), Admin (among admin, accountant, client and 3rd party), Super Admin (break-glass, audited) — never their OWN role (rev 1.4; leaving is "Leave", an owner steps down by the ownership transfer). A role change keeps the switches an owner set, clears the others, and switches off whatever of the new role's defaults the person changing it does not hold (§7.2). |
 | Who can switch a person's permissions | The owner and admins (`users.manage`), for any member within their ceiling except an owner and except themselves, and only ever switching ON what they hold themselves; an admin never changes or resets a switch an owner set (§7). |

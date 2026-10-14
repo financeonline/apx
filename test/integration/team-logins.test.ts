@@ -20,7 +20,7 @@ import { ANON_KEY, SUPABASE_URL, adminSql, clientFor, createAuthUser, sqlstate }
  *
  * Every "cannot" is asserted at the DATABASE with the person's own token — the service checks first
  * for a plain message, but the api.* functions are the authority. The one claim this suite exists
- * for: no existing account can be pulled into a company, and nobody gives more than they have.
+ * for: no existing account can be pulled into a company, and only the owner adds anyone (ADR-174).
  */
 
 const RUN = `t${Date.now().toString(36)}`;
@@ -164,34 +164,56 @@ describe('creating a team member with a login', () => {
     expect(sqlstate(again.error)).toBe('P0002');
   });
 
-  it('nobody gives what they do not have, and only managers create logins', async () => {
-    // The owner takes data.export away from the admin; the admin cannot give it.
-    expect((await rpc('owner', 'set_member_permission', {
-      p_org: org, p_user: ids.admin, p_permission: 'data.export', p_granted: false,
-    })).error).toBeNull();
-    const notHeld = await rpc('admin', 'begin_member_login', {
-      p_org: org, p_email: email('x1'), p_role: 'client', p_permissions: ['data.export'], p_departments: null,
-    });
-    expect(sqlstate(notHeld.error)).toBe('42501');
-
-    // The owner narrows the admin to Reports; the admin cannot give Banking, nor "all".
-    expect((await rpc('owner', 'set_member_departments', { p_org: org, p_user: ids.admin, p_departments: ['reports'] })).error).toBeNull();
-    for (const departments of [['banking'], null]) {
-      const wide = await rpc('admin', 'begin_member_login', {
-        p_org: org, p_email: email('x2'), p_role: 'client', p_permissions: [], p_departments: departments,
-      });
-      expect(sqlstate(wide.error)).toBe('42501');
+  it('only the owner creates logins: an admin, a client and a stranger are refused (ADR-174)', async () => {
+    // Through the service: a plain refusal before anything is made.
+    for (const who of ['admin', 'client'] as Who[]) {
+      const ctx = await ctxFor(who);
+      for (const role of ['client', 'accountant', 'third_party', 'admin'] as const) {
+        expect(await outcome(createMemberLogin(ctx, {
+          fullName: 'Nobody', email: email(`by-${who}-${role}`), password: 'Whatever-123',
+          role, permissions: [], departments: [],
+        }))).toBe('PERMISSION_DENIED');
+      }
     }
+    // At the database, which is the authority: every role, with or without permissions ticked.
+    for (const who of ['admin', 'admin2', 'client', 'outsider'] as Who[]) {
+      for (const role of ['client', 'accountant', 'third_party', 'admin']) {
+        const begin = await rpc(who, 'begin_member_login', {
+          p_org: org, p_email: email(`db-${who}-${role}`), p_role: role, p_permissions: [], p_departments: null,
+        });
+        expect(['42501', 'P0002']).toContain(sqlstate(begin.error));
+      }
+    }
+    expect(adminSql(`select count(*) from public.member_login_claims where organization_id = '${org}' and created_by <> '${ids.owner}'`)).toBe('0');
 
-    // Never an owner this way, and a member without users.invite cannot start one.
+    // A claim the owner started cannot be finished by an admin either (the claim is the owner's).
+    const begin = await rpc('owner', 'begin_member_login', {
+      p_org: org, p_email: email('late'), p_role: 'client', p_permissions: [], p_departments: null,
+    });
+    expect(begin.error).toBeNull();
+    const fresh = createAuthUser(email('late'));
+    const stolen = await rpc('admin', 'finish_member_login', { p_claim: begin.data as string, p_user: fresh });
+    expect(sqlstate(stolen.error)).toBe('P0002');
+
+    // Never an owner this way, even by the owner.
     const owner = await rpc('owner', 'begin_member_login', {
       p_org: org, p_email: email('x3'), p_role: 'owner', p_permissions: [], p_departments: null,
     });
     expect(sqlstate(owner.error)).toBe('22023');
-    const client = await rpc('client', 'begin_member_login', {
-      p_org: org, p_email: email('x4'), p_role: 'client', p_permissions: [], p_departments: null,
-    });
-    expect(sqlstate(client.error)).toBe('42501');
+  });
+
+  it('a second owner of the company may create logins too', async () => {
+    adminSql(`insert into public.organization_memberships (organization_id, user_id, role) values ('${org}', '${ids.outsider}', 'owner')`);
+    try {
+      const ctx = await ctxFor('outsider');
+      const { userId } = await createMemberLogin(ctx, {
+        fullName: 'Second Owner Hire', email: email('second-hire'), password: 'Second-owner-1',
+        role: 'accountant', permissions: ['dashboard.view'], departments: [],
+      });
+      expect(membership(userId)).toMatch(/^accountant\|/);
+    } finally {
+      adminSql(`delete from public.organization_memberships where organization_id = '${org}' and user_id = '${ids.outsider}'`);
+    }
   });
 });
 
