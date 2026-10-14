@@ -50,9 +50,12 @@ export function BrandedScreen({
   if (auth) {
     return (
       <div className="relative isolate min-h-dvh overflow-hidden bg-black">
-        {/* The client's background, recreated at high resolution in ChatGPT (owner, 2026-10-13). */}
+        {/* The client's background, generated in ChatGPT and cleaned and upscaled to 2880 × 1620 here
+            (owner, 2026-10-14: "neat and clean, high resolution with proper pixels"). `unoptimized`:
+            served exactly as prepared — the image optimiser would re-encode it at quality 75 and
+            bring the blockiness back. */}
         <Image
-          src="/brand/apx-background-v3.webp" alt="" fill priority sizes="100vw"
+          src="/brand/apx-background-v4.webp" alt="" fill priority unoptimized sizes="100vw"
           className="-z-10 object-cover object-[32%_center] lg:object-center"
         />
         <svg
