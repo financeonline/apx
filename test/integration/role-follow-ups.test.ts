@@ -6,7 +6,7 @@ import { assignAction, assignableOwners } from '@/modules/actions';
 import { loadHome } from '@/modules/dashboard';
 import { loadDataCompliance } from '@/modules/departments';
 import { listNotifications, unreadCount } from '@/modules/engagement';
-import { getMonthlyReport, listAvailable } from '@/modules/reporting';
+import { getMonthlyReport, getMonthlySummary, listAvailable } from '@/modules/reporting';
 import { checkAffordability, listScenarios } from '@/modules/scenarios';
 import {
   agreedPermissions, decideAccessRequest, requestAccess, type AccessContext,
@@ -139,14 +139,27 @@ describe('Home and the reports, for a 3rd party', () => {
     expect(state.kind === 'ready' || state.kind === 'bank_only').toBe(true);
   });
 
-  it('opens the Monthly Management Report without the Action Centre or the alerts it may not read', async () => {
+  /*
+   * ADR-172 addendum (2026-10-14): a 3rd party's monthly report is the SUMMARY EDITION — figures and
+   * the Business Health Score, built from the overview — and the full report (alerts, open actions)
+   * is refused them rather than shown with those sections emptied. The intent is unchanged: they open
+   * their month's report without the Action Centre or the alerts. (report-summary-edition.test.ts
+   * checks the edition's PDF text; pgTAP 32 the database's side.)
+   */
+  it('opens the Monthly Management Report (its summary edition) without the Action Centre or the alerts it may not read', async () => {
     const ctx = await ctxFor('third');
     expect((await listAvailable(ctx)).map((r) => r.periodId)).toEqual([periodId]);
-    const report = await getMonthlyReport(ctx, periodId);
-    expect(report).not.toBeNull();
-    expect(report!.openActions).toEqual([]);
-    expect(report!.alerts).toEqual([]);
-    expect(report!.cards.length).toBeGreaterThan(0);
+    const summary = await getMonthlySummary(ctx, periodId);
+    expect(summary).not.toBeNull();
+    expect(summary!.edition).toBe('summary');
+    expect(summary!.figures.length).toBeGreaterThan(0);
+    expect(summary!.health?.score).toBe(70);
+    // No section for either, and neither's words anywhere in it.
+    expect(Object.keys(summary!)).not.toContain('alerts');
+    expect(Object.keys(summary!)).not.toContain('openActions');
+    expect(JSON.stringify(summary)).not.toContain(`F${RUN}`);
+    // The full report is refused them.
+    expect(await outcome(getMonthlyReport(ctx, periodId))).toBe('PERMISSION_DENIED');
   });
 
   it('… while an owner reads the same report with its open action and alert', async () => {

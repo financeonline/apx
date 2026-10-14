@@ -8,6 +8,11 @@ import type { ReportFileRef } from '../domain/types';
 
 export interface ReportFileRow {
   readonly id: string;
+  /**
+   * `monthly_management` for the full Monthly Management Report's PDF, which only `financials.view`
+   * may read (ADR-172 addendum; `report_files_select`); a Phase 17 kind for a stored report's PDF.
+   */
+  readonly reportKind: string;
   /** NULL for the PDF of a stored (Phase 17) report, which belongs to the report instead. */
   readonly periodId: string | null;
   readonly storageBucket: string;
@@ -17,10 +22,11 @@ export interface ReportFileRow {
 }
 
 const FILE_SELECT =
-  'id, period_id, storage_bucket, storage_path, byte_size, created_at, deleted_at';
+  'id, report_kind, period_id, storage_bucket, storage_path, byte_size, created_at, deleted_at';
 
 interface FileRow {
   id: string;
+  report_kind: string;
   period_id: string | null;
   storage_bucket: string;
   storage_path: string;
@@ -73,6 +79,7 @@ export async function getReportFile(
   if (row.deleted_at !== null) return null;
   return {
     id: row.id,
+    reportKind: row.report_kind,
     periodId: row.period_id,
     storageBucket: row.storage_bucket,
     storagePath: row.storage_path,

@@ -6,13 +6,14 @@ import {
   listAdvisers,
   listMemberPermissions,
   listAccessRequests,
+  setsOwnerSwitches,
 } from '@/modules/tenancy';
 import { can, canInviteRole, ceilingAllows } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody, Badge, Banner, EmptyState } from '@/components/ui/surfaces';
 import { MEMBERSHIP_ROLE_LABELS, MEMBER_STATUS_LABELS, ROLE_LABELS, formatDate } from '@/components/labels';
 import { InviteForm, MemberItem, InvitationItem, AnalystItem, ListHeader } from './team-forms';
 import { PendingRequest } from './request-forms';
-import { accessPanel, defaultInviteRole, requestView, roleOptions, splitRequests, type RequestView } from './access-view';
+import { accessPanel, defaultInviteRole, ownRoleNote, requestView, roleOptions, splitRequests, type RequestView } from './access-view';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
@@ -21,9 +22,10 @@ export const dynamic = 'force-dynamic';
  * Team (ADR-172): who can see this company and what each person may do.
  *
  * - **People** — the members, then the Financial Analysts APX has assigned. An owner or admin can
- *   change a member's role and, under Access, switch individual permissions on or off — never for
- *   an owner, never for themselves, never beyond their own rights (the service says which). A
- *   Financial Analyst is the super admin's to manage: no role, no switches.
+ *   change another member's role and, under Access, switch individual permissions on or off — never
+ *   for an owner, never for themselves, never beyond their own rights, and (for an admin) never a
+ *   switch an owner set (the service says which; RBAC_MATRIX.md §3.15–18, rev 1.4). One's own row
+ *   has no role selector. A Financial Analyst is the super admin's to manage: no role, no switches.
  * - **Invite someone** — the five company roles, as far as the viewer's ceiling reaches.
  * - **Requests for more information** (`#requests`) — what members have asked to see, for an owner or
  *   admin to approve or decline. A member who is not a manager sees their own on their home page.
@@ -51,6 +53,9 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
   const assignableRoles = roleOptions((role) => ceilingAllows(ctx.effectiveRole, role));
 
   const accessByUser = new Map(access.map((person) => [person.userId, person]));
+  // Nobody changes their own role (RBAC_MATRIX.md §3.18, rev 1.4): one's own row shows the role as
+  // text, and says who can change it — another owner for an owner, an owner for anyone else.
+  const selfNote = ownRoleNote(setsOwnerSwitches(ctx.effectiveRole));
   const nameOf = (userId: string) => {
     const member = members.find((m) => m.userId === userId);
     return member ? (member.fullName ?? member.email) : null;
@@ -111,6 +116,7 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
                     canManage={mayManage && ceilingAllows(ctx.effectiveRole, member.role)}
                     assignableRoles={assignableRoles}
                     access={permissions && permissions.editable && !isSelf ? accessPanel(permissions) : null}
+                    ownRoleNote={isSelf && mayManage ? selfNote : null}
                   />
                 );
               })}
@@ -211,8 +217,9 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
       </div>
 
       <p className="mt-6 text-sm text-ink-muted">
-        <Badge tone="neutral">Note</Badge> An admin can manage everyone except owners; only an owner can
-        make or change an owner. Nobody can switch on a permission they do not have themselves.
+        <Badge tone="neutral">Note</Badge> An admin can manage the other members except owners; only an
+        owner can make or change an owner, or change a switch an owner set. Nobody can change their own
+        role, or switch on a permission they do not have themselves.
       </p>
     </>
   );

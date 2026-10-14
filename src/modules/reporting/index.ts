@@ -20,14 +20,33 @@ export {
 } from './domain/types';
 
 export {
+  FULL_MONTHLY_REPORT_PERMISSION,
   buildMonthlyReport,
   getMonthlyReport,
+  getMonthlySummary,
   getReportFile,
   listAvailable,
+  readsFullMonthlyReport,
   requestPdf,
 } from './services';
 
 export { renderReportPdf } from './domain/pdf';
+
+/** The summary edition: what a reader without `financials.view` gets (ADR-172 addendum). */
+export {
+  SUMMARY_EDITION_AUDIENCE,
+  SUMMARY_EDITION_LEFT_OUT,
+  SUMMARY_EDITION_TITLE,
+  SUMMARY_EDITION_VERSION,
+  composeSummaryEdition,
+  summaryEditionNotice,
+  type SummaryEditionSources,
+  type SummaryEditionView,
+  type SummaryFigure,
+  type SummaryHealth,
+  type SummaryHealthArea,
+} from './domain/summary';
+export { renderSummaryPdf } from './domain/pdf-summary';
 
 export {
   BRIEF_CONTENT_VERSION,

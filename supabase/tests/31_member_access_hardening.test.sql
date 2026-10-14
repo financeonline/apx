@@ -533,7 +533,9 @@ select is(pg_temp.try_server($$select api_server.record_access_event('e4000000-0
           'ok', '… its author can');
 select is(pg_temp.try_server($$select api_server.record_access_event('e4000000-0000-0000-0000-000000000005', 'e4a00000-0000-0000-0000-00000000000a', 'report.downloaded', 'report_files',
             (select id from public.report_files where storage_path = 'e4a00000-0000-0000-0000-00000000000a/monthly.pdf'))$$),
-          'ok', 'a 3rd party may record a download of the Monthly Management Report');
+          -- Was 'ok' until the ADR-172 addendum (20261018000036): the stored PDF is the FULL report
+          -- and needs financials.view; a 3rd party gets the summary edition (32_report_variants).
+          'P0002', 'a 3rd party may NOT record a download of the full Monthly Management Report PDF (ADR-172 addendum)');
 select is(pg_temp.try_server($$select api_server.record_access_event('e4000000-0000-0000-0000-000000000005', 'e4a00000-0000-0000-0000-00000000000a', 'report.downloaded', null, null, '{"surface": "marketing"}'::jsonb)$$),
           'ok', '… and of a report rendered on request (Marketing, Investment), as before');
 

@@ -14,6 +14,7 @@ import {
 import { AiReadingRequest, DocumentPageView, PageConfirmation, ReceiptReadingRequest, StatementBalancesForm } from './pdf-review';
 import { requirePermission } from '@/app/_lib/authz';
 import { can } from '@/core/permissions';
+import { rowsNotShownSentence, rowsReadable } from './rows-view';
 
 export const dynamic = 'force-dynamic';
 
@@ -173,7 +174,15 @@ export default async function ReviewBatchPage({
     : [];
   const balancesNeeded = review.batch.status === 'awaiting_review' && review.batch.targetTable === 'bank_transactions'
     && (review.batch.extractionMethod === 'pdf_claude' || review.batchIssues.some((i) => i.code === 'IMP-BAL-006' || i.code === 'IMP-BAL-007'));
-  const aiPages = review.batch.extractionMethod === 'pdf_claude'
+  /*
+   * ADR-172 hardening: the file's own lines (`raw_data`, `mapped_data`) are served only while the
+   * batch is in review (`import_rows_review`); afterwards every row comes back empty. Out of review,
+   * nothing that would print them is drawn — the page-by-page AI rows, the rows that need a decision
+   * and the full list — and one sentence says what became of the rows instead.
+   */
+  const showsRows = rowsReadable(review.batch.status);
+  const rowsGone = rowsNotShownSentence(review.batch.status);
+  const aiPages = showsRows && review.batch.extractionMethod === 'pdf_claude'
     ? [...new Set(review.rows.filter((r) => r.sourcePage !== null).map((r) => r.sourcePage!))].sort((a, b) => a - b)
     : [];
   const outstanding = review.requiredConfirmations
@@ -487,7 +496,7 @@ export default async function ReviewBatchPage({
           </CardBody>
         </Card>
 
-        {review.undecidedErrors.length > 0 ? (
+        {showsRows && review.undecidedErrors.length > 0 ? (
           <Card>
             <CardBody className="p-4">
               <div className="flex min-w-0 items-center gap-3">
@@ -515,7 +524,7 @@ export default async function ReviewBatchPage({
           </Card>
         ) : null}
 
-        {review.duplicates.length > 0 ? (
+        {showsRows && review.duplicates.length > 0 ? (
           <Card>
             <CardBody className="p-4">
               <div className="flex min-w-0 items-center gap-3">
@@ -563,40 +572,52 @@ export default async function ReviewBatchPage({
           </Card>
         )}
 
-        <Card>
-          <CardBody className="p-4">
-            <div className="flex min-w-0 items-center gap-3">
-              <IconBadge tint="pink" size="sm"><TableIcon /></IconBadge>
-              <h2 className="min-w-0 font-serif text-lg text-ink">Every row we read</h2>
-            </div>
-            <p className="mt-1 text-sm text-ink-muted">
-              Including the ones that will not import. Nothing from your file is thrown away.
-            </p>
-            <div className="mt-3">
-              <Table>
-                <caption className="sr-only">Rows read from this file</caption>
-                <THead columns={['Row', 'Status', 'What it says', 'Why it needs a look']} />
-                <TBody>
-                  {review.rows.slice(0, 200).map((row) => (
-                    <TR key={row.id}>
-                      <TD className="tabular">{row.rowNumber}</TD>
-                      <TD><StatusBadge status={row.status} /></TD>
-                      <TD>{summarise(row.rawData)}</TD>
-                      <TD className="text-ink-muted">
-                        {row.issues.map((issue) => issue.message).join(' · ') || '—'}
-                      </TD>
-                    </TR>
-                  ))}
-                </TBody>
-              </Table>
-              {review.rows.length > 200 ? (
-                <p className="mt-2 text-sm text-ink-faint">
-                  Showing the first 200 of {review.rows.length} rows.
-                </p>
-              ) : null}
-            </div>
-          </CardBody>
-        </Card>
+        {rowsGone !== null ? (
+          <Card>
+            <CardBody className="p-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="pink" size="sm"><TableIcon /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">The rows</h2>
+              </div>
+              <p className="mt-1 text-sm text-ink-muted" data-testid="rows-not-shown">{rowsGone}</p>
+            </CardBody>
+          </Card>
+        ) : (
+          <Card>
+            <CardBody className="p-4">
+              <div className="flex min-w-0 items-center gap-3">
+                <IconBadge tint="pink" size="sm"><TableIcon /></IconBadge>
+                <h2 className="min-w-0 font-serif text-lg text-ink">Every row we read</h2>
+              </div>
+              <p className="mt-1 text-sm text-ink-muted">
+                Including the ones that will not import. Nothing from your file is thrown away.
+              </p>
+              <div className="mt-3">
+                <Table>
+                  <caption className="sr-only">Rows read from this file</caption>
+                  <THead columns={['Row', 'Status', 'What it says', 'Why it needs a look']} />
+                  <TBody>
+                    {review.rows.slice(0, 200).map((row) => (
+                      <TR key={row.id}>
+                        <TD className="tabular">{row.rowNumber}</TD>
+                        <TD><StatusBadge status={row.status} /></TD>
+                        <TD>{summarise(row.rawData)}</TD>
+                        <TD className="text-ink-muted">
+                          {row.issues.map((issue) => issue.message).join(' · ') || '—'}
+                        </TD>
+                      </TR>
+                    ))}
+                  </TBody>
+                </Table>
+                {review.rows.length > 200 ? (
+                  <p className="mt-2 text-sm text-ink-faint">
+                    Showing the first 200 of {review.rows.length} rows.
+                  </p>
+                ) : null}
+              </div>
+            </CardBody>
+          </Card>
+        )}
       </div>
     </>
   );

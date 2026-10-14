@@ -10,6 +10,7 @@ import { loadHealthCard } from '@/modules/health';
 import { listActions, type Action } from '@/modules/actions';
 import type { AccessContext } from '@/modules/tenancy';
 import type { AvailableReport, ReportViewModel } from '../domain/types';
+import { composeSummaryEdition, type SummaryEditionView } from '../domain/summary';
 import * as repo from '../data/repository';
 
 /**
@@ -53,19 +54,39 @@ export async function listAvailable(ctx: AccessContext): Promise<AvailableReport
 }
 
 /**
- * The report on screen, for a reader with `reports.view`.
+ * Who reads the FULL Monthly Management Report — on screen and as the stored PDF — rather than its
+ * summary edition (ADR-172 addendum, the owner's decision of 2026-10-14). The full report carries the
+ * month's alerts, whose sentences name customers and suppliers, and the titles of open actions; it is
+ * detail, and detail is `financials.view` (RBAC_MATRIX.md §8). The database draws the same line on
+ * the stored file (`report_files_select`) and on the download's access event
+ * (`api_server.record_access_event`, migration 20261018000036), so a page or route that forgot to
+ * ask would still be refused.
+ */
+export const FULL_MONTHLY_REPORT_PERMISSION = 'financials.view' as const;
+
+export function readsFullMonthlyReport(ctx: AccessContext): boolean {
+  return can(ctx, 'reports.view') && can(ctx, FULL_MONTHLY_REPORT_PERMISSION);
+}
+
+/**
+ * The full report on screen, for a reader with `reports.view` AND `financials.view`.
+ *
+ * Without `financials.view` — a 3rd party by default, or anyone whose switch is off — this refuses:
+ * that reader gets the summary edition (`getMonthlySummary`), which is built from the overview and
+ * never from this. (Before the addendum a 3rd party read this report with its alerts emptied by RLS;
+ * an empty section built from a full document is exactly the "filtering" the owner ruled out.)
  *
  * Its open actions come from the Action Centre, which is `actions.view` reading (ADR-172): a reader
- * without it — a 3rd party — gets the report without that section rather than a refusal, exactly as
- * the alerts section is empty for them under RLS. Both sections are drawn only when they have rows,
- * so neither says "nothing outstanding" about something the reader simply cannot see. The PDF job is
- * not affected: it builds the report with its own scoped client (`buildMonthlyReport`), and a reader
- * holding `actions.view` sees exactly what the PDF prints.
+ * without it gets the report without that section rather than a refusal. The section is drawn only
+ * when it has rows, so it never says "nothing outstanding" about something the reader cannot see.
+ * The PDF job is not affected: it builds the report with its own scoped client
+ * (`buildMonthlyReport`), and a reader holding `actions.view` sees exactly what the PDF prints.
  */
 export async function getMonthlyReport(
   ctx: AccessContext, periodId: string,
 ): Promise<ReportViewModel | null> {
   assertCan(ctx, 'reports.view');
+  assertCan(ctx, FULL_MONTHLY_REPORT_PERMISSION);
   const readsActions = can(ctx, 'actions.view');
   return buildMonthlyReport({
     db: ctx.db,
@@ -152,6 +173,74 @@ export async function buildMonthlyReport(input: {
     asOf: run,
     generatedAt: input.now.toISOString(),
   };
+}
+
+/**
+ * The summary edition (ADR-172 addendum): the headline figures, the Business Health Score area by
+ * area and the report's own sentence — for any reader with `reports.view`. It is what a reader
+ * without `financials.view` gets, and a full reader may take it too (to send to their bank).
+ *
+ * Built ONLY from the overview, with the READER'S client, and never from `buildMonthlyReport`:
+ *   - no alert, action, counterparty, account, bank account, document or import is read at all;
+ *   - only UNDIMENSIONED snapshots become figures (per customer, per account and per bank account
+ *     figures are dropped before the cards are built, whatever the reader's RLS would allow), and
+ *     their payloads are reduced to the one number a change line needs (`pct_change`);
+ *   - the basis line is written without "last data added", which comes from the import log — so the
+ *     edition says the same for every reader, and depends on nothing a 3rd party cannot read;
+ *   - the composition is an allow-list (`composeSummaryEdition`).
+ * For a 3rd party the database withholds the detail as well (RLS, `health_score_breakdowns`
+ * redaction): even a mistake here could not read what the reader may not.
+ *
+ * NULL for a month that has not finished, has no figures, or is not this organisation's — NOT
+ * FOUND, as the full report (SECURITY_MODEL.md §14).
+ */
+export async function getMonthlySummary(
+  ctx: AccessContext, periodId: string,
+): Promise<SummaryEditionView | null> {
+  assertCan(ctx, 'reports.view');
+  const orgId = orgOf(ctx);
+  const { db, requestId } = ctx;
+
+  const [periods, withData] = await Promise.all([
+    loadPeriods(db, orgId, requestId),
+    loadPeriodsWithData(db, orgId, requestId),
+  ]);
+  const period = periods.find((candidate) => candidate.id === periodId) ?? null;
+  if (period === null || !period.isComplete) return null;
+  // The comparison month is the previous month WITH DATA — Home's rule, and the full report's.
+  const previous = periods
+    .filter((candidate) => candidate.periodStart < period.periodStart && withData.has(candidate.id))[0] ?? null;
+
+  const [snapshots, health, run, organisationName] = await Promise.all([
+    loadPeriodSnapshots(db, orgId, period.id, requestId),
+    loadHealthCard(db, orgId, period.id, previous?.id ?? null, requestId),
+    repo.loadRunFor(db, orgId, period.id),
+    repo.organisationName(db, orgId),
+  ]);
+
+  const overview = snapshots
+    .filter((snapshot) => snapshot.dimensionType === 'none')
+    .map((snapshot) => ({
+      ...snapshot,
+      components: snapshot.components.pct_change === undefined ? {} : { pct_change: snapshot.components.pct_change },
+    }));
+  if (overview.length === 0) return null;
+
+  const { cards } = buildHeadlineCards({
+    snapshots: overview, period, previousLabel: previous?.label ?? null, orgSlug: ctx.orgSlug ?? '',
+  });
+
+  return composeSummaryEdition({
+    organisationName,
+    period,
+    comparisonLabel: previous?.label ?? null,
+    cards,
+    health,
+    summary: repo.summaryFor(health, period.label),
+    basisLine: basisLine(cards, null, period),
+    asOf: run,
+    generatedAt: ctx.now().toISOString(),
+  });
 }
 
 /**

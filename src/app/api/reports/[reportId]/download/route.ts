@@ -4,7 +4,7 @@ import { MotionError, NotFound, PermissionDenied, toMotionError, ValidationError
 import { log, newRequestId } from '@/core/logging';
 import { can } from '@/core/permissions';
 import { signDownloadUrl } from '@/core/storage/signer';
-import { getReportFile } from '@/modules/reporting';
+import { getReportFile, readsFullMonthlyReport } from '@/modules/reporting';
 import { getAccessContext } from '@/modules/tenancy';
 
 /**
@@ -14,6 +14,13 @@ import { getAccessContext } from '@/modules/tenancy';
  * the signer verifies, so a download that was not recorded cannot happen. The report is resolved by
  * `(organization_id, id)` first, so another organisation's report id is a 404 rather than a 403 —
  * isolation case 23 (SECURITY_MODEL.md §14).
+ *
+ * The Monthly Management Report's stored PDF is the FULL report — the month's alerts and open actions
+ * — and is served only to a reader with `financials.view` (ADR-172 addendum). Anyone else gets NOT
+ * FOUND here and the summary edition at `/api/reports/summary/[periodId]`. Three places say so and
+ * agree: this route; `report_files_select`, under which such a reader's client has no row to resolve;
+ * and `api_server.record_access_event`, which issues no audit id — so the signer signs nothing — for
+ * an actor without it (migration 20261018000036).
  */
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -40,6 +47,8 @@ export async function GET(
 
     const file = await getReportFile(ctx, reportId);
     if (file === null) throw new NotFound();
+    // NOT FOUND rather than 403, as the database answers: the file does not exist for this reader.
+    if (file.reportKind === 'monthly_management' && !readsFullMonthlyReport(ctx)) throw new NotFound();
 
     const auditEventId = await recordAccessEvent(
       { userId: ctx.userId, requestId },

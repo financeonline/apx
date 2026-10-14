@@ -1,13 +1,14 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { can } from '@/core/permissions';
-import { getMonthlyReport, listAvailable } from '@/modules/reporting';
+import { getMonthlyReport, getMonthlySummary, listAvailable, readsFullMonthlyReport } from '@/modules/reporting';
 import { getAccessContext } from '@/modules/tenancy';
 import { HealthScoreInline, StatusBadgeView } from '@/components/dashboard';
-import { ChartColumn, ClipboardCheck, FileText, TriangleAlert } from 'lucide-react';
+import { ChartColumn, ClipboardCheck, FileDown, FileText, TriangleAlert } from 'lucide-react';
 import { Badge, Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { PdfControl } from './pdf-control';
 import { requirePermission } from '@/app/_lib/authz';
+import { SummaryEditionScreen, summaryPdfHref } from '../../_components/summary-view';
 
 export const dynamic = 'force-dynamic';
 
@@ -18,6 +19,12 @@ export const dynamic = 'force-dynamic';
  * `buildHeadlineCards`. `ARCHITECTURE.md` names metric drift — the same metric computed differently
  * in two places — as a top risk, and a report is where it would hurt most: this is the page somebody
  * prints and takes to a meeting, and it must not disagree with the screen it came from.
+ *
+ * Two editions (ADR-172 addendum). A reader with `financials.view` reads the FULL report — alerts and
+ * open actions included — and may produce and open its stored PDF. A reader without it (a 3rd party
+ * by default) reads the SUMMARY EDITION at the same address: built from the overview alone, never
+ * from the full report, and offering only its own PDF. The service refuses the full report to them
+ * as well (`getMonthlyReport`), and the database hides its stored file (`report_files_select`).
  */
 export default async function MonthlyReportPage({
   params,
@@ -27,6 +34,13 @@ export default async function MonthlyReportPage({
   const { orgSlug, period } = await params;
   const ctx = await getAccessContext(orgSlug);
   requirePermission(ctx, 'reports.view');
+
+  if (!readsFullMonthlyReport(ctx)) {
+    // The summary edition; NOT FOUND exactly where the full report would be (§119).
+    const summary = await getMonthlySummary(ctx, period);
+    if (summary === null) notFound();
+    return <SummaryEditionScreen orgSlug={orgSlug} summary={summary} />;
+  }
 
   // A month with no figures, or one that has not finished, has no report — NOT FOUND rather than an
   // empty page that looks like a fault (§119).
@@ -61,6 +75,14 @@ export default async function MonthlyReportPage({
           />
         </div>
       ) : null}
+
+      {/* The edition a lender, investor or partner reads — for a full reader to send on (ADR-172 addendum). */}
+      <p className="mt-3 text-sm print:hidden">
+        <a href={summaryPdfHref(orgSlug, period)} download className="inline-flex items-center gap-1 text-accent underline underline-offset-2 pointer-coarse:min-h-10">
+          <FileDown aria-hidden="true" className="size-4" />
+          Download the summary edition (figures and Business Health Score only, for external readers)
+        </a>
+      </p>
 
       {/* A readable measure on a very wide screen. */}
       <div className="mt-8 flex max-w-5xl flex-col gap-6">

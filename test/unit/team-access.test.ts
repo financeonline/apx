@@ -1,14 +1,18 @@
 import { describe, expect, it } from 'vitest';
 import {
+  CEILING_WITHHOLD_NOTE,
   NOT_EDITABLE_REASON,
   NOT_HELD_REASON,
+  OWNER_LOCKED_REASON,
   PERMISSION_GROUPS,
   RESET_NOT_HELD_REASON,
   accessPanel,
+  resetAllMessage,
   resetAllNote,
   asSwitchable,
   defaultInviteRole,
   grantFrom,
+  ownRoleNote,
   requestView,
   roleOptions,
   splitRequests,
@@ -221,6 +225,163 @@ describe('"Back to default" and "Reset all" follow withinOwnRights (ADR-172 foll
     expect(none.resettable).toEqual([]);
     expect(none.resetAllNote).toMatch(/^Reset all is not available: putting Reports back/);
     expect(accessPanel(person()).resetAllNote).toBeNull();
+  });
+});
+
+describe('a switch an owner set is the owner’s (rev 1.4 §3.17)', () => {
+  // As the service answers an ADMIN: the owner switched `ai.use` off and `data.export` on; both are
+  // locked, and `grantable` leaves them out.
+  const asAdmin = person({
+    overrides: [
+      { permission: 'ai.use', granted: false, setByOwner: true, ceilingWithhold: false },
+      { permission: 'data.export', granted: true, setByOwner: true, ceilingWithhold: false },
+      { permission: 'reports.view', granted: false, setByOwner: false, ceilingWithhold: false },
+    ],
+    effective: [...CLIENT_DEFAULTS.filter((p) => p !== 'ai.use' && p !== 'reports.view'), 'data.export'],
+    grantable: SWITCHABLE_PERMISSIONS.filter((p) => p !== 'ai.use' && p !== 'data.export'),
+    ownerLocked: ['ai.use', 'data.export'],
+  });
+
+  it('draws it locked in both directions for a viewer who is not an owner, and says why', () => {
+    const off = switchView(asAdmin, 'ai.use');
+    expect(off).toMatchObject({ on: false, change: 'taken_away', ownerLocked: true, lockedReason: OWNER_LOCKED_REASON });
+    const on = switchView(asAdmin, 'data.export');
+    // Switching OFF needs no right of one's own — yet an owner's switch is still not the admin's to press.
+    expect(on).toMatchObject({ on: true, change: 'added', ownerLocked: true, lockedReason: OWNER_LOCKED_REASON });
+    expect(OWNER_LOCKED_REASON).toBe('Set by the owner — only an owner can change this.');
+  });
+
+  it('offers no "Back to the role’s default" on it, and gives no reset reason — the lock is the reason', () => {
+    for (const permission of ['ai.use', 'data.export'] as const) {
+      const view = switchView(asAdmin, permission);
+      expect(view.canReset).toBe(false);
+      expect(view.resetLockedReason).toBeNull();
+    }
+  });
+
+  it('leaves the admin’s own switches as they were', () => {
+    const view = switchView(asAdmin, 'reports.view');
+    expect(view).toMatchObject({ ownerLocked: false, lockedReason: null, canReset: true, resetLockedReason: null });
+  });
+
+  it('keeps it out of "Reset all", and says so by name', () => {
+    const panel = accessPanel(asAdmin);
+    expect(panel.resettable).toEqual(['reports.view']);
+    expect(panel.unresettable).toEqual([]);
+    expect([...panel.ownerLocked].sort()).toEqual(['AI Analyst', 'Export data']);
+    expect(panel.resetAllNote).toMatch(/^Reset all leaves .* as they are: the owner set them, and only an owner can change them\.$/);
+    expect(panel.changedCount).toBe(3);
+  });
+
+  it('explains a "Reset all" that is not offered because everything stored is the owner’s', () => {
+    const onlyLocked = accessPanel({
+      ...asAdmin,
+      overrides: asAdmin.overrides.filter((o) => o.setByOwner),
+      effective: [...CLIENT_DEFAULTS.filter((p) => p !== 'ai.use'), 'data.export'],
+    });
+    expect(onlyLocked.resettable).toEqual([]);
+    expect(onlyLocked.resetAllNote).toMatch(/^Reset all is not available: the owner set .*, and only an owner can change them\.$/);
+  });
+
+  it('shows it to an OWNER as any other switch (the service locks nothing for an owner)', () => {
+    const asOwner = { ...asAdmin, ownerLocked: [], grantable: [...SWITCHABLE_PERMISSIONS] };
+    for (const permission of ['ai.use', 'data.export'] as const) {
+      const view = switchView(asOwner, permission);
+      expect(view.ownerLocked).toBe(false);
+      expect(view.lockedReason).toBeNull();
+      expect(view.canReset).toBe(true);
+    }
+    expect(accessPanel(asOwner).ownerLocked).toEqual([]);
+    expect(accessPanel(asOwner).resetAllNote).toBeNull();
+  });
+
+  it('says NOT_EDITABLE first for a person the viewer may not change at all', () => {
+    const view = switchView({ ...asAdmin, editable: false }, 'ai.use');
+    expect(view.lockedReason).toBe(NOT_EDITABLE_REASON);
+    expect(view.ownerLocked).toBe(false);
+  });
+
+  it('treats an older fixture without `ownerLocked` as nothing locked', () => {
+    const { ownerLocked: _ignored, ...older } = asAdmin;
+    expect(switchView(older, 'reports.view').ownerLocked).toBe(false);
+  });
+
+  it('words both reasons when "Reset all" leaves an owner’s switch and one it cannot give back', () => {
+    expect(resetAllNote(1, ['Reports'], ['AI Analyst'])).toBe(
+      'Reset all leaves AI Analyst as it is: the owner set it, and only an owner can change it. '
+      + 'It also leaves Reports as it is: the role’s default would switch on something you do not have yourself.',
+    );
+    expect(resetAllNote(0, ['Reports'], ['AI Analyst'])).toBe(
+      'Reset all is not available: the owner set AI Analyst, and only an owner can change it; '
+      + 'putting Reports back to the role’s default would switch on something you do not have yourself.',
+    );
+    expect(resetAllNote(2, [], [])).toBeNull();
+  });
+});
+
+describe('"Reset all" says what stayed and why (rev 1.4)', () => {
+  it('counts what went back', () => {
+    expect(resetAllMessage({ reset: ['ai.use'], lockedByOwner: [], notHeld: [] })).toBe('1 permission is back to the role’s default.');
+    expect(resetAllMessage({ reset: ['ai.use', 'data.export'], lockedByOwner: [], notHeld: [] })).toBe(
+      '2 permissions are back to the role’s defaults.',
+    );
+    expect(resetAllMessage({ reset: [], lockedByOwner: [], notHeld: [] })).toBe('Nothing to reset.');
+  });
+
+  it('names the switches that stayed because the owner set them', () => {
+    expect(resetAllMessage({ reset: ['reports.view'], lockedByOwner: ['ai.use', 'data.export'], notHeld: [] })).toBe(
+      '1 permission is back to the role’s default. AI Analyst, Export data stayed as they were: the owner set them, and only an owner can change them.',
+    );
+    expect(resetAllMessage({ reset: [], lockedByOwner: ['ai.use'], notHeld: [] })).toBe(
+      'Nothing was reset. AI Analyst stayed as it was: the owner set it, and only an owner can change it.',
+    );
+  });
+
+  it('names the switches whose default the viewer could not give back', () => {
+    expect(resetAllMessage({ reset: [], lockedByOwner: [], notHeld: ['reports.view'] })).toBe(
+      'Nothing was reset. Reports stayed as it was: the role’s default would switch on something you do not have yourself.',
+    );
+  });
+});
+
+describe('a switch-off stored by the ceiling (rev 1.4 §3.15)', () => {
+  const withheld = person({
+    overrides: [{ permission: 'ai.use', granted: false, setByOwner: false, ceilingWithhold: true }],
+    effective: CLIENT_DEFAULTS.filter((p) => p !== 'ai.use'),
+  });
+
+  it('is labelled with why it is off', () => {
+    const view = switchView(withheld, 'ai.use');
+    expect(view.on).toBe(false);
+    expect(view.withheldNote).toBe(CEILING_WITHHOLD_NOTE);
+    expect(CEILING_WITHHOLD_NOTE).toBe('Off: whoever set this role or sent the invitation didn’t have it to give.');
+  });
+
+  it('is an ordinary switch otherwise: whoever holds it may switch it on', () => {
+    const view = switchView(withheld, 'ai.use');
+    expect(view.lockedReason).toBeNull();
+    expect(view.next).toBe('default');
+    expect(view.canReset).toBe(true);
+  });
+
+  it('carries no label on any other switch, nor once it is on again', () => {
+    expect(switchView(withheld, 'reports.view').withheldNote).toBeNull();
+    expect(switchView(person({ overrides: [{ permission: 'ai.use', granted: false }] }), 'ai.use').withheldNote).toBeNull();
+    const onAgain = person({ overrides: [{ permission: 'ai.use', granted: true, setByOwner: false, ceilingWithhold: true }] });
+    expect(switchView(onAgain, 'ai.use').withheldNote).toBeNull();
+  });
+});
+
+describe('one’s own role (rev 1.4 §3.18)', () => {
+  it('says nobody changes their own role, and whom to ask', () => {
+    expect(ownRoleNote(true)).toBe('You can’t change your own role — ask another owner.');
+    expect(ownRoleNote(false)).toBe('You can’t change your own role — ask an owner.');
+  });
+
+  it('never suggests one may demote oneself', () => {
+    for (const note of [ownRoleNote(true), ownRoleNote(false)]) {
+      expect(note).not.toMatch(/demote|step down|lower your/i);
+    }
   });
 });
 

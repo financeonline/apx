@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import {
   getAccessContext,
-  listMemberPermissions,
+  resetMemberPermissions,
   setMemberPermission,
   decideAccessRequest,
   type SwitchablePermission,
@@ -11,7 +11,7 @@ import {
 import { ValidationError } from '@/core/errors';
 import { fail, done, text, optionalText } from '@/app/_lib/server-action';
 import type { ActionResult } from '@/components/action-result';
-import { accessPanel, asSwitchable, grantFrom } from './access-view';
+import { asSwitchable, grantFrom, resetAllMessage } from './access-view';
 
 /**
  * Per-person access and "Request more information" (ADR-172), in the shape of every settings
@@ -48,9 +48,11 @@ export async function setMemberPermissionAction(
 }
 
 /**
- * "Reset all": every switch the viewer may put back, read fresh from the service rather than from
- * the form, so a switch another admin set a moment ago is not missed. One call per switch, in turn;
- * a refusal stops there and says so, leaving those already reset reset.
+ * "Reset all" (rev 1.4): the service's `resetMemberPermissions`, which reads the member fresh, puts
+ * back every switch the viewer may, and leaves — and names — those an owner set (for a viewer who is
+ * not an owner) and those whose default would give something the viewer lacks; the database
+ * re-checks each reset. The confirmation says what stayed and why, rather than stopping at the
+ * first refusal. A refusal part-way still leaves those already reset reset.
  */
 export async function resetMemberPermissionsAction(
   _previous: ActionResult | null,
@@ -61,15 +63,9 @@ export async function resetMemberPermissionsAction(
   try {
     const ctx = await getAccessContext(orgSlug);
     requestId = ctx.requestId;
-    const userId = text(form, 'user_id');
-    const member = (await listMemberPermissions(ctx)).find((m) => m.userId === userId);
-    if (!member) throw new ValidationError('That person is no longer a member.');
-    const { resettable } = accessPanel(member);
-    for (const permission of resettable) {
-      await setMemberPermission(ctx, { userId, permission, granted: null });
-    }
+    const outcome = await resetMemberPermissions(ctx, text(form, 'user_id'));
     revalidatePath(`/app/${orgSlug}/settings/team`);
-    return done(resettable.length === 0 ? 'Nothing to reset.' : 'Back to the role’s defaults.');
+    return done(resetAllMessage(outcome));
   } catch (error) {
     return fail(error, { requestId, action: 'settings.resetMemberPermissions' });
   }

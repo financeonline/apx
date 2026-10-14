@@ -2,6 +2,7 @@
 
 import { useActionState, useId, type ReactNode } from 'react';
 import { useFormStatus } from 'react-dom';
+import { Lock } from 'lucide-react';
 import { setMemberPermissionAction, resetMemberPermissionsAction } from './actions';
 import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 import { Badge } from '@/components/ui/surfaces';
@@ -11,7 +12,9 @@ import type { AccessPanelView, SwitchView } from './access-view';
  * One person's permissions, switch by switch (ADR-172). Each switch is its own small form, so a
  * press saves at once and works before the page's script has loaded; the panel shares one result
  * message between them. What a switch would refuse is drawn disabled with the reason beside it,
- * never drawn live and refused — the service and the api.* function re-check either way.
+ * never drawn live and refused — the service and the api.* function re-check either way. A switch an
+ * owner set is drawn locked for a viewer who is not an owner ("Set by the owner"), and an owner sees
+ * it as any other (RBAC_MATRIX.md §3.17, rev 1.4).
  */
 export function AccessPanel({ orgSlug, who, panel }: { orgSlug: string; who: string; panel: AccessPanelView }) {
   const [state, action] = useActionState(setMemberPermissionAction, null);
@@ -42,7 +45,10 @@ export function AccessPanel({ orgSlug, who, panel }: { orgSlug: string; who: str
           </form>
         ) : null}
       </div>
-      {/* What "Reset all" leaves alone, or why it is not offered — the database would refuse those resets. */}
+      {/*
+        What "Reset all" leaves alone, or why it is not offered — the database would refuse those
+        resets: a default the viewer could not give back, or a switch an owner set (rev 1.4).
+      */}
       {panel.resetAllNote ? <p className="mt-2 text-xs text-warn">{panel.resetAllNote}</p> : null}
 
       <div className="mt-3 empty:hidden">
@@ -88,7 +94,10 @@ function SwitchRow({
   const titleId = `${id}-title`;
   const detailId = `${id}-detail`;
   const reasonId = `${id}-reason`;
-  const describedBy = view.lockedReason ? `${detailId} ${reasonId}` : detailId;
+  const withheldId = `${id}-withheld`;
+  const describedBy = [detailId, view.lockedReason ? reasonId : null, view.withheldNote ? withheldId : null]
+    .filter(Boolean)
+    .join(' ');
 
   return (
     <li className="flex items-start justify-between gap-3 py-3">
@@ -100,8 +109,19 @@ function SwitchRow({
         </p>
         <p id={detailId} className="text-xs text-ink-muted">{view.detail}</p>
         <p className="mt-0.5 text-xs text-ink-faint">Role default: {view.byDefault ? 'on' : 'off'}</p>
+        {/* A switch-off the ceiling stored at a role change or an invitation (RBAC_MATRIX §3.15, rev 1.4). */}
+        {view.withheldNote ? (
+          <p id={withheldId} className="mt-1 text-xs text-ink-muted">{view.withheldNote}</p>
+        ) : null}
+        {/*
+          Why the switch is disabled. For a switch an owner set and a viewer who is not an owner, this
+          is the whole story (§3.17): no "Back to the role's default" is drawn, and no reset reason.
+        */}
         {view.lockedReason ? (
-          <p id={reasonId} className="mt-1 text-xs text-warn">{view.lockedReason}</p>
+          <p id={reasonId} className="mt-1 inline-flex items-start gap-1 text-xs text-warn">
+            {view.ownerLocked ? <Lock aria-hidden="true" className="mt-px size-3 shrink-0" /> : null}
+            <span>{view.lockedReason}</span>
+          </p>
         ) : null}
         {view.resetLockedReason ? (
           <p className="mt-1 text-xs text-ink-muted">

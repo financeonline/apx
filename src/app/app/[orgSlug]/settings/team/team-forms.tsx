@@ -109,6 +109,11 @@ export function MemberItem(props: {
   assignableRoles: readonly RoleOption[];
   /** Present when the viewer may switch this person's permissions (never an owner, never oneself). */
   access: AccessPanelView | null;
+  /**
+   * On the viewer's own row, for a viewer who manages the team: why there is no role selector
+   * (`ownRoleNote`). Nobody changes their own role (RBAC_MATRIX.md §3.18, rev 1.4).
+   */
+  ownRoleNote?: string | null;
 }) {
   const [roleState, roleAction] = useActionState(changeMemberRoleAction, null);
   const [removeState, removeAction] = useActionState(removeMemberAction, null);
@@ -130,6 +135,10 @@ export function MemberItem(props: {
         </div>
 
         <div className="min-w-0">
+          {/*
+            Never on one's own row: nobody changes their own role, in either direction — the service
+            and `api.change_member_role` refuse it (rev 1.4 §3.18), so no selector is drawn to refuse.
+          */}
           {props.canManage && !props.isSelf ? (
             <form action={roleAction} className="flex flex-wrap items-center gap-2">
               <label htmlFor={roleSelectId} className="block w-full text-xs text-ink-faint md:sr-only">
@@ -151,6 +160,9 @@ export function MemberItem(props: {
             <>
               <FieldName>Role</FieldName>
               <p>{props.roleLabel}</p>
+              {props.isSelf && props.ownRoleNote ? (
+                <p className="mt-0.5 text-xs text-ink-muted">{props.ownRoleNote}</p>
+              ) : null}
             </>
           )}
           {props.access && props.access.changedCount > 0 ? (

@@ -63,7 +63,11 @@ export default async function HealthPage({ params }: { params: Promise<{ orgSlug
           {/*
             The panel links each dimension's figures to their evidence, which is detail
             (`financials.view`). Without it (a 3rd party, ADR-172) the arithmetic is shown in full and
-            the links are left out — never a link into a refusal.
+            the links are left out — never a link into a refusal. Such a reader is also handed the
+            REDACTED breakdown (`health_score_breakdowns`, ADR-172 hardening: no subject, record or
+            snapshot ids); every field the panel prints — rules, results, points, weights, caps,
+            exclusions and the factor sentences — survives the redaction, so it renders the same
+            arithmetic. Checked as a client with `financials.view` switched off (2026-10-14).
           */}
           <HealthExplainPanel
             view={view.health}

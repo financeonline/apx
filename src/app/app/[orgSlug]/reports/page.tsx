@@ -1,21 +1,23 @@
 import type { ReactNode } from 'react';
 import Link from 'next/link';
 import {
-  Building2, CalendarDays, CalendarRange, ChevronRight, FileText, HandCoins, Sparkles,
+  Building2, CalendarDays, CalendarRange, ChevronRight, FileDown, FileText, HandCoins, Sparkles,
 } from 'lucide-react';
 import { can } from '@/core/permissions';
 import { addDays } from '@/core/periods';
 import {
-  KIND_LABELS, latestCompletedWindows, listAvailable, listStoredReports, windowLabel,
+  KIND_LABELS, SUMMARY_EDITION_LEFT_OUT, SUMMARY_EDITION_TITLE, latestCompletedWindows, listAvailable,
+  listStoredReports, readsFullMonthlyReport, summaryEditionNotice, windowLabel,
   type StoredKind, type StoredReportSummary,
 } from '@/modules/reporting';
 import { fundingEnabled } from '@/modules/funding';
 import { getAccessContext, moduleOn } from '@/modules/tenancy';
 import { ReportsBeforeFirstMonthEmpty } from '@/components/dashboard';
 import { Badge, Card, CardBody, IconBadge, PageHeader, type IconTint } from '@/components/ui/surfaces';
-import { CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
+import { ABOVE_CARD_LINK, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { requirePermission } from '@/app/_lib/authz';
 import { ComposeForm } from './_components/report-controls';
+import { summaryPdfHref } from './_components/summary-view';
 
 export const dynamic = 'force-dynamic';
 
@@ -100,6 +102,12 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
    * Readiness — is listed as for everyone.
    */
   const seesInternal = can(ctx, 'financials.view');
+  /*
+   * ADR-172 addendum: the full Monthly Management Report (alerts, open actions) is `financials.view`
+   * too. A reader without it is offered the SUMMARY EDITION — its own title, its own PDF — and no
+   * link to the full report or its stored file, which the database hides from them anyway.
+   */
+  const readsFullMonthly = readsFullMonthlyReport(ctx);
   const [monthly, stored, windows, funding] = await Promise.all([
     listAvailable(ctx),
     listStoredReports(ctx, seesInternal
@@ -157,6 +165,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
         </Section>
         </>) : null}
 
+        {readsFullMonthly ? (
         <Section title="Monthly Management Report" icon={<FileText />} tint="violet" description="One report a month, from the figures APX has already calculated.">
           {monthly.length === 0 ? (
             <ReportsBeforeFirstMonthEmpty addDataHref={can(ctx, 'imports.create') ? `/app/${orgSlug}/data/imports/new` : undefined} />
@@ -183,6 +192,42 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
             </ul>
           )}
         </Section>
+        ) : (
+        <Section
+          title={SUMMARY_EDITION_TITLE}
+          icon={<FileText />}
+          tint="violet"
+          description={`${summaryEditionNotice()}. ${SUMMARY_EDITION_LEFT_OUT}`}
+        >
+          {monthly.length === 0 ? (
+            <p className="text-sm text-ink-muted">No month has finished with figures yet.</p>
+          ) : (
+            <ul className="flex flex-col divide-y divide-line">
+              {monthly.map((report) => (
+                <li key={report.periodId} className={`${ROW} flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm`}>
+                  <div className="min-w-0">
+                    <p className="font-medium text-ink">{report.periodLabel}</p>
+                    <p className="mt-1 text-ink-muted">The headline figures and the Business Health Score for the month.</p>
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    {/* Rendered now, never stored: a plain download, above the row's link layer. */}
+                    <a href={summaryPdfHref(orgSlug, report.periodId)} download className={`${SOFT_PILL} ${ABOVE_CARD_LINK}`}>
+                      <FileDown aria-hidden="true" className="size-4" />
+                      Download the PDF
+                      <span className="sr-only"> of the summary edition for {report.periodLabel}</span>
+                    </a>
+                    <CardLink href={`/app/${orgSlug}/reports/monthly/${report.periodId}`} className={`${OPEN_PILL} after:rounded-xl`}>
+                      Open the summary
+                      <span className="sr-only"> for {report.periodLabel}</span>
+                      <ChevronRight aria-hidden="true" className="size-4" />
+                    </CardLink>
+                  </div>
+                </li>
+              ))}
+            </ul>
+          )}
+        </Section>
+        )}
 
         {seesInternal ? (
         <Section
