@@ -6,7 +6,7 @@ import { CornerBlob, Wordmark } from './brand';
 import { SidebarNav, type SidebarGroup } from './sidebar';
 import { NAV_COOKIE } from './nav-cookie';
 import { ShellFrame } from './shell-frame';
-import { SignOutButton } from './sign-out-button';
+import { SignOutButton, SignOutHeaderButton } from './sign-out-button';
 
 /**
  * The application shell (ADR-155; APX look, ADR-169): the wordmark, the sections, the signed-in
@@ -78,7 +78,7 @@ export async function AppShell({
   const docked = (await cookies()).get(NAV_COOKIE)?.value === 'shown';
 
   return (
-    <ShellFrame initiallyDocked={docked} brand={brand} compactBrand={compactBrand} sidebar={sidebar}>
+    <ShellFrame initiallyDocked={docked} brand={brand} compactBrand={compactBrand} sidebar={sidebar} headerEnd={<SignOutHeaderButton />}>
       <CornerBlob idPrefix="page-blob" className="fixed top-0 right-0 -z-10 hidden w-[26rem] max-w-[45vw] -scale-x-100 opacity-25 md:block" />
       <main className="mx-auto w-full min-w-0 max-w-[100rem] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
     </ShellFrame>

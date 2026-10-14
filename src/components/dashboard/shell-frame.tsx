@@ -32,6 +32,7 @@ export function ShellFrame({
   brand,
   compactBrand,
   sidebar,
+  headerEnd,
   children,
 }: {
   initiallyDocked: boolean;
@@ -41,6 +42,8 @@ export function ShellFrame({
   compactBrand: ReactNode;
   /** The links, the person and Sign out. */
   sidebar: ReactNode;
+  /** At the right of the top bar: Log out. */
+  headerEnd?: ReactNode;
   children: ReactNode;
 }) {
   const [docked, setDocked] = useState(initiallyDocked);
@@ -134,6 +137,7 @@ export function ShellFrame({
           <Menu aria-hidden="true" className="size-5" strokeWidth={1.75} />
         </button>
         {compactBrand}
+        {headerEnd}
       </header>
 
       {/* The drawer, below `lg`. */}
