@@ -17,7 +17,7 @@ const WORDS = [
 /**
  * A page outside the app shell, in the client's APX reference (ADR-169).
  *
- * `auth` (the front page, sign-in, sign-up, password pages): the reference's screen — the client's full-bleed
+ * `auth` (sign-in, sign-up, password pages): the reference's screen — the client's full-bleed
  * background (black, with glossy pink-to-orange ribbons at the right and in the corners), the
  * wordmark and the form over its black left-centre, and "Analyse, Plan, Execute, Grow" on the
  * ribbons' black pools from `lg`. Below `lg` the image shifts to its black middle, so the form sits on black.
@@ -32,7 +32,6 @@ export function BrandedScreen({
   homeHref = '/',
   auth = false,
   logo,
-  wide = false,
 }: {
   children: ReactNode;
   width?: 'md' | 'lg' | '2xl' | '6xl';
@@ -41,10 +40,8 @@ export function BrandedScreen({
   homeHref?: string;
   /** The sign-in split screen. */
   auth?: boolean;
-  /** In place of the wordmark link (the front page's animated logo). */
+  /** In place of the wordmark link (the sign-in pages' animated logo). */
   logo?: ReactNode;
-  /** `auth` only: a wider column than the forms' (the front page's words). */
-  wide?: boolean;
 }) {
   const home = logo ?? (
     <Link href={homeHref} aria-label="APX home" className="self-start">
@@ -88,7 +85,7 @@ export function BrandedScreen({
         </svg>
         <main className="flex min-h-dvh w-full flex-col justify-center gap-10 px-6 py-16 sm:px-12 lg:pl-[17.5vw]">
           <div className="w-full max-w-sm">{home}</div>
-          <div className={`w-full ${wide ? 'max-w-lg' : 'max-w-sm'}`}>{children}</div>
+          <div className="w-full max-w-sm">{children}</div>
         </main>
       </div>
     );
