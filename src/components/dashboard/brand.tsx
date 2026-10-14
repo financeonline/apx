@@ -6,7 +6,7 @@ import Image from 'next/image';
  * The logo is the client's own, recreated at high resolution in ChatGPT from their artwork (owner,
  * 2026-10-13), cropped and cut out of its black ground so it sits on any dark surface
  * (public/brand/apx-logo.png with the tagline, apx-letters.png without). The sign-in
- * background is the client's too, recreated the same way (public/brand/apx-background-v7.webp, the owner's four-turn spiral, 2026-10-14; see
+ * background is the client's too, recreated the same way (public/brand/apx-background-v8.webp, the owner's ribbon design, 2026-10-14; see
  * BrandedScreen). Decorative parts are hidden from assistive technology; the logo carries
  * the name "APX".
  */
