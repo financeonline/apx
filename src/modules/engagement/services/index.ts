@@ -3,6 +3,7 @@ import { NotFound, ValidationError, toMotionError } from '@/core/errors';
 import { assertCan, can } from '@/core/permissions';
 import { callApi } from '@/core/db';
 import type { AccessContext } from '@/modules/tenancy';
+import { notificationHref, readableNotificationKinds } from '../domain/notifications';
 
 /**
  * Team/Client Management (Agreement §4; ADR-144): comments on actions, the client's requests and the
@@ -44,20 +45,33 @@ export interface NotificationView {
   readonly createdAt: string;
 }
 
+/**
+ * One's own notifications in this organisation, newest first — any member with the overview
+ * (`dashboard.view`) reads their own inbox (ADR-172 follow-up). RLS gives each person only their own
+ * rows; the kinds are filtered again by what the person may open NOW (`readableNotificationKinds`),
+ * so an inbox written before a permission was taken away does not keep showing its detail.
+ */
 export async function listNotifications(ctx: AccessContext, limit = 50): Promise<NotificationView[]> {
+  assertCan(ctx, 'dashboard.view');
+  const kinds = readableNotificationKinds((p) => can(ctx, p));
   const { data, error } = await ctx.db.from('notifications')
     .select('id, kind, title, body, href, read_at, created_at')
-    .eq('organization_id', orgOf(ctx)).eq('user_id', ctx.userId)
+    .eq('organization_id', orgOf(ctx)).eq('user_id', ctx.userId).in('kind', kinds)
     .order('created_at', { ascending: false }).limit(limit);
   if (error) throw toMotionError(error, ctx.requestId);
   return ((data ?? []) as Array<{ id: string; kind: string; title: string; body: string | null; href: string | null; read_at: string | null; created_at: string }>)
-    .map((n) => ({ id: n.id, kind: n.kind, title: n.title, body: n.body, href: n.href, read: n.read_at !== null, createdAt: n.created_at }));
+    .map((n) => ({
+      id: n.id, kind: n.kind, title: n.title, body: n.body,
+      href: notificationHref(n.kind, n.href, ctx.orgSlug), read: n.read_at !== null, createdAt: n.created_at,
+    }));
 }
 
+/** The sidebar's unread count, over exactly the kinds `listNotifications` shows. */
 export async function unreadCount(ctx: AccessContext): Promise<number> {
-  if (!ctx.orgId) return 0;
+  if (!ctx.orgId || !can(ctx, 'dashboard.view')) return 0;
+  const kinds = readableNotificationKinds((p) => can(ctx, p));
   const { count, error } = await ctx.db.from('notifications').select('id', { count: 'exact', head: true })
-    .eq('organization_id', ctx.orgId).eq('user_id', ctx.userId).is('read_at', null);
+    .eq('organization_id', ctx.orgId).eq('user_id', ctx.userId).in('kind', kinds).is('read_at', null);
   if (error) throw toMotionError(error, ctx.requestId);
   return count ?? 0;
 }

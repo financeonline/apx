@@ -111,6 +111,10 @@ export async function runScenarioAction(
   try {
     const ctx = await getAccessContext(orgSlug);
     requestId = ctx.requestId;
+    // ADR-172: a scenario is figures beneath the overview (`scenario_runs` is `financials.view`
+    // reading), so working one out needs the figures as well as the right to calculate — a 3rd party
+    // switched on for `intelligence.recompute` alone still may not write one.
+    assertCan(ctx, 'financials.view');
     assertCan(ctx, 'intelligence.recompute');
 
     const state = await runScenario(ctx, {
@@ -158,6 +162,7 @@ export async function archiveScenarioAction(
   try {
     const ctx = await getAccessContext(orgSlug);
     requestId = ctx.requestId;
+    assertCan(ctx, 'financials.view');
     assertCan(ctx, 'intelligence.recompute');
 
     const archived = text(form, 'archived') !== 'false';

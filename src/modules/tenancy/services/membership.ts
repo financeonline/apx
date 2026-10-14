@@ -124,6 +124,13 @@ export async function acceptInvitation(
   return callApi<string>(db, 'accept_invitation', { p_token: token }, requestId);
 }
 
+/**
+ * Change another member's role. Never one's OWN, in either direction (ADR-172 hardening,
+ * 2026-10-14): a self-demotion cleared the switches an owner had set, and nothing honest needs it —
+ * leaving is `leaveOrganization`, and an owner steps down through the ownership transfer.
+ * `api.change_member_role` refuses it too, and is the authority; it also carries the owner's switches
+ * into the new role and switches off whatever of the new role's defaults the caller does not hold.
+ */
 export async function changeMemberRole(
   ctx: AccessContext,
   input: { userId: string; fromRole: MembershipRole; toRole: MembershipRole },
@@ -132,7 +139,9 @@ export async function changeMemberRole(
   const userId = parse(Uuid, input.userId);
   const from = parse(Role, input.fromRole);
   const to = parse(Role, input.toRole);
+  if (userId === ctx.userId) throw new PermissionDenied('change your own role');
   if (!canChangeRole(ctx.effectiveRole, from, to)) throw new PermissionDenied('change that role');
+  // Unreachable now that one's own role is refused above; kept as the named guard's second line.
   if (isSelfElevation(userId === ctx.userId, from, to)) {
     throw new PermissionDenied('raise your own role');
   }

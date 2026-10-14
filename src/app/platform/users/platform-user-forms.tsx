@@ -16,7 +16,7 @@ export function AddPlatformUserForm() {
       </Field>
       {/* ADR-159: there is one super admin; everyone added here is staff. */}
       <input type="hidden" name="platform_role" value="employee" />
-      <p className="text-sm text-ink-muted">They are added as staff. There is one super admin.</p>
+      <p className="text-sm text-ink-muted">They are added as a Financial Analyst. There is one super admin.</p>
       <ActionMessage state={state} />
       <SubmitButton pendingLabel="Adding…">Add platform admin</SubmitButton>
     </form>

@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createUserClient } from '@/core/db/user-client';
-import { listMyOrganizations } from '@/modules/tenancy';
+import { landingPathForRole, listMyOrganizations } from '@/modules/tenancy';
 import { adviserOrganisations } from '@/modules/portfolio';
 import { Card, CardBody, Badge } from '@/components/ui/surfaces';
 import { ORG_STATUS_LABELS, ROLE_LABELS } from '@/components/labels';
@@ -17,7 +17,10 @@ export default async function SelectOrganizationPage() {
 
   const organizations = await listMyOrganizations(db);
   if (organizations.length === 0) redirect('/onboarding');
-  if (organizations.length === 1) redirect(`/app/${organizations[0]!.slug}/departments`);
+  // Departments, or Home for a person without `financials.view` — a 3rd party must not land on a
+  // refusal (ADR-172 follow-up; `landingPathForRole`). The Departments page corrects a switch the
+  // role alone cannot see.
+  if (organizations.length === 1) redirect(landingPathForRole(organizations[0]!.slug, organizations[0]!.role));
 
   const advises = adviserOrganisations(organizations).length > 0;
 
@@ -43,7 +46,7 @@ export default async function SelectOrganizationPage() {
             <Card className={CLICKABLE_CARD}>
               <CardBody className="flex items-center justify-between gap-4">
                 <span className="min-w-0">
-                  <CardLink href={`/app/${organization.slug}/departments`} className="block font-medium [overflow-wrap:anywhere]">
+                  <CardLink href={landingPathForRole(organization.slug, organization.role)} className="block font-medium [overflow-wrap:anywhere]">
                     {organization.name}
                   </CardLink>
                   <span className="block text-sm text-ink-muted">

@@ -66,10 +66,10 @@ export default async function PlatformOrganizationPage({ params }: { params: Pro
           </Card>
 
           <Card>
-            <CardHeader icon={<Briefcase />} tint="pink" title={`Assigned staff (${assignments.length})`} />
+            <CardHeader icon={<Briefcase />} tint="pink" title={`Assigned Financial Analysts (${assignments.length})`} />
             <CardBody>
               {assignments.length === 0 ? (
-                <p className="text-sm text-ink-muted">Nobody is assigned. <Link className="underline" href="/platform/assignments">Assign an employee</Link>.</p>
+                <p className="text-sm text-ink-muted">Nobody is assigned. <Link className="underline" href="/platform/assignments">Assign a Financial Analyst</Link>.</p>
               ) : (
                 <ul className="flex flex-col gap-2 text-sm">
                   {assignments.map((a) => (

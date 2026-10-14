@@ -3,8 +3,10 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import { isMotionError } from '@/core/errors';
 import type { EffectiveRole } from '@/core/permissions';
 import {
+  changeMemberRole,
   decideAccessRequest,
   inviteMember,
+  resetMemberPermissions,
   listAccessRequests,
   listMemberPermissions,
   requestAccess,
@@ -216,7 +218,10 @@ describe('a 3rd party sees the overview and the reports, and no detail record', 
   it('reads nothing at all of another organisation', async () => {
     for (const table of ['health_current', 'metric_snapshots', 'reports', 'fiscal_periods', 'organizations'] as const) {
       const column = table === 'organizations' ? 'id' : 'organization_id';
-      const { data } = await db('third').from(table).select('*').eq(column, orgB);
+      // A column, not `*`: `*` on metric_snapshots is refused outright since the ADR-172 hardening
+      // (payload columns), and a refusal would pass this check without testing anything.
+      const { data, error } = await db('third').from(table).select(column).eq(column, orgB);
+      expect(error, table).toBeNull();
       expect(data ?? [], table).toHaveLength(0);
     }
   });
@@ -346,16 +351,51 @@ describe('per-person switches', () => {
     expect(error).not.toBeNull();
   });
 
-  it('a role change clears the switches', async () => {
+  // ADR-172 hardening (2026-10-14, migration 20261018000032): a role change CARRIES the switches an
+  // owner set and clears the rest — it used to clear them all, which let a role round trip undo the
+  // owner's decision.
+  it('a role change carries the owner\'s switches and clears the rest', async () => {
     await setMemberPermission(await ctxFor('owner'), { userId: ids.accountant, permission: 'financials.view', granted: false });
+    await setMemberPermission(await ctxFor('admin'), { userId: ids.accountant, permission: 'data.export', granted: false });
     expect(await rows('accountant', 'ledger_entries')).toBe(0);
     const changed = await rpc('owner', 'change_member_role', { p_org: orgA, p_user: ids.accountant, p_role: 'client' });
     expect(changed.error).toBeNull();
-    expect(adminSql(`select count(*) from public.member_permission_overrides where user_id = '${ids.accountant}'`)).toBe('0');
+    expect(adminSql(`select string_agg(permission, ',' order by permission) from public.member_permission_overrides where user_id = '${ids.accountant}'`))
+      .toBe('financials.view');
     expect(adminSql(`select count(*) from public.audit_events where organization_id = '${orgA}' and action = 'member.permissions_reset'`)).toBe('1');
-    // Back to an accountant: the defaults again, the ledger included.
+    // Back to an accountant: the owner's decision still holds…
     expect((await rpc('owner', 'change_member_role', { p_org: orgA, p_user: ids.accountant, p_role: 'accountant' })).error).toBeNull();
+    expect(await rows('accountant', 'ledger_entries')).toBe(0);
+    // …until the owner puts it back: the accountant's defaults again, the ledger included.
+    await setMemberPermission(await ctxFor('owner'), { userId: ids.accountant, permission: 'financials.view', granted: null });
     expect(await rows('accountant', 'ledger_entries')).toBe(1);
+  });
+
+  it('an admin cannot change or reset a switch the owner set, and "Reset all" leaves it alone', async () => {
+    await setMemberPermission(await ctxFor('owner'), { userId: ids.client, permission: 'ai.use', granted: false });
+    await setMemberPermission(await ctxFor('admin'), { userId: ids.client, permission: 'data.export', granted: true });
+    const asAdmin = (await listMemberPermissions(await ctxFor('admin'))).find((m) => m.userId === ids.client)!;
+    expect(asAdmin.ownerLocked).toEqual(['ai.use']);
+    expect(asAdmin.grantable).not.toContain('ai.use');
+    expect(asAdmin.overrides.find((o) => o.permission === 'ai.use')?.setByOwner).toBe(true);
+    expect(await outcome(setMemberPermission(await ctxFor('admin'), { userId: ids.client, permission: 'ai.use', granted: null })))
+      .toBe('PERMISSION_DENIED');
+    const result = await resetMemberPermissions(await ctxFor('admin'), ids.client);
+    expect(result.reset).toEqual(['data.export']);
+    expect(result.lockedByOwner).toEqual(['ai.use']);
+    expect(adminSql(`select string_agg(permission, ',' order by permission) from public.member_permission_overrides where user_id = '${ids.client}'`))
+      .toBe('ai.use');
+    // The owner sees no lock and may reset it.
+    const asOwner = (await listMemberPermissions(await ctxFor('owner'))).find((m) => m.userId === ids.client)!;
+    expect(asOwner.ownerLocked).toEqual([]);
+    await setMemberPermission(await ctxFor('owner'), { userId: ids.client, permission: 'ai.use', granted: null });
+  });
+
+  it('nobody changes their own role', async () => {
+    expect(await outcome(changeMemberRole(await ctxFor('admin'), { userId: ids.admin, fromRole: 'admin', toRole: 'client' })))
+      .toBe('PERMISSION_DENIED');
+    expect(sqlstate((await rpc('admin', 'change_member_role', { p_org: orgA, p_user: ids.admin, p_role: 'client' })).error))
+      .toBe('42501');
   });
 });
 

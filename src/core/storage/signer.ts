@@ -15,8 +15,9 @@ import { sanitiseFilename } from './filenames';
  *
  *   1. Every key must begin with `${orgId}/`. A key that does not is refused before any call.
  *   2. Nothing is signed without the id of an audit event written in the same request, which is
- *      re-read and verified — right actor, right target, written within the last 30 seconds
- *      (ADR-043.5; R2-A-02). A download that is not audited does not happen.
+ *      re-read and verified — right actor, right organisation, right target, written within the last
+ *      30 seconds (ADR-043.5; R2-A-02). A download that is not audited does not happen. (That the key
+ *      is the target's own object is the caller's to get right; see `signDownloadUrl`.)
  *   3. Signed URLs live 60 seconds and are returned as attachments.
  *
  * Rule 2 governs DISCLOSURE and so applies to signing alone; writing, deleting and listing hand
@@ -135,9 +136,23 @@ export interface SignRequest {
 }
 
 /**
- * Mints a short-lived download URL. Permission (`documents.view` / `reports.view`) is checked by the
- * caller *and* by `api_server.record_access_event`, whose audit row this function then verifies —
- * so an unauthorised caller cannot obtain the audit id in the first place.
+ * Mints a short-lived download URL.
+ *
+ * What is checked, and where — precisely, because this is the one place the database does not stand
+ * behind the read:
+ *   - the CALLER (the route) checks the permission and resolves the file row under the user's RLS,
+ *     and takes `key` from that row;
+ *   - `api_server.record_access_event` re-checks the ACTOR in SQL before writing the audit row:
+ *     `document.downloaded` needs `documents.view` and a document of this organisation;
+ *     `report.downloaded` needs `reports.view` and — for a stored report file — that the actor may
+ *     read that report (`reports_select`'s rule per kind: the daily, weekly and adviser reports also
+ *     need `financials.view`, a custom AI report is its author's; ADR-172 hardening, 2026-10-14).
+ *     Without the right, no audit id is issued;
+ *   - THIS function checks that `key` lies under the caller's organisation and that the audit row it
+ *     is handed exists and names this actor, this organisation, this target table and id, and was
+ *     written within the last 30 seconds.
+ * It does NOT check that `key` is the storage path of that target, nor which access event the row
+ * records: those rest on the caller passing the key of the row it just audited.
  */
 export async function signDownloadUrl(
   ctx: SignerContext,

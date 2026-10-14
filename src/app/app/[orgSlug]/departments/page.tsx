@@ -5,7 +5,8 @@ import {
   Megaphone, PiggyBank, Plus, Receipt, ShieldCheck, Sparkles, TrendingUp, Upload, Users, UsersRound,
 } from 'lucide-react';
 import { loadDepartments, type DepartmentTile, type TileTone } from '@/modules/departments';
-import { getAccessContext, moduleOn, type AccessContext, type ModuleKey } from '@/modules/tenancy';
+import { redirect } from 'next/navigation';
+import { DEPARTMENTS_PERMISSION, getAccessContext, moduleOn, type AccessContext, type ModuleKey } from '@/modules/tenancy';
 import { fundingEnabled } from '@/modules/funding';
 import { getMarketingView, marketingEnabled, summariseMarketing, type MarketingSummary } from '@/modules/marketing';
 import { getInvestmentView, investmentEnabled, summariseInvestment, type InvestmentSummary } from '@/modules/investment';
@@ -17,7 +18,6 @@ import {
   DepartmentCard, QuickLink, ShortcutLink, IconTile, type CardTint,
 } from '@/components/dashboard/department-card';
 import { SectionTabs } from '@/components/dashboard/section-tabs';
-import { requirePermission } from '@/app/_lib/authz';
 import { CompetitiveReadinessCard } from '../marketing/_components/competitive-readiness-card';
 
 export const dynamic = 'force-dynamic';
@@ -71,7 +71,8 @@ const PRESENTATION: Readonly<Record<string, Presentation>> = {
   alerts: {
     title: 'Risk & Health', icon: <ShieldCheck />, tint: 'violet',
     description: ['Business Health Score', 'Alerts & anomaly review'],
-    pills: [{ label: 'Health score', path: 'home/health' }, { label: 'Alerts', path: 'insights/alerts' }],
+    // Alerts live on Insights (there is no page at `insights/alerts` — that pill was a 404).
+    pills: [{ label: 'Health score', path: 'home/health' }, { label: 'Alerts', path: 'insights#alerts-heading' }],
   },
   actions: {
     title: 'Action Centre', icon: <ClipboardCheck />, tint: 'pink',
@@ -125,8 +126,19 @@ const ORDER = ['finance', 'banking', 'planning', 'analyst', 'alerts', 'actions',
 export default async function DepartmentsPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
-  // Not `dashboard.view` alone: a suspended member sees only the frozen Home (ADR-044.4).
-  requirePermission(ctx, 'financials.view');
+  /*
+   * Not `dashboard.view` alone: every tile here is the detail beneath a section. Without
+   * `financials.view` — a 3rd party, a suspended organisation's frozen Home (ADR-044.4), anyone whose
+   * figures switch is off — this page REDIRECTS to Home rather than refusing (ADR-172 follow-up).
+   *
+   * Why redirect and not a cut-down Departments: signing in lands here (the owner's rule), so a
+   * refusal would be the first thing a lender sees; and what a 3rd party may open — the headline
+   * figures, the Health Score, the reports — is exactly Home's overview, where the "Request more
+   * information" card also lives. A Departments page of two report tiles would be a second, thinner
+   * Home. `landingPath` sends them to Home in the first place; this catches a per-person switch the
+   * stored role cannot show, and an old bookmark.
+   */
+  if (!can(ctx, DEPARTMENTS_PERMISSION)) redirect(`/app/${orgSlug}/home`);
   const view = await loadDepartments(ctx);
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
   const [marketing, investment] = await Promise.all([marketingSummary(ctx), investmentSummary(ctx)]);

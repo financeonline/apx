@@ -2,12 +2,13 @@ import { dataLinks, sectionLinks } from '@/components/dashboard/nav';
 import type { SidebarGroup, SidebarIcon } from '@/components/dashboard/sidebar';
 import { AppShell } from '@/components/dashboard/app-shell';
 import { notFound } from 'next/navigation';
-import { getAccessContext } from '@/modules/tenancy';
+import { getAccessContext, landingPath, mayRequestAccess } from '@/modules/tenancy';
 import { can, isPlatformStaff, isSuperAdmin } from '@/core/permissions';
 import { isMotionError } from '@/core/errors';
 import { recordAccessEvent } from '@/core/db/server-rpc';
 import { callApi } from '@/core/db';
 import { Banner } from '@/components/ui/surfaces';
+import { AccessLinksProvider } from '@/components/dashboard/access-links';
 import { ROLE_LABELS } from '@/components/labels';
 import { unreadCount } from '@/modules/engagement';
 import { fundingEnabled } from '@/modules/funding';
@@ -58,8 +59,13 @@ export default async function OrgLayout({
   const suspended = ctx.organizationStatus === 'suspended';
   const pendingDeletion = ctx.organizationStatus === 'pending_deletion';
   const showSettings = can(ctx, 'settings.manage');
-  // ADR-144: the inbox. Not for a suspended member, who keeps only the frozen Home (ADR-044.4).
-  const unread = can(ctx, 'financials.view') ? await unreadCount(ctx) : null;
+  // ADR-144: the inbox — personal, so anyone with the overview reads their own (ADR-172 follow-up: a
+  // 3rd party reads the answer to their own access request there). Not for a suspended organisation,
+  // which keeps only the frozen Home (ADR-044.4).
+  const unread = can(ctx, 'dashboard.view') && !suspended ? await unreadCount(ctx) : null;
+  // ADR-172: "Your access" and "Request more information", for members who may ask (never an owner,
+  // never APX staff, never a suspended organisation — `mayRequestAccess`).
+  const mayAsk = mayRequestAccess(ctx.effectiveRole);
   // Phase 16 (U-5): the Funding link exists only while the flag is on, for those with `reports.view`.
   const showFunding = can(ctx, 'reports.view') && await fundingEnabled(ctx);
   // ADR-170: Marketing, for `reports.view`, unless the super admin switched it off (ADR-158).
@@ -90,6 +96,7 @@ export default async function OrgLayout({
           label: 'Notifications', href: `${base}/notifications`, icon: 'notifications' as const,
           count: { value: unread, srText: `${unread} unread` },
         }]),
+        ...(mayAsk ? [{ label: 'Your access', href: `${base}/access`, icon: 'access' as const }] : []),
         ...(showSettings ? [{ label: 'Settings', href: `${base}/settings`, icon: 'settings' as const }] : []),
         // The Command Centre is APX staff only (ADR-112 addendum, owner 2026-10-14): company owners and
         // admins hold assignments.view to see their analysts, but have no Command Centre.
@@ -106,8 +113,19 @@ export default async function OrgLayout({
     href: '/account',
   };
 
+  /*
+   * The logo goes where signing in goes: Departments, or Home for a person without `financials.view`
+   * (a 3rd party), who would otherwise be sent to a refusal (`landingPath`, ADR-172 follow-up). The
+   * forbidden page offers the same Home and, to a member who may ask, "Request more information" —
+   * through context, because `forbidden.tsx` takes no props.
+   */
+  const accessLinks = {
+    homeHref: can(ctx, 'dashboard.view') ? `${base}/home` : null,
+    accessHref: mayAsk ? `${base}/access` : null,
+  };
+
   return (
-    <AppShell homeHref={`${base}/departments`} groups={groups} user={user}>
+    <AppShell homeHref={landingPath(orgSlug, ctx.permissions)} groups={groups} user={user}>
         <div className="mb-6 flex flex-col gap-3 empty:mb-0">
           {isSuperAdmin(ctx) && (
             <Banner tone="warn" title="You are viewing this organisation as APX staff">
@@ -125,7 +143,7 @@ export default async function OrgLayout({
             </Banner>
           )}
         </div>
-        {children}
+        <AccessLinksProvider value={accessLinks}>{children}</AccessLinksProvider>
     </AppShell>
   );
 }

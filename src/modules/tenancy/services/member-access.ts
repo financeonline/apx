@@ -16,10 +16,12 @@ import {
 import {
   isSwitchable,
   mayRequestAccess,
-  parseOverrides,
+  parseOverrideDetails,
+  setsOwnerSwitches,
   switchableDefaults,
   switchableEffective,
   takesSwitches,
+  withinOwnRights,
 } from '../domain/permissions';
 
 /**
@@ -91,7 +93,9 @@ interface MemberPermissionRow {
  *
  * `editable` is the TypeScript copy of the SQL refusals: the viewer manages the team, the member is
  * active, is not an owner, is not the viewer, and is within the viewer's ceiling. `grantable` is what
- * the viewer holds themselves. A deactivated member is listed, not editable.
+ * the viewer holds themselves, less what an owner's switch locks. `ownerLocked` is the switches an
+ * owner set, which a viewer who is not an owner (or the super admin) may neither change nor reset
+ * (ADR-172 hardening, 2026-10-14). A deactivated member is listed, not editable.
  */
 export async function listMemberPermissions(ctx: AccessContext): Promise<MemberPermissions[]> {
   assertCan(ctx, 'users.view');
@@ -100,16 +104,23 @@ export async function listMemberPermissions(ctx: AccessContext): Promise<MemberP
   );
   const mayManage = can(ctx, 'users.manage');
   const viewerHolds = SWITCHABLE_PERMISSIONS.filter((p) => can(ctx, p));
+  const viewerIsOwner = setsOwnerSwitches(ctx.effectiveRole);
 
   return (rows ?? []).flatMap((row): MemberPermissions[] => {
     const role = asTenantRole(row.role);
     if (role === null) return [];
-    const overrides = takesSwitches(role) ? parseOverrides(row.overrides) : [];
+    const details = takesSwitches(role) ? parseOverrideDetails(row.overrides) : [];
+    const overrides = details.map(({ permission, granted, setByOwner, ceilingWithhold }) => ({
+      permission, granted, setByOwner, ceilingWithhold,
+    }));
     const editable = mayManage
       && row.status === 'active'
       && takesSwitches(role)
       && row.user_id !== ctx.userId
       && ceilingAllows(ctx.effectiveRole, role);
+    const ownerLocked = editable && !viewerIsOwner
+      ? overrides.filter((o) => o.setByOwner).map((o) => o.permission)
+      : [];
     return [{
       userId: row.user_id,
       name: row.full_name ?? null,
@@ -119,9 +130,56 @@ export async function listMemberPermissions(ctx: AccessContext): Promise<MemberP
       overrides,
       effective: switchableEffective(role, overrides),
       editable,
-      grantable: editable ? viewerHolds : [],
+      grantable: editable ? viewerHolds.filter((p) => !ownerLocked.includes(p)) : [],
+      ownerLocked,
     }];
   });
+}
+
+/**
+ * "Reset all": put back to the role's default every switch of one member that the viewer may reset
+ * — never one an owner set (unless the viewer is an owner), and never a reset that would give the
+ * person something the viewer does not hold (`withinOwnRights`, the copy of the SQL rule). Read fresh
+ * from the database, so a switch another admin set a moment ago is included; each reset goes through
+ * `setMemberPermission`, so the database re-checks every one. Returns what was reset and what was
+ * left (and why), so the page can say so instead of stopping at the first refusal.
+ */
+export async function resetMemberPermissions(
+  ctx: AccessContext,
+  userId: string,
+): Promise<{
+  readonly reset: readonly SwitchablePermission[];
+  readonly lockedByOwner: readonly SwitchablePermission[];
+  readonly notHeld: readonly SwitchablePermission[];
+}> {
+  assertCan(ctx, 'users.manage');
+  const member = (await listMemberPermissions(ctx)).find((m) => m.userId === uuid(userId, 'userId'));
+  if (!member) throw new NotFound();
+  if (!member.editable) throw new PermissionDenied('change this person’s access');
+
+  const reset: SwitchablePermission[] = [];
+  const lockedByOwner: SwitchablePermission[] = [];
+  const notHeld: SwitchablePermission[] = [];
+  for (const override of member.overrides) {
+    if ((member.ownerLocked ?? []).includes(override.permission)) {
+      lockedByOwner.push(override.permission);
+      continue;
+    }
+    const allowed = withinOwnRights({
+      viewerHolds: can(ctx, override.permission),
+      targetRole: member.role,
+      current: override.granted,
+      next: null,
+      permission: override.permission,
+    });
+    if (!allowed) {
+      notHeld.push(override.permission);
+      continue;
+    }
+    await setMemberPermission(ctx, { userId: member.userId, permission: override.permission, granted: null });
+    reset.push(override.permission);
+  }
+  return { reset, lockedByOwner, notHeld };
 }
 
 /**

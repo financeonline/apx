@@ -1,6 +1,6 @@
 import 'server-only';
 import { NotFound, toMotionError, ValidationError } from '@/core/errors';
-import { assertCan } from '@/core/permissions';
+import { assertCan, can } from '@/core/permissions';
 import { callApi } from '@/core/db';
 import {
   buildHeadlineCards, loadPeriods, loadPeriodSnapshots, loadPeriodsWithData, loadLastDataDate,
@@ -52,10 +52,21 @@ export async function listAvailable(ctx: AccessContext): Promise<AvailableReport
     }));
 }
 
+/**
+ * The report on screen, for a reader with `reports.view`.
+ *
+ * Its open actions come from the Action Centre, which is `actions.view` reading (ADR-172): a reader
+ * without it — a 3rd party — gets the report without that section rather than a refusal, exactly as
+ * the alerts section is empty for them under RLS. Both sections are drawn only when they have rows,
+ * so neither says "nothing outstanding" about something the reader simply cannot see. The PDF job is
+ * not affected: it builds the report with its own scoped client (`buildMonthlyReport`), and a reader
+ * holding `actions.view` sees exactly what the PDF prints.
+ */
 export async function getMonthlyReport(
   ctx: AccessContext, periodId: string,
 ): Promise<ReportViewModel | null> {
   assertCan(ctx, 'reports.view');
+  const readsActions = can(ctx, 'actions.view');
   return buildMonthlyReport({
     db: ctx.db,
     orgId: orgOf(ctx),
@@ -63,7 +74,9 @@ export async function getMonthlyReport(
     periodId,
     requestId: ctx.requestId,
     now: ctx.now(),
-    openActions: () => listActions(ctx, { status: ['open', 'in_progress'] }),
+    openActions: readsActions
+      ? () => listActions(ctx, { status: ['open', 'in_progress'] })
+      : () => Promise.resolve([]),
   });
 }
 

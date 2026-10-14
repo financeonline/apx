@@ -2,11 +2,11 @@ import 'server-only';
 import { Decimal } from '@/core/money';
 import { assertCan } from '@/core/permissions';
 import {
-  addDays, addMonths, fiscalYearStart, monthEnd, monthStart, todayInTimeZone, yearMonthOf, systemClock, type IsoDate,
+  addMonths, fiscalYearStart, monthEnd, monthStart, todayInTimeZone, yearMonthOf, systemClock, type IsoDate,
 } from '@/core/periods';
 import { loadPeriodSnapshots, loadPeriods } from '@/modules/dashboard';
 import type { AccessContext } from '@/modules/tenancy';
-import { estimateCorporationTax, addMonthsToDate, type CorporationTaxEstimate } from '../domain/corporation-tax';
+import { corporationTaxDueDate, estimateCorporationTax, type CorporationTaxEstimate } from '../domain/corporation-tax';
 import { computeVatReturn, recentVatQuarters, vatQuarterFor, type VatQuarter, type VatReturn } from '../domain/vat';
 import { loadOrganisationTaxFacts, loadVatInvoices, type OrganisationTaxFacts } from '../data/repository';
 
@@ -101,7 +101,7 @@ export async function loadCorporationTaxView(ctx: AccessContext, yearStart?: str
   });
   // The due date belongs to the accounting period, not to the months the figures reach.
   const dated = estimate.kind === 'estimate'
-    ? { ...estimate, dueDate: facts.countryCode === 'GB' ? addDays(addMonthsToDate(end, 9), 1) : addMonthsToDate(end, 9) }
+    ? { ...estimate, dueDate: corporationTaxDueDate(facts.countryCode, end) ?? estimate.dueDate }
     : estimate;
 
   return {
@@ -111,5 +111,51 @@ export async function loadCorporationTaxView(ctx: AccessContext, yearStart?: str
   };
 }
 
+/**
+ * The compliance dates the tax module can state, for Home's "Data & compliance" strip (ADR-172
+ * follow-up; SOW "Accountant: … including compliance"). Dates only — no figure is computed, so it
+ * needs no invoice or snapshot read:
+ *   - VAT: the quarter now running and the last one that ended (the one a return is due for), when
+ *     the business is VAT registered and has said which months its quarters end in — never assumed.
+ *     APX states no VAT filing deadline, so none is given here.
+ *   - Corporation Tax: the financial year holding the latest complete month, and when its tax is due
+ *     under the country's rule (`corporationTaxDueDate`); null outside the UK and UAE.
+ */
+export interface TaxDates {
+  readonly vatRegistered: boolean | null;
+  readonly vatQuarter: VatQuarter | null;
+  readonly lastVatQuarter: VatQuarter | null;
+  readonly corporationTax: { readonly yearStart: IsoDate; readonly yearEnd: IsoDate; readonly dueDate: IsoDate } | null;
+}
+
+export async function loadTaxDates(ctx: AccessContext): Promise<TaxDates> {
+  assertCan(ctx, 'financials.view');
+  const orgId = ctx.orgId!;
+  const [facts, periods] = await Promise.all([
+    loadOrganisationTaxFacts(ctx.db, orgId, ctx.requestId),
+    loadPeriods(ctx.db, orgId, ctx.requestId),
+  ]);
+
+  let vatQuarter: VatQuarter | null = null;
+  let lastVatQuarter: VatQuarter | null = null;
+  if (facts.vatRegistered === true && facts.vatQuarterEndMonth !== null) {
+    const today = todayInTimeZone(systemClock, facts.timezone);
+    const quarters = recentVatQuarters(today, facts.vatQuarterEndMonth, 2);
+    vatQuarter = quarters[0] ?? null;
+    lastVatQuarter = quarters[1] ?? null;
+  }
+
+  const latest = periods.find((p) => p.isComplete) ?? null;
+  let corporationTax: TaxDates['corporationTax'] = null;
+  if (latest !== null) {
+    const startYm = fiscalYearStart(yearMonthOf(latest.periodStart), facts.fiscalYearStartMonth);
+    const yearStart = monthStart(startYm);
+    const yearEnd = monthEnd(addMonths(startYm, 11));
+    const dueDate = corporationTaxDueDate(facts.countryCode, yearEnd);
+    corporationTax = dueDate === null ? null : { yearStart, yearEnd, dueDate };
+  }
+
+  return { vatRegistered: facts.vatRegistered, vatQuarter, lastVatQuarter, corporationTax };
+}
 
 export { vatQuarterFor };

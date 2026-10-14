@@ -10,9 +10,10 @@ import { NativeSelect } from '@/components/ui/shadcn';
 /**
  * Who owns this action (SOW §17; RBAC_MATRIX.md `actions.assign`).
  *
- * The list is the organisation's current members and assigned employees, resolved on the server at
- * render. `api.assign_action` refuses anybody without access anyway — not offering them is the
- * difference between a considered interface and one that fails after the click.
+ * The list is the organisation's current members and assigned Financial Analysts who can see the
+ * Action Centre (`api.action_assignees`, ADR-172), resolved on the server at render. `api.assign_action`
+ * refuses anybody else anyway — a 3rd party, or a client whose Action Centre is switched off — and not
+ * offering them is the difference between a considered interface and one that fails after the click.
  */
 export function AssignControl({
   orgSlug,
@@ -26,6 +27,9 @@ export function AssignControl({
   owners: ReadonlyArray<{ userId: string; name: string }>;
 }) {
   const [state, submit] = useActionState(assignActionAction, null);
+  // The current owner may since have lost the Action Centre (a switch, a role change): they are not
+  // offered, so say why the list does not start on them.
+  const ownerGone = ownerUserId !== null && !owners.some((owner) => owner.userId === ownerUserId);
 
   return (
     <Card>
@@ -41,7 +45,7 @@ export function AssignControl({
             <span className="text-ink-muted">Assign to</span>
             <NativeSelect
               name="owner_user_id"
-              defaultValue={ownerUserId ?? ''}
+              defaultValue={ownerGone ? '' : (ownerUserId ?? '')}
               className="w-full sm:w-72"
             >
               <option value="">Nobody</option>
@@ -52,6 +56,11 @@ export function AssignControl({
           </label>
           <SubmitButton tone="secondary">Assign</SubmitButton>
         </form>
+        {ownerGone ? (
+          <p className="mt-2 text-xs text-warn">
+            The person it is given to can no longer see the Action Centre. Choose someone who can.
+          </p>
+        ) : null}
         <ActionMessage state={state} />
       </CardBody>
     </Card>

@@ -221,7 +221,8 @@ export function AnalystNoConversationsEmpty({ askHrefBase }: { askHrefBase: stri
 }
 
 /** Reports, before the first full month of data. */
-export function ReportsBeforeFirstMonthEmpty({ addDataHref }: { addDataHref: string }) {
+/** `addDataHref` only for someone who may add data; anyone else reads the sentence without a button. */
+export function ReportsBeforeFirstMonthEmpty({ addDataHref }: { addDataHref?: string }) {
   return <CopyState copy={REPORTS_BEFORE_FIRST_MONTH} primaryHref={addDataHref} />;
 }
 

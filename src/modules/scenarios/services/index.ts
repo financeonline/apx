@@ -28,8 +28,10 @@ import * as repo from '../data/repository';
  * scenario holds BOTH figures per cell, so regenerating the forecast underneath it cannot rewrite
  * what it said (§13).
  *
- * **Two permissions, on purpose.** Reading is `dashboard.view` — a scenario is a statement about
- * figures, and everyone who may see the figures may see it, a client included. Working one out is
+ * **Two permissions, on purpose.** Reading is `financials.view` — a scenario is a statement about
+ * figures, and everyone who may see the figures may see it, a client included (ADR-172: it was
+ * `dashboard.view` until a 3rd party held that without the figures; `scenario_runs` is
+ * `financials.view` reading). Working one out is
  * `intelligence.recompute`, which is the permission for triggering a deterministic calculation over
  * the organisation's figures and which a client does not hold. No new permission was invented (§19,
  * §22).
@@ -438,7 +440,7 @@ async function viewOf(
 export async function loadScenario(
   ctx: AccessContext, scenarioId?: string,
 ): Promise<ScenarioState> {
-  assertCan(ctx, 'dashboard.view');
+  assertCan(ctx, 'financials.view');
   const orgId = orgOf(ctx);
 
   const stored = scenarioId === undefined
@@ -453,7 +455,7 @@ export async function loadScenario(
 export async function listScenarios(
   ctx: AccessContext, { includeArchived = false } = {},
 ): Promise<ScenarioSummary[]> {
-  assertCan(ctx, 'dashboard.view');
+  assertCan(ctx, 'financials.view');
   const rows = await repo.listScenarioRows(ctx.db, orgOf(ctx), includeArchived, ctx.requestId);
   return rows.map((row) => ({
     runId: row.runId,

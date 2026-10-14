@@ -39,7 +39,8 @@ export default async function WhatIfPage({
   const { orgSlug } = await params;
   const query = await searchParams;
   const ctx = await getAccessContext(orgSlug);
-  requirePermission(ctx, 'dashboard.view');
+  // `financials.view`: the forecast and scenario tables are figures beneath the overview (ADR-172).
+  requirePermission(ctx, 'financials.view');
 
   const [forecast, latest, saved] = await Promise.all([
     loadForecast(ctx),

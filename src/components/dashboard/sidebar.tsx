@@ -4,7 +4,7 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
   Activity, ArrowLeftRight, Bell, Briefcase, Building2, ChartColumn, CircleUser, Database, FileText, FileUp,
-  House, Inbox, Landmark, LayoutGrid, Lightbulb, ListChecks, Megaphone, PiggyBank, Settings, ShieldAlert, Sparkles, Users, Wallet,
+  House, Inbox, KeyRound, Landmark, LayoutGrid, Lightbulb, ListChecks, Megaphone, PiggyBank, Settings, ShieldAlert, Sparkles, Users, Wallet,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -17,7 +17,7 @@ import {
 export type SidebarIcon =
   | 'home' | 'departments' | 'insights' | 'money' | 'customers' | 'actions' | 'engagement' | 'reports'
   | 'analyst' | 'funding' | 'marketing' | 'investment' | 'add-data' | 'imports' | 'documents' | 'accounts' | 'notifications' | 'settings'
-  | 'portfolio' | 'switch' | 'account' | 'alerts' | 'assignments' | 'jobs' | 'audit' | 'users';
+  | 'portfolio' | 'switch' | 'account' | 'alerts' | 'assignments' | 'jobs' | 'audit' | 'users' | 'access';
 
 const ICONS: Readonly<Record<SidebarIcon, LucideIcon>> = {
   home: House, departments: LayoutGrid, insights: Lightbulb, money: Wallet, customers: Users,
@@ -26,6 +26,8 @@ const ICONS: Readonly<Record<SidebarIcon, LucideIcon>> = {
   'add-data': FileUp, imports: Database, documents: FileText, accounts: ListChecks,
   notifications: Bell, settings: Settings, portfolio: Building2, switch: ArrowLeftRight, account: CircleUser,
   alerts: ShieldAlert, assignments: Briefcase, jobs: Activity, audit: FileText, users: Users,
+  // ADR-172: "Your access" — what one holds in a company, and "Request more information".
+  access: KeyRound,
 };
 
 export interface SidebarLink {

@@ -8,7 +8,7 @@ import { basisFromForecast } from './index';
 /**
  * An affordability check (SOW §12; ADR-146), worked out against the stored forecast and NOT stored.
  *
- * `dashboard.view`, as reading the forecast is: nothing is written, and the check says no more than
+ * `financials.view`, as reading the forecast is (ADR-172): nothing is written, and the check says no more than
  * the forecast already does plus the amount the person gave. The AI tool and the What-if page's form
  * both call this, so the analyst and the page cannot disagree.
  */
@@ -27,7 +27,7 @@ export async function checkAffordability(
   ctx: AccessContext,
   input: { readonly amount: string; readonly recurrence: Recurrence; readonly startsInMonth: number },
 ): Promise<AffordabilityCheck> {
-  assertCan(ctx, 'dashboard.view');
+  assertCan(ctx, 'financials.view');
   const state = await loadForecast(ctx);
   if (!hasForecast(state) || state.periods.length === 0) {
     return {

@@ -30,7 +30,7 @@ function ProfileNeeded({ base, view }: { base: string; view: MarketingView }) {
       title="Start with the company profile"
       actionHref={view.canEditProfile ? `${base}/settings/company-profile` : undefined}
       actionLabel={view.canEditProfile ? 'Fill in the company profile' : undefined}
-      secondary={view.canEditProfile ? undefined : 'Ask your adviser to fill in the company profile.'}
+      secondary={view.canEditProfile ? undefined : 'Ask your Financial Analyst to fill in the company profile.'}
     >
       The marketing report is written from the company profile: what {view.organisationName} sells, its industry, its
       website and social accounts. Once it says what the company sells or its industry, APX prepares the report — there
@@ -87,14 +87,25 @@ export default async function MarketingPage({ params }: { params: Promise<{ orgS
       />
 
       <div className="flex flex-col gap-6">
-        {!view.profileReady ? <ProfileNeeded base={base} view={view} /> : null}
+        {/*
+          ADR-172 follow-up: the profile panel is instructions for whoever fills it in or creates the
+          report. A reader who can do neither (a 3rd party, a client) is told only that there is no
+          report yet, and who makes one.
+        */}
+        {!view.profileReady && (view.canEditProfile || view.canRefresh) ? <ProfileNeeded base={base} view={view} /> : null}
+
+        {!view.profileReady && !view.canEditProfile && !view.canRefresh && view.status === 'none' && presentation === null ? (
+          <EmptyState title="No marketing report yet" secondary="An owner or your Financial Analyst can create it.">
+            It will appear here once they have.
+          </EmptyState>
+        ) : null}
 
         {view.profileReady && view.status === 'none' && presentation === null ? (
           <EmptyState
             title="No marketing report yet"
             secondary={view.canRefresh
               ? <div className="flex justify-center"><RequestReportControl orgSlug={orgSlug} label="Create the marketing report" /></div>
-              : 'An owner or adviser can create it.'}
+              : 'An owner or your Financial Analyst can create it.'}
           >
             ChatGPT writes it from the company profile and the figures in APX: comparable competitors and customer sectors,
             a marketing and growth strategy with a first 90 days, and a review of the figures. It usually takes under a minute.

@@ -79,6 +79,14 @@ export async function listBatches(
  * Rows of one batch, optionally filtered to a review status. `raw_data` is returned verbatim: it is
  * the file as it arrived, including columns nobody mapped, and level-4 evidence highlighting depends
  * on it still being there (DATABASE_ARCHITECTURE.md §5).
+ *
+ * `raw_data` and `mapped_data` (the same text, verbatim and unmasked) are not selectable on
+ * `import_rows` since the ADR-172 hardening (migration 20261018000033). They come from the definer
+ * view `import_rows_review`, which returns them while the batch is IN REVIEW (not yet in the books)
+ * to whoever holds `imports.review` and reads the lines (`banking.view` or `financials.view`). It is
+ * read with the same filters, order and page as the rows, so the two line up row for row; a committed
+ * batch's rows come back with no payload (the review page does not list them, and the committed
+ * records are read through their own tables, masked).
  */
 export async function listBatchRows(
   db: SupabaseClient,
@@ -90,24 +98,39 @@ export async function listBatchRows(
 ): Promise<ImportRow[]> {
   let query = db
     .from('import_rows')
-    .select(`id, row_number, source_ref, source_page, raw_data, mapped_data, status, issues,
+    .select(`id, row_number, source_ref, source_page, status, issues,
              reviewer_decision, reviewer_reason, committed_table, committed_record_id`)
     .eq('organization_id', orgId)
     .eq('batch_id', batchId);
+  let payloadQuery = db
+    .from('import_rows_review')
+    .select('id, raw_data, mapped_data')
+    .eq('organization_id', orgId)
+    .eq('batch_id', batchId);
 
-  if (filter.status) query = query.eq('status', filter.status);
+  if (filter.status) {
+    query = query.eq('status', filter.status);
+    payloadQuery = payloadQuery.eq('status', filter.status);
+  }
 
-  const { data, error } = await query
-    .order('row_number')
-    .range(page.offset, page.offset + page.limit - 1);
+  const [{ data, error }, payload] = await Promise.all([
+    query.order('row_number').range(page.offset, page.offset + page.limit - 1),
+    payloadQuery.order('row_number').range(page.offset, page.offset + page.limit - 1),
+  ]);
+  const payloads = new Map(
+    unwrap(payload.data, payload.error, requestId).map((r) => [
+      r.id as string,
+      { raw: (r.raw_data as Record<string, unknown> | null) ?? {}, mapped: r.mapped_data as ImportRow['mappedData'] },
+    ]),
+  );
 
   return unwrap(data, error, requestId).map((r) => ({
     id: r.id,
     rowNumber: r.row_number,
     sourceRef: r.source_ref,
     sourcePage: (r.source_page as number | null) ?? null,
-    rawData: r.raw_data ?? {},
-    mappedData: r.mapped_data,
+    rawData: payloads.get(r.id as string)?.raw ?? {},
+    mappedData: payloads.get(r.id as string)?.mapped ?? null,
     status: r.status,
     issues: r.issues ?? [],
     reviewerDecision: r.reviewer_decision,

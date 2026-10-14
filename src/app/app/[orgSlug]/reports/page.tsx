@@ -92,12 +92,24 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
   const canGenerate = can(ctx, 'reports.generate');
   // ADR-158: a new custom report needs the AI Analyst system; reports already made stay listed.
   const canAsk = can(ctx, 'ai.use') && moduleOn(ctx, 'analyst');
+  /*
+   * ADR-172: the Daily Executive Brief, the Weekly Intelligence Report and the Accountant/CFO Report
+   * are internal — the database lets only `financials.view` read them (`reports_select`). A reader
+   * without it (a 3rd party) is not shown their sections: an empty list there would say "no brief
+   * yet" about briefs that exist. What they can open — the Monthly Management Report and Funding
+   * Readiness — is listed as for everyone.
+   */
+  const seesInternal = can(ctx, 'financials.view');
   const [monthly, stored, windows, funding] = await Promise.all([
     listAvailable(ctx),
-    listStoredReports(ctx, ['daily_brief', 'weekly_intelligence', 'adviser', 'custom_ai', 'funding_readiness']),
+    listStoredReports(ctx, seesInternal
+      ? ['daily_brief', 'weekly_intelligence', 'adviser', 'custom_ai', 'funding_readiness']
+      : ['custom_ai', 'funding_readiness']),
     latestCompletedWindows(ctx),
     fundingEnabled(ctx),
   ]);
+  // A custom report is its author's own; the section is for whoever may write one, or has.
+  const showsCustom = canAsk || stored.some((r) => r.kind === 'custom_ai');
   const of = (kind: StoredKind, limit: number) => stored.filter((r) => r.kind === kind).slice(0, limit);
 
   const days = Array.from({ length: DAYS_OFFERED }, (_, i) => addDays(windows.yesterday, -i))
@@ -115,6 +127,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
 
       {/* A readable width on a very wide screen: a row's details stay near its title. */}
       <div className="flex max-w-5xl flex-col gap-6">
+        {seesInternal ? (<>
         <Section
           title={KIND_LABELS.daily_brief}
           icon={<CalendarDays />}
@@ -142,10 +155,11 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
             empty="No weekly report yet. Each week's report is produced early on Monday." />
           {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="weekly_intelligence" label="Produce a weekly report" windows={weeks} /> : null}
         </Section>
+        </>) : null}
 
         <Section title="Monthly Management Report" icon={<FileText />} tint="violet" description="One report a month, from the figures APX has already calculated.">
           {monthly.length === 0 ? (
-            <ReportsBeforeFirstMonthEmpty addDataHref={`/app/${orgSlug}/data/imports/new`} />
+            <ReportsBeforeFirstMonthEmpty addDataHref={can(ctx, 'imports.create') ? `/app/${orgSlug}/data/imports/new` : undefined} />
           ) : (
             <ul className="flex flex-col divide-y divide-line">
               {monthly.map((report) => (
@@ -170,6 +184,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
           )}
         </Section>
 
+        {seesInternal ? (
         <Section
           title={KIND_LABELS.adviser}
           icon={<Building2 />}
@@ -179,7 +194,9 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
           <StoredList orgSlug={orgSlug} reports={of('adviser', 6)} empty="No Accountant/CFO Report yet." />
           {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="adviser" label="Produce one now" /> : null}
         </Section>
+        ) : null}
 
+        {showsCustom ? (
         <Section
           title={KIND_LABELS.custom_ai}
           icon={<Sparkles />}
@@ -193,6 +210,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
             </Link>
           ) : null}
         </Section>
+        ) : null}
 
         <Section
           title={KIND_LABELS.funding_readiness}

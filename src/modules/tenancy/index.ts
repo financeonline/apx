@@ -71,13 +71,25 @@ export {
   switchableDefaults,
   switchableEffective,
   withinOwnRights,
+  setsOwnerSwitches,
+  parseOverrideDetails,
   type PermissionOverride,
+  type PermissionOverrideDetail,
 } from './domain/permissions';
 export {
   listMemberPermissions,
   setMemberPermission,
+  resetMemberPermissions,
   requestAccess,
   listAccessRequests,
   decideAccessRequest,
   withdrawAccessRequest,
 } from './services/member-access';
+// ADR-172 follow-up: where a person lands in a company — Departments, or Home without `financials.view`.
+export {
+  DEPARTMENTS_PERMISSION,
+  landingPath,
+  landingPathForRole,
+  landingSection,
+  type LandingSection,
+} from './domain/landing';

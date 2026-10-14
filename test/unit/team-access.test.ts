@@ -3,7 +3,9 @@ import {
   NOT_EDITABLE_REASON,
   NOT_HELD_REASON,
   PERMISSION_GROUPS,
+  RESET_NOT_HELD_REASON,
   accessPanel,
+  resetAllNote,
   asSwitchable,
   defaultInviteRole,
   grantFrom,
@@ -174,6 +176,51 @@ describe('the access panel', () => {
     expect(panel.changedCount).toBe(3);
     // `reports.view` is taken away and the viewer lacks it: putting it back would be a grant.
     expect([...panel.resettable].sort()).toEqual(['ai.use', 'data.export']);
+  });
+});
+
+describe('"Back to default" and "Reset all" follow withinOwnRights (ADR-172 follow-up)', () => {
+  const takenAway = person({
+    grantable: CLIENT_DEFAULTS.filter((p) => p !== 'reports.view'),
+    overrides: [{ permission: 'reports.view', granted: false }],
+    effective: CLIENT_DEFAULTS.filter((p) => p !== 'reports.view'),
+  });
+
+  it('gives the reason where the reset would be, when the default would switch on something the viewer lacks', () => {
+    const view = switchView(takenAway, 'reports.view');
+    expect(view.canReset).toBe(false);
+    expect(view.resetLockedReason).toBe(RESET_NOT_HELD_REASON);
+  });
+
+  it('offers the reset with no reason when it only takes something away', () => {
+    const view = switchView(
+      person({ grantable: [], overrides: [{ permission: 'data.export', granted: true }], effective: [...CLIENT_DEFAULTS, 'data.export'] }),
+      'data.export',
+    );
+    expect(view.canReset).toBe(true);
+    expect(view.resetLockedReason).toBeNull();
+  });
+
+  it('gives no reset reason for a switch that is not stored, or a person the viewer may not change', () => {
+    expect(switchView(takenAway, 'ai.use').resetLockedReason).toBeNull();
+    expect(switchView({ ...takenAway, editable: false }, 'reports.view').resetLockedReason).toBeNull();
+  });
+
+  it('says what "Reset all" leaves alone, and why it is not offered when it could reset nothing', () => {
+    const mixed = accessPanel({
+      ...takenAway,
+      overrides: [...takenAway.overrides, { permission: 'ai.use', granted: false }],
+      effective: takenAway.effective.filter((p) => p !== 'ai.use'),
+    });
+    expect(mixed.resettable).toEqual(['ai.use']);
+    expect(mixed.unresettable).toEqual(['Reports']);
+    expect(mixed.resetAllNote).toBe(resetAllNote(1, ['Reports']));
+    expect(mixed.resetAllNote).toMatch(/^Reset all leaves Reports as it is/);
+
+    const none = accessPanel(takenAway);
+    expect(none.resettable).toEqual([]);
+    expect(none.resetAllNote).toMatch(/^Reset all is not available: putting Reports back/);
+    expect(accessPanel(person()).resetAllNote).toBeNull();
   });
 });
 

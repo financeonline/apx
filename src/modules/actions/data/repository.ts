@@ -136,15 +136,23 @@ export async function getAction(
   return toAction(row, await ownerNames(db, orgId, [row.owner_user_id], resolveNames));
 }
 
-/** The people an action may be assigned to: members and currently assigned employees. */
+/**
+ * The people an action may be assigned to: active members and currently assigned Financial Analysts
+ * who can see the Action Centre (`actions.view`).
+ */
 export async function assignableOwners(
   db: SupabaseClient, orgId: string,
 ): Promise<Array<{ userId: string; name: string }>> {
-  const { data, error } = await db.schema('api').rpc('org_members', { p_org: orgId });
+  /*
+   * ADR-172 follow-up: `api.action_assignees` — the active members and assigned Financial Analysts
+   * who hold `actions.view`, which is exactly whom `api.assign_action` accepts. It asks
+   * `actions.assign`, the permission the picker serves; the `api.org_members` this used needed
+   * `users.view`, which a Financial Analyst does not hold, and listed people with no Action Centre.
+   */
+  const { data, error } = await db.schema('api').rpc('action_assignees', { p_org: orgId });
   if (error) throw toMotionError(error);
 
-  return ((data ?? []) as Array<{ user_id: string; full_name: string | null; status: string }>)
-    .filter((row) => row.status === 'active')
+  return ((data ?? []) as Array<{ user_id: string; full_name: string | null }>)
     .map((row) => ({ userId: row.user_id, name: row.full_name ?? 'A colleague' }))
     .sort((a, b) => a.name.localeCompare(b.name));
 }

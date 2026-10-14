@@ -32,18 +32,18 @@ export default async function PlatformAssignmentsPage() {
   return (
     <>
       <PageHeader
-        title="Adviser assignments"
-        description="An adviser sees only the organisations assigned here. The organisation's owner can remove access at any time."
+        title="Financial Analyst assignments"
+        description="A Financial Analyst sees only the organisations assigned here. The organisation's owner can remove access at any time."
       />
       <div className="mt-8 flex flex-col gap-6">
         <Card>
           <CardHeader icon={<Briefcase />} tint="violet" title="Active assignments" />
           <CardBody>
             {assignments.length === 0 ? (
-              <EmptyState title="No active assignments">Assign an adviser to a client organisation below.</EmptyState>
+              <EmptyState title="No active assignments">Assign a Financial Analyst to a client organisation below.</EmptyState>
             ) : (
               <TableWrap>
-                <THead columns={['Organisation', 'Adviser', 'Access ends', '']} />
+                <THead columns={['Organisation', 'Financial Analyst', 'Access ends', '']} />
                 <TBody>
                   {assignments.map((assignment) => (
                     <AssignmentRow
@@ -60,7 +60,7 @@ export default async function PlatformAssignmentsPage() {
           </CardBody>
         </Card>
         <Card>
-          <CardHeader icon={<UserPlus />} tint="pink" title="Assign an adviser" description="Requires a recent re-authentication." />
+          <CardHeader icon={<UserPlus />} tint="pink" title="Assign a Financial Analyst" description="Requires a recent re-authentication." />
           <CardBody><CreateAssignmentForm /></CardBody>
         </Card>
       </div>

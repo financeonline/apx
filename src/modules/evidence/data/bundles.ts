@@ -117,18 +117,36 @@ export function fetchCalculationRun(
   );
 }
 
-export function fetchMetricSnapshot(
+/**
+ * One snapshot with its `components` and `evidence_query`.
+ *
+ * The two payload columns are not selectable on `metric_snapshots` since the ADR-172 hardening
+ * (migration 20261018000033) — they carry account and counterparty ids, bank account names and the
+ * record descriptors behind a figure. They come from the definer view `metric_snapshot_payloads`,
+ * whole for the evidence's own readers (`financials.view`, which every caller here has asserted). A
+ * snapshot the caller cannot read is NULL from the table read, so the view is not asked.
+ */
+export async function fetchMetricSnapshot(
   db: SupabaseClient,
   orgId: string,
   snapshotId: string,
 ): Promise<Row | null> {
-  return one(
-    db,
-    'metric_snapshots',
-    'id,organization_id,calculation_run_id,period_id,metric_key,dimension_type,dimension_id,value,unit,currency,basis,assurance_level,data_quality,components,evidence_query',
-    orgId,
-    snapshotId,
-  );
+  const [row, payload] = await Promise.all([
+    one(
+      db,
+      'metric_snapshots',
+      'id,organization_id,calculation_run_id,period_id,metric_key,dimension_type,dimension_id,value,unit,currency,basis,assurance_level,data_quality',
+      orgId,
+      snapshotId,
+    ),
+    one(db, 'metric_snapshot_payloads', 'id,components,evidence_query', orgId, snapshotId),
+  ]);
+  if (row === null) return null;
+  return {
+    ...row,
+    components: payload?.components ?? {},
+    evidence_query: payload?.evidence_query ?? null,
+  };
 }
 
 /**

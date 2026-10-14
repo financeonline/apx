@@ -182,6 +182,10 @@ export async function latestCompletedWindows(ctx: AccessContext): Promise<{
  */
 export async function previewBrief(ctx: AccessContext, kind: BriefKind): Promise<BriefContent> {
   assertCan(ctx, 'reports.view');
+  // The stored daily and weekly reports also need `financials.view` (`reports_select`, ADR-172): they
+  // list the day's alerts, overdue actions and movements by account. A preview composed live under a
+  // reader without it would be the same report with its detail silently missing.
+  assertCan(ctx, 'financials.view');
   const windows = await latestCompletedWindows(ctx);
   return composeBrief({
     db: ctx.db, orgId: orgOf(ctx), kind,

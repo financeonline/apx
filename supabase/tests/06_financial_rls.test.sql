@@ -135,7 +135,11 @@ begin
   values (p_org, v_doc, 'general_ledger', 'ledger_entries', '2026-03-01', '2026-03-31')
   returning id into v_batch;
 
-  insert into public.import_rows (organization_id, batch_id, row_number) values (p_org, v_batch, 1);
+  -- ADR-172 hardening (2026-10-14, migration 20261018000033): `bank_transactions_raw` shows a line's
+  -- raw text only while it is in review — here, as the line a row of a batch still in review is
+  -- flagged as a duplicate of — so the raw-view assertions below still have a row to see.
+  insert into public.import_rows (organization_id, batch_id, row_number, duplicate_of_table, duplicate_of_id)
+  values (p_org, v_batch, 1, 'bank_transactions', v_txn);
 
   insert into public.evidence_bundles (organization_id, kind, origin_table)
   values (p_org, 'metric', 'metric_snapshots');

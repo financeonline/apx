@@ -51,7 +51,7 @@ function NoFigures({ view, importHref }: { view: InvestmentView; importHref: str
             </p>
           </div>
           {importHref === null
-            ? <p className="text-sm text-ink-muted">Ask your adviser to import the company’s figures.</p>
+            ? <p className="text-sm text-ink-muted">Ask your Financial Analyst to import the company’s figures.</p>
             : <div><ButtonLink href={importHref}><FileUp aria-hidden="true" /> Import the figures</ButtonLink></div>}
           {/* No pack without figures, even with an amount entered: every growth table and the comparison
               start from the base year's revenue and margin (ADR-171), so the request is refused. */}
@@ -83,7 +83,36 @@ function ReadyToCreate({ view, start, amount, orgSlug }: { view: InvestmentView;
           </div>
           {view.canRefresh
             ? <RequestPackControl orgSlug={orgSlug} label="Create the investment pack" amount={amount} />
-            : <p className="text-sm text-ink-muted">An owner or adviser can create it.</p>}
+            : <p className="text-sm text-ink-muted">An owner or your Financial Analyst can create it.</p>}
+        </div>
+      </CardBody>
+    </Card>
+  );
+}
+
+/**
+ * No pack yet, for a reader who cannot create one (ADR-172 follow-up). The "ready to create" and "needs
+ * figures" panels describe what APX WOULD build on — the base year and surplus, worked out live under
+ * the reader's own access. For someone who cannot create the pack that is not their concern, and for a
+ * reader without the figures beneath the overview (a 3rd party) it would be worked out from what they
+ * can see and could be wrong. So they are told plainly that there is no pack, and who makes one.
+ */
+function NoPackYet({ importHref }: { importHref: string | null }) {
+  return (
+    <Card>
+      <CardBody className="flex min-w-0 items-start gap-4">
+        <IconBadge tint="violet"><PiggyBank /></IconBadge>
+        <div className="flex min-w-0 flex-col gap-2">
+          <h2 className="text-lg">No investment pack yet</h2>
+          <p className="max-w-prose text-sm text-ink-muted">
+            An owner or your Financial Analyst can create it. It will appear here once they have.
+          </p>
+          {importHref === null ? null : (
+            <p className="text-sm">
+              <Link href={importHref} className="text-accent underline underline-offset-2">Import the company’s figures</Link>
+              <span className="text-ink-muted"> — the pack is built on them.</span>
+            </p>
+          )}
         </div>
       </CardBody>
     </Card>
@@ -145,9 +174,11 @@ export default async function InvestmentPage({ params }: { params: Promise<{ org
         <Banner tone="warn" title="Illustrative scenarios, not financial advice">{INVESTMENT_DISCLAIMER}</Banner>
 
         {presentation === null && !preparing && !failed
-          ? (start.hasFigures
-            ? <ReadyToCreate view={view} start={start} amount={amount} orgSlug={orgSlug} />
-            : <NoFigures view={view} importHref={importHref} />)
+          ? (!view.canRefresh
+            ? <NoPackYet importHref={start.hasFigures ? null : importHref} />
+            : start.hasFigures
+              ? <ReadyToCreate view={view} start={start} amount={amount} orgSlug={orgSlug} />
+              : <NoFigures view={view} importHref={importHref} />)
           : null}
 
         {preparing ? <Preparing hasPrevious={presentation !== null} /> : null}

@@ -60,6 +60,17 @@ export function addMonthsToDate(date: IsoDate, months: number): IsoDate {
   return `${target.year}-${String(target.month).padStart(2, '0')}-${String(Math.min(day, last)).padStart(2, '0')}`;
 }
 
+/**
+ * When Corporation Tax for an accounting period ending on `periodEnd` is due — the UK's nine months
+ * and one day, the UAE's nine months — or null where APX states no rule (ADR-156). The one copy of
+ * the date rule, shared by the estimate, the Tax page and Home's "Data & compliance" strip.
+ */
+export function corporationTaxDueDate(country: string | null, periodEnd: IsoDate): IsoDate | null {
+  if (country === 'GB') return addDays(addMonthsToDate(periodEnd, 9), 1);
+  if (country === 'AE') return addMonthsToDate(periodEnd, 9);
+  return null;
+}
+
 export function estimateCorporationTax(input: {
   readonly country: string | null;
   readonly periodStart: IsoDate;
@@ -95,7 +106,7 @@ export function estimateCorporationTax(input: {
       effectiveRate: taxable.isZero() ? null : tax.dividedBy(taxable).toDecimalPlaces(4).toString(),
       thresholds: { lower: two(lower), upper: two(upper) },
       marginalRelief: relief === null ? null : two(relief),
-      dueDate: addDays(addMonthsToDate(input.periodEnd, 9), 1),
+      dueDate: corporationTaxDueDate('GB', input.periodEnd)!,
       days,
     };
   }
@@ -110,7 +121,7 @@ export function estimateCorporationTax(input: {
       effectiveRate: taxable.isZero() ? null : tax.dividedBy(taxable).toDecimalPlaces(4).toString(),
       thresholds: { lower: two(threshold), upper: null },
       marginalRelief: null,
-      dueDate: addMonthsToDate(input.periodEnd, 9),
+      dueDate: corporationTaxDueDate('AE', input.periodEnd)!,
       days,
     };
   }

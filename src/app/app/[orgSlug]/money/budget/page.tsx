@@ -4,6 +4,7 @@ import { formatMoney, formatPercent } from '@/core/money';
 import { missingReasonText } from '@/modules/dashboard';
 import { getBudgetView, type BudgetLineKey } from '@/modules/budgets';
 import { getAccessContext } from '@/modules/tenancy';
+import { can } from '@/core/permissions';
 import { Badge, Card, CardBody, EmptyState, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { requirePermission } from '@/app/_lib/authz';
@@ -51,7 +52,12 @@ export default async function BudgetPage({
     return (
       <>
         <PageHeader eyebrow="Money" title="Budget against actual" />
-        <EmptyState title="There is no budget yet" actionHref={`/app/${orgSlug}/data/imports/new`} actionLabel="Import a budget">
+        {/* The upload page is `imports.create`; a reader without it is not sent to a refusal. */}
+        <EmptyState
+          title="There is no budget yet"
+          actionHref={can(ctx, 'imports.create') ? `/app/${orgSlug}/data/imports/new` : undefined}
+          actionLabel="Import a budget"
+        >
           Import a budget as a spreadsheet with a month, an account and an amount on each line — choose
           &quot;Budget&quot; as the kind of file. Each month&apos;s actual figures are then set beside it.
         </EmptyState>
@@ -147,7 +153,8 @@ export default async function BudgetPage({
                 </span>
                 <span className="text-ink-muted">
                   {money(line.amount)}
-                  {line.importBatchId === null ? null : (
+                  {/* The import it came from opens for whoever reviews imports (a client does not). */}
+                  {line.importBatchId === null || !can(ctx, 'imports.review') ? null : (
                     <> · <Link href={`/app/${orgSlug}/data/imports/${line.importBatchId}`} className="text-accent underline underline-offset-2">import</Link></>
                   )}
                 </span>

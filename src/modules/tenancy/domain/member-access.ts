@@ -74,14 +74,36 @@ export interface MemberPermissions {
   readonly role: TenantRole;
   /** What the role gives, among the switchable permissions. */
   readonly defaults: readonly SwitchablePermission[];
-  /** The switches set for this person: `true` added, `false` taken away. Absent = the default. */
-  readonly overrides: readonly { readonly permission: SwitchablePermission; readonly granted: boolean }[];
+  /**
+   * The switches set for this person: `true` added, `false` taken away. Absent = the default.
+   * `setByOwner`: an owner (or the super admin) set it — an admin may not change or reset it, and it
+   * survives a role change. `ceilingWithhold`: a switch-off a role change or an invitation stored
+   * because whoever made it did not hold the permission (ADR-172 hardening, 2026-10-14). Both are
+   * optional in the type only so older fixtures still compile; the service always sets them.
+   */
+  readonly overrides: readonly {
+    readonly permission: SwitchablePermission;
+    readonly granted: boolean;
+    readonly setByOwner?: boolean;
+    readonly ceilingWithhold?: boolean;
+  }[];
   /** The result, among the switchable permissions. */
   readonly effective: readonly SwitchablePermission[];
   /** Whether the viewer may change this person's switches at all (never an owner; never oneself). */
   readonly editable: boolean;
-  /** The permissions the viewer may switch ON for this person (those the viewer holds). */
+  /**
+   * The permissions the viewer may switch ON for this person: those the viewer holds, less any an
+   * owner's switch locks (`ownerLocked`).
+   */
   readonly grantable: readonly SwitchablePermission[];
+  /**
+   * The switches the viewer may NOT change or reset because an owner set them — always empty for an
+   * owner or the super admin. The database refuses an admin's change to these
+   * (`app.apply_member_permission`), so the page should draw them locked ("Set by the owner") and
+   * "Reset all" should leave them alone (`resetMemberPermissions` does). Optional in the type only so
+   * older fixtures still compile; the service always sets it.
+   */
+  readonly ownerLocked?: readonly SwitchablePermission[];
 }
 
 export type AccessRequestStatus = 'pending' | 'approved' | 'declined' | 'withdrawn';

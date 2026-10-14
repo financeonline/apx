@@ -244,16 +244,45 @@ describe('RLS on the new tables', () => {
     expect(sqlstate(error)).toBe(PERMISSION_DENIED);
   });
 
-  it('the definer view exposes raw text to imports.review and nothing to a client', async () => {
-    const owner = await clientFor(ownerId).from('bank_transactions_raw').select('id')
-      .eq('organization_id', orgId);
-    expect(owner.error, owner.error?.message).toBeNull();
-    expect((owner.data ?? []).length, 'an owner holds imports.review').toBeGreaterThan(0);
+  /*
+   * ADR-172 hardening (2026-10-14, migration 20261018000033): the raw text is for REVIEW. The view
+   * returns a line only while a batch in review is about it — here, a row of a batch awaiting review
+   * flagged as a duplicate of the line — and only to `imports.review` with `banking.view` or
+   * `financials.view`. Once nothing is in review, nobody reads it, an owner included.
+   */
+  it('the definer view exposes raw text to imports.review, only while it is in review, and nothing to a client', async () => {
+    const rawRows = async (userId: string) => {
+      const { data, error } = await clientFor(userId).from('bank_transactions_raw').select('id')
+        .eq('organization_id', orgId);
+      expect(error, error?.message).toBeNull();
+      return (data ?? []).length;
+    };
+    expect(await rawRows(ownerId), 'nothing is in review: no raw text, even for an owner').toBe(0);
 
-    const clientRead = await clientFor(clientUserId).from('bank_transactions_raw').select('id')
-      .eq('organization_id', orgId);
-    expect(clientRead.error).toBeNull();
-    expect(clientRead.data ?? [], 'a client holds no imports.review').toHaveLength(0);
+    const line = adminSql(`select id from public.bank_transactions where organization_id = '${orgId}' limit 1`);
+    const account = adminSql(`select bank_account_id from public.bank_transactions where id = '${line}'`);
+    const batch = adminSql(`
+      with doc as (
+        insert into public.source_documents
+               (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status)
+        values ('${orgId}', '${orgId}/review/raw.csv', 'raw.csv', 'text/csv', 10, decode('bb','hex'), 'ready')
+        returning id),
+      b as (
+        insert into public.import_batches
+               (organization_id, source_document_id, import_type, target_table, bank_account_id,
+                period_start, period_end, status)
+        select '${orgId}', doc.id, 'bank_statement', 'bank_transactions', '${account}',
+               '2026-05-01', '2026-05-31', 'awaiting_review' from doc
+        returning id)
+      select id from b`);
+    adminSql(`insert into public.import_rows (organization_id, batch_id, row_number, duplicate_of_table, duplicate_of_id, status)
+              values ('${orgId}', '${batch}', 1, 'bank_transactions', '${line}', 'duplicate')`);
+
+    expect(await rawRows(ownerId), 'an owner holds imports.review and reads the line under review').toBe(1);
+    expect(await rawRows(clientUserId), 'a client holds no imports.review').toBe(0);
+
+    adminSql(`update public.import_batches set status = 'rejected' where id = '${batch}'`);
+    expect(await rawRows(ownerId), 'the review over, the raw text is gone again').toBe(0);
   });
 });
 
@@ -282,7 +311,9 @@ describe('suspension freezes the financial tables (ADR-044.4; R2-A-07)', () => {
   it('still admits the frozen-Home tables', async () => {
     for (const table of FROZEN_HOME) {
       const column = table === 'organizations' ? 'id' : 'organization_id';
-      const { error } = await clientFor(ownerId).from(table).select('*').eq(column, orgId);
+      // A column rather than `*`: the payload columns (`health_scores.breakdown`) are not selectable
+      // by `authenticated` since the ADR-172 hardening; they are read through definer views.
+      const { error } = await clientFor(ownerId).from(table).select(column).eq(column, orgId);
       expect(error, `${table} should still be readable`).toBeNull();
     }
     const { data } = await clientFor(ownerId).from('organizations').select('id').eq('id', orgId);

@@ -55,7 +55,10 @@ describe('a member sees their own organization and nothing else', () => {
     const a = clientFor(ownerA);
     for (const table of ['organizations', 'organization_memberships', 'invitations', 'audit_events'] as const) {
       const column = table === 'organizations' ? 'id' : 'organization_id';
-      const { data, error } = await a.from(table).select('*').eq(column, orgB);
+      // `audit_events` carries row copies in `before`/`after`, which `authenticated` cannot select at
+      // all since the ADR-172 hardening (the trail is served by api.org_audit_events): a column list.
+      const columns = table === 'audit_events' ? 'id, organization_id, action' : '*';
+      const { data, error } = await a.from(table).select(columns).eq(column, orgB);
       expect(error, `${table} should read cleanly`).toBeNull();
       expect(data, `${table} must expose nothing of organization B`).toHaveLength(0);
     }

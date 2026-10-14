@@ -49,6 +49,46 @@ export function mayRequestAccess(role: EffectiveRole): boolean {
 }
 
 /**
+ * Whether a person in this role sets OWNER switches: an owner's (or the super admin's) switch may not
+ * be changed or reset by an admin, and is carried through a role change (ADR-172 hardening,
+ * 2026-10-14; `app.apply_member_permission` and `app.member_role_changed` are the authority). An
+ * allow-list (R2-A-07).
+ */
+const OWNER_SWITCH_ROLES: ReadonlySet<string> = new Set<EffectiveRole>(['owner', 'super_admin']);
+
+export function setsOwnerSwitches(role: EffectiveRole | string): boolean {
+  return OWNER_SWITCH_ROLES.has(role);
+}
+
+/** A switch with who set it, as the team page reads it (`api.org_member_permissions`). */
+export interface PermissionOverrideDetail extends PermissionOverride {
+  readonly setByOwner: boolean;
+  readonly ceilingWithhold: boolean;
+}
+
+/**
+ * `parseOverrides`, keeping who set each switch. A missing or malformed flag reads as `true` for
+ * `setByOwner` — the LOCKED answer: the database refuses an admin's change to an owner's switch, and
+ * guessing "not the owner's" would only draw a button the database then refuses.
+ */
+export function parseOverrideDetails(raw: unknown): PermissionOverrideDetail[] {
+  if (!Array.isArray(raw)) return [];
+  const flags = new Map<string, { setByOwner: boolean; ceilingWithhold: boolean }>();
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue;
+    const { permission, set_by_owner: byOwner, ceiling_withhold: withhold } =
+      item as { permission?: unknown; set_by_owner?: unknown; ceiling_withhold?: unknown };
+    if (typeof permission !== 'string' || flags.has(permission)) continue;
+    flags.set(permission, { setByOwner: byOwner !== false, ceilingWithhold: withhold === true });
+  }
+  return parseOverrides(raw).map((o) => ({
+    ...o,
+    setByOwner: flags.get(o.permission)?.setByOwner ?? true,
+    ceilingWithhold: flags.get(o.permission)?.ceilingWithhold ?? false,
+  }));
+}
+
+/**
  * Keep only well-formed switches for switchable permissions. Input arrives from the database as JSON;
  * anything unexpected is dropped rather than trusted — dropping a switch can only fall back to the
  * role's default, which the database computes the same way.

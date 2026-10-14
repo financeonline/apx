@@ -21,9 +21,9 @@ export default async function PortfolioLayout({ children }: { children: React.Re
     if (isMotionError(error) && error.code === 'NOT_FOUND') notFound();
     throw error;
   }
-  // The person at the foot of the sidebar: platform staff by their platform role, owners as advisers.
+  // The person at the foot of the sidebar: platform staff by their platform role; anyone else as a Financial Analyst.
   const platformRole = await resolvePlatformRole(ctx.db, ctx.requestId).catch(() => 'none' as const);
-  const user = await shellUser(ctx.db, platformRole === 'none' ? 'Adviser' : ROLE_LABELS[platformRole] ?? 'Adviser', ctx.requestId);
+  const user = await shellUser(ctx.db, platformRole === 'none' ? 'Financial Analyst' : ROLE_LABELS[platformRole] ?? 'Financial Analyst', ctx.requestId);
 
   return (
     <AppShell

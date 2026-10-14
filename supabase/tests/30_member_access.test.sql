@@ -14,7 +14,7 @@
 --      suspended organisation and for APX staff;
 --   5. the switches table refuses a non-switchable permission and a non-member;
 --   6. api.set_member_permission's refusals: not users.manage, self, owner, beyond one's own rights;
---   7. a role change clears the switches; and
+--   7. a role change carries the owner's switches and clears the rest (20261018000032); and
 --   8. the SHAPE: no policy grants by the old five-role list any more, and the switch-aware set
 --      helpers stay one evaluation per statement (ADR-065).
 
@@ -480,7 +480,7 @@ select is(pg_temp.visible_rows('e3000000-0000-0000-0000-000000000007',
           0, 'an owner of another organisation sees none');
 
 -- ---------------------------------------------------------------------------
--- 7. A role change clears the switches
+-- 7. A role change carries the owner's switches and clears the rest
 -- ---------------------------------------------------------------------------
 select ok((select count(*) from public.member_permission_overrides
             where organization_id = 'e3a00000-0000-0000-0000-00000000000a'
@@ -489,15 +489,17 @@ select ok((select count(*) from public.member_permission_overrides
 select is(pg_temp.try_as('e3000000-0000-0000-0000-000000000001',
             'select api.change_member_role(''e3a00000-0000-0000-0000-00000000000a'', ''e3000000-0000-0000-0000-000000000004'', ''accountant'')'),
           'ok', 'the owner makes the client an accountant');
-select is((select count(*)::int from public.member_permission_overrides
-            where organization_id = 'e3a00000-0000-0000-0000-00000000000a'
-              and user_id = 'e3000000-0000-0000-0000-000000000004'),
-          0, '… which clears every switch they had');
+-- Since the ADR-172 hardening (20261018000032) a role change CARRIES the switches an owner set and
+-- clears the rest: the owner switched documents.view and financials.view, admin 2 switched ai.use.
+select is((select string_agg(o.permission, ',' order by o.permission) from public.member_permission_overrides o
+            where o.organization_id = 'e3a00000-0000-0000-0000-00000000000a'
+              and o.user_id = 'e3000000-0000-0000-0000-000000000004'),
+          'documents.view,financials.view', '… which keeps the owner''s switches and clears the admin''s (ai.use)');
 select is((select count(*)::int from public.audit_events
             where organization_id = 'e3a00000-0000-0000-0000-00000000000a' and action = 'member.permissions_reset'),
           1, '… audited member.permissions_reset');
-select ok(pg_temp.has_perm('e3000000-0000-0000-0000-000000000004', 'e3a00000-0000-0000-0000-00000000000a', 'financials.view'),
-          '… and they hold exactly the new role''s defaults');
+select ok(not pg_temp.has_perm('e3000000-0000-0000-0000-000000000004', 'e3a00000-0000-0000-0000-00000000000a', 'financials.view'),
+          '… so the owner''s switch-off of financials.view holds in the new role too');
 select is(pg_temp.try_as('e3000000-0000-0000-0000-000000000002',
             'select api.change_member_role(''e3a00000-0000-0000-0000-00000000000a'', ''e3000000-0000-0000-0000-000000000004'', ''third_party'')'),
           'ok', 'an admin may move a member to 3rd party');

@@ -18,3 +18,4 @@ export {
   type EngagementStatus,
   type NotificationView,
 } from './services';
+export { NOTIFICATION_KIND_PERMISSION, notificationHref, readableNotificationKinds } from './domain/notifications';

@@ -27,7 +27,8 @@ export default async function SavedScenarioPage({
 }) {
   const { orgSlug, scenarioId } = await params;
   const ctx = await getAccessContext(orgSlug);
-  requirePermission(ctx, 'dashboard.view');
+  // `financials.view`: the forecast and scenario tables are figures beneath the overview (ADR-172).
+  requirePermission(ctx, 'financials.view');
 
   const scenario = await loadScenario(ctx, scenarioId);
   if (!hasScenario(scenario)) notFound();

@@ -59,7 +59,7 @@ export default async function AccountsPage({ params }: { params: Promise<{ orgSl
           description={
             canEdit
               ? 'Changing a category updates every month that account appears in.'
-              : 'Owners, admins and APX advisers can change a category here.'
+              : 'Owners, admins, accountants and your Financial Analyst can change a category here.'
           }
         />
         <CardBody className="px-0 py-0">

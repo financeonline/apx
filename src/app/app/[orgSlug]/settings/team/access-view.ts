@@ -3,6 +3,7 @@ import {
   ROLE_NAMES,
   SWITCHABLE_PERMISSIONS,
   TENANT_ROLES,
+  withinOwnRights,
   type AccessRequest,
   type AccessRequestStatus,
   type MemberPermissions,
@@ -71,6 +72,13 @@ export type NextGrant = 'on' | 'off' | 'default';
 
 export const NOT_EDITABLE_REASON = 'You cannot change this person’s access.';
 export const NOT_HELD_REASON = 'You do not have this permission yourself, so you cannot give it.';
+/**
+ * Why "Back to the role's default" is not offered: the role's default would switch this on again,
+ * and the viewer does not hold it — the database refuses that reset (`app.apply_member_permission`),
+ * exactly as it refuses switching it on.
+ */
+export const RESET_NOT_HELD_REASON =
+  'Its role default would switch this back on, and you do not have this permission yourself, so only an owner can put it back.';
 
 export interface SwitchView {
   readonly permission: SwitchablePermission;
@@ -84,7 +92,13 @@ export interface SwitchView {
   readonly next: NextGrant;
   /** Null when the switch may be pressed; otherwise, in plain words, why it may not. */
   readonly lockedReason: string | null;
+  /** "Back to the role's default" is drawn and will work. */
   readonly canReset: boolean;
+  /**
+   * A switch is stored but going back to the default would be refused (it would give the person
+   * something the viewer lacks): the reason, shown where the reset would be. Null otherwise.
+   */
+  readonly resetLockedReason: string | null;
 }
 
 export function switchView(member: MemberPermissions, permission: SwitchablePermission): SwitchView {
@@ -102,6 +116,20 @@ export function switchView(member: MemberPermissions, permission: SwitchablePerm
   // does. Landing on the role's default clears the stored switch instead of storing a copy of it.
   const lockedReason = !member.editable ? NOT_EDITABLE_REASON : target && !mayGive ? NOT_HELD_REASON : null;
 
+  /*
+   * Going back to the default is judged by the same rule the database applies
+   * (`withinOwnRights`, the TypeScript copy of `app.apply_member_permission`'s check): a reset that
+   * leaves the person holding something they did not hold before needs the viewer to hold it. The
+   * stored switch IS the current answer for an overridden permission, so `current` is `on`.
+   */
+  const resetAllowed = member.editable && overridden && withinOwnRights({
+    viewerHolds: mayGive,
+    targetRole: member.role,
+    current: on,
+    next: null,
+    permission,
+  });
+
   return {
     permission,
     title: PERMISSION_WORDS[permission].title,
@@ -112,8 +140,8 @@ export function switchView(member: MemberPermissions, permission: SwitchablePerm
     overridden,
     next: target === byDefault ? 'default' : target ? 'on' : 'off',
     lockedReason,
-    // Going back to a default that is ON switches it on, so it needs the same right as the switch.
-    canReset: member.editable && overridden && (!byDefault || on || mayGive),
+    canReset: resetAllowed,
+    resetLockedReason: member.editable && overridden && !resetAllowed ? RESET_NOT_HELD_REASON : null,
   };
 }
 
@@ -123,7 +151,21 @@ export interface AccessPanelView {
   readonly changedCount: number;
   /** Switches "Reset all" would put back (those the viewer may put back). */
   readonly resettable: readonly SwitchablePermission[];
+  /** Stored switches the viewer may NOT put back, by title — "Reset all" leaves them as they are. */
+  readonly unresettable: readonly string[];
+  /** Beside "Reset all": what it will leave alone and why; or, with nothing it may reset, why not. Null when it resets everything. */
+  readonly resetAllNote: string | null;
   readonly groups: readonly { readonly title: string; readonly switches: readonly SwitchView[] }[];
+}
+
+/** The note beside "Reset all" — or in its place, when every stored switch is out of the viewer's reach. */
+export function resetAllNote(resettable: number, unresettable: readonly string[]): string | null {
+  if (unresettable.length === 0) return null;
+  const list = unresettable.join(', ');
+  if (resettable === 0) {
+    return `Reset all is not available: putting ${list} back to the role’s default would switch on something you do not have yourself. An owner can.`;
+  }
+  return `Reset all leaves ${list} as ${unresettable.length === 1 ? 'it is' : 'they are'}: the role’s default would switch on something you do not have yourself.`;
 }
 
 export function accessPanel(member: MemberPermissions): AccessPanelView {
@@ -132,11 +174,15 @@ export function accessPanel(member: MemberPermissions): AccessPanelView {
     switches: group.permissions.map((permission) => switchView(member, permission)),
   }));
   const all = groups.flatMap((group) => group.switches);
+  const resettable = all.filter((s) => s.canReset).map((s) => s.permission);
+  const unresettable = all.filter((s) => s.resetLockedReason !== null).map((s) => s.title);
   return {
     userId: member.userId,
     roleName: ROLE_NAMES[member.role],
     changedCount: all.filter((s) => s.change !== null).length,
-    resettable: all.filter((s) => s.canReset).map((s) => s.permission),
+    resettable,
+    unresettable,
+    resetAllNote: resetAllNote(resettable.length, unresettable),
     groups,
   };
 }

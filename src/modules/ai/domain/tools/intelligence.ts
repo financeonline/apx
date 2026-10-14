@@ -73,10 +73,16 @@ function typedRecord(values: Readonly<Record<string, string | null>>): Record<st
 // 9. get_alerts
 // -----------------------------------------------------------------------------------------------
 
+/*
+ * `financials.view` (ADR-172): alert sentences name customers and suppliers, so `alerts_select` lets
+ * only the readers of the figures behind them (or their handlers) see one. Under `dashboard.view` a
+ * person holding the AI without the figures — a 3rd party with `ai.use` switched on — would have been
+ * told "no alerts" about alerts that exist; now the tool is simply not theirs.
+ */
 export const getAlerts: ToolDefinition<{ period?: string; severity?: readonly string[]; status?: readonly string[]; limit?: number }, unknown> = {
   name: 'get_alerts',
   description: 'Open or acknowledged alerts, optionally for one month or filtered by severity. Each carries its explanation, its numbers as structured fields, and its evidence bundle.',
-  permission: 'dashboard.view',
+  permission: 'financials.view',
   input: z.object({
     period: z.string().optional(),
     severity: z.array(z.enum(['critical', 'high', 'medium', 'low', 'info'])).optional(),
@@ -451,13 +457,13 @@ void RECORD_KINDS;
  * machinery marks a forecast statement as an estimate rather than a verified fact — REQ-FC-05 and
  * §18 are enforced by the envelope, not by asking the model to remember.
  *
- * `dashboard.view`: the same permission the page needs, and no new one (§22).
+ * `financials.view`: the same permission the page needs (ADR-172), and no new one (§22).
  */
 export const getForecast: ToolDefinition<{ metric_key?: string }, unknown> = {
   name: 'get_forecast',
   description:
     'What APX expects for the months ahead: revenue, running costs, operating profit, cash, and what is owed. These are estimates worked out from finished months, never results. Use this for "what will…", "how much will…" and "what is the forecast" questions. It cannot answer "what if" questions.',
-  permission: 'dashboard.view',
+  permission: 'financials.view',
   input: z.object({ metric_key: z.string().max(60).optional() }),
   async run(input, call) {
     try {
@@ -542,13 +548,13 @@ function percentAsRatio(value: string): ReturnType<typeof ratio> {
  * The scenario's NAME is text somebody typed, so it is wrapped `untrusted` like every other
  * imported string (§3, F-C-10).
  *
- * `dashboard.view`: the same permission the page needs, and no new one (§22).
+ * `financials.view`: the same permission the page needs (ADR-172), and no new one (§22).
  */
 export const getScenario: ToolDefinition<{ scenario_id?: string }, unknown> = {
   name: 'get_scenario',
   description:
     'A what-if scenario somebody has already saved in APX: what it assumed, and what it expects to happen to sales, costs, profit and cash if those assumptions hold. Use it when the question is about a scenario that exists. It CANNOT work a new scenario out — if the person is asking what would happen under assumptions they have just given you, say that APX works what-ifs out on its What-if page and that you can read one back once it is saved.',
-  permission: 'dashboard.view',
+  permission: 'financials.view',
   input: z.object({ scenario_id: uuid.optional() }),
   async run(input, call) {
     try {

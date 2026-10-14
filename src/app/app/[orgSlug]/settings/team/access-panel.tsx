@@ -42,6 +42,8 @@ export function AccessPanel({ orgSlug, who, panel }: { orgSlug: string; who: str
           </form>
         ) : null}
       </div>
+      {/* What "Reset all" leaves alone, or why it is not offered — the database would refuse those resets. */}
+      {panel.resetAllNote ? <p className="mt-2 text-xs text-warn">{panel.resetAllNote}</p> : null}
 
       <div className="mt-3 empty:hidden">
         <ActionMessage state={state} />
@@ -100,6 +102,12 @@ function SwitchRow({
         <p className="mt-0.5 text-xs text-ink-faint">Role default: {view.byDefault ? 'on' : 'off'}</p>
         {view.lockedReason ? (
           <p id={reasonId} className="mt-1 text-xs text-warn">{view.lockedReason}</p>
+        ) : null}
+        {view.resetLockedReason ? (
+          <p className="mt-1 text-xs text-ink-muted">
+            <span className="text-ink-faint line-through decoration-ink-faint/60">Back to the role’s default</span>{' '}
+            — {view.resetLockedReason}
+          </p>
         ) : null}
         {view.canReset ? (
           <form action={action} className="mt-1">

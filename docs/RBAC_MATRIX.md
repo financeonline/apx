@@ -7,6 +7,8 @@ Consumed by: `SECURITY_MODEL.md`, `SERVICE_ARCHITECTURE.md`, `ROUTE_ARCHITECTURE
 
 > **Revision 1.3 (ADR-172, 2026-10-14).** Two new company roles, `accountant` and `third_party`; the platform `employee` is shown as **Financial Analyst**; per-person permission switches set by the owner or an admin (§7); "Request more information" (§7.3); and every tenant-data read policy now names a PERMISSION instead of a list of roles, so a switch opens or closes a table for one person (§8). Contract: `src/modules/tenancy/domain/member-access.ts`. Migrations `20261018000017`–`20261018000019`.
 
+> **Revision 1.4 (ADR-172 hardening, independent security review, 2026-10-14).** Never beyond one's own rights on EVERY path that sets access, not only the switch: nobody changes their own role; an owner's switch is locked against admins and survives a role change; a role change and an invitation switch off whatever of the new role's defaults the actor lacks (§3.15–3.18, §7). Detail stored a second time — the audit trail's row copies, raw import text, the overview's jsonb payloads, per-customer pointers — is gated like the detail itself, and a suspended company shows each person what they saw before, no more (§8). Migrations `20261018000032`–`20261018000035`; pgTAP `31_member_access_hardening`.
+
 > **Revision 1.2 (red-team round 2, 2026-09-05).** Applies ADR-043 (`api` vs `api_server`), ADR-044 (MFA at the database for employees, ownership-transfer invariants, allow-list principle, throttles, `suspended_member` in the code type). Findings addressed: R2-A-01, R2-A-03, R2-A-07, R2-A-08, R2-A-11. See `RED_TEAM_REVIEW.md §6`.
 
 ## 1. Roles
@@ -56,7 +58,7 @@ All keys live in `src/core/permissions/catalogue.ts` as a `const` union; the rol
 | `ai.use` | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ | Subject to org quota (CD-24) |
 | `actions.view` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |  |
 | `actions.create` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ |  |
-| `actions.assign` | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | Assignee must be a member/employee of the org |
+| `actions.assign` | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | Assignee must be an active member or assigned employee of the org who holds `actions.view`; naming somebody else as the owner when CREATING an action is assigning too (rev 1.4, `app.check_action_owner`) |
 | `actions.update_own` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | Status + outcome on actions where `owner_user_id = self` |
 | `alerts.manage` | ✓ | ✓ | ✓ | ✓ | ◐ | ◐ | ✗ | Acknowledge/resolve/dismiss alerts; client and accountant may acknowledge only (a 3rd party too, if switched on) |
 | `intelligence.recompute` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Trigger a manual calculation run |
@@ -85,8 +87,8 @@ Every permission in this table is checked twice on a write: by `assertCan` in th
 |---|---|
 | Who can invite users | Owner (any tenant role), Admin (admin, accountant, client, 3rd party — never owner), Super Admin (any). Employees, accountants, clients and 3rd parties cannot. |
 | Who can remove users | Owner (anyone except last owner), Admin (admins, accountants, clients, 3rd parties), Super Admin. Users may leave an org themselves unless they are the last owner. |
-| Who can change roles | Owner (any, including promote to owner and demote another owner), Admin (among admin, accountant, client and 3rd party), Super Admin (break-glass, audited). A role change clears the person's per-person switches (§7.2). |
-| Who can switch a person's permissions | The owner and admins (`users.manage`), for any member within their ceiling except an owner and except themselves, and only ever switching ON what they hold themselves (§7). |
+| Who can change roles | Owner (any, including promote to owner and demote another owner), Admin (among admin, accountant, client and 3rd party), Super Admin (break-glass, audited) — never their OWN role (rev 1.4; leaving is "Leave", an owner steps down by the ownership transfer). A role change keeps the switches an owner set, clears the others, and switches off whatever of the new role's defaults the person changing it does not hold (§7.2). |
+| Who can switch a person's permissions | The owner and admins (`users.manage`), for any member within their ceiling except an owner and except themselves, and only ever switching ON what they hold themselves; an admin never changes or resets a switch an owner set (§7). |
 | Who answers "Request more information" | The owner and admins, under the same rules as a switch; the requester may withdraw (§7.3). |
 | Who can assign employees to clients | Super Admin only. Owner can revoke. Admin can see. |
 | Who can access financial source documents | Owner, Admin, Accountant, Employee, Super Admin — and anyone the owner or an admin switches `documents.view` on for. Client sees evidence down to transaction level but not the file; a 3rd party sees neither. |
@@ -102,7 +104,7 @@ These cannot be expressed as a permission bit and are enforced in services (and 
 
 1. **Last-owner protection.** DB trigger on `organization_memberships` rejects UPDATE/DELETE that would leave zero active owners. Service returns a friendly error.
 2. **Role ceiling.** A user may never grant a role higher than their own effective role, nor act on a member whose current role is above their own. Admin ceiling = admin. Enforced in `membership.service` and inside `api.invite_member`, `api.change_member_role`, `api.remove_member` and `api.set_member_status`, which check the ceiling on the current **and** the target role (ADR-026; F-A-02).
-3. **No self-elevation; ownership transfer is a flow with invariants.** No user can raise their own role. Sole ownership moves through `ownership_transfers` (ADR-044.7): an owner initiates to an active admin (one pending transfer per organization, 7-day expiry); acceptance requires `auth.uid()` = nominee, transfer pending and unexpired, the nominee **currently** an active admin and the initiator **currently** an active owner, all checked in `api.accept_ownership_transfer` under the org lock; the initiator or any owner may cancel. Owners cannot demote themselves if they are the last owner; admins can demote themselves to client.
+3. **No self-elevation; ownership transfer is a flow with invariants.** No user can raise their own role. Sole ownership moves through `ownership_transfers` (ADR-044.7): an owner initiates to an active admin (one pending transfer per organization, 7-day expiry); acceptance requires `auth.uid()` = nominee, transfer pending and unexpired, the nominee **currently** an active admin and the initiator **currently** an active owner, all checked in `api.accept_ownership_transfer` under the org lock; the initiator or any owner may cancel. Nobody changes their own role (rev 1.4): a self-demotion used to clear the switches the owner had set on that person. Leaving is `api.leave_organization` (refused for the last owner); an owner steps down through the ownership transfer.
 4. **Employee write scope.** `role_permissions` grants `employee` the data-table permissions in §2.1 and none of the governance permissions, so the `api.*` functions that write memberships, assignments, settings and organizations refuse an employee; there is no other write path (ADR-026).
 5. **Platform staff exclusivity.** A user with an active `platform_users` row cannot be inserted into `organization_memberships` (trigger). If a platform employee needs to be a customer, they use a separate account.
 6. **Super admin reads are audited.** Every `/app/[orgSlug]/*` request served to a super admin writes one `audit_events` row (`actor_type = 'platform_admin'`, `action = 'org.data_viewed'`, target = route). Under `/platform`, any surface that renders tenant content — opening an item in `/platform/ai-feedback`, expanding an audit row's `before/after`, viewing `/platform/organizations/[orgId]` — writes `org.data_viewed {surface, target_id}` as well; list views that show only organization names, types and dates do not (ADR-038.6).
@@ -113,8 +115,10 @@ These cannot be expressed as a permission bit and are enforced in services (and 
 12. **User-intent vs server-asserted writes.** `api.*` functions accept only what the user legitimately chooses; anything the server observed (a grounding result, a scan result, a tool-call log, a download) is written through `api_server.*`, executable only by the service role from `core/db/server-rpc.ts` with the human actor passed explicitly (ADR-043; R2-A-01). A user JWT can never write a "passed" AI answer or register an unscanned document.
 13. **Throttled at the database.** Every `api.*` function starts with `app.throttle()`; the RPC surface is reachable on the Supabase host without passing the Vercel edge, so edge limits alone are not limits (ADR-044.5; R2-A-08).
 14. **Per-person switches never reach an owner, APX staff or a suspended organisation (ADR-172).** `app.effective_permission` applies a switch only for `admin`, `accountant`, `client` and `third_party` (`app.overridable_role`, an allow-list), so a switch stored against anyone else is ignored, and `api.set_member_permission` refuses to store one. A suspended organisation resolves everyone to `suspended_member`, whose one permission no switch changes.
-15. **Never beyond one's own rights (ADR-172).** Switching a permission ON, approving a request for it, or resetting a switch to a default that would give it, needs the caller to hold that permission at that moment (`app.apply_member_permission`). Switching OFF does not — taking access away is always within an owner's or admin's remit for the members they govern.
-16. **A role change starts the person again (ADR-172).** The `member_role_changed` trigger deletes every switch of a member whose role changes and closes their waiting request; removal deletes both (foreign keys). A deactivation keeps them (it resolves to no access anyway).
+15. **Never beyond one's own rights (ADR-172; rev 1.4 on every path).** Switching a permission ON, approving a request for it, or resetting a switch to a default that would give it, needs the caller to hold that permission at that moment (`app.apply_member_permission`). Switching OFF does not — taking access away is always within an owner's or admin's remit for the members they govern. The same ceiling now applies to the other paths that set a person's access: a ROLE CHANGE switches off every default of the new role the actor does not effectively hold (`app.member_role_changed`), and an INVITATION does the same for the inviter, at invite time and again at acceptance (`invitations.withheld_permissions`, `api.accept_invitation`). These switch-offs are stored as ordinary switches marked `ceiling_withhold`; an owner (or an admin who holds the permission) can switch them on. An owner or the super admin holds everything and so withholds nothing.
+16. **A role change keeps the owner's decisions (ADR-172; rev 1.4).** The `member_role_changed` trigger CARRIES the switches an owner or the super admin set into the new role — dropping them only for a promotion to owner, which takes no switches — deletes every other switch, applies rule 15's ceiling, and closes the waiting request; audited `member.permissions_reset` (before, after, carried, cleared, withheld). Before rev 1.4 it cleared every switch, so an admin's role round trip (client → accountant → client) undid the owner's switch-off. Removal deletes switches and requests (foreign keys). A deactivation keeps them (it resolves to no access anyway).
+17. **An owner's switch is the owner's (rev 1.4).** Each switch records whether an owner (or the super admin) set it (`set_by_owner`, stored when set, never derived later). An admin may not change, reset or approve a request over it (`app.apply_member_permission`), and the team page shows it locked (`MemberPermissions.ownerLocked`).
+18. **Nobody changes their own role (rev 1.4).** `api.change_member_role` and `changeMemberRole` refuse it in either direction (rule 3).
 8. **AI acts as the user.** Tool calls run with the asking user's `AccessContext`. A client asking the AI for a source document link is refused by the tool exactly as the UI would refuse.
 
 ## 4. Permission enforcement points
@@ -174,13 +178,14 @@ Each role has the defaults in §2.1. The owner or an admin may switch an individ
 | The member is an ACTIVE member of this company, within the caller's ceiling (an admin may switch another admin, an accountant, a client or a 3rd party; a super admin anyone but an owner) | `app.apply_member_permission` (row-locked) |
 | Never an owner — an owner holds everything | the same, and `app.overridable_role` ignores any switch stored against an owner |
 | Never oneself | `setMemberPermission`; `app.apply_member_permission` |
+| Never a switch an OWNER set, unless the caller is an owner or the super admin — no change, no reset, no approval over it (rev 1.4) | `app.apply_member_permission`; `listMemberPermissions` (`ownerLocked`, `grantable`), `resetMemberPermissions` skips them |
 | Never beyond one's own rights: switching ON, or resetting to a default that gives the permission back, needs the caller to hold it. Switching OFF does not | `withinOwnRights` (for drawing the page); `app.apply_member_permission` |
 | Only for company roles: never platform staff (they are not members), never a suspended organisation | `app.effective_permission` |
 | Audited `member.permission_changed` with the switch and the effective answer before and after; throttled | `app.apply_member_permission`; `api.set_member_permission` |
 
 ### 7.2 Lifecycle
 
-A **role change** clears every switch of that member and closes their waiting request (trigger `member_role_changed`, audited `member.permissions_reset`): switches were chosen against the old role, and carrying them into a new one would mean something nobody chose. **Removal** deletes switches and requests (foreign keys to the membership). **Deactivation** keeps them; the member resolves to no access while deactivated and gets exactly their old access back when switched on again.
+A **role change** (rev 1.4) keeps the switches an OWNER set — the owner's decision about the person, which an admin's role change must not undo — and clears every other switch, which was chosen against the old role; a promotion to owner drops them all. It then switches off every default of the new role the person making the change does not hold (§3.15), and closes the waiting request (trigger `member_role_changed`, audited `member.permissions_reset`). Nobody changes their own role. An **invitation** carries the inviter's ceiling the same way: what the inviter lacks is switched off on acceptance. **Removal** deletes switches and requests (foreign keys to the membership). **Deactivation** keeps them; the member resolves to no access while deactivated and gets exactly their old access back when switched on again.
 
 ### 7.3 "Request more information"
 
@@ -193,6 +198,8 @@ Any member whose role takes switches (admin, accountant, client, 3rd party) may 
 `/portfolio` (the Command Centre) is APX staff only; an accountant or a 3rd party never has one, whatever their switches (`app.adviser_org_ids()` is a role allow-list of `super_admin` and `employee`).
 
 ## 8. Who reads which table (ADR-172)
+
+**Rev 1.4 — detail stored twice is gated once.** A switch that closes a detail table must close every copy of that detail: rev 1.4 found four copies the policies did not reach (the audit trail's row copies, raw import text, the overview's jsonb payloads, per-customer pointers) and gates each with the permission of the table it copies — by column privilege plus a definer view that redacts, so the overview a 3rd party reads keeps its figures and loses the names. And a suspended company's frozen Home now follows each person's real role and switches (`app.frozen_org_ids_with_any_permission`) rather than the blanket `suspended_member`, which had given a 3rd party the alerts and per-customer figures the moment their company was suspended.
 
 Every tenant-data SELECT policy names the permission its pages need, through `app.org_ids_with_permission(p)` or `app.org_ids_with_any_permission(p, …)` (switch-aware, set-shaped, evaluated once per statement). Before ADR-172 most of these were the five-role list `owner, admin, employee, super_admin, client`. Under the defaults, owner, admin, employee, super admin and client read exactly what they read before (all hold every permission named below except where stated); the accountant reads the detail; a 3rd party reads only the rows marked **3P**.
 
@@ -209,14 +216,17 @@ Every tenant-data SELECT policy names the permission its pages need, through `ap
 | `products`, `campaigns`, `campaign_spend`, `marketing_channels`, `opportunities` | five roles | `customers.view` or `financials.view` |
 | `source_documents` | owner, admin, employee, super admin | `documents.view` or `imports.review` (the review pages name the file; opening it is a signed URL after `documents.view`) |
 | `evidence_bundles` (and `evidence_items` through it) | five roles; `ai_response` bundles owner/admin/super admin or the message's own author | `financials.view`; the `ai_response` rule unchanged |
-| `alerts` | every resolved role | `financials.view` or `alerts.manage`, plus `suspended_member` (frozen Home). Alert sentences name customers and suppliers |
+| `alerts` | every resolved role | `financials.view` or `alerts.manage`; in a suspended company, the frozen Home shows them to whoever's REAL role and switches hold one of the two (rev 1.4; was every `suspended_member`). Alert sentences name customers and suppliers |
 | `alert_revisions` | five roles | `financials.view` or `alerts.manage` |
 | `actions` | five roles | `actions.view` |
-| `audit_events` | owner, admin, super admin | `audit.view` (switchable); platform events super admin |
+| `audit_events` | owner, admin, super admin | `audit.view` (switchable); platform events super admin. Rev 1.4: `before`/`after` (whole row copies: bank lines, ledger, invoices, members' e-mails), `ip`, `user_agent` are not selectable at all; the log is read through `api.org_audit_events` (who, what, which row, when) |
 | `ai_conversations`, `ai_feedback` | own, or owner/admin/employee/super admin | `ai.use` AND (own, or owner/admin/employee/super admin) |
 | `ai_tool_calls` | owner/admin/employee/super admin | the same AND `ai.use` |
 | `org_member_profiles` (view: member names) | every member | `users.view` or `actions.view` holders |
-| `import_batches`, `import_rows`, `import_mappings`, `report_completeness_attestations` | `imports.review` | unchanged (now switch-aware) |
+| `import_batches`, `import_mappings`, `report_completeness_attestations` | `imports.review` | unchanged (now switch-aware) |
+| `import_rows` | `imports.review` | `imports.review` AND (`banking.view` or `financials.view`) (rev 1.4); `raw_data`/`mapped_data` only through `import_rows_review`, while the batch is in review |
+| `bank_transactions_raw` (view: raw statement text) | `imports.review`, every line | rev 1.4: `imports.review` AND (`banking.view` or `financials.view`), and only lines a batch IN REVIEW is about (its own, or the line a row under review duplicates); after commit nobody reads raw text |
+| `counterparties_contact` (view: e-mails, notes) | `customers.edit` | `customers.edit` AND `customers.view` (rev 1.4) |
 | `action_comments`, `engagement_items`, `engagement_events` | `actions.view` | unchanged (now switch-aware) |
 
 ### 8.2 The overview (3P)
@@ -225,16 +235,16 @@ Every tenant-data SELECT policy names the permission its pages need, through `ap
 |---|---|---|
 | `organizations` | every resolved role | unchanged **3P** |
 | `fiscal_periods` | five roles + `suspended_member` | every resolved role **3P** (months hold no figures) |
-| `metric_current` (pointers, no figures) | every resolved role | unchanged **3P** |
-| `metric_snapshots` | five roles; `suspended_member` the current rows | `financials.view`: every snapshot; `customers.view`: also the per-customer rows; `dashboard.view`: the CURRENT rows of undimensioned and standard-category figures only **3P** — never per account or per counterparty; `suspended_member` every current row, as before |
-| `health_scores`, `health_current` | every resolved role | `dashboard.view` **3P** (`suspended_member` holds it) |
+| `metric_current` (pointers, no figures) | every resolved role | undimensioned and standard-category pointers: every resolved role **3P**; per-counterparty: `financials.view` or `customers.view`; per account / bank account: `financials.view` (rev 1.4 — they named every customer and account) |
+| `metric_snapshots` | five roles; `suspended_member` the current rows | `financials.view`: every snapshot; `customers.view`: also the per-customer rows; `dashboard.view`: the CURRENT rows of undimensioned and standard-category figures only **3P** — never per account or per counterparty; a suspended company's frozen Home: the current rows each person's REAL role and switches read before (rev 1.4; was every current row). `components`/`evidence_query` are not selectable; `metric_snapshot_payloads` serves them WHOLE to a detail reader and REDACTED (numbers and dates only; no descriptor) to a `dashboard.view` reader |
+| `health_scores`, `health_current` | every resolved role | `dashboard.view` **3P** (`suspended_member` holds it). `health_scores.breakdown` is not selectable; `health_score_breakdowns` serves it whole with `financials.view`, and REDACTED otherwise — no condition subjects (bank descriptions naming customers and suppliers), no record or snapshot ids (rev 1.4) |
 | `calculation_runs` | five roles | `financials.view` or `reports.view` **3P** |
 
 ### 8.3 Reports (3P where stated)
 
 | Table | Before | After |
 |---|---|---|
-| `reports` | `reports.view`; custom AI report its author's; Funding Readiness while Funding is on | the same, AND the Daily Brief, Weekly Intelligence and Accountant/CFO (adviser) reports also need `financials.view` — they are lists of the day's alerts and overdue actions, movements by account and customer and bank account names. **3P**: Funding Readiness |
+| `reports` | `reports.view`; custom AI report its author's; Funding Readiness while Funding is on | the same, AND the Daily Brief, Weekly Intelligence and Accountant/CFO (adviser) reports also need `financials.view` — they are lists of the day's alerts and overdue actions, movements by account and customer and bank account names. **3P**: Funding Readiness. Rev 1.4: `api_server.record_access_event` applies the same rule to the actor before a download is recorded (and so before the signer will sign). The policy's `monthly_management` branch can never match — the `reports` CHECK keeps that kind out of the table (its PDF is a `report_files` row with no report) — and is left as harmless |
 | `report_files` | `reports.view` and the report readable | unchanged — follows `reports`; the Monthly Management Report PDF (no report row) **3P** |
 | `funding_assessments`, `funding_current` | five roles while Funding is on | `reports.view` while Funding is on **3P** |
 | `marketing_reports`, `investment_reports` | `reports.view` while the system is on | unchanged **3P** |

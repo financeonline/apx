@@ -17,7 +17,7 @@ import type { ToolDefinition } from './types';
  *   3. **What the model chose is echoed back.** The amount, one-off or monthly, and the start month
  *      all return in the result, so the answer states the assumptions it was checked under.
  *
- * Nothing is stored. `dashboard.view`, as `get_forecast` is.
+ * Nothing is stored. `financials.view`, as `get_forecast` is (ADR-172).
  */
 
 const asToolError = (e: unknown) =>
@@ -36,7 +36,7 @@ export const checkAffordabilityTool: ToolDefinition<{ amount_as_written: string;
   name: 'check_affordability',
   description:
     'Whether the business can afford a proposed expenditure, worked out by APX against its cash forecast: closing cash in each forecast month as expected and after the spend, the lowest point, a one-month buffer of normal money out, and a verdict (affordable, tight or not_affordable). Use it for "can we afford…" questions ONLY when the person stated an amount. `amount_as_written` must be copied exactly as the person wrote it in their question (for example "£25,000" or "5k"); never convert, round or supply it yourself. `recurrence` is "one_off" for a single payment or "monthly" for a cost that repeats every month — use what the person said. `starts_in_month` is 1 for the first forecast month (the default), 2 for the second, and so on. If no amount was given, do not call this tool.',
-  permission: 'dashboard.view',
+  permission: 'financials.view',
   input: z.object({
     amount_as_written: z.string().min(1).max(40),
     recurrence: z.enum(RECURRENCES),

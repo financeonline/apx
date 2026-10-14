@@ -78,6 +78,21 @@ export const ACCESS_REQUEST_STATUS_LABELS: Record<string, string> = {
 };
 
 /**
+ * The inbox's kinds (ADR-144; ADR-172 adds the two "Request more information" kinds), shown as a
+ * small label on each notification. A kind without an entry is shown as "Notification".
+ */
+export const NOTIFICATION_KIND_LABELS: Record<string, string> = {
+  data_added: 'New data',
+  report_ready: 'Report ready',
+  engagement_created: 'Requests & deliverables',
+  engagement_status: 'Requests & deliverables',
+  engagement_comment: 'Comment on a request',
+  action_comment: 'Comment on an action',
+  access_request: 'Access request',
+  access_decision: 'Your access request',
+};
+
+/**
  * Audit actions are `noun.verb` keys. Anything without an entry is shown with its key made
  * readable rather than hidden, so the log is never silently incomplete.
  */
@@ -95,6 +110,12 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'member.status_changed': 'Member status changed',
   'member.removed': 'Member removed',
   'member.left': 'Member left',
+  // ADR-172: per-person permissions and "Request more information".
+  'member.permission_changed': 'Member’s access changed',
+  'member.permissions_reset': 'Member’s access reset to the role’s defaults',
+  'member.access_requested': 'More access requested',
+  'member.access_request_decided': 'Access request answered',
+  'member.access_request_withdrawn': 'Access request withdrawn',
   'ownership.transfer_initiated': 'Ownership transfer started',
   'ownership.transfer_accepted': 'Ownership transferred',
   'ownership.transfer_cancelled': 'Ownership transfer cancelled',

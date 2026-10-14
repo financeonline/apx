@@ -2,7 +2,7 @@
 
 import { redirect } from 'next/navigation';
 import { createUserClient } from '@/core/db/user-client';
-import { createOrganization, listMyOrganizations } from '@/modules/tenancy';
+import { createOrganization, landingPathForRole, listMyOrganizations } from '@/modules/tenancy';
 import { newRequestId } from '@/core/logging';
 import { fail, text, integer } from '@/app/_lib/server-action';
 import type { ActionResult } from '@/components/action-result';
@@ -12,7 +12,7 @@ export async function createOrganizationAction(
   form: FormData,
 ): Promise<ActionResult> {
   const requestId = newRequestId();
-  let slug: string | null = null;
+  let landing: string | null = null;
   try {
     const db = await createUserClient();
     const organizationId = await createOrganization(
@@ -27,10 +27,13 @@ export async function createOrganizationAction(
       requestId,
     );
     const organizations = await listMyOrganizations(db);
-    slug = organizations.find((o) => o.organizationId === organizationId)?.slug ?? null;
+    const created = organizations.find((o) => o.organizationId === organizationId);
+    // The creator is its owner, so this is Departments; asked through the one landing rule (ADR-172)
+    // rather than spelled here, so the four ways into a company cannot disagree.
+    landing = created ? landingPathForRole(created.slug, created.role) : null;
   } catch (error) {
     return fail(error, { requestId, action: 'onboarding.createOrganization' });
   }
   // redirect() throws, so it must sit outside the try/catch that maps errors.
-  redirect(slug ? `/app/${slug}/departments` : '/select-organization');
+  redirect(landing ?? '/select-organization');
 }

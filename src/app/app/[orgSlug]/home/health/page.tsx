@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getAccessContext } from '@/modules/tenancy';
+import { can } from '@/core/permissions';
 import { PageHeader, Card, CardBody } from '@/components/ui/surfaces';
 import { loadHealthTrend, loadHome } from '@/modules/dashboard';
 import { HealthExplainPanel, HealthHistoryChart, NO_SCORE_FOR_PARTIAL_MONTH } from '@/components/dashboard';
@@ -34,8 +35,9 @@ export default async function HealthPage({ params }: { params: Promise<{ orgSlug
         <Card>
           <CardBody>
             <p className="text-sm text-ink-muted">
-              There is nothing to explain yet — no month has been scored. Add your first month of
-              data and the score, and this breakdown, will appear.
+              {can(ctx, 'imports.create')
+                ? 'There is nothing to explain yet — no month has been scored. Add your first month of data and the score, and this breakdown, will appear.'
+                : 'There is nothing to explain yet — no month has been scored. The score, and this breakdown, will appear once the company has added a month of data.'}
             </p>
           </CardBody>
         </Card>
@@ -58,7 +60,16 @@ export default async function HealthPage({ params }: { params: Promise<{ orgSlug
         </Card>
       ) : (
         <div className="space-y-6">
-          <HealthExplainPanel view={view.health} periodLabel={view.period.label} orgSlug={orgSlug} />
+          {/*
+            The panel links each dimension's figures to their evidence, which is detail
+            (`financials.view`). Without it (a 3rd party, ADR-172) the arithmetic is shown in full and
+            the links are left out — never a link into a refusal.
+          */}
+          <HealthExplainPanel
+            view={view.health}
+            periodLabel={view.period.label}
+            orgSlug={can(ctx, 'financials.view') ? orgSlug : undefined}
+          />
 
           <Card>
             <CardBody>

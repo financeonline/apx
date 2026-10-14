@@ -104,12 +104,15 @@ function groupHistory(rows: readonly repo.HistoryRow[]): Record<string, ActualPo
 /**
  * Work out a forecast and store it.
  *
- * `dashboard.view` — the permission every role that resolves holds and nobody else does, which is
- * the same reach the figures themselves have. No new forecast permission was invented: §22 forbids
- * one that could bypass the existing matrix, and a forecast is a figure.
+ * `financials.view` (ADR-172 hardening, 2026-10-14; it was `dashboard.view`). A forecast is computed
+ * from the whole metric history and what it stores (`forecast_runs`, `forecast_values`, its evidence)
+ * is readable only with `financials.view` — `dashboard.view` stopped meaning "the figures" when the
+ * 3rd party, who holds it and reads none of the detail, arrived. No new forecast permission was
+ * invented: §22 forbids one that could bypass the existing matrix. `api_server.finish_forecast`
+ * re-checks the same permission for the actor.
  */
 export async function generateForecast(ctx: AccessContext): Promise<ForecastState> {
-  assertCan(ctx, 'dashboard.view');
+  assertCan(ctx, 'financials.view');
   const orgId = ctx.orgId;
   if (!orgId) throw new NotFound();
 
@@ -224,9 +227,14 @@ async function storeForecast(
   });
 }
 
-/** Read the stored forecast back, with its actual comparison and its staleness. */
+/**
+ * Read the stored forecast back, with its actual comparison and its staleness.
+ *
+ * `financials.view`, as `forecast_runs` itself (RBAC_MATRIX.md §8.1): without it the read would find
+ * nothing and say "never generated", which is not true — it is not theirs to see.
+ */
 export async function loadForecast(ctx: AccessContext): Promise<ForecastState> {
-  assertCan(ctx, 'dashboard.view');
+  assertCan(ctx, 'financials.view');
   const orgId = ctx.orgId;
   if (!orgId) throw new NotFound();
 

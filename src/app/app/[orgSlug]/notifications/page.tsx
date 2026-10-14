@@ -1,9 +1,11 @@
 import { listNotifications } from '@/modules/engagement';
+import { NOTIFICATION_KIND_LABELS } from '@/components/labels';
 import { getAccessContext } from '@/modules/tenancy';
 import { Bell, BellDot } from 'lucide-react';
 import { Card, CardBody, EmptyState, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { CardLink } from '@/components/ui/clickable-card';
 import { MarkAllReadForm } from '@/components/engagement/forms';
+import { forbidden } from 'next/navigation';
 import { requirePermission } from '@/app/_lib/authz';
 import { markAllReadAction } from '../engagement/actions';
 
@@ -15,11 +17,23 @@ export const dynamic = 'force-dynamic';
  */
 const ROW = 'relative -mx-2 rounded-xl px-2 transition-colors hover:bg-accent-soft/40 focus-within:ring-2 focus-within:ring-accent/50';
 
-/** Your notifications in this organisation (ADR-144): new data, reports ready, requests, deliverables, comments. */
+/**
+ * Your notifications in this organisation (ADR-144): new data, reports ready, requests, deliverables,
+ * comments, and the answer to "Request more information" (ADR-172).
+ *
+ * Notifications are personal, so any member with the overview (`dashboard.view`) reads their own —
+ * a 3rd party included; until ADR-172's follow-up this asked for `financials.view`, which left a
+ * 3rd party no way to read the answer to their own request. Nothing here exposes the company's
+ * detail: RLS returns only the reader's rows, `app.notify` wrote each only for someone who could open
+ * what it points at, and `listNotifications` drops any kind the reader may no longer open.
+ */
 export default async function NotificationsPage({ params }: { params: Promise<{ orgSlug: string }> }) {
   const { orgSlug } = await params;
   const ctx = await getAccessContext(orgSlug);
-  requirePermission(ctx, 'financials.view');
+  requirePermission(ctx, 'dashboard.view');
+  // A suspended organisation is frozen to its Home page for everyone (ADR-044.4); `suspended_member`
+  // holds `dashboard.view` for exactly that one page.
+  if (ctx.organizationStatus === 'suspended') forbidden();
   const items = await listNotifications(ctx);
 
   return (
@@ -43,7 +57,9 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
                         {n.read ? null : <span className="sr-only"> (unread)</span>}
                       </p>
                       {n.body === null ? null : <p className="mt-1 text-ink-muted">{n.body}</p>}
-                      <p className="mt-1 text-xs text-ink-faint">{n.createdAt.slice(0, 16).replace('T', ' ')} UTC</p>
+                      <p className="mt-1 text-xs text-ink-faint">
+                        {NOTIFICATION_KIND_LABELS[n.kind] ?? 'Notification'} · {n.createdAt.slice(0, 16).replace('T', ' ')} UTC
+                      </p>
                     </div>
                   </li>
                 ))}

@@ -17,6 +17,8 @@ export default async function BriefPreviewPage({ params }: { params: Promise<{ o
   if (kind !== 'daily_brief' && kind !== 'weekly_intelligence') notFound();
   const ctx = await getAccessContext(orgSlug);
   requirePermission(ctx, 'reports.view');
+  // As the stored daily and weekly reports: internal, so `financials.view` too (ADR-172).
+  requirePermission(ctx, 'financials.view');
 
   const content = await previewBrief(ctx, kind);
   const daily = kind === 'daily_brief';

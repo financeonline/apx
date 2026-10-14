@@ -48,6 +48,10 @@ Creation paths:
 
 Both tables have `UNIQUE (organization_id, user_id)` so a user has one relationship of each kind per organization, and a trigger prevents a platform user from also being a member (RBAC §3.5).
 
+### 3.1 Company roles and per-person permissions (ADR-172)
+
+A membership's `role` is one of five company roles — `owner`, `admin`, `accountant`, `client`, `third_party` — and the platform `employee` who reaches a company through an assignment is shown as the **Financial Analyst**. A role is only a starting point: the owner or an admin may switch individual permissions on or off for one member (`member_permission_overrides`), and a member may ask for more ("Request more information", `access_requests`). Neither changes how a person REACHES an organisation — the two paths above and `app.accessible_org_ids()` are untouched — only what they may read and do once inside it: every tenant-data policy asks for a permission through `app.org_ids_with_permission(…)`, which applies the switches. A person without `financials.view` (a 3rd party by default) lands on Home rather than Departments. See `RBAC_MATRIX.md` §7–§8.
+
 ## 4. Access resolution — the one function
 
 ```sql

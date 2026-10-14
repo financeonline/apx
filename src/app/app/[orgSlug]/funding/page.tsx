@@ -1,4 +1,5 @@
 import Link from 'next/link';
+import { can } from '@/core/permissions';
 import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
 import { FUNDING_DISCLAIMER, getFundingView, type FactorResult } from '@/modules/funding';
@@ -165,7 +166,8 @@ export default async function FundingPage({
           </CardBody></Card>
 
           <p className="mt-6 text-sm">
-            {a.evidenceBundleId === null ? null : (
+            {/* The evidence page is detail (`financials.view`); a 3rd party reads the assessment without it (ADR-172). */}
+            {a.evidenceBundleId === null || !can(ctx, 'financials.view') ? null : (
               <Link href={`/app/${orgSlug}/evidence/${a.evidenceBundleId}`} className={`inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft ${TOUCH_TARGET}`}>See the figures behind this assessment<ChevronRight aria-hidden="true" className="size-4" /></Link>
             )}
           </p>

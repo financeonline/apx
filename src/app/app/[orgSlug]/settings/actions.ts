@@ -197,7 +197,7 @@ export async function revokeAdviserAction(
       reason: 'Revoked by the organisation',
     });
     revalidatePath(`/app/${orgSlug}/settings/team`);
-    return done('Adviser access removed.');
+    return done('Financial Analyst access removed.');
   } catch (error) {
     return fail(error, { requestId, action: 'settings.revokeAdviser' });
   }

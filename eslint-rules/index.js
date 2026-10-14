@@ -291,7 +291,9 @@ const noRoleNameLiterals = {
     const allow = context.options[0]?.allow ?? [];
     const filename = context.filename ?? context.getFilename();
     if (inAnyOf(filename, allow) || allow.some((p) => norm(filename).includes(p))) return {};
-    const ROLES = new Set(['owner', 'admin', 'client', 'employee', 'super_admin', 'suspended_member']);
+    // ADR-172 adds the two company roles `accountant` and `third_party`: a `role === 'third_party'`
+    // branch is exactly the widening this rule exists to stop.
+    const ROLES = new Set(['owner', 'admin', 'accountant', 'client', 'third_party', 'employee', 'super_admin', 'suspended_member']);
     return {
       BinaryExpression(node) {
         if (!['===', '!==', '==', '!='].includes(node.operator)) return;

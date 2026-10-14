@@ -13,7 +13,8 @@ import type { SnapshotRow, PeriodLabel } from '../domain/view-models';
  *
  * Reads run on the caller's client under RLS. A suspended organisation still resolves `metric_current`
  * — it is one of the five frozen-Home tables (ADR-044.4) — which is what lets the banner and the
- * frozen figures render rather than an empty page.
+ * frozen figures render rather than an empty page. Since the ADR-172 hardening the frozen Home shows
+ * each person the figures their real role showed them before the suspension, never more.
  */
 
 function unwrap<T>(data: T[] | null, error: unknown, requestId?: string): T[] {
@@ -36,17 +37,64 @@ interface CurrentRow {
     basis: SnapshotRow['basis'];
     assurance_level: SnapshotRow['assurance'];
     data_quality: SnapshotRow['dataQuality'];
-    components: Record<string, unknown>;
   } | null;
 }
 
+/*
+ * `components` is NOT in this select. Since the ADR-172 hardening (migration 20261018000033) the
+ * column is not selectable on `metric_snapshots` at all: it carries per-account balances, bank account
+ * names and counterparty ids, which a 3rd party reading the overview must not see. It is read from the
+ * definer view `metric_snapshot_payloads`, which hands each reader the WHOLE payload when they read
+ * the detail behind it (`financials.view`; `customers.view` for a per-customer figure) and a REDACTED
+ * one — numbers and dates only, no ids or names — when they read only the overview (`dashboard.view`).
+ * The service role (a job composing a brief) gets the whole payload, as it reads the tables.
+ */
 const SNAPSHOT_SELECT = `
   metric_key, period_id, dimension_type, dimension_id, dimension_key, snapshot_id,
   metric_snapshots!inner (
-    id, value, unit, currency, basis, assurance_level, data_quality, components
+    id, value, unit, currency, basis, assurance_level, data_quality
   )`;
 
-function toSnapshot(row: CurrentRow): SnapshotRow | null {
+type Payloads = ReadonlyMap<string, Record<string, unknown>>;
+
+/**
+ * The current snapshots' `components`, by snapshot id, for the SAME filters as the pointer read
+ * beside it — filters rather than a list of ids, so nothing long travels in a URL. A snapshot the
+ * view does not return (none should be missing; the view admits what the table's policy admits) reads
+ * as no components, never as an error.
+ */
+async function loadPayloads(
+  db: SupabaseClient,
+  orgId: string,
+  filter: {
+    readonly periodId?: string;
+    readonly periodIds?: readonly string[];
+    readonly metricKey?: string;
+    readonly metricKeys?: readonly string[];
+    readonly dimension?: 'none' | 'dimensioned';
+  },
+  requestId?: string,
+): Promise<Payloads> {
+  let query = db
+    .from('metric_snapshot_payloads')
+    .select('id, components')
+    .eq('organization_id', orgId)
+    .eq('is_current', true);
+  if (filter.periodId !== undefined) query = query.eq('period_id', filter.periodId);
+  if (filter.periodIds !== undefined) query = query.in('period_id', [...filter.periodIds]);
+  if (filter.metricKey !== undefined) query = query.eq('metric_key', filter.metricKey);
+  if (filter.metricKeys !== undefined) query = query.in('metric_key', [...filter.metricKeys]);
+  if (filter.dimension === 'none') query = query.eq('dimension_type', 'none');
+  if (filter.dimension === 'dimensioned') query = query.neq('dimension_type', 'none');
+
+  const { data, error } = await query;
+  return new Map(
+    unwrap(data as Array<{ id: string; components: Record<string, unknown> | null }> | null, error, requestId)
+      .map((r) => [r.id, r.components ?? {}]),
+  );
+}
+
+function toSnapshot(row: CurrentRow, payloads: Payloads): SnapshotRow | null {
   const snapshot = row.metric_snapshots;
   if (!snapshot) return null;
   return {
@@ -62,7 +110,7 @@ function toSnapshot(row: CurrentRow): SnapshotRow | null {
     basis: snapshot.basis,
     assurance: snapshot.assurance_level,
     dataQuality: snapshot.data_quality,
-    components: snapshot.components ?? {},
+    components: payloads.get(snapshot.id) ?? {},
   };
 }
 
@@ -70,14 +118,17 @@ function toSnapshot(row: CurrentRow): SnapshotRow | null {
 export async function loadPeriodSnapshots(
   db: SupabaseClient, orgId: string, periodId: string, requestId?: string,
 ): Promise<SnapshotRow[]> {
-  const { data, error } = await db
-    .from('metric_current')
-    .select(SNAPSHOT_SELECT)
-    .eq('organization_id', orgId)
-    .eq('period_id', periodId);
+  const [{ data, error }, payloads] = await Promise.all([
+    db
+      .from('metric_current')
+      .select(SNAPSHOT_SELECT)
+      .eq('organization_id', orgId)
+      .eq('period_id', periodId),
+    loadPayloads(db, orgId, { periodId }, requestId),
+  ]);
 
   return unwrap(data as unknown as CurrentRow[] | null, error, requestId)
-    .map(toSnapshot)
+    .map((row) => toSnapshot(row, payloads))
     .filter((s): s is SnapshotRow => s !== null);
 }
 
@@ -91,16 +142,19 @@ export async function loadMetricSeries(
 ): Promise<SnapshotRow[]> {
   if (metricKeys.length === 0 || periodIds.length === 0) return [];
 
-  const { data, error } = await db
-    .from('metric_current')
-    .select(SNAPSHOT_SELECT)
-    .eq('organization_id', orgId)
-    .in('metric_key', [...metricKeys])
-    .in('period_id', [...periodIds])
-    .eq('dimension_type', 'none');
+  const [{ data, error }, payloads] = await Promise.all([
+    db
+      .from('metric_current')
+      .select(SNAPSHOT_SELECT)
+      .eq('organization_id', orgId)
+      .in('metric_key', [...metricKeys])
+      .in('period_id', [...periodIds])
+      .eq('dimension_type', 'none'),
+    loadPayloads(db, orgId, { metricKeys, periodIds, dimension: 'none' }, requestId),
+  ]);
 
   return unwrap(data as unknown as CurrentRow[] | null, error, requestId)
-    .map(toSnapshot)
+    .map((row) => toSnapshot(row, payloads))
     .filter((s): s is SnapshotRow => s !== null);
 }
 
@@ -114,16 +168,19 @@ export async function loadDimensioned(
 ): Promise<SnapshotRow[]> {
   if (periodIds.length === 0) return [];
 
-  const { data, error } = await db
-    .from('metric_current')
-    .select(SNAPSHOT_SELECT)
-    .eq('organization_id', orgId)
-    .eq('metric_key', metricKey)
-    .in('period_id', [...periodIds])
-    .neq('dimension_type', 'none');
+  const [{ data, error }, payloads] = await Promise.all([
+    db
+      .from('metric_current')
+      .select(SNAPSHOT_SELECT)
+      .eq('organization_id', orgId)
+      .eq('metric_key', metricKey)
+      .in('period_id', [...periodIds])
+      .neq('dimension_type', 'none'),
+    loadPayloads(db, orgId, { metricKey, periodIds, dimension: 'dimensioned' }, requestId),
+  ]);
 
   return unwrap(data as unknown as CurrentRow[] | null, error, requestId)
-    .map(toSnapshot)
+    .map((row) => toSnapshot(row, payloads))
     .filter((s): s is SnapshotRow => s !== null);
 }
 
@@ -180,24 +237,19 @@ export async function loadPeriodsWithData(
  * hundreds of non-null snapshots — all of them zero. Home read that as "ready" and offered a
  * dashboard built on nothing (ADR-058.8).
  *
- * The honest question is whether any accepted record exists, and that is what this asks.
+ * The honest question is whether any accepted record exists. It is asked of the DATABASE
+ * (`api.has_accepted_records`, ADR-172) rather than by counting the record tables here: those tables
+ * are readable only with `financials.view` (or banking/customers), so a 3rd party — who holds the
+ * overview and nothing beneath it — counted zero everywhere and was told to upload their first file.
+ * The function answers one boolean to anyone with `dashboard.view`, over the same four tables and the
+ * same "accepted and not superseded" this used to ask.
  */
 export async function hasAcceptedRecords(
   db: SupabaseClient, orgId: string, requestId?: string,
 ): Promise<boolean> {
-  const tables = ['ledger_entries', 'bank_transactions', 'invoices', 'period_balances'] as const;
-
-  for (const table of tables) {
-    const { count, error } = await db
-      .from(table)
-      .select('id', { count: 'exact', head: true })
-      .eq('organization_id', orgId)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null);
-    if (error) throw toMotionError(error, requestId);
-    if ((count ?? 0) > 0) return true;
-  }
-  return false;
+  const { data, error } = await db.schema('api').rpc('has_accepted_records', { p_org: orgId });
+  if (error) throw toMotionError(error, requestId);
+  return data === true;
 }
 
 /** Whether a recalculation is in flight, for the "Updating your numbers" banner (§7.1, F-D-03). */

@@ -78,7 +78,7 @@ export async function createAssignmentAction(
     });
     if (error) throw toMotionError(error, requestId);
     revalidatePath('/platform/assignments');
-    return done('Adviser assigned.');
+    return done('Financial Analyst assigned.');
   } catch (error) {
     return fail(error, { requestId, action: 'platform.createAssignment' });
   }

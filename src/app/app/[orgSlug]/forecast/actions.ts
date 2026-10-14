@@ -10,7 +10,9 @@ import type { ActionResult } from '@/components/action-result';
 /**
  * Work the forecast out again (REQ-FC-02; ADR-099).
  *
- * `dashboard.view`, checked here and again in `generateForecast`, and a third time in SQL where
+ * `financials.view` (ADR-172): the forecast's tables are figures beneath the overview, and a 3rd party
+ * holds `dashboard.view` without them, so the `dashboard.view` this asked for until then would have
+ * let a 3rd party write a forecast. Checked here first, then by `generateForecast` and in SQL where
  * `api_server.finish_forecast` re-validates the actor — the permission is not a property of this
  * button (ADR-026). No new forecast permission exists: a forecast is a figure, and §22 forbids one
  * that could sit outside the matrix.
@@ -24,7 +26,7 @@ export async function regenerateForecastAction(
   try {
     const ctx = await getAccessContext(orgSlug);
     requestId = ctx.requestId;
-    assertCan(ctx, 'dashboard.view');
+    assertCan(ctx, 'financials.view');
 
     const state = await generateForecast(ctx);
     revalidatePath(`/app/${orgSlug}/forecast`);

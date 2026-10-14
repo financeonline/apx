@@ -13,14 +13,14 @@ export function CreateAssignmentForm() {
       <Field label="Organisation id" htmlFor="organization_id">
         <Input id="organization_id" name="organization_id" required />
       </Field>
-      <Field label="Adviser user id" htmlFor="employee_user_id" hint="Must already hold the APX adviser platform role.">
+      <Field label="Financial Analyst user id" htmlFor="employee_user_id" hint="Must already hold the Financial Analyst platform role.">
         <Input id="employee_user_id" name="employee_user_id" required />
       </Field>
       <Field label="Access ends" htmlFor="ends_at" hint="Leave blank for the default of twelve months.">
         <Input id="ends_at" name="ends_at" type="date" />
       </Field>
       <ActionMessage state={state} />
-      <SubmitButton pendingLabel="Assigning…">Assign adviser</SubmitButton>
+      <SubmitButton pendingLabel="Assigning…">Assign Financial Analyst</SubmitButton>
     </form>
   );
 }

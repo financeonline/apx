@@ -136,6 +136,9 @@ describe('the last owner cannot disappear (ADR-030)', () => {
     expect(sqlstate(error)).toBe(CONFLICT);
   });
 
+  // Since the ADR-172 hardening (migration 20261018000032) nobody changes their OWN role, so the
+  // refusal comes before the last-owner trigger is reached: PERMISSION_DENIED rather than CONFLICT.
+  // The trigger itself is still asserted directly in pgTAP 03; the next test proves the owner stays.
   it('the sole owner cannot demote themselves', async () => {
     const { error } = await rpc(ownerId, 'change_member_role', {
       p_org: orgId,
@@ -143,7 +146,7 @@ describe('the last owner cannot disappear (ADR-030)', () => {
       p_role: 'admin',
     });
     expect(error).not.toBeNull();
-    expect(sqlstate(error)).toBe(CONFLICT);
+    expect(sqlstate(error)).toBe(PERMISSION_DENIED);
   });
 
   it('the organization still has exactly one active owner afterwards', () => {

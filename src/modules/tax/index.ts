@@ -7,7 +7,9 @@ export {
   type VatBox, type VatCountry, type VatInvoice, type VatQuarter, type VatReturn, type VatScheme,
 } from './domain/vat';
 export {
-  addMonthsToDate, daysInclusive, estimateCorporationTax, type CorporationTaxEstimate, type CtCountry,
+  addMonthsToDate, corporationTaxDueDate, daysInclusive, estimateCorporationTax, type CorporationTaxEstimate, type CtCountry,
 } from './domain/corporation-tax';
-export { loadCorporationTaxView, loadVatView, type CorporationTaxView, type VatView } from './services';
+export {
+  loadCorporationTaxView, loadTaxDates, loadVatView, type CorporationTaxView, type TaxDates, type VatView,
+} from './services';
 export type { OrganisationTaxFacts } from './data/repository';

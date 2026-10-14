@@ -66,7 +66,13 @@ export type RecordObservationLike = Pick<RecordObservation, 'counterpartyId' | '
  */
 const OBSERVATION_PAGE = 1000;
 
-/** Every current snapshot for a set of periods — the period being scored and its lookback. */
+/**
+ * Every current snapshot for a set of periods — the period being scored and its lookback.
+ *
+ * SERVICE ROLE ONLY (the score run and the alert pass, both inside `withOrgScope`): it selects
+ * `components` and `evidence_query`, which `authenticated` cannot select since the ADR-172 hardening
+ * (migration 20261018000033). A user-facing reader goes through `metric_snapshot_payloads`.
+ */
 export async function loadObservations(
   db: SupabaseClient, orgId: string, periodIds: readonly string[], requestId?: string,
 ): Promise<MetricObservation[]> {
@@ -267,17 +273,48 @@ interface HealthCurrentRow {
     dimensions_used: number;
     dimensions_total: number;
     config_version: string;
-    breakdown: DimensionBreakdown[] | null;
   } | null;
 }
 
+/*
+ * `breakdown` is NOT in this select. Since the ADR-172 hardening (migration 20261018000033) the column
+ * is not selectable on `health_scores`: its conditions name the bank descriptions (customers,
+ * suppliers) a rule counted, and a 3rd party reads the score. It is read from the definer view
+ * `health_score_breakdowns`: WHOLE for a `financials.view` reader, REDACTED — the same shape, with
+ * every subject, record and snapshot id removed — for a reader of the overview alone. The service role
+ * (a job composing a brief) reads it whole.
+ */
 const HEALTH_SELECT = `
   period_id, updated_at,
   health_scores!health_current_score_fk!inner (
-    id, score, dimensions_used, dimensions_total, config_version, breakdown
+    id, score, dimensions_used, dimensions_total, config_version
   )`;
 
-function toStored(row: HealthCurrentRow, band: (score: number | null) => HealthBand | null): StoredHealthScore | null {
+/** The stored breakdowns, by score id, as the caller may read them (see above). */
+async function loadBreakdowns(
+  db: SupabaseClient, orgId: string, scoreIds: readonly string[], requestId?: string,
+): Promise<ReadonlyMap<string, DimensionBreakdown[]>> {
+  const ids = [...new Set(scoreIds)];
+  const out = new Map<string, DimensionBreakdown[]>();
+  // Ids travel in the URL: a hundred at a time stays far inside any proxy's request-line limit.
+  for (let from = 0; from < ids.length; from += 100) {
+    const { data, error } = await db
+      .from('health_score_breakdowns')
+      .select('id, breakdown')
+      .eq('organization_id', orgId)
+      .in('id', ids.slice(from, from + 100));
+    for (const r of unwrap(data as Array<{ id: string; breakdown: DimensionBreakdown[] | null }> | null, error, requestId)) {
+      out.set(r.id, r.breakdown ?? []);
+    }
+  }
+  return out;
+}
+
+function toStored(
+  row: HealthCurrentRow,
+  band: (score: number | null) => HealthBand | null,
+  breakdowns: ReadonlyMap<string, DimensionBreakdown[]>,
+): StoredHealthScore | null {
   const stored = row.health_scores;
   if (!stored) return null;
   return {
@@ -288,7 +325,7 @@ function toStored(row: HealthCurrentRow, band: (score: number | null) => HealthB
     dimensionsUsed: stored.dimensions_used,
     dimensionsTotal: stored.dimensions_total,
     configVersion: stored.config_version,
-    breakdown: stored.breakdown ?? [],
+    breakdown: breakdowns.get(stored.id) ?? [],
     updatedAt: row.updated_at,
   };
 }
@@ -307,7 +344,9 @@ export async function loadHealthScore(
 
   const rows = unwrap(data as unknown as HealthCurrentRow[] | null, error, requestId);
   const row = rows[0];
-  return row === undefined ? null : toStored(row, band);
+  if (row === undefined) return null;
+  const breakdowns = await loadBreakdowns(db, orgId, row.health_scores ? [row.health_scores.id] : [], requestId);
+  return toStored(row, band, breakdowns);
 }
 
 /** The score history, for the monthly chart. Ordered by the caller's period list, not by id. */
@@ -322,11 +361,14 @@ export async function loadHealthHistory(
     .eq('organization_id', orgId)
     .in('period_id', [...periodIds]);
 
-  return unwrap(data as unknown as HealthCurrentRow[] | null, error, requestId)
-    .flatMap((row) => {
-      const stored = toStored(row, band);
-      return stored === null ? [] : [stored];
-    });
+  const rows = unwrap(data as unknown as HealthCurrentRow[] | null, error, requestId);
+  const breakdowns = await loadBreakdowns(
+    db, orgId, rows.flatMap((row) => (row.health_scores ? [row.health_scores.id] : [])), requestId,
+  );
+  return rows.flatMap((row) => {
+    const stored = toStored(row, band, breakdowns);
+    return stored === null ? [] : [stored];
+  });
 }
 
 interface PortfolioRow {

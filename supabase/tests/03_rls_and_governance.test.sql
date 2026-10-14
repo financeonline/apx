@@ -6,7 +6,7 @@
 begin;
 create extension if not exists pgtap;
 
-select plan(39);
+select plan(40);
 
 -- ---------------------------------------------------------------------------
 -- Fixtures
@@ -165,10 +165,20 @@ select throws_ok(
   'select api.remove_member(''c0a00000-0000-0000-0000-00000000000a'',
                             ''c1000000-0000-0000-0000-000000000001'')',
   '23514', null, 'the sole owner cannot be removed (last-owner guard)');
+-- ADR-172 hardening (2026-10-14, migration 20261018000032): nobody changes their OWN role any more,
+-- so api.change_member_role refuses the sole owner's self-demotion before the trigger is reached;
+-- the trigger itself is then exercised directly and still refuses a change that leaves no owner.
 select throws_ok(
   'select api.change_member_role(''c0a00000-0000-0000-0000-00000000000a'',
                                  ''c1000000-0000-0000-0000-000000000001'', ''admin'')',
+  '42501', null, 'the sole owner cannot demote themselves (no change of one''s own role)');
+call pg_temp.act_as_postgres();
+select throws_ok(
+  'update public.organization_memberships set role = ''admin''
+    where organization_id = ''c0a00000-0000-0000-0000-00000000000a''
+      and user_id = ''c1000000-0000-0000-0000-000000000001''',
   '23514', null, 'the sole owner cannot be demoted (last-owner guard)');
+call pg_temp.act_as('c1000000-0000-0000-0000-000000000001');
 
 -- organization state machine (R2-A-10)
 select throws_ok(
