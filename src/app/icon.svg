@@ -1,8 +1,21 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- The APX logo (owner, 2026-10-14: "replace with my logo"): the wordmark's own paths, on black. -->
+  <defs>
+    <linearGradient id="x" gradientUnits="userSpaceOnUse" x1="597" y1="0" x2="1013" y2="0">
+      <stop offset="0" stop-color="#f0143c"/><stop offset="0.5" stop-color="#ff2445"/><stop offset="1" stop-color="#ff6a35"/>
+    </linearGradient>
+  </defs>
   <rect width="64" height="64" rx="14" fill="#09090b"/>
-  <g fill="none" stroke-width="7" stroke-linecap="round" stroke-linejoin="round">
-    <path d="M11 18 L24 32 L11 46" stroke="#f0143c"/>
-    <path d="M53 18 L40 32 L53 46" stroke="#ff6a35"/>
+  <g transform="translate(1.6 24.1) scale(0.0572)">
+    <g fill="none" stroke="#ffffff" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M78 205 L190 72 L300 205"/>
+      <path d="M372 205 V75 H468 C 528 75, 528 165, 468 165 H372"/>
+    </g>
+    <circle cx="186" cy="198" r="30" fill="#f0143c"/>
+    <g fill="none" stroke="url(#x)" stroke-width="72" stroke-linecap="round" stroke-linejoin="round">
+      <path d="M625 75 L715 140 L625 205"/>
+      <path d="M985 75 L893 140 L985 205"/>
+    </g>
+    <circle cx="804" cy="140" r="34" fill="#ff2445"/>
   </g>
-  <circle cx="32" cy="32" r="4.5" fill="#ff2445"/>
 </svg>
