@@ -34,6 +34,8 @@ export {
   StartImportBatchInput,
 } from './domain/validation';
 
+export { CheckedInvoiceInput } from './domain/checked-invoice';
+
 export { countRowsByStatus, listBatchRows, listBatches, listDocuments } from './data/repository';
 
 export {
@@ -117,6 +119,7 @@ export {
   startImport,
   assertImportSupported,
   pdfHandling,
+  readsCheckedInvoice,
   targetFor,
   type StartImportInput,
   type StartImportResult,

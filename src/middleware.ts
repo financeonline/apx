@@ -214,8 +214,9 @@ export const config = {
   matcher: [
     /*
      * Everything except Next's own static output and file requests. Middleware must see every
-     * page and route handler so the session cookie is refreshed on each of them.
+     * page and route handler so the session cookie is refreshed on each of them. `ocr/` is the
+     * in-browser OCR engine and language file (ADR-175): static, public, and several MB each.
      */
-    '/((?!_next/static|_next/image|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webm|ico|woff2?)$).*)',
+    '/((?!_next/static|_next/image|ocr/|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webm|ico|woff2?)$).*)',
   ],
 };

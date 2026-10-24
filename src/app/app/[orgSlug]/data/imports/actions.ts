@@ -9,8 +9,8 @@ import { setStatementBalancesAndRevalidate } from '@/modules/imports';
 import { assertCan } from '@/core/permissions';
 import { ValidationError } from '@/core/errors';
 import {
-  attestReportCompleteness, commitImportBatch, decideImportRows, recordBatchConfirmation, rejectImportBatch,
-  rollbackImportBatch, startImport,
+  attestReportCompleteness, CheckedInvoiceInput, commitImportBatch, decideImportRows, recordBatchConfirmation,
+  rejectImportBatch, rollbackImportBatch, startImport,
 } from '@/modules/imports';
 import type { ImportType } from '@/modules/imports';
 import { fail, done, text } from '@/app/_lib/server-action';
@@ -44,6 +44,27 @@ export async function startImportAction(
 
     const bankAccount = form.get('bank_account_id');
 
+    // ADR-175: one invoice read on the upload page, its fields checked by the reviewer.
+    let checkedInvoice: CheckedInvoiceInput | undefined;
+    if (form.get('invoice_read') === '1') {
+      const parsed = CheckedInvoiceInput.safeParse({
+        invoiceNumber: text(form, 'invoice_number'),
+        counterparty: text(form, 'invoice_counterparty'),
+        issueDate: text(form, 'invoice_issue_date'),
+        dueDate: text(form, 'invoice_due_date'),
+        subtotal: text(form, 'invoice_subtotal'),
+        taxAmount: text(form, 'invoice_tax'),
+        total: text(form, 'invoice_total'),
+        currency: text(form, 'invoice_currency'),
+        description: text(form, 'invoice_description'),
+        checked: form.get('invoice_checked') === 'on',
+      });
+      if (!parsed.success) {
+        throw new ValidationError(parsed.error.issues[0]?.message ?? 'Check the invoice fields.');
+      }
+      checkedInvoice = parsed.data;
+    }
+
     const result = await startImport({
       organizationId: ctx.orgId!,
       userId: ctx.userId,
@@ -54,6 +75,7 @@ export async function startImportAction(
       periodStart: text(form, 'period_start'),
       periodEnd: text(form, 'period_end'),
       bankAccountId: typeof bankAccount === 'string' && bankAccount !== '' ? bankAccount : null,
+      ...(checkedInvoice === undefined ? {} : { checkedInvoice }),
     });
 
     batchId = result.batchId;

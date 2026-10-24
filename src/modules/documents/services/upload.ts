@@ -34,6 +34,11 @@ export interface UploadInput {
   readonly bytes: Uint8Array;
   /** The user's choice from the upload form; the suggestion is only a default (§2.6). */
   readonly documentKind: string;
+  /**
+   * ADR-175: the file's content was read before upload (OCR of an invoice scan, checked by the
+   * reviewer), so a PDF without a text layer is still `ready` rather than `unreadable`.
+   */
+  readonly readOutsideServer?: boolean;
 }
 
 export interface UploadResult {
@@ -129,7 +134,7 @@ export async function uploadDocument(ctx: UploadContext, input: UploadInput): Pr
   // §4: a file that fails validation is STORED with status `quarantined` and its findings, never
   // silently rejected. The reviewer and the platform must be able to see what was refused and why.
   const status: UploadResult['status'] = validation.ok
-    ? (fileKind === 'pdf' && validation.hasTextLayer === false ? 'unreadable' : 'ready')
+    ? (fileKind === 'pdf' && validation.hasTextLayer === false && input.readOutsideServer !== true ? 'unreadable' : 'ready')
     : (validation.quarantine ? 'quarantined' : 'unreadable');
 
   const documentId = await ctx.registerDocument({

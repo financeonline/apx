@@ -16,8 +16,9 @@ export const StartImportBatchInput = z
     periodStart: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     periodEnd: z.string().regex(/^\d{4}-\d{2}-\d{2}$/).optional(),
     balanceBasis: z.enum(['cumulative', 'movement']).optional(),
-    /** How the wizard read the file (ADR-083). `pdf_claude` is the server's alone. */
-    extractionMethod: z.enum(['csv', 'xlsx', 'pdf_text']).optional(),
+    /** How the wizard read the file (ADR-083). `pdf_claude` is the server's alone. `ocr` is one
+     *  invoice read in the browser and checked by the reviewer (ADR-175). */
+    extractionMethod: z.enum(['csv', 'xlsx', 'pdf_text', 'ocr']).optional(),
   })
   .refine((v) => v.importType !== 'bank_statement' || v.bankAccountId !== undefined, {
     message: 'Choose which bank account this statement belongs to',

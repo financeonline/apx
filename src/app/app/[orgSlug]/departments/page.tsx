@@ -231,7 +231,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
             <Link href={`${base}/data/imports`} className="inline-flex items-center text-sm font-medium text-accent hover:underline pointer-coarse:min-h-10">Imports &amp; evidence →</Link>
           </div>
           <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <li><QuickLink href={`${base}/data/imports/new`} title="Upload a file" line="CSV, XLSX or PDF" icon={<FileUp />} tint="violet" /></li>
+            <li><QuickLink href={`${base}/data/imports/new`} title="Upload a file" line="CSV, XLSX, PDF or an invoice photo" icon={<FileUp />} tint="violet" /></li>
             <li><QuickLink href={`${base}/data/documents`} title="Documents" line="Statements, invoices, receipts" icon={<FileText />} tint="pink" /></li>
             <li><QuickLink href={`${base}/data/accounts`} title="Accounts" line="Your chart of accounts" icon={<ListChecks />} tint="pink" /></li>
           </ul>

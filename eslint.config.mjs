@@ -4,7 +4,8 @@ import next from 'eslint-config-next';
 import motion from './eslint-rules/index.js';
 
 export default tseslint.config(
-  { ignores: ['.next/**', 'node_modules/**', 'coverage/**', 'supabase/**', 'next-env.d.ts', 'eslint-rules/**'] },
+  // public/ocr: vendored OCR files copied from node_modules (ADR-175). logs: local, git-ignored run output.
+  { ignores: ['.next/**', 'node_modules/**', 'coverage/**', 'supabase/**', 'next-env.d.ts', 'eslint-rules/**', 'public/ocr/**', 'logs/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...next,

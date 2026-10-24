@@ -14,6 +14,8 @@ test-results/
 playwright-report/
 e2e/.shots
 test/regression/out/
+# In-browser OCR files, copied from node_modules by scripts/ocr-assets.mjs (ADR-175)
+/public/ocr/
 
 # Local run output (sample-data screenshots, Playwright results)
 /logs/

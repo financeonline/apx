@@ -14,13 +14,14 @@ import { parseCsv } from '../domain/parsers/csv';
 import { SCANNED_PDF_MESSAGE } from '../domain/parsers/pdf-scanned';
 import { parsePdfText } from '../domain/parsers/pdf-text';
 import { parseXlsx } from '../domain/parsers/xlsx';
+import { checkedInvoiceTable, type CheckedInvoiceInput } from '../domain/checked-invoice';
 import type { ParsedTable, TargetField, Transforms } from '../domain/pipeline-types';
 import type { PipelineInput } from '../domain/pipeline';
 import {
   IMPORT_TYPE_SPECS, isImportType, type ExtractionMethod, type ImportTarget, type ImportType,
 } from '../domain/types';
 import { loadCounterparties, parseAndValidate } from './parse-and-validate';
-import { createImportAccounts, createImportCounterparties, startImportBatch } from './index';
+import { createImportAccounts, createImportCounterparties, recordBatchConfirmation, startImportBatch } from './index';
 
 /**
  * The import wizard's one server-side journey (IMPORT_ENGINE.md §2–§7).
@@ -46,6 +47,11 @@ export interface StartImportInput {
   readonly bankAccountId: string | null;
   /** A reviewer's corrections to the proposed map, on a second pass (§6.4). */
   readonly columnMap?: Readonly<Record<string, TargetField>>;
+  /**
+   * ADR-175: the fields of ONE invoice, read in the browser from a photo, scan or PDF and checked by
+   * the reviewer. When present the file is stored as the evidence and these fields are the row.
+   */
+  readonly checkedInvoice?: CheckedInvoiceInput;
 }
 
 export interface StartImportResult {
@@ -151,6 +157,11 @@ type Parsed =
   | { readonly kind: 'scanned' }
   /** §5.3: a text-layer PDF whose layout no grammar matched. Stored, batched, and the batch failed. */
   | { readonly kind: 'pdf_unparsed'; readonly reason: string };
+
+/** ADR-175: the import types whose single-invoice photos, scans and PDFs are read in the browser. */
+export function readsCheckedInvoice(importType: ImportType): boolean {
+  return importType === 'sales_invoices' || importType === 'purchase_invoices';
+}
 
 /** ADR-150: what a receipt upload says until a reviewer asks for it to be read. */
 export const RECEIPT_WAITING_MESSAGE =
@@ -287,9 +298,22 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
   const isPdf = validation.detectedKind === 'pdf' || input.file.name.toLowerCase().endsWith('.pdf');
   const isImage = validation.detectedKind === 'image';
 
+  /*
+   * ADR-175: one invoice as a photo, scan or PDF, with the fields the reviewer checked. The document
+   * is the evidence; the fields are the row. Only for invoice types, and only for a file that IS a
+   * document — a CSV with invoice fields attached would make two claims about the same invoices.
+   */
+  const checked = input.checkedInvoice;
+  if (checked !== undefined && !(readsCheckedInvoice(importType) && (isPdf || isImage))) {
+    throw new ValidationError('Checked invoice fields go with a photo, scan or PDF of a sales or purchase invoice.');
+  }
+
   // ADR-150: a photo is a receipt, or nothing MOTION reads. Refused before it is stored.
-  if (isImage && pdfHandling(importType) !== 'read_on_request') {
-    throw new ValidationError('Photos can be imported as receipts only. Choose "Receipts", or upload a CSV, Excel or PDF file.');
+  // ADR-175: …or one invoice whose fields the reviewer checked.
+  if (isImage && checked === undefined && pdfHandling(importType) !== 'read_on_request') {
+    throw new ValidationError(readsCheckedInvoice(importType)
+      ? 'APX reads an invoice photo on this page before it is uploaded. Choose the file again and check the fields it finds.'
+      : 'Photos can be imported as receipts or single invoices only. Choose "Receipts", or upload a CSV, Excel or PDF file.');
   }
 
   /*
@@ -321,7 +345,7 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
     };
   }
 
-  if (isPdf && pdfHandling(importType) === 'store_only') {
+  if (isPdf && checked === undefined && pdfHandling(importType) === 'store_only') {
     /*
      * Stored, not read (see `pdfHandling`). The document is registered under its kind, so it is
      * listed, access-controlled and linkable as evidence; no batch is started, because no rows can
@@ -360,13 +384,26 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
    * things that never happened. A file MOTION cannot parse should leave no trace but the sentence
    * explaining why (ADR-058.1).
    */
-  const parsed = await parseTable(input.file, bytes);
+  /*
+   * ADR-175: one invoice covers its own date and nothing more. Its range is the invoice date, set
+   * here rather than taken from the form, so a single invoice can never be read as "every purchase
+   * invoice for September" — coverage needs a batch whose range spans the whole month (§2.2).
+   */
+  const periodStart = checked === undefined ? input.periodStart : checked.issueDate;
+  const periodEnd = checked === undefined ? input.periodEnd : checked.issueDate;
+
+  const fromChecked = checked === undefined
+    ? null
+    : checkedInvoiceTable(checked, importType === 'sales_invoices' ? 'sales' : 'purchase');
+  const parsed: Parsed = fromChecked === null
+    ? await parseTable(input.file, bytes)
+    : { kind: 'table', table: fromChecked.table, method: 'ocr' };
   // Both are decided from the parsed table alone, and either can refuse the file — so both happen
   // on the same side of the upload as the parse, for the same reason (ADR-058.1). A PDF that
   // yielded no table is the exception: §5.3 and §5.5 say it is STORED, so the refusal comes after
   // the upload, with the document kept.
   const table = parsed.kind === 'table' ? parsed.table : null;
-  const columnMap = table === null ? {} : (input.columnMap ?? proposeColumnMap(table, input.importType));
+  const columnMap = table === null ? {} : (fromChecked?.columnMap ?? input.columnMap ?? proposeColumnMap(table, input.importType));
   const transforms = table === null ? {} : await resolveTransforms(db, organizationId, input, columnMap);
 
   const uploaded = await uploadDocument(
@@ -386,6 +423,8 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
       // A `document_kind_enum` value. The import type itself is not one for invoice lists or
       // receipts, and the cast in `register_document` refused the whole upload.
       documentKind: spec.documentKind,
+      // ADR-175: a scan has no text layer, but its fields were read and checked, so it is ready.
+      ...(fromChecked === null ? {} : { readOutsideServer: true }),
     },
   );
 
@@ -403,8 +442,8 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
     // ABSENT, not null: `StartImportBatchInput` requires a bank account for a statement and forbids
     // one elsewhere, and it expresses "no account" as the key being missing. A null is a value.
     ...(input.bankAccountId === null ? {} : { bankAccountId: input.bankAccountId }),
-    periodStart: input.periodStart,
-    periodEnd: input.periodEnd,
+    periodStart,
+    periodEnd,
     extractionMethod: parsed.kind === 'table' ? parsed.method : 'pdf_text',
   }, requestId);
 
@@ -435,7 +474,7 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
   try {
     created = await createMissingReferences({
       db, organizationId, actor, batchId, importType: input.importType,
-      table, columnMap, transforms, periodStart: input.periodStart, periodEnd: input.periodEnd,
+      table, columnMap, transforms, periodStart, periodEnd,
       bankAccountId: input.bankAccountId,
     });
   } catch (cause) {
@@ -453,10 +492,16 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
     table,
     columnMap,
     transforms,
-    periodStart: input.periodStart,
-    periodEnd: input.periodEnd,
+    periodStart,
+    periodEnd,
     bankAccountId: input.bankAccountId,
   });
+
+  if (checked !== undefined) {
+    // R-2's question — does this list hold every invoice unpaid at its start? — has one true answer
+    // for a single invoice, so it is recorded rather than asked (ADR-175).
+    await recordBatchConfirmation(db, batchId, 'IMP-INV-013', { opening: 'partial' }, requestId);
+  }
 
   return {
     batchId,

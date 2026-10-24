@@ -143,7 +143,7 @@ export interface SourceDocument {
 }
 
 /** How a batch's rows were read (`import_batches.extraction_method`). */
-export type ExtractionMethod = 'csv' | 'xlsx' | 'pdf_text' | 'pdf_claude' | 'manual';
+export type ExtractionMethod = 'csv' | 'xlsx' | 'pdf_text' | 'pdf_claude' | 'manual' | 'ocr';
 
 export interface ImportBatch {
   readonly id: string;

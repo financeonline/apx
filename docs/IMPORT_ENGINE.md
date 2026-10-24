@@ -175,6 +175,9 @@ A Receipts upload may be a JPEG or PNG photo (≤ 5 MB, `IMP-FILE-009`) or a PDF
 ### 5.5 Scanned PDF (no text layer)
 `source_documents.status = 'unreadable'`, no batch is created. The user sees: "This PDF is a scanned image. MOTION has stored it as a source document. Please upload the same statement as CSV or XLSX from your bank." OCR is post-MVP (`MVP_SCOPE.md §4`).
 
+### 5.5a One invoice — a photo, scan or PDF read on the upload page (ADR-175)
+A Sales invoices or Purchase invoices upload may be ONE invoice as a PDF, JPEG or PNG (≤ 5 MB for a photo). The browser reads it before anything is sent — the PDF's text layer, else Tesseract OCR in the tab, self-hosted under `/ocr` — and `src/core/invoice-reading` proposes the fields. The reviewer corrects them beside the invoice and ticks that every field was checked; the server receives only those fields (`CheckedInvoiceInput`). The file is stored as an `invoice` document (a scan is `ready`), and the fields become a one-row table with a fixed map, through the same pipeline, review and commit as a CSV row. `extraction_method = 'ocr'`; commit stamps `verified`. The batch range is the invoice date (set by the server), so one invoice never covers a month; IMP-INV-013 is recorded `partial`. An invoice photo without checked fields is refused before storage, and so are checked fields on any other type or on a CSV.
+
 ---
 
 ## 6. Mapping

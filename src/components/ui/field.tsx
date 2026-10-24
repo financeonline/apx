@@ -1,4 +1,4 @@
-import type { InputHTMLAttributes, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
+import type { ComponentProps, ReactNode, SelectHTMLAttributes, TextareaHTMLAttributes } from 'react';
 import { Input as ShadcnInput, Label, NativeSelect, Textarea as ShadcnTextarea } from './shadcn';
 
 /** Form fields on shadcn/ui (SOW §6; ADR-151): a Label, the control, and a hint. */
@@ -22,7 +22,7 @@ export function Field({
   );
 }
 
-export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
+export function Input(props: ComponentProps<'input'>) {
   return <ShadcnInput {...props} />;
 }
 

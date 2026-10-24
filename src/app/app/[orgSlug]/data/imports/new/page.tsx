@@ -30,6 +30,8 @@ export default async function NewImportPage({
     .eq('is_active', true)
     .order('name');
 
+  const { data: org } = await ctx.db.from('organizations').select('name').eq('id', ctx.orgId!).maybeSingle();
+
   const bankAccounts = ((data ?? []) as Array<{
     id: string; name: string; account_number_masked: string | null;
   }>).map((row) => ({
@@ -43,7 +45,7 @@ export default async function NewImportPage({
       <PageHeader
         eyebrow="Data"
         title="Add data"
-        description="Upload a statement, ledger or invoice list. We check every row before anything is imported."
+        description="Upload a statement, ledger or invoice list — or drop in a photo or PDF of one invoice. We check every row before anything is imported."
       />
 
       <div className="mt-8">
@@ -55,6 +57,7 @@ export default async function NewImportPage({
               bankAccountTypes={IMPORT_TYPES.filter((t) => IMPORT_TYPE_SPECS[t].bankAccount === 'required')}
               pdfReadTypes={IMPORT_TYPES.filter((t) => IMPORT_TYPE_SPECS[t].pdfSupported)}
               aiReadTypes={IMPORT_TYPES.filter((t) => pdfHandling(t) === 'read_on_request')}
+              orgName={(org as { name?: string } | null)?.name ?? ''}
             />
           </CardBody>
         </Card>
