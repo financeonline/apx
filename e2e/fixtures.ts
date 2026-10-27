@@ -288,7 +288,7 @@ export async function onboard(page: Page, orgName: string): Promise<string> {
   await page.goto('/onboarding');
   await page.getByLabel(/business name/i).fill(orgName);
   await page.getByRole('button', { name: /create|continue|get started|set up|save/i }).first().click();
-  await page.waitForURL(/\/app\/[^/]+\/departments/, { timeout: 30_000 });
+  await page.waitForURL(/\/app\/[^/]+\/home/, { timeout: 30_000 });
   const slug = page.url().match(/\/app\/([^/]+)\//)?.[1];
   expect(slug, 'onboarding lands the owner in their new organisation').toBeTruthy();
   return slug!;

@@ -84,6 +84,51 @@
   --brand-gradient: linear-gradient(100deg, #ff6b3d 0%, #ff4058 20%, #ff6a3c 46%, #ff2d55 76%, #ff6b3d 100%);
 }
 
+/*
+ * The client lobby's light palette (ADR-176): the owner's second reference — white ground, warm grey
+ * rules, APX red and wine. Only the lobby's main area takes it; the shell, its dark bar and the
+ * wordmark are unchanged. The tokens are redefined in scope, so every utility inside follows without
+ * a literal hex value in a component. Every text colour measured at WCAG AA on white and on #f7f0f1.
+ */
+.theme-lobby {
+  --color-paper: #ffffff;
+  --color-surface: #ffffff;
+  --color-surface-sunken: #f7f3f3;
+  --color-ink: #27272a;
+  --color-ink-muted: #6e6b70;
+  --color-ink-faint: #737075;
+  --color-line: #ebe5e6;
+  --color-line-strong: #ddd3d6;
+  --color-accent: #b72e3d;
+  --color-accent-hover: #8c243c;
+  --color-accent-soft: #faf0f3;
+  --color-brand-ink: #27272a;
+  --color-on-accent: #ffffff;
+  --color-pink: #ee604e;
+  --color-pink-icon: #b72e3d;
+  --color-pink-soft: #fbeff1;
+  --color-good: #2f7a4b;
+  --color-good-dot: #3c9a5f;
+  --color-good-soft: #edf6f0;
+  --color-warn: #8a5a00;
+  --color-warn-dot: #d99a1e;
+  --color-warn-soft: #fbf3e2;
+  --color-danger: #b72e3d;
+  --color-danger-soft: #faf0f3;
+  --color-chart-1: #b72e3d;
+  --color-chart-2: #ee604e;
+  --color-chart-3: #8c243c;
+  --color-chart-4: #7c6f9e;
+  --color-chart-5: #3c9a5f;
+  --color-chart-6: #8a8590;
+  --panel-shadow: none;
+  --lobby-wine: #8c243c;
+  --lobby-serif: Georgia, 'Times New Roman', serif;
+  color-scheme: light;
+  background-color: var(--color-paper);
+  color: var(--color-ink);
+}
+
 @layer base {
   html {
     color-scheme: dark;

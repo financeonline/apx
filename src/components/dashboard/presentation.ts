@@ -309,3 +309,48 @@ export function chartDash(index: number): string | undefined {
   const dash = CHART_DASH[index % CHART_DASH.length];
   return dash === 'none' ? undefined : dash;
 }
+
+// -----------------------------------------------------------------------------------------------
+// The client lobby (ADR-176)
+// -----------------------------------------------------------------------------------------------
+
+/** A trend series as `loadTrend` returns it: the figure is the snapshot's decimal string. */
+export interface TrendSeriesInput {
+  readonly key: string;
+  readonly label: string;
+  readonly points: ReadonlyArray<{ period: string; label: string; plotted: number | null; display: string }>;
+}
+
+/**
+ * `loadTrend`'s series in the chart's shape. The position comes from the service's `plotted` number
+ * (parsed with Decimal there, ADR-006); the figure the reader sees is its `display` string.
+ */
+export function chartSeriesFrom(trend: readonly TrendSeriesInput[]): TrendSeriesView[] {
+  return trend.map((series) => ({
+    key: series.key,
+    label: series.label,
+    points: series.points.map((point) => ({
+      periodId: point.period,
+      periodLabel: point.label,
+      value: point.plotted,
+      display: point.display,
+    })),
+  }));
+}
+
+/** The small line in a lobby figure card's corner: no labels, so no margins. */
+export const SPARK_BOX: ChartBox = {
+  width: 96,
+  height: 34,
+  padding: { top: 3, right: 3, bottom: 3, left: 3 },
+};
+
+/**
+ * The runs of a series as sparkline `points` attributes, gaps kept (§4). Zero stays inside the
+ * scale, as on the full chart, so the corner line never flatters a small change.
+ */
+export function sparklineRuns(series: TrendSeriesView): string[] {
+  const scale = scaleFor([series]);
+  if (scale.empty) return [];
+  return segmentsFor(series, scale, SPARK_BOX).filter((run) => run.length > 1).map(polylinePoints);
+}

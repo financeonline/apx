@@ -1,8 +1,14 @@
 import { ROLE_MATRIX, type GrantedRole, type Permission } from '@/core/permissions';
 
 /**
- * Where a person lands in a company (ADR-172 follow-up; the owner's rule that signing in opens
- * Departments).
+ * Where a person lands in a company.
+ *
+ * ADR-176 (owner, 2026-10-27): everyone lands on **Home, the client lobby** — the departments they
+ * may open in a row at its top, the analysis beneath. Departments is one click away ("More apps").
+ * Home asks only for `dashboard.view`, which every resolving role holds, so nobody lands on a
+ * refusal. What follows is the earlier rule, kept for the Departments page's own redirect:
+ *
+ * (ADR-172 follow-up; the owner's earlier rule that signing in opens Departments.)
  *
  * Departments is the whole business at a glance, and every tile on it is the detail beneath a
  * section — it needs `financials.view`. A person without it (a 3rd party by default; a suspended
@@ -22,9 +28,9 @@ export type LandingSection = 'departments' | 'home';
 /** The permission Departments asks for; without it a person lands on Home. */
 export const DEPARTMENTS_PERMISSION: Permission = 'financials.view';
 
-/** The section a person with these (effective) permissions lands on. */
-export function landingSection(permissions: ReadonlySet<Permission>): LandingSection {
-  return permissions.has(DEPARTMENTS_PERMISSION) ? 'departments' : 'home';
+/** The section a person lands on: the lobby, whatever they hold (ADR-176). */
+export function landingSection(_permissions: ReadonlySet<Permission>): LandingSection {
+  return 'home';
 }
 
 /** `/app/<slug>/departments` or `/app/<slug>/home`. */
@@ -44,6 +50,6 @@ function isGrantedRole(role: string): role is GrantedRole {
  * whose own check then decides.
  */
 export function landingPathForRole(orgSlug: string, role: string): string {
-  if (!isGrantedRole(role)) return `/app/${orgSlug}/departments`;
+  if (!isGrantedRole(role)) return `/app/${orgSlug}/home`;
   return landingPath(orgSlug, ROLE_MATRIX[role]);
 }

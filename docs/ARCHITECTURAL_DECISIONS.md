@@ -3135,3 +3135,16 @@ Decision:
 7. **Body size.** The wizard posts through a Server Action whose default body limit is 1 MB — smaller than a phone photo. `serverActions.bodySizeLimit` is now 26 MB (the 25 MB file limit plus multipart overhead). A host may cap bodies lower (Vercel: 4.5 MB).
 
 Consequences: invoice photos and scans can be captured free and offline; accuracy depends on the image, which is why nothing is imported without the reviewer's tick. One invoice per file (the first three PDF pages are read). A file whose batch is discarded must be deleted from Documents before the same file can be uploaded again (CD-12 duplicate rule, unchanged). Receipts keep ADR-150's AI path. Migrations `20261024000001` (enum value) and `20261024000002` (`start_import_batch`).
+
+### ADR-176 · Home is the client lobby: departments in a row, the analysis beneath, in a light palette
+
+Status: **built locally on 2026-10-27 on the owner's instruction. Not reviewed, merged or deployed.** Supersedes the landing rule of ADR-172's follow-up (signing in opened Departments).
+
+Context: the owner shared a second reference (an "APX Financial System" prototype) and asked for the client lobby's home page to carry the analysis, arranged in that reference's card style, with the logo unchanged and only the colour of the main sections changed.
+
+Decision:
+1. **Layout.** Home (`/app/<slug>/home`) is the lobby: "Your departments" as a row of tiles (Financial Analysis — this page, marked; Banking, Data Capture, Manage Workflow, each only for a reader who may open it; "More apps" opens Departments); then "Workspace / Financial Analysis", the greeting and the company; then three numbered bands — 01 the headline figures with their twelve months as a corner line; 02 the top risks as numbered report points, the sales/profit/cash chart (table always in the document), the Business Health Score as a ring with its disclaimer, and the month's sentence; 03 the open actions as a queue, What if, the workspace's status (the accountant's data and tax lines when held) and the AI analyst. Every figure, sentence and gate is the one Home already had; nothing is computed in the page (`chartSeriesFrom`, `sparklineRuns`, `scoreRingDash` are pixel geometry; the chart's numbers are parsed with Decimal in `loadTrend`).
+2. **Colour.** `.theme-lobby` (globals.css) redefines the colour tokens in scope — white ground, warm grey rules, APX red `#b72e3d` and wine `#8c243c`, coral `#ee604e` — and the lobby's main area takes it. The shell, its dark bar and the wordmark are unchanged; every other page keeps ADR-169's dark palette.
+3. **Landing.** Everyone lands on Home (`landingSection` returns `home`): every resolving role holds `dashboard.view`, so nobody lands on a refusal, and Departments stays one click away. The Departments page still sends a reader without `financials.view` to Home.
+
+Consequences: the lobby and the other pages differ in palette until the owner decides whether the light palette should spread. e2e journeys now wait for `/home` after onboarding and sign-in. Components: `src/components/dashboard/lobby.tsx`.

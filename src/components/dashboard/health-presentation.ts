@@ -215,3 +215,13 @@ export function capNote(dimension: Pick<DimensionBreakdown, 'capped' | 'cap_reas
   }
   return `Capped at 70 — ${dimension.cap_reason ?? PROXY_CAP_NOTE}.`;
 }
+
+/**
+ * The lobby's score ring (ADR-176): the stroke's dash for a score out of 100 on a circle of this
+ * radius. Pixel geometry only — the score itself is the engine's.
+ */
+export function scoreRingDash(score: number, radius: number): { readonly dash: string; readonly circumference: number } {
+  const circumference = 2 * Math.PI * radius;
+  const filled = (Math.min(100, Math.max(0, score)) / 100) * circumference;
+  return { dash: `${filled.toFixed(2)} ${circumference.toFixed(2)}`, circumference };
+}

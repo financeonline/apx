@@ -29,30 +29,28 @@ import { NOTIFICATION_KIND_LABELS, AUDIT_ACTION_LABELS } from '@/components/labe
  */
 
 describe('where a person lands in a company', () => {
-  it('is Departments with financials.view, Home without', () => {
+  it('is Home, the client lobby, whatever they hold (ADR-176)', () => {
     expect(DEPARTMENTS_PERMISSION).toBe('financials.view');
-    expect(landingSection(new Set<Permission>(['dashboard.view', 'financials.view']))).toBe('departments');
+    expect(landingSection(new Set<Permission>(['dashboard.view', 'financials.view']))).toBe('home');
     expect(landingSection(new Set<Permission>(['dashboard.view', 'reports.view']))).toBe('home');
     expect(landingPath('acme', new Set<Permission>())).toBe('/app/acme/home');
   });
 
-  it('sends a 3rd party and a suspended organisation Home, and everyone else — the accountant too — to Departments', () => {
-    expect(landingPathForRole('acme', 'third_party')).toBe('/app/acme/home');
-    expect(landingPathForRole('acme', 'suspended_member')).toBe('/app/acme/home');
-    for (const role of ['owner', 'admin', 'accountant', 'client', 'employee', 'super_admin']) {
-      expect(landingPathForRole('acme', role), role).toBe('/app/acme/departments');
+  it('sends every role Home — a 3rd party, a suspended organisation and the owner alike', () => {
+    for (const role of ['third_party', 'suspended_member', 'owner', 'admin', 'accountant', 'client', 'employee', 'super_admin']) {
+      expect(landingPathForRole('acme', role), role).toBe('/app/acme/home');
     }
   });
 
-  it('agrees with the matrix for every granted role', () => {
+  it('agrees with the matrix for every granted role: each holds dashboard.view, which Home asks for', () => {
     for (const [role, permissions] of Object.entries(ROLE_MATRIX)) {
-      const expected = permissions.has('financials.view') ? 'departments' : 'home';
-      expect(landingPathForRole('x', role)).toBe(`/app/x/${expected}`);
+      expect(permissions.has('dashboard.view'), role).toBe(true);
+      expect(landingPathForRole('x', role)).toBe('/app/x/home');
     }
   });
 
-  it('sends an unknown role to Departments, whose own check decides', () => {
-    expect(landingPathForRole('acme', 'mystery')).toBe('/app/acme/departments');
+  it('sends an unknown role Home, whose own check decides', () => {
+    expect(landingPathForRole('acme', 'mystery')).toBe('/app/acme/home');
   });
 });
 

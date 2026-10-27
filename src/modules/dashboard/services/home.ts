@@ -6,7 +6,7 @@ import {
   loadHealthCard, loadHealthHistory, summarySentence,
   type HealthCardView, type HealthHistoryPoint, type SummarySentence,
 } from '@/modules/health';
-import { formatMoney } from '@/core/money';
+import { formatMoney, tryParseDecimal } from '@/core/money';
 import * as repo from '../data/repository';
 import {
   changeFrom, formatValue, labelFor, toMetricCard,
@@ -393,7 +393,11 @@ function trailingWindow(
 export interface TrendSeries {
   readonly key: string;
   readonly label: string;
-  readonly points: ReadonlyArray<{ period: string; label: string; value: string | null; display: string }>;
+  readonly points: ReadonlyArray<{
+    period: string; label: string; value: string | null; display: string;
+    /** The figure as a plain number for a chart's axis only (ADR-176); null is a gap. */
+    plotted: number | null;
+  }>;
 }
 
 export async function loadTrend(
@@ -423,6 +427,7 @@ export async function loadTrend(
         const v = byKeyPeriod.get(`${key}|${p.id}`)?.value ?? null;
         return v === null ? '—' : formatMoney(v, { currency });
       })(),
+      plotted: tryParseDecimal(byKeyPeriod.get(`${key}|${p.id}`)?.value ?? null)?.toNumber() ?? null,
     })),
   }));
 }
