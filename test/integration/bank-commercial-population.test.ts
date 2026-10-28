@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 import { Decimal } from '@/core/money';
 import { permissionsFor } from '@/core/permissions';
 import { resolvePeriodContext, TOOLS } from '@/modules/ai';
@@ -6,7 +6,13 @@ import { loadPeriods, loadPeriodsWithData } from '@/modules/dashboard';
 import { resolveDescriptor } from '@/modules/evidence';
 import { drainJobs } from '@/modules/jobs';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { writeRecordStatusEvent } from '@/db/app/shared';
+import { orgCollection, orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, drainUntilFinished, fs } from './setup';
+import {
+  dropFixtures, makeOrg, periodFor, queueCalculation, rowOf, rowsOf, seedBankAccount, seedBankTxn, seedBatch,
+  seedCounterparty, seedDocument, seedImportRow, systemAccount,
+} from './f-fixtures';
 
 /**
  * HIGH-3: on the bank basis, a counterparty's figure and its evidence are one population (ADR-110).
@@ -20,7 +26,7 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  * the new one must not: a transfer leg categorised as revenue or as an expense, an uncategorised
  * payment, an owner's capital injection, other income, a loan repayment, drawings, a supplier refund.
  * The test drives the real pipeline — rows → `calculation.run` → snapshot → descriptor → the evidence
- * service under the owner's RLS → an independent sum of the rows it returned — and checks the rows
+ * service under the owner's read policies → an independent sum of the rows it returned — and checks the rows
  * themselves, not only the totals, so a population that happened to add up to the right number over
  * the wrong rows still fails.
  *
@@ -28,9 +34,10 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  * categories and would otherwise decide the population before the engine sees it.
  */
 
+vi.setConfig({ testTimeout: 180_000 });
+
 const RUN = `bc${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.bankcommercial.itest`;
-const one = (s: string) => adminSql(`with q as (${s}) select * from q`).trim();
+const DOMAIN = `${RUN}.bankcommercial.itest.motion`;
 
 let owner: string;
 let org: string;
@@ -44,134 +51,150 @@ const ctxFor = (orgId: string): AccessContext => ({
   now: () => new Date('2026-09-15T00:00:00Z'), organizationStatus: 'active',
 });
 
-async function createOrg(name: string): Promise<string> {
-  const r = await clientFor(owner).schema('api').rpc('create_organization', { p_name: name });
-  if (r.error) throw new Error(r.error.message);
-  return r.data as unknown as string;
-}
+const createOrg = (name: string): Promise<string> => makeOrg(owner, name);
 
 async function calc(orgId: string) {
-  const j = adminSql(`insert into public.jobs (organization_id, job_type, payload, max_attempts) values ('${orgId}','calculation.run','{"trigger":"recalc_manual","as_of":"2026-09-15"}'::jsonb,3) returning id`).split('\n')[0]!.trim();
-  expect(await drainUntilFinished(drainJobs, j)).toBe('succeeded');
+  const j = await queueCalculation(orgId, { trigger: 'recalc_manual', as_of: '2026-09-15' });
+  expect(await drainUntilFinished(drainJobs, j, 60)).toBe('succeeded');
 }
 
 /** A bank organisation with a statement batch; returns a row writer. */
-function bankOrg(orgId: string) {
-  const acct = (cat: string) => one(`select id from public.accounts where organization_id='${orgId}' and standard_category='${cat}' and is_system limit 1`);
-  const bank = (name: string, type: string) => one(`insert into public.bank_accounts (organization_id, name, bank_name, account_type, opening_balance, opening_balance_date, is_active) values ('${orgId}','${name}','Test Bank','${type}',0,'2026-08-01',true) returning id`);
-  const main = bank('Main', 'current');
-  const savings = bank('Savings', 'savings');
-  const card = bank('Card', 'credit_card');
-  const doc = one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind) values ('${orgId}','${orgId}/b.csv','b.csv','text/csv',10,digest('${orgId}b','sha256'),'ready','bank_statement') returning id`);
-  const batch = one(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, bank_account_id) values ('${orgId}','${doc}','bank_statement','bank_transactions','committed','csv','2026-08-01','2026-08-31',now(),'${main}') returning id`);
+async function bankOrg(orgId: string) {
+  const accounts = new Map<string, string>();
+  const acct = async (cat: string) => {
+    if (!accounts.has(cat)) accounts.set(cat, await systemAccount(orgId, cat));
+    return accounts.get(cat)!;
+  };
+  const bank = (name: string, type: string) => seedBankAccount(orgId, {
+    name, bankName: 'Test Bank', type, openingBalance: '0.00', openingBalanceDate: '2026-08-01', currency: 'GBP',
+  });
+  const main = await bank('Main', 'current');
+  const savings = await bank('Savings', 'savings');
+  const card = await bank('Card', 'credit_card');
+  const doc = await seedDocument(orgId, { filename: 'b.csv', kind: 'bank_statement' });
+  const batch = await seedBatch(orgId, {
+    documentId: doc, importType: 'bank_statement', targetTable: 'bank_transactions', status: 'committed',
+    periodStart: '2026-08-01', periodEnd: '2026-08-31', bankAccountId: main,
+  });
   let n = 0;
-  const tx = (o: {
+  const tx = async (o: {
     key: string; bank: string; amount: string; party: string | null; cat: string | null; kind?: string;
   }) => {
     n += 1;
     const kind = o.kind ?? 'none';
-    const row = one(`insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status) values ('${orgId}','${batch}',${n},'t${n}','{}'::jsonb,'{}'::jsonb,'committed') returning id`);
-    const id = one(`insert into public.bank_transactions (organization_id, bank_account_id, transaction_date, amount, currency, description_raw, description_normalized, period_id, category_source, record_status, assurance_level, duplicate_reviewed, source_document_id, import_batch_id, import_row_id, source_ref, counterparty_id, category_account_id, is_transfer, transfer_kind)
-      values ('${orgId}','${o.bank}','2026-08-${String(10 + (n % 15)).padStart(2, '0')}',${o.amount},'GBP','${o.key}','${o.key}','00000000-0000-0000-0000-000000000000','${o.cat === null ? 'none' : 'user'}','accepted','verified',true,'${doc}','${batch}','${row}','t${n}',${o.party === null ? 'null' : `'${o.party}'`},${o.cat === null ? 'null' : `'${acct(o.cat)}'`},${kind !== 'none'},'${kind}') returning id`);
-    adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id) values ('${orgId}','bank_transactions','${id}','accepted','${batch}')`);
+    const row = await seedImportRow(orgId, { batchId: batch, rowNumber: n, status: 'committed', sourceRef: `t${n}` });
+    const id = await seedBankTxn(orgId, {
+      bankAccountId: o.bank, date: `2026-08-${String(10 + (n % 15)).padStart(2, '0')}`, amount: o.amount, currency: 'GBP',
+      description: o.key, descriptionRaw: o.key, categorySource: o.cat === null ? 'none' : 'user', duplicateReviewed: true,
+      sourceDocumentId: doc, importBatchId: batch, importRowId: row, sourceRef: `t${n}`, counterpartyId: o.party,
+      categoryAccountId: o.cat === null ? null : await acct(o.cat), isTransfer: kind !== 'none', transferKind: kind,
+    });
+    await fs().runTransaction(async (t) => {
+      writeRecordStatusEvent(t, fs(), { orgId, table: 'bank_transactions', recordId: id, event: 'accepted', actorId: null, batchId: batch });
+    });
     txn.set(o.key, id);
     return id;
   };
-  const pair = (a: string, b: string) => adminSql(`update public.bank_transactions set transfer_pair_id = case id when '${a}' then '${b}'::uuid else '${a}'::uuid end where id in ('${a}','${b}')`);
+  const pair = async (a: string, b: string) => {
+    await orgRow(fs(), orgId, 'bank_transactions', a).update({ transfer_pair_id: b });
+    await orgRow(fs(), orgId, 'bank_transactions', b).update({ transfer_pair_id: a });
+  };
   return { main, savings, card, tx, pair };
 }
 
-const cp = (orgId: string, name: string, kind: string) => {
-  const id = one(`insert into public.counterparties (organization_id, name, kind) values ('${orgId}','${name}','${kind}') returning id`);
+const cp = async (orgId: string, name: string, kind: string) => {
+  const id = await seedCounterparty(orgId, { name, kind });
   party.set(name, id);
   return id;
 };
 
 beforeAll(async () => {
-  owner = createAuthUser(`owner@${DOMAIN}`);
+  owner = await createAuthUser(`owner@${DOMAIN}`);
   org = await createOrg(`BC ${RUN}`);
-  const b = bankOrg(org);
-  const C1 = cp(org, 'Customer One', 'customer');
-  const C2 = cp(org, 'Customer Two', 'customer');
-  const C3 = cp(org, 'Customer Three', 'customer');
-  const S1 = cp(org, 'Supplier One', 'supplier');
-  const S2 = cp(org, 'Supplier Two', 'supplier');
-  const S3 = cp(org, 'Supplier Three', 'supplier');
+  const b = await bankOrg(org);
+  const C1 = await cp(org, 'Customer One', 'customer');
+  const C2 = await cp(org, 'Customer Two', 'customer');
+  const C3 = await cp(org, 'Customer Three', 'customer');
+  const S1 = await cp(org, 'Supplier One', 'supplier');
+  const S2 = await cp(org, 'Supplier Two', 'supplier');
+  const S3 = await cp(org, 'Supplier Three', 'supplier');
 
   // ---- CASE B: customer revenue ----
-  b.tx({ key: 'C1 SALE A', bank: b.main, amount: '10000.00', party: C1, cat: 'revenue' });
-  b.tx({ key: 'C1 SALE B', bank: b.main, amount: '2500.00', party: C1, cat: 'revenue' });
-  b.tx({ key: 'C1 REFUND', bank: b.main, amount: '-400.00', party: C1, cat: 'revenue' });
-  b.tx({ key: 'C1 UNCATEGORISED IN', bank: b.main, amount: '1300.00', party: C1, cat: null });
-  b.tx({ key: 'C1 OTHER INCOME', bank: b.main, amount: '700.00', party: C1, cat: 'other_income' });
-  b.tx({ key: 'C2 SALE', bank: b.main, amount: '4000.00', party: C2, cat: 'revenue' });
-  b.tx({ key: 'C2 OWNER FUNDING', bank: b.main, amount: '5000.00', party: C2, cat: 'equity' });
+  await b.tx({ key: 'C1 SALE A', bank: b.main, amount: '10000.00', party: C1, cat: 'revenue' });
+  await b.tx({ key: 'C1 SALE B', bank: b.main, amount: '2500.00', party: C1, cat: 'revenue' });
+  await b.tx({ key: 'C1 REFUND', bank: b.main, amount: '-400.00', party: C1, cat: 'revenue' });
+  await b.tx({ key: 'C1 UNCATEGORISED IN', bank: b.main, amount: '1300.00', party: C1, cat: null });
+  await b.tx({ key: 'C1 OTHER INCOME', bank: b.main, amount: '700.00', party: C1, cat: 'other_income' });
+  await b.tx({ key: 'C2 SALE', bank: b.main, amount: '4000.00', party: C2, cat: 'revenue' });
+  await b.tx({ key: 'C2 OWNER FUNDING', bank: b.main, amount: '5000.00', party: C2, cat: 'equity' });
   // A cash transfer whose incoming leg still carries a revenue category, as a hand-marked pair does.
-  const tIn = b.tx({ key: 'C2 TRANSFER IN (revenue-categorised)', bank: b.main, amount: '3000.00', party: C2, cat: 'revenue', kind: 'cash_transfer' });
-  const tOut = b.tx({ key: 'C2 TRANSFER OUT', bank: b.savings, amount: '-3000.00', party: C2, cat: 'transfer', kind: 'cash_transfer' });
-  b.pair(tIn, tOut);
-  b.tx({ key: 'UNNAMED SALE', bank: b.main, amount: '1200.00', party: null, cat: 'revenue' });
+  const tIn = await b.tx({ key: 'C2 TRANSFER IN (revenue-categorised)', bank: b.main, amount: '3000.00', party: C2, cat: 'revenue', kind: 'cash_transfer' });
+  const tOut = await b.tx({ key: 'C2 TRANSFER OUT', bank: b.savings, amount: '-3000.00', party: C2, cat: 'transfer', kind: 'cash_transfer' });
+  await b.pair(tIn, tOut);
+  await b.tx({ key: 'UNNAMED SALE', bank: b.main, amount: '1200.00', party: null, cat: 'revenue' });
 
   // ---- CASE A: supplier spend ----
-  b.tx({ key: 'S1 STOCK', bank: b.main, amount: '-3200.00', party: S1, cat: 'cost_of_sales' });
-  b.tx({ key: 'S1 RENT', bank: b.main, amount: '-1150.00', party: S1, cat: 'operating_expense' });
-  b.tx({ key: 'S1 UNCATEGORISED OUT', bank: b.main, amount: '-2750.00', party: S1, cat: null });
-  b.tx({ key: 'S1 LOAN REPAYMENT', bank: b.main, amount: '-500.00', party: S1, cat: 'loan' });
+  await b.tx({ key: 'S1 STOCK', bank: b.main, amount: '-3200.00', party: S1, cat: 'cost_of_sales' });
+  await b.tx({ key: 'S1 RENT', bank: b.main, amount: '-1150.00', party: S1, cat: 'operating_expense' });
+  await b.tx({ key: 'S1 UNCATEGORISED OUT', bank: b.main, amount: '-2750.00', party: S1, cat: null });
+  await b.tx({ key: 'S1 LOAN REPAYMENT', bank: b.main, amount: '-500.00', party: S1, cat: 'loan' });
   // A card repayment whose paying leg still carries an expense category.
-  const rOut = b.tx({ key: 'S1 CARD REPAYMENT (expense-categorised)', bank: b.main, amount: '-1800.00', party: S1, cat: 'operating_expense', kind: 'card_repayment' });
-  const rIn = b.tx({ key: 'S1 CARD REPAYMENT IN', bank: b.card, amount: '1800.00', party: S1, cat: 'operating_expense', kind: 'card_repayment' });
-  b.pair(rOut, rIn);
-  b.tx({ key: 'S2 ADS', bank: b.main, amount: '-900.00', party: S2, cat: 'marketing' });
-  b.tx({ key: 'S2 REFUND IN', bank: b.main, amount: '250.00', party: S2, cat: 'marketing' });
-  b.tx({ key: 'S2 DRAWINGS', bank: b.main, amount: '-600.00', party: S2, cat: 'drawings' });
-  b.tx({ key: 'UNNAMED EXPENSE', bank: b.main, amount: '-700.00', party: null, cat: 'operating_expense' });
+  const rOut = await b.tx({ key: 'S1 CARD REPAYMENT (expense-categorised)', bank: b.main, amount: '-1800.00', party: S1, cat: 'operating_expense', kind: 'card_repayment' });
+  const rIn = await b.tx({ key: 'S1 CARD REPAYMENT IN', bank: b.card, amount: '1800.00', party: S1, cat: 'operating_expense', kind: 'card_repayment' });
+  await b.pair(rOut, rIn);
+  await b.tx({ key: 'S2 ADS', bank: b.main, amount: '-900.00', party: S2, cat: 'marketing' });
+  await b.tx({ key: 'S2 REFUND IN', bank: b.main, amount: '250.00', party: S2, cat: 'marketing' });
+  await b.tx({ key: 'S2 DRAWINGS', bank: b.main, amount: '-600.00', party: S2, cat: 'drawings' });
+  await b.tx({ key: 'UNNAMED EXPENSE', bank: b.main, amount: '-700.00', party: null, cat: 'operating_expense' });
 
   // ---- CASE C: the HIGH-3 shape — a party whose only rows are uncategorised or transfers ----
-  b.tx({ key: 'S3 UNCATEGORISED', bank: b.main, amount: '-4100.00', party: S3, cat: null });
-  const s3Out = b.tx({ key: 'S3 TRANSFER OUT', bank: b.main, amount: '-2020.00', party: S3, cat: 'transfer', kind: 'cash_transfer' });
-  const s3In = b.tx({ key: 'S3 TRANSFER IN', bank: b.savings, amount: '2020.00', party: S3, cat: 'transfer', kind: 'cash_transfer' });
-  b.pair(s3Out, s3In);
-  b.tx({ key: 'C3 UNCATEGORISED IN', bank: b.main, amount: '2600.00', party: C3, cat: null });
+  await b.tx({ key: 'S3 UNCATEGORISED', bank: b.main, amount: '-4100.00', party: S3, cat: null });
+  const s3Out = await b.tx({ key: 'S3 TRANSFER OUT', bank: b.main, amount: '-2020.00', party: S3, cat: 'transfer', kind: 'cash_transfer' });
+  const s3In = await b.tx({ key: 'S3 TRANSFER IN', bank: b.savings, amount: '2020.00', party: S3, cat: 'transfer', kind: 'cash_transfer' });
+  await b.pair(s3Out, s3In);
+  await b.tx({ key: 'C3 UNCATEGORISED IN', bank: b.main, amount: '2600.00', party: C3, cat: null });
   await calc(org);
 
   // ---- CASE E: a bank organisation with no eligible commercial row at all ----
   emptyOrg = await createOrg(`BC empty ${RUN}`);
-  const e = bankOrg(emptyOrg);
-  const eS = cp(emptyOrg, 'Empty Supplier', 'supplier');
-  const eC = cp(emptyOrg, 'Empty Customer', 'customer');
-  e.tx({ key: 'E UNCATEGORISED OUT', bank: e.main, amount: '-1500.00', party: eS, cat: null });
-  e.tx({ key: 'E UNCATEGORISED IN', bank: e.main, amount: '800.00', party: eC, cat: null });
-  const eOut = e.tx({ key: 'E TRANSFER OUT', bank: e.main, amount: '-400.00', party: eS, cat: 'transfer', kind: 'cash_transfer' });
-  const eIn = e.tx({ key: 'E TRANSFER IN', bank: e.savings, amount: '400.00', party: eS, cat: 'transfer', kind: 'cash_transfer' });
-  e.pair(eOut, eIn);
+  const e = await bankOrg(emptyOrg);
+  const eS = await cp(emptyOrg, 'Empty Supplier', 'supplier');
+  const eC = await cp(emptyOrg, 'Empty Customer', 'customer');
+  await e.tx({ key: 'E UNCATEGORISED OUT', bank: e.main, amount: '-1500.00', party: eS, cat: null });
+  await e.tx({ key: 'E UNCATEGORISED IN', bank: e.main, amount: '800.00', party: eC, cat: null });
+  const eOut = await e.tx({ key: 'E TRANSFER OUT', bank: e.main, amount: '-400.00', party: eS, cat: 'transfer', kind: 'cash_transfer' });
+  const eIn = await e.tx({ key: 'E TRANSFER IN', bank: e.savings, amount: '400.00', party: eS, cat: 'transfer', kind: 'cash_transfer' });
+  await e.pair(eOut, eIn);
   await calc(emptyOrg);
 }, 900_000);
 
-afterAll(() => { if (process.env.KEEP_BC) return;
-  adminSql(`delete from public.organizations where id in ('${org}','${emptyOrg}'); delete from auth.users where email like '%@${DOMAIN}';`);
-});
+afterAll(async () => {
+  if (process.env.KEEP_BC) return;
+  await dropFixtures([org, emptyOrg], DOMAIN);
+}, 60_000);
 
 interface Snap { snapshotId: string; value: string | null; basis: string; descriptor: unknown }
 
-function snapshot(orgId: string, key: string, dimensionId: string | null): Snap | null {
-  const line = adminSql(`select s.id || '|' || coalesce(s.value::text,'NULL') || '|' || s.basis || '|' || coalesce(s.evidence_query::text,'NULL')
-      from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-      join public.fiscal_periods p on p.id = c.period_id
-     where c.organization_id = '${orgId}' and c.metric_key = '${key}' and p.period_start = '2026-08-01'
-       and ${dimensionId === null ? `c.dimension_id is null and c.dimension_type = ${key === 'revenue' ? `'none'` : `'counterparty'`}` : `c.dimension_id = '${dimensionId}'`}`).trim();
-  if (line === '') return null;
-  const [snapshotId, value, basis, ...rest] = line.split('|');
-  const query = rest.join('|');
+async function snapshot(orgId: string, key: string, dimensionId: string | null): Promise<Snap | null> {
+  let q: FirebaseFirestore.Query = orgCollection(fs(), orgId, 'metric_current')
+    .where('metric_key', '==', key).where('period_id', '==', await periodFor(orgId, '2026-08-01'));
+  q = dimensionId === null
+    ? q.where('dimension_id', '==', null).where('dimension_type', '==', key === 'revenue' ? 'none' : 'counterparty')
+    : q.where('dimension_id', '==', dimensionId);
+  const cell = (await q.limit(1).get()).docs[0];
+  if (!cell) return null;
+  const s = (await rowOf(orgId, 'metric_snapshots', String(cell.get('snapshot_id'))))!;
+  // The Unattributed rows store a null query.
+  const query = (s.evidence_query ?? null) as { descriptor?: unknown } | null;
   return {
-    snapshotId: snapshotId!, value: value === 'NULL' ? null : value!, basis: basis!,
-    // The Unattributed rows store a JSON `null` query, which `coalesce` does not catch.
-    descriptor: query === 'NULL' ? null : (JSON.parse(query) as { descriptor?: unknown } | null)?.descriptor ?? null,
+    snapshotId: String(s.id), value: s.value === null || s.value === undefined ? null : String(s.value), basis: String(s.basis),
+    descriptor: query?.descriptor ?? null,
   };
 }
 
 /** Figure, evidence total, independent Σ of the returned rows, and the rows' keys. */
 async function reconcile(orgId: string, key: string, dimensionId: string | null) {
-  const snap = snapshot(orgId, key, dimensionId);
+  const snap = await snapshot(orgId, key, dimensionId);
   expect(snap, `${key} snapshot`).not.toBeNull();
   expect(snap!.basis).toBe('bank');
   expect(snap!.descriptor, `${key} must carry a descriptor`).not.toBeNull();
@@ -206,8 +229,7 @@ describe('CASE A — bank-basis supplier spend is expense-category, non-transfer
     const r = await reconcile(org, 'supplier_spend', party.get('Supplier One')!);
     expect(r.rows.map((row) => row.transferKind)).toEqual(['none', 'none']);
     // The drawer shows a directional selection as magnitudes (ADR-109); the stored rows are outflows.
-    const raw = adminSql(`select amount from public.bank_transactions where id in (${r.rows.map((row) => `'${row.id}'`).join(',')})`)
-      .split('\n').map((l) => l.trim()).filter(Boolean);
+    const raw = await Promise.all(r.rows.map(async (row) => String((await rowOf(org, 'bank_transactions', row.id))!.amount)));
     expect(raw.map((v) => new Decimal(v).isNegative())).toEqual([true, true]);
     for (const excluded of ['S1 UNCATEGORISED OUT', 'S1 LOAN REPAYMENT', 'S1 CARD REPAYMENT (expense-categorised)', 'S1 CARD REPAYMENT IN']) {
       expect(r.keys).not.toContain(excluded);
@@ -224,11 +246,12 @@ describe('CASE A — bank-basis supplier spend is expense-category, non-transfer
 
 describe('the bank-basis P&L expense lines follow the same rule', () => {
   it('an expense category is its non-transfer outflows, and its evidence totals the same positive figure', async () => {
-    const line = (category: string) => adminSql(`select s.value || '|' || s.evidence_query::text
-        from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-        join public.fiscal_periods p on p.id = c.period_id
-       where c.organization_id = '${org}' and c.metric_key = 'expense_by_category' and c.dimension_key = '${category}'
-         and p.period_start = '2026-08-01'`).trim();
+    const line = async (category: string) => {
+      const cell = (await orgCollection(fs(), org, 'metric_current').where('metric_key', '==', 'expense_by_category')
+        .where('dimension_key', '==', category).where('period_id', '==', await periodFor(org, '2026-08-01')).limit(1).get()).docs[0]!;
+      const s = (await rowOf(org, 'metric_snapshots', String(cell.get('snapshot_id'))))!;
+      return { value: String(s.value), query: s.evidence_query as { descriptor: unknown } };
+    };
     const byId = new Map([...txn.entries()].map(([k, id]) => [id, k]));
     for (const [category, keys, figure] of [
       // Rent and the unnamed expense; the card repayment leg is a transfer, the card-side leg an inflow.
@@ -236,9 +259,9 @@ describe('the bank-basis P&L expense lines follow the same rule', () => {
       // The supplier refund (an inflow) enters no figure.
       ['marketing', ['S2 ADS'], '900.00'],
     ] as const) {
-      const [value, ...rest] = line(category).split('|');
-      const selection = await resolveDescriptor(ctxFor(org), (JSON.parse(rest.join('|')) as { descriptor: unknown }).descriptor);
-      expect(new Decimal(value!).toFixed(2), category).toBe(figure);
+      const { value, query } = await line(category);
+      const selection = await resolveDescriptor(ctxFor(org), query.descriptor);
+      expect(new Decimal(value).toFixed(2), category).toBe(figure);
       expect(new Decimal(selection.total!).toFixed(2), category).toBe(figure);
       expect(selection.rows.map((r) => byId.get(r.id)).sort(), category).toEqual([...keys]);
     }
@@ -268,7 +291,7 @@ describe('CASE B — bank-basis customer revenue is revenue-category, non-transf
     expect(revenue.keys).toEqual(['C1 SALE A', 'C1 SALE B', 'C2 SALE', 'UNNAMED SALE']);
     expect(revenue.figure).toBe('17700.00');
     expect(revenue.evidenceTotal).toBe(revenue.figure);
-    const unattributed = snapshot(org, 'customer_revenue', null)!;
+    const unattributed = (await snapshot(org, 'customer_revenue', null))!;
     // The remainder is the one revenue inflow with no party — not a transfer, not a refund.
     expect(new Decimal(unattributed.value!).toFixed(2)).toBe('1200.00');
     expect(unattributed.descriptor).toBeNull();
@@ -276,18 +299,18 @@ describe('CASE B — bank-basis customer revenue is revenue-category, non-transf
 });
 
 describe('CASE C — the HIGH-3 shape: a party with only uncategorised and transfer rows', () => {
-  it('has no spend and no revenue to show, rather than a figure over an empty drill-down', () => {
+  it('has no spend and no revenue to show, rather than a figure over an empty drill-down', async () => {
     // Old implementation: Supplier Three = 4,100 + 2,020 + 2,020 = 8,140.00 over 0 evidence rows.
-    expect(snapshot(org, 'supplier_spend', party.get('Supplier Three')!)).toBeNull();
-    expect(snapshot(org, 'customer_revenue', party.get('Customer Three')!)).toBeNull();
+    expect(await snapshot(org, 'supplier_spend', party.get('Supplier Three')!)).toBeNull();
+    expect(await snapshot(org, 'customer_revenue', party.get('Customer Three')!)).toBeNull();
   });
 });
 
 describe('CASE D — every counterparty snapshot on the organisation reconciles', () => {
   it('each attributed customer_revenue and supplier_spend figure equals its evidence', async () => {
-    const ids = adminSql(`select c.metric_key || '|' || c.dimension_id from public.metric_current c
-       where c.organization_id = '${org}' and c.metric_key in ('customer_revenue','supplier_spend') and c.dimension_id is not null`)
-      .split('\n').map((l) => l.trim()).filter(Boolean);
+    const ids = (await rowsOf(org, 'metric_current'))
+      .filter((c) => (c.metric_key === 'customer_revenue' || c.metric_key === 'supplier_spend') && c.dimension_id !== null)
+      .map((c) => `${c.metric_key}|${c.dimension_id}`);
     expect(ids.sort()).toEqual([
       `customer_revenue|${party.get('Customer One')}`, `customer_revenue|${party.get('Customer Two')}`,
       `supplier_spend|${party.get('Supplier One')}`, `supplier_spend|${party.get('Supplier Two')}`,
@@ -298,23 +321,23 @@ describe('CASE D — every counterparty snapshot on the organisation reconciles'
       expect(r.evidenceTotal, `${key} ${dim}`).toBe(r.figure);
       expect(r.independent, `${key} ${dim}`).toBe(r.figure);
     }
-    const supplierUnattributed = snapshot(org, 'supplier_spend', null)!;
+    const supplierUnattributed = (await snapshot(org, 'supplier_spend', null))!;
     expect(new Decimal(supplierUnattributed.value!).toFixed(2)).toBe('700.00');
     expect(supplierUnattributed.descriptor).toBeNull();
   });
 });
 
 describe('CASE E — no eligible commercial rows', () => {
-  it('writes no attributed figure, fabricates no evidence, and keeps the covered zero as zero', () => {
-    const attributed = adminSql(`select count(*) from public.metric_current c where c.organization_id = '${emptyOrg}'
-       and c.metric_key in ('customer_revenue','supplier_spend') and c.dimension_id is not null`).trim();
-    expect(attributed).toBe('0');
+  it('writes no attributed figure, fabricates no evidence, and keeps the covered zero as zero', async () => {
+    const attributed = (await rowsOf(emptyOrg, 'metric_current'))
+      .filter((c) => (c.metric_key === 'customer_revenue' || c.metric_key === 'supplier_spend') && c.dimension_id !== null);
+    expect(attributed).toHaveLength(0);
     // The bank covers the period, so revenue is a known zero, not missing (ADR-104) …
-    const revenue = snapshot(emptyOrg, 'revenue', null)!;
+    const revenue = (await snapshot(emptyOrg, 'revenue', null))!;
     expect(new Decimal(revenue.value!).toFixed(2)).toBe('0.00');
     // … and the Unattributed rows are that zero with no descriptor: nothing to drill into, nothing invented.
     for (const key of ['customer_revenue', 'supplier_spend']) {
-      const row = snapshot(emptyOrg, key, null)!;
+      const row = (await snapshot(emptyOrg, key, null))!;
       expect(new Decimal(row.value!).toFixed(2)).toBe('0.00');
       expect(row.descriptor).toBeNull();
     }
@@ -352,7 +375,7 @@ describe('the analyst reads the same population', () => {
       ['supplier_spend', 'Supplier One', ['S1 RENT', 'S1 STOCK'], '4350.00'],
       ['customer_revenue', 'Customer Two', ['C2 SALE'], '4000.00'],
     ] as const) {
-      const snap = snapshot(org, key, party.get(name)!)!;
+      const snap = (await snapshot(org, key, party.get(name)!))!;
       const out = await tool('get_transactions_for_evidence').run({ metric_snapshot_id: snap.snapshotId }, await callContext(org)) as {
         ok: boolean; data: { records: Array<{ id: string; amount: { value: string } }> };
       };

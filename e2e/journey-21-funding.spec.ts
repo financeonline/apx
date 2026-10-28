@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { GL_CSV, cleanUpOwn, drainQueue, importLedger, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { GL_CSV, cleanUpOwn, drainQueue, importLedger, onboard, seedUser, signIn, uniqueName } from './fixtures';
+import { enableFeatures, orgIdBySlug } from './firestore';
 
 /**
  * Journey 21 — Funding Readiness (Phase 16; ADR-145). Off by default: no link and NOT FOUND. Switched
@@ -15,7 +16,7 @@ test.afterAll(() => cleanUpOwn([ORG], [OWNER]));
 
 test('funding readiness is hidden until switched on, then honest about what it does not know', async ({ page }) => {
   test.setTimeout(240_000);
-  await signIn(page, seedUser(OWNER));
+  await signIn(page, await seedUser(OWNER));
   const slug = await onboard(page, ORG);
   await importLedger(page, slug, GL_CSV);
   await drainQueue(page, slug);
@@ -29,7 +30,7 @@ test('funding readiness is hidden until switched on, then honest about what it d
   await expect(page.getByText('Funding Readiness is switched off for this organisation, so this report is not available.')).toBeVisible();
 
   // On (the super admin's switch, as the platform page sets it), then the backfill runs.
-  sql(`update public.organizations set features = features || '{"funding_readiness": true}' where slug = '${slug}'`);
+  await enableFeatures(await orgIdBySlug(slug), { funding_readiness: true });
   await drainQueue(page, slug);
 
   await page.goto(`/app/${slug}/home`);

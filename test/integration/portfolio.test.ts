@@ -4,7 +4,12 @@ import {
   loadOpportunities, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts, loadPortfolioReport, resolvePortfolioContext,
   type PortfolioContext, type PortfolioView,
 } from '@/modules/portfolio';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { clientFor, createAuthUser, fs, rpc } from './setup';
+import {
+  actionDoc, addMember, alertDoc, assign, cleanup, periodOf, platformUser, seedOrg, seedRun,
+  seedScore, setAssignmentStatus,
+} from './portfolio-fixtures';
+import { orgRow } from '@/db/schema';
 
 /**
  * The Command Centre's boundary (ADR-112 §2, §4; brief §7, §8, §18, §19).
@@ -24,41 +29,38 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  */
 
 const RUN = `pf${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.portfolio.itest`;
-const one = (s: string) => adminSql(`with q as (${s}) select * from q`).trim();
+const DOMAIN = `${RUN}.portfolio.itest.motion`;
 
 let ownerAB: string; let employee: string; let employeeD: string; let superAdmin: string; let clientC: string; let clientOnly: string; let stranger: string; let adminD: string; let adminOnly: string;
 let A: string; let B: string; let C: string; let D: string; let E: string;
 const named = new Map<string, string>();
+const users: string[] = [];
 
-async function createOrg(who: string, name: string): Promise<string> {
-  const r = await clientFor(who).schema('api').rpc('create_organization', { p_name: name });
-  if (r.error) throw new Error(r.error.message);
-  const id = r.data as unknown as string;
+async function person(local: string): Promise<string> {
+  const id = await createAuthUser(`${local}@${DOMAIN}`);
+  users.push(id);
+  return id;
+}
+
+/** An organisation and its owner's membership — what `create_organization` leaves behind. */
+async function createOrg(owner: string, name: string): Promise<string> {
+  const id = await seedOrg(name);
+  await addMember(id, owner, 'owner');
   named.set(id, name);
   return id;
 }
 
-const period = (org: string) => one(`select id from public.fiscal_periods where organization_id='${org}' and period_start='2026-07-01'`);
-const olderPeriod = (org: string) => one(`select id from public.fiscal_periods where organization_id='${org}' and period_start='2026-06-01'`);
+const period = (org: string) => periodOf(org, '2026-07-01');
+const olderPeriod = (org: string) => periodOf(org, '2026-06-01');
+const threeDaysAgo = () => new Date(Date.now() - 3 * 86_400_000).toISOString();
 
-function seedRun(org: string, periodId: string): string {
-  return one(`insert into public.calculation_runs (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-    values ('${org}','recalc_manual','1.0.0','${periodId}','${periodId}','2026-09-15','succeeded') returning id`);
+async function seedAlert(org: string, periodId: string, runId: string, severity: string, title: string, status = 'open') {
+  const doc = alertDoc(org, periodId, runId, severity, title, { status, firstSeenAt: threeDaysAgo(), dedupe: `${RUN}-${title}` });
+  await orgRow(fs(), org, 'alerts', String(doc.id)).set(doc);
 }
-function seedScore(org: string, periodId: string, runId: string, score: number | null) {
-  const id = one(`insert into public.health_scores (organization_id, period_id, calculation_run_id, score, dimensions_used, dimensions_total, breakdown, config_version)
-    values ('${org}','${periodId}','${runId}',${score === null ? 'null' : score},5,6,'[]'::jsonb,'health.config.v1') returning id`);
-  adminSql(`update public.fiscal_periods set is_complete = true where id='${periodId}'`);
-  adminSql(`insert into public.health_current (organization_id, period_id, health_score_id, calculation_run_id) values ('${org}','${periodId}','${id}','${runId}')`);
-}
-function seedAlert(org: string, periodId: string, runId: string, severity: string, title: string, status = 'open') {
-  return one(`insert into public.alerts (organization_id, period_id, rule_key, rule_version, severity, key_kind, calculation_run_id, title, explanation, status, first_seen_at, dedupe_key)
-    values ('${org}','${periodId}','cash.decline','1','${severity}','state','${runId}','${title}','seeded','${status}',now() - interval '3 days','${RUN}-${title}') returning id`);
-}
-function seedAction(org: string, title: string, priority: string, due: string | null, status = 'open', owner: string | null = null) {
-  return one(`insert into public.actions (organization_id, title, priority, due_date, status, source_type, owner_user_id${status === 'completed' ? ', completed_at' : ''})
-    values ('${org}','${title}','${priority}',${due === null ? 'null' : `'${due}'`},'${status}','user',${owner === null ? 'null' : `'${owner}'`}${status === 'completed' ? ', now()' : ''}) returning id`);
+async function seedAction(org: string, title: string, priority: string, due: string | null, status = 'open', owner: string | null = null) {
+  const doc = actionDoc(org, title, priority, due, { status, owner });
+  await orgRow(fs(), org, 'actions', String(doc.id)).set(doc);
 }
 
 const ctxFor = async (user: string): Promise<PortfolioContext> => {
@@ -68,54 +70,57 @@ const ctxFor = async (user: string): Promise<PortfolioContext> => {
 };
 
 beforeAll(async () => {
-  ownerAB = createAuthUser(`owner-ab@${DOMAIN}`);
-  adminD = createAuthUser(`admin-d@${DOMAIN}`);
-  clientC = createAuthUser(`client-c@${DOMAIN}`);
-  employee = createAuthUser(`employee@${DOMAIN}`);
-  employeeD = createAuthUser(`employee-d@${DOMAIN}`);
-  superAdmin = createAuthUser(`super@${DOMAIN}`);
-  stranger = createAuthUser(`stranger@${DOMAIN}`);
-  clientOnly = createAuthUser(`client-only@${DOMAIN}`);
-  adminOnly = createAuthUser(`admin-only@${DOMAIN}`);
-  adminSql(`insert into public.platform_users (user_id, platform_role) values ('${employee}','employee'), ('${employeeD}','employee'), ('${superAdmin}','super_admin')`);
+  ownerAB = await person('owner-ab');
+  adminD = await person('admin-d');
+  clientC = await person('client-c');
+  employee = await person('employee');
+  employeeD = await person('employee-d');
+  superAdmin = await person('super');
+  stranger = await person('stranger');
+  clientOnly = await person('client-only');
+  adminOnly = await person('admin-only');
+  await platformUser(employee, 'employee');
+  await platformUser(employeeD, 'employee');
+  await platformUser(superAdmin, 'super_admin');
 
-  A = await createOrg(ownerAB, `PF Alpha ${RUN}`);
-  B = await createOrg(ownerAB, `PF Beta ${RUN}`);
-  C = await createOrg(adminD, `PF Gamma ${RUN}`);   // adminD owns C; clientC is a client of C
-  D = await createOrg(clientC, `PF Delta ${RUN}`);  // clientC owns D — a mixed-role person
-  E = await createOrg(adminD, `PF Epsilon ${RUN}`);   // adminD owns E too; nobody else reaches it but the super admin
+  A = await createOrg(ownerAB, `ITest PF Alpha ${RUN}`);
+  B = await createOrg(ownerAB, `ITest PF Beta ${RUN}`);
+  C = await createOrg(adminD, `ITest PF Gamma ${RUN}`);   // adminD owns C; clientC is a client of C
+  D = await createOrg(clientC, `ITest PF Delta ${RUN}`);  // clientC owns D — a mixed-role person
+  E = await createOrg(adminD, `ITest PF Epsilon ${RUN}`);   // adminD owns E too; nobody else reaches it but the super admin
 
-  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${C}','${clientC}','client','active'), ('${C}','${clientOnly}','client','active')`);
-  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${D}','${adminD}','admin','active')`);
+  await addMember(C, clientC, 'client');
+  await addMember(C, clientOnly, 'client');
+  await addMember(D, adminD, 'admin');
   // A company admin and nothing else: an admin of A, a member of no other organisation.
-  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${A}','${adminOnly}','admin','active')`);
+  await addMember(A, adminOnly, 'admin');
   // The staff: one Financial Analyst over A and B, another over D alone; E is assigned to nobody.
-  adminSql(`insert into public.organization_assignments (organization_id, employee_user_id) values ('${A}','${employee}'), ('${B}','${employee}'), ('${D}','${employeeD}')`);
+  await assign(A, employee);
+  await assign(B, employee);
+  await assign(D, employeeD);
 
   // Facts, written the way the jobs write them.
   for (const [org, score, prev] of [[A, 35, 62], [B, 85, 84], [C, 50, 50]] as const) {
-    const earlier = seedRun(org, olderPeriod(org));
-    seedScore(org, olderPeriod(org), earlier, prev);
-    const run = seedRun(org, period(org));
-    seedScore(org, period(org), run, score);
+    const earlier = await seedRun(org, olderPeriod(org));
+    await seedScore(org, olderPeriod(org), earlier, prev);
+    const run = await seedRun(org, period(org));
+    await seedScore(org, period(org), run, score);
     named.set(`run:${org}`, run);
   }
-  seedAlert(A, period(A), named.get(`run:${A}`)!, 'critical', 'A critical');
-  seedAlert(A, period(A), named.get(`run:${A}`)!, 'high', 'A high');
-  seedAlert(A, period(A), named.get(`run:${A}`)!, 'medium', 'A resolved', 'resolved');
-  seedAlert(B, period(B), named.get(`run:${B}`)!, 'low', 'B low');
-  seedAlert(C, period(C), named.get(`run:${C}`)!, 'critical', 'C critical');
-  seedAction(A, 'A overdue', 'medium', '2026-09-01');
-  seedAction(A, 'A undated urgent', 'critical', null, 'open', employee);
-  seedAction(B, 'B done', 'low', null, 'completed');
-  seedAction(C, 'C overdue', 'high', '2026-08-01');
+  await seedAlert(A, period(A), named.get(`run:${A}`)!, 'critical', 'A critical');
+  await seedAlert(A, period(A), named.get(`run:${A}`)!, 'high', 'A high');
+  await seedAlert(A, period(A), named.get(`run:${A}`)!, 'medium', 'A resolved', 'resolved');
+  await seedAlert(B, period(B), named.get(`run:${B}`)!, 'low', 'B low');
+  await seedAlert(C, period(C), named.get(`run:${C}`)!, 'critical', 'C critical');
+  await seedAction(A, 'A overdue', 'medium', '2026-09-01');
+  await seedAction(A, 'A undated urgent', 'critical', null, 'open', employee);
+  await seedAction(B, 'B done', 'low', null, 'completed');
+  await seedAction(C, 'C overdue', 'high', '2026-08-01');
 }, 120_000);
 
-afterAll(() => {
-  adminSql(`delete from public.organizations where id in ('${A}','${B}','${C}','${D}','${E}');
-            delete from public.platform_users where user_id in ('${employee}','${employeeD}','${superAdmin}');
-            delete from auth.users where email like '%@${DOMAIN}';`);
-});
+afterAll(async () => {
+  await cleanup([A, B, C, D, E].filter(Boolean), users);
+}, 120_000);
 
 const names = (ctx: PortfolioContext) => ctx.organisations.map((o) => o.name).sort();
 /** The capped detail lists, as the alerts and actions pages read them. */
@@ -177,7 +182,7 @@ describe('a company login has no Command Centre — not even over its own compan
       [adminD, 'admin-d', [C, D, E]], [clientC, 'client-c', [C, D]],
     ];
     for (const [user, local, orgs] of own) {
-      const db = clientFor(user, { email: `${local}@${DOMAIN}` }).schema('api');
+      const db = clientFor(user, { email: `${local}@${DOMAIN}` });
       for (const p_orgs of [orgs, null]) {
         for (const [fn, args] of [
           ['portfolio_summary', { p_orgs, p_today: '2026-09-15', p_due_soon_until: '2026-09-29' }],
@@ -187,7 +192,7 @@ describe('a company login has no Command Centre — not even over its own compan
           ['portfolio_finished_actions', { p_orgs, p_since: '2000-01-01T00:00:00Z', p_limit: 50 }],
           ['portfolio_health_breakdowns', { p_orgs }],
         ] as const) {
-          const r = await db.rpc(fn, args);
+          const r = await rpc(db, fn, args);
           expect(r.error, `${fn} for ${local}`).toBeNull();
           expect(r.data ?? [], `${fn} for ${local} over ${p_orgs === null ? 'the whole scope' : 'its own organisations'}`).toEqual([]);
         }
@@ -276,7 +281,8 @@ describe('the adversarial path: the resolver bypassed, a foreign id in the state
       organisations: [...real.organisations, { id: E, slug: 'epsilon', name: 'Epsilon', status: 'active', role: 'employee' }],
       organisationIds: [...real.organisationIds, E],
     };
-    adminSql(`insert into public.actions (organization_id, title, priority, status, source_type) values ('${E}','E secret','critical','open','user')`);
+    const secret = actionDoc(E, 'E secret', 'critical', null);
+    await orgRow(fs(), E, 'actions', String(secret.id)).set(secret);
     const view = await loadPortfolio(forged);
     const { alerts, actions } = await details(forged, view);
     expect(alerts).toEqual([]);
@@ -288,7 +294,7 @@ describe('the adversarial path: the resolver bypassed, a foreign id in the state
 
 describe('an assignment revoked stops working on the next request', () => {
   it('B leaves the employee\'s portfolio, and its facts with it', async () => {
-    adminSql(`update public.organization_assignments set status='revoked' where organization_id='${B}' and employee_user_id='${employee}'`);
+    await setAssignmentStatus(B, employee, 'revoked');
     try {
       const ctx = await ctxFor(employee);
       expect(names(ctx)).toEqual([named.get(A)]);
@@ -297,25 +303,25 @@ describe('an assignment revoked stops working on the next request', () => {
       expect((await details(ctx, view)).alerts.some((a) => a.organizationId === B)).toBe(false);
       // And with A revoked too, the employee has an EMPTY Command Centre (ADR-114 §6) — no organisation,
       // no count, no row — not a 404.
-      adminSql(`update public.organization_assignments set status='revoked' where organization_id='${A}' and employee_user_id='${employee}'`);
+      await setAssignmentStatus(A, employee, 'revoked');
       const empty = await ctxFor(employee);
       expect(empty.organisations).toEqual([]);
       const emptyView = await loadPortfolio(empty);
       expect(emptyView.counts.clients).toBe(0);
       expect(emptyView.counts.criticalAlerts).toBe(0);
     } finally {
-      adminSql(`update public.organization_assignments set status='active' where employee_user_id='${employee}'`);
+      await setAssignmentStatus(A, employee, 'active');
+      await setAssignmentStatus(B, employee, 'active');
     }
   });
 });
 
 describe('an eligible employee with no assignment has an empty Command Centre (ADR-114 §6)', () => {
   let unassigned: string;
-  beforeAll(() => {
-    unassigned = createAuthUser(`unassigned@${DOMAIN}`);
-    adminSql(`insert into public.platform_users (user_id, platform_role) values ('${unassigned}','employee')`);
+  beforeAll(async () => {
+    unassigned = await person('unassigned');
+    await platformUser(unassigned, 'employee');
   });
-  afterAll(() => { adminSql(`delete from public.platform_users where user_id='${unassigned}'`); });
 
   it('an empty portfolio — no organisation, no count — not the uniform 404', async () => {
     const ctx = await ctxFor(unassigned);
@@ -326,22 +332,23 @@ describe('an eligible employee with no assignment has an empty Command Centre (A
   });
 
   it('a suspended platform account: NOT_FOUND', async () => {
-    adminSql(`update public.platform_users set status='suspended' where user_id='${unassigned}'`);
+    await fs().collection('platform_users').doc(unassigned).update({ status: 'suspended' });
     try {
       await expect(ctxFor(unassigned)).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'NOT_FOUND');
     } finally {
-      adminSql(`update public.platform_users set status='active' where user_id='${unassigned}'`);
+      await fs().collection('platform_users').doc(unassigned).update({ status: 'active' });
     }
   });
 });
 
 describe('advisory opportunities follow the same boundary (ADR-148)', () => {
   // A's and C's latest months carry a marketing score of 80: "campaigns paying back" for both.
-  const marketing = `'[{"key":"marketing_efficiency","included":true,"score":80,"rules":[{"rule":"M1","points":20,"result":">= 3x","value":"3.2","skipped_reason":null}]}]'::jsonb`;
-  beforeAll(() => {
-    adminSql(`set session_replication_role = replica;
-      update public.health_scores set breakdown = ${marketing}
-       where id in (select health_score_id from public.health_current where organization_id in ('${A}','${C}') and period_id in ('${period(A)}','${period(C)}'));`);
+  const marketing = [{ key: 'marketing_efficiency', included: true, score: 80, rules: [{ rule: 'M1', points: 20, result: '>= 3x', value: '3.2', skipped_reason: null }] }];
+  beforeAll(async () => {
+    for (const org of [A, C]) {
+      const current = await orgRow(fs(), org, 'health_current', period(org)).get();
+      await orgRow(fs(), org, 'health_scores', String(current.get('health_score_id'))).update({ breakdown: marketing });
+    }
   });
 
   it('the employee sees A\'s, never C\'s — even with C forged into the context', async () => {
@@ -365,13 +372,13 @@ describe('advisory opportunities follow the same boundary (ADR-148)', () => {
     // A super admin sees every organisation in the database; this file's own are A, C (and B, without one).
     const ours = new Set([A, B, C, D, E]);
     expect((await loadOpportunities(admin, view)).map((e) => e.organizationId).filter((id) => ours.has(id)).sort()).toEqual([A, C].sort());
-    const { data, error } = await clientFor(stranger, { email: `stranger@${DOMAIN}` }).schema('api')
-      .rpc('portfolio_health_breakdowns', { p_orgs: [A, B, C] });
+    const { data, error } = await rpc(clientFor(stranger, { email: `stranger@${DOMAIN}` }),
+      'portfolio_health_breakdowns', { p_orgs: [A, B, C] });
     expect(error).toBeNull();
     expect(data ?? []).toEqual([]);
     // A's own owner: a company login, so no portfolio — A's breakdown is not served to them here.
-    const own = await clientFor(ownerAB, { email: `owner-ab@${DOMAIN}` }).schema('api')
-      .rpc('portfolio_health_breakdowns', { p_orgs: [A] });
+    const own = await rpc(clientFor(ownerAB, { email: `owner-ab@${DOMAIN}` }),
+      'portfolio_health_breakdowns', { p_orgs: [A] });
     expect(own.error).toBeNull();
     expect(own.data ?? []).toEqual([]);
   });

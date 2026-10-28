@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { cleanUpOwn, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, onboard, seedUser, signIn, uniqueName } from './fixtures';
+import { addMembership, orgIdBySlug } from './firestore';
 
 /**
  * Journey 20 — Team/Client Management, in the product (ADR-144).
@@ -17,13 +18,12 @@ test.afterAll(() => cleanUpOwn([ORG], [OWNER, CLIENT]));
 test('a client\'s request reaches the team, and the team\'s answer reaches the client', async ({ browser }) => {
   test.setTimeout(180_000);
   const ownerPage = await (await browser.newContext()).newPage();
-  const owner = seedUser(OWNER);
+  const owner = await seedUser(OWNER);
   await signIn(ownerPage, owner);
   const slug = await onboard(ownerPage, ORG);
 
-  const client = seedUser(CLIENT);
-  sql(`insert into public.organization_memberships (organization_id, user_id, role, status)
-       select id, '${client.userId}', 'client', 'active' from public.organizations where slug = '${slug}'`);
+  const client = await seedUser(CLIENT);
+  await addMembership(await orgIdBySlug(slug), client.userId, 'client');
   const clientPage = await (await browser.newContext()).newPage();
   await signIn(clientPage, client);
 

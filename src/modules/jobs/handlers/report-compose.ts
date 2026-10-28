@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { recordReport } from '@/core/db';
 import { log } from '@/core/logging';
 import { composeStoredReport, type ComposableKind } from '@/modules/reporting';
@@ -36,7 +36,7 @@ export async function runReportComposeJob(
   }
 
   const composed = await composeStoredReport({
-    db: scope.db as SupabaseClient,
+    db: scope.db as Db,
     orgId,
     kind: kind as ComposableKind,
     windowStart,

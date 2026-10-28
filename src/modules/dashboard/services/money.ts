@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { compare, formatMoney, tryParseDecimal } from '@/core/money';
 import { varianceKey } from '@/modules/financial-engine';
 import {
@@ -76,7 +76,7 @@ export function previousPeriodOf(
 }
 
 export async function loadPeriodScope(
-  db: SupabaseClient, orgId: string, requested?: string | null, requestId?: string,
+  db: Db, orgId: string, requested?: string | null, requestId?: string,
 ): Promise<PeriodScope | null> {
   const [periods, withData] = await Promise.all([
     repo.loadPeriods(db, orgId, requestId),
@@ -299,7 +299,7 @@ const INDEX_PAGES = [
 ] as const;
 
 export async function loadMoneyIndex(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
 ): Promise<MoneyIndexView> {
   const snapshots = await repo.loadPeriodSnapshots(db, orgId, scope.period.id, requestId);
   const byKey = index(snapshots);
@@ -351,7 +351,7 @@ export interface ProfitAndLossView {
 }
 
 export async function loadProfitAndLoss(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
 ): Promise<ProfitAndLossView> {
   const [snapshots, categories] = await Promise.all([
     repo.loadPeriodSnapshots(db, orgId, scope.period.id, requestId),
@@ -461,7 +461,7 @@ export function toCashAccount(account: BankAccount): CashAccountView {
 }
 
 export async function loadCash(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
 ): Promise<CashView> {
   const [snapshots, bankAccounts] = await Promise.all([
     repo.loadPeriodSnapshots(db, orgId, scope.period.id, requestId),
@@ -497,7 +497,7 @@ export interface BalanceSheetView {
 }
 
 export async function loadBalanceSheet(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
 ): Promise<BalanceSheetView> {
   const snapshots = await repo.loadPeriodSnapshots(db, orgId, scope.period.id, requestId);
   const byKey = index(snapshots);
@@ -514,7 +514,7 @@ export async function loadBalanceSheet(
 
 /** The bank accounts the opening-balance form offers, whether or not a period has figures yet. */
 export async function loadBankAccountsForBalances(
-  db: SupabaseClient, orgId: string, requestId?: string,
+  db: Db, orgId: string, requestId?: string,
 ): Promise<CashAccountView[]> {
   const accounts = await listBankAccounts(db, orgId, requestId);
   return accounts.filter((a) => a.isActive).map(toCashAccount);
@@ -599,7 +599,7 @@ export function toTransactionView(
 }
 
 export async function loadBanking(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   scope: PeriodScope,
@@ -728,7 +728,7 @@ const BOOKS = {
 } as const;
 
 export async function loadLedgerBook(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   scope: PeriodScope,
@@ -782,7 +782,7 @@ const CONCENTRATION_KEYS = [
 ] as const;
 
 export async function loadCustomers(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
 ): Promise<CustomersView> {
   const [snapshots, revenue, shares, counterparties] = await Promise.all([
     repo.loadPeriodSnapshots(db, orgId, scope.period.id, requestId),
@@ -850,7 +850,7 @@ export interface CustomerDetailView {
 export const CUSTOMER_TREND_MONTHS = 12;
 
 export async function loadCustomerDetail(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   scope: PeriodScope,
@@ -965,7 +965,7 @@ export function toAccountRow(account: Account): AccountRow {
 }
 
 export async function loadAccountsPage(
-  db: SupabaseClient, orgId: string, requestId?: string,
+  db: Db, orgId: string, requestId?: string,
 ): Promise<AccountsView> {
   const accounts = await listAccounts(db, orgId, requestId);
   const rows = sortAccountsForMapping(accounts.filter((a) => a.isActive)).map(toAccountRow);

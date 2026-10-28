@@ -1,9 +1,9 @@
 /**
- * "Keep me signed in" (ADR-169). Supabase keeps a session in long-lived cookies, so by default a
+ * "Keep me signed in" (ADR-169). The `__session` cookie lasts up to fourteen days, so by default a
  * sign-in survives closing the browser. When the box is NOT ticked, the sign-in form sets two
  * cookies: a lasting marker that this session is for this visit only, and a session cookie (no
  * expiry) that the browser drops when it closes. A request that carries the marker without the
- * session cookie is from a later visit, and the middleware signs it out.
+ * session cookie is from a later visit, and the proxy (src/proxy.ts) signs it out.
  *
  * Browsers that restore the previous session on start-up also restore session cookies, so there the
  * session survives a restart; that is the browser's choice, as for every site.

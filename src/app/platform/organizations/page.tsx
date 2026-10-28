@@ -1,7 +1,6 @@
 import Link from 'next/link';
-import { toMotionError } from '@/core/errors';
 import { getPlatformContext } from '@/modules/tenancy';
-import { listCompanyOwners } from '@/modules/platform';
+import { listCompanyOwners, readableOrganizations } from '@/modules/platform';
 import { Building2 } from 'lucide-react';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardBody, CardHeader, EmptyState, Badge } from '@/components/ui/surfaces';
@@ -20,8 +19,8 @@ export const dynamic = 'force-dynamic';
  * (ADR-038.6), and that happens in the tenant layout.
  */
 /**
- * The search term, reduced to letters, digits, spaces, hyphens, ampersands and full stops: it goes
- * into a PostgREST `or` filter, whose own syntax (commas, brackets, `*`) must not be injectable.
+ * The search term, reduced to letters, digits, spaces, hyphens, ampersands and full stops — kept
+ * from the PostgREST filter it once went into; it is now matched in TypeScript, case-insensitively.
  */
 function searchTerm(raw: string | string[] | undefined): string {
   const value = Array.isArray(raw) ? raw[0] : raw;
@@ -35,20 +34,22 @@ export default async function PlatformOrganizationsPage({
 }) {
   const ctx = await getPlatformContext();
   const q = searchTerm((await searchParams).q);
-  let query = ctx.db
-    .from('organizations')
-    .select('id, slug, name, legal_name, country_code, base_currency, fiscal_year_start_month, status, plan, created_at')
-    .neq('status', 'deleted')
-    .order('created_at', { ascending: false })
-    .limit(100);
-  // Name, slug or legal name containing the words, in any case.
-  if (q) query = query.or(`name.ilike.*${q}*,slug.ilike.*${q}*,legal_name.ilike.*${q}*`);
-  const { data, error } = await query;
-
-  // Never `data ?? []` on its own: a failing query rendered as an empty list is the one thing a
-  // platform page must not show (PRODUCTION_AUDIT.md M2; ADR-070).
-  if (error) throw toMotionError(error, ctx.requestId);
-  const organizations = data ?? [];
+  // Firestore has no `ilike`, so the reachable organisations (`organizations_select`) are filtered
+  // here: not deleted; name, slug or legal name containing the words, in any case; newest 100.
+  // A failing read throws rather than rendering as an empty list — the one thing a platform page
+  // must not show (PRODUCTION_AUDIT.md M2; ADR-070).
+  const needle = q.toLowerCase();
+  const organizations = (await readableOrganizations(ctx.db))
+    .filter((o) => o.status !== 'deleted')
+    .filter((o) => !needle || [o.name, o.slug, o.legal_name].some((v) => typeof v === 'string' && v.toLowerCase().includes(needle)))
+    .sort((a, b) => (String(b.created_at) < String(a.created_at) ? -1 : String(b.created_at) > String(a.created_at) ? 1 : 0))
+    .slice(0, 100)
+    .map((o) => ({
+      id: String(o.id), slug: String(o.slug), name: String(o.name), legal_name: (o.legal_name as string | null) ?? null,
+      country_code: (o.country_code as string | null) ?? null, base_currency: String(o.base_currency),
+      fiscal_year_start_month: Number(o.fiscal_year_start_month), status: o.status as keyof typeof ORG_STATUS_LABELS,
+      plan: String(o.plan), created_at: String(o.created_at),
+    }));
   const mayCreate = can(ctx, 'platform.orgs.manage');
   // ADR-167: whose login the Edit dialog changes.
   const owners = mayCreate ? await listCompanyOwners(ctx, organizations.map((o) => o.id)) : new Map();

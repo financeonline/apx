@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { cleanUpOwn, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, onboard, seedUser, signIn, uniqueName } from './fixtures';
+import { orgIdBySlug, orgRows, periodOf, seedMonthlyFigures, seedRun, updateOrganization } from './firestore';
 
 /**
  * The what-if page (REQ-SC-01…10; ADR-100; remediated per `PHASE_12_REMEDIATION.md`).
@@ -27,16 +28,9 @@ test.afterAll(() => cleanUpOwn([ORG, `${ORG} Thin`], ['wi-owner', 'wi-thin']));
  * cash-basis estimate, and deliberately WITHOUT the `expense_by_category` breakdown, so a
  * percentage of wages has nothing to be a percentage of and is refused.
  */
-function seedHistory(orgId: string): void {
-  sql(`update public.organizations set base_currency = 'INR' where id = '${orgId}'`);
-  const runId = sql(`
-    with q as (
-      insert into public.calculation_runs
-             (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-      select '${orgId}', 'recalc_manual', '1.0.0', p.id, p.id, '2026-08-31', 'succeeded'
-        from public.fiscal_periods p
-       where p.organization_id = '${orgId}' and p.period_start = '2026-08-01'
-      returning id) select * from q`);
+async function seedHistory(orgId: string): Promise<void> {
+  await updateOrganization(orgId, { base_currency: 'INR' });
+  const runId = await seedRun(orgId, { periodFrom: await periodOf(orgId, '2026-08-01'), asOf: '2026-08-31' });
 
   const monthly: Record<string, string> = {
     revenue: '10000', cost_of_sales: '4000', operating_expenses: '3000',
@@ -44,32 +38,15 @@ function seedHistory(orgId: string): void {
     receivables: '5000', payables: '2000', closing_cash: '20000',
   };
 
-  for (let i = 0; i < 6; i += 1) {
-    const start = `2026-${String(8 - i).padStart(2, '0')}-01`;
-    const periodId = sql(`
-      select id from public.fiscal_periods
-       where organization_id = '${orgId}' and period_start = '${start}'`);
-    sql(`update public.fiscal_periods set is_complete = true where id = '${periodId}'`);
-    for (const [key, value] of Object.entries(monthly)) {
-      const snapshotId = sql(`
-        with q as (
-          insert into public.metric_snapshots
-                 (organization_id, calculation_run_id, period_id, metric_key, dimension_type,
-                  value, unit, currency, basis, assurance_level, data_quality)
-          values ('${orgId}', '${runId}', '${periodId}', '${key}', 'none',
-                  ${value}, 'money', 'INR', 'bank', 'estimated',
-                  '{"completeness": 1, "proxy": true, "warnings": ["cash_basis_proxy"], "missing": []}'::jsonb)
-          returning id) select * from q`);
-      sql(`
-        insert into public.metric_current
-               (organization_id, period_id, metric_key, dimension_type, snapshot_id, calculation_run_id)
-        values ('${orgId}', '${periodId}', '${key}', 'none', '${snapshotId}', '${runId}')`);
-    }
-  }
+  const starts = Array.from({ length: 6 }, (_, i) => `2026-${String(8 - i).padStart(2, '0')}-01`);
+  await seedMonthlyFigures(orgId, {
+    runId, periodStarts: starts, values: monthly, currency: 'INR', basis: 'bank', assurance: 'estimated',
+    proxy: true, warnings: ['cash_basis_proxy'],
+  });
 }
 
 test('an organisation with no forecast is told what it needs first', async ({ page }) => {
-  const owner = seedUser('wi-thin');
+  const owner = await seedUser('wi-thin');
   await signIn(page, owner);
   const slug = await onboard(page, `${ORG} Thin`);
 
@@ -82,12 +59,12 @@ test('an organisation with no forecast is told what it needs first', async ({ pa
 });
 
 test('a person asks what would happen, and is answered — or told exactly why not', async ({ page }) => {
-  const owner = seedUser('wi-owner');
+  const owner = await seedUser('wi-owner');
   await signIn(page, owner);
   const slug = await onboard(page, ORG);
-  const orgId = sql(`select id from public.organizations where slug = '${slug}'`);
-  seedHistory(orgId);
-  const saved = () => sql(`select count(*) from public.scenario_runs where organization_id = '${orgId}'`);
+  const orgId = await orgIdBySlug(slug);
+  await seedHistory(orgId);
+  const saved = async (): Promise<string> => String((await orgRows(orgId, 'scenario_runs')).length);
 
   // The forecast a what-if changes has to exist first.
   await page.goto(`/app/${slug}/forecast`);
@@ -134,7 +111,7 @@ test('a person asks what would happen, and is answered — or told exactly why n
   await expect(page.getByText(/worked out and saved/i)).toHaveCount(0);
   await expect(page.getByText(/reasons are below/i)).toHaveCount(0);
   await expect(page.getByText(/last saved scenario/i), 'nothing to show as saved yet').toHaveCount(0);
-  expect(saved(), 'nothing was saved').toBe('0');
+  expect(await saved(), 'nothing was saved').toBe('0');
 
   // ---------------------------------------------------------------------------------------------
   // 2. Refused for an answer MOTION cannot read: a price change with no volume answer (§4, §9).
@@ -148,7 +125,7 @@ test('a person asks what would happen, and is answered — or told exactly why n
   await page.locator('#pricing_change\\.volumePercent').fill('');
   await page.getByRole('button', { name: /^work it out$/i }).click();
   await expect(page.getByText(/need fixing|must be a number/i).first()).toBeVisible({ timeout: 30_000 });
-  expect(saved()).toBe('0');
+  expect(await saved()).toBe('0');
 
   // ---------------------------------------------------------------------------------------------
   // 3. The thing it will do.
@@ -161,7 +138,7 @@ test('a person asks what would happen, and is answered — or told exactly why n
   await page.locator('#revenue_change\\.value').fill('10');
   await page.getByRole('button', { name: /^work it out$/i }).click();
   await expect(page.getByText(/worked out and saved/i)).toBeVisible({ timeout: 30_000 });
-  expect(saved()).toBe('1');
+  expect(await saved()).toBe('1');
 
   // §14: BASELINE beside SCENARIO, both labelled, neither mistakable for the other; and the section
   // is labelled as the last SAVED scenario, with its date.
@@ -223,7 +200,7 @@ test('a person asks what would happen, and is answered — or told exactly why n
   await expect(page.getByText(/last saved scenario/i)).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Sales up 10%' })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Wages pct' })).toHaveCount(0);
-  expect(saved(), 'still exactly the one that succeeded').toBe('1');
+  expect(await saved(), 'still exactly the one that succeeded').toBe('1');
 
   // ---------------------------------------------------------------------------------------------
   // 5. "Can we afford it?" (SOW §12; ADR-146). Cash opens on ₹20,000 and rises by ₹2,000 a month;
@@ -245,7 +222,7 @@ test('a person asks what would happen, and is answered — or told exactly why n
   await page.getByRole('textbox', { name: 'Amount', exact: true }).fill('1,50');
   await page.getByRole('button', { name: 'Check' }).click();
   await expect(page.getByText(/enter an amount more than zero/i)).toBeVisible({ timeout: 30_000 });
-  expect(saved(), 'a check saves nothing').toBe('1');
+  expect(await saved(), 'a check saves nothing').toBe('1');
 
   // §15: no database terminology reaches the reader.
   const body = (await page.locator('main').innerText()).toLowerCase();

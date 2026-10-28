@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import {
   displayCopyFor, familyOf, loadAlertHistory, loadAlerts, thresholdNoteFor, whyItMattersFor,
   type AlertListRow, type AlertQuery, type AlertSeverity,
@@ -87,7 +87,7 @@ export interface AlertsPageView {
 }
 
 export async function loadAlertsPage(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   query: AlertQuery,
@@ -117,7 +117,7 @@ export async function loadAlertsPage(
  * it back at the top of Home every morning is how a product trains people to stop reading Home.
  */
 export async function loadTopRisks(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   limit = 3,
@@ -140,7 +140,7 @@ export interface AlertHistoryView {
 
 /** What an alert said at each evaluation (ADR-034, F-C-16). */
 export async function loadAlertDetail(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   alertId: string,
@@ -178,7 +178,7 @@ export async function loadAlertDetail(
  * it from a money snapshot rather than hard-coding 'GBP' keeps that true for every organisation.
  */
 async function loadCurrency(
-  db: SupabaseClient, orgId: string, requestId?: string,
+  db: Db, orgId: string, requestId?: string,
 ): Promise<string> {
   const periods = await repo.loadPeriods(db, orgId, requestId);
   const latest = periods.find((p) => p.isComplete) ?? periods[0];

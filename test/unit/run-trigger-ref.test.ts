@@ -1,21 +1,17 @@
-import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { runTriggerRef } from '@/modules/jobs';
+import { TRIGGER_TABLES } from '@/db/app/engine-runs';
 
 /**
  * ADR-132: a run records only a reference `calculation_runs`' `same_org_ref` trigger accepts.
- * The mapping is read from the migration itself, so the two cannot drift.
+ * The mapping is the database layer's own (`TRIGGER_TABLES`, the port of that trigger), so the two
+ * cannot drift.
  */
 
-const sql = readFileSync(path.resolve(process.cwd(), 'supabase/migrations/20260911000002_polymorphic_refs.sql'), 'utf8');
-const block = /same_org_ref_trigger_ref[\s\S]*?app\.same_org_ref\(([\s\S]*?)\);/.exec(sql)![1]!;
-const pairs = [...block.matchAll(/'([a-z_-]+)'/g)].map((m) => m[1]!).slice(2);
-const MAPPING = new Map<string, string>();
-for (let i = 0; i < pairs.length; i += 2) MAPPING.set(pairs[i]!, pairs[i + 1]!);
+const MAPPING = new Map<string, string>(Object.entries(TRIGGER_TABLES));
 
 describe('runTriggerRef', () => {
-  it('reads all nine triggers from the migration', () => {
+  it('reads all nine triggers from the database layer', () => {
     expect(MAPPING.size).toBe(9);
   });
 

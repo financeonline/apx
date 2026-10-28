@@ -5,7 +5,7 @@
  * and nowhere else. Ratios and metric values are `NUMERIC(20,6)`. Rounding is `ROUND_HALF_UP`,
  * applied once — at storage (`toMoneyString`) or at display (`formatMoney`) — never in between.
  *
- * This module is pure: no I/O, no Supabase, no React, no clock.
+ * This module is pure: no I/O, no database, no React, no clock.
  */
 
 export {

@@ -1,7 +1,10 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Query } from 'firebase-admin/firestore';
 import { csvLine } from '@/core/csv';
-import { NotFound, toMotionError } from '@/core/errors';
+import { NotFound } from '@/core/errors';
+import { documentIdField, type OrgTable } from '@/db/schema';
+import type { Db } from '@/db/types';
+import { readRows, readRowsByIds } from '@/db/app/caller-reads';
 import { assertCan } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
 
@@ -14,6 +17,10 @@ import type { AccessContext } from '@/modules/tenancy';
  * is `description_normalized` only — the raw statement text with account numbers in it never
  * leaves the review screens (R2-A-04). Rows are read in pages and yielded as lines, so a ten-year
  * ledger streams rather than sits in memory.
+ *
+ * On Firestore each page is ordered by ONE field and the document id (= the row's id), which the
+ * single-field index serves, so no composite index is needed; `record_status` is applied here. The
+ * old embedded selects are second reads per page through the same read policies.
  */
 
 export const EXPORT_KINDS = ['ledger', 'bank_transactions', 'invoices', 'metrics'] as const;
@@ -104,37 +111,70 @@ const METRICS: readonly Column<Row>[] = [
   { header: 'snapshot_id', cell: (r) => str(r.snapshot_id) },
 ];
 
+/** An embedded resource of the old select: the column holding its id, its table, and the key it lands under. */
+interface Embed {
+  readonly column: string;
+  readonly table: OrgTable;
+  readonly as: string;
+}
+
 interface Source {
-  readonly table: string;
-  readonly select: string;
-  readonly order: readonly string[];
+  readonly table: OrgTable;
+  /** The date the rows are ordered by, then by id; null for `metric_current`, sorted whole. */
+  readonly orderField: string | null;
   readonly acceptedOnly: boolean;
+  readonly embeds: readonly Embed[];
   readonly columns: readonly Column<Row>[];
   readonly filename: string;
 }
 
+const PERIOD: Embed = { column: 'period_id', table: 'fiscal_periods', as: 'fiscal_periods' };
+const COUNTERPARTY: Embed = { column: 'counterparty_id', table: 'counterparties', as: 'counterparties' };
+
 const SOURCES: Readonly<Record<ExportKind, Source>> = {
   ledger: {
-    table: 'ledger_entries',
-    select: 'entry_date, direction, amount, currency, description, reference, journal_ref, assurance_level, source_ref, fiscal_periods(label), accounts(code, name, standard_category), counterparties(name)',
-    order: ['entry_date', 'id'], acceptedOnly: true, columns: LEDGER, filename: 'ledger',
+    table: 'ledger_entries', orderField: 'entry_date', acceptedOnly: true,
+    embeds: [PERIOD, { column: 'account_id', table: 'accounts', as: 'accounts' }, COUNTERPARTY],
+    columns: LEDGER, filename: 'ledger',
   },
   bank_transactions: {
-    table: 'bank_transactions',
-    select: 'transaction_date, amount, currency, description_normalized, reference, balance_after, is_transfer, assurance_level, source_ref, fiscal_periods(label), bank_accounts(name), counterparties(name), category_account_id',
-    order: ['transaction_date', 'id'], acceptedOnly: true, columns: BANK, filename: 'bank-transactions',
+    table: 'bank_transactions', orderField: 'transaction_date', acceptedOnly: true,
+    embeds: [PERIOD, { column: 'bank_account_id', table: 'bank_accounts', as: 'bank_accounts' }, COUNTERPARTY],
+    columns: BANK, filename: 'bank-transactions',
   },
   invoices: {
-    table: 'invoices',
-    select: 'invoice_type, invoice_number, issue_date, due_date, subtotal, tax_amount, total_amount, amount_paid, balance_due, currency, status, paid_date, description, assurance_level, source_ref, fiscal_periods(label), counterparties(name)',
-    order: ['issue_date', 'id'], acceptedOnly: true, columns: INVOICES, filename: 'invoices',
+    table: 'invoices', orderField: 'issue_date', acceptedOnly: true,
+    embeds: [PERIOD, COUNTERPARTY],
+    columns: INVOICES, filename: 'invoices',
   },
   metrics: {
-    table: 'metric_current',
-    select: 'metric_key, dimension_type, dimension_id, dimension_key, snapshot_id, fiscal_periods(label, period_start), metric_snapshots(value, unit, currency, basis, assurance_level)',
-    order: ['period_id', 'metric_key', 'dimension_type', 'dimension_key', 'dimension_id'], acceptedOnly: false, columns: METRICS, filename: 'metrics',
+    table: 'metric_current', orderField: null, acceptedOnly: false,
+    embeds: [PERIOD, { column: 'snapshot_id', table: 'metric_snapshots', as: 'metric_snapshots' }],
+    columns: METRICS, filename: 'metrics',
   },
 };
+
+/** `order by period_id, metric_key, dimension_type, dimension_key, dimension_id` (NULLS LAST). */
+const METRIC_ORDER = ['period_id', 'metric_key', 'dimension_type', 'dimension_key', 'dimension_id'] as const;
+function metricOrder(a: Row, b: Row): number {
+  for (const key of METRIC_ORDER) {
+    const x = a[key] ?? null; const y = b[key] ?? null;
+    if (x === y) continue;
+    if (x === null) return 1;
+    if (y === null) return -1;
+    return String(x) < String(y) ? -1 : 1;
+  }
+  return 0;
+}
+
+/** Joins one page's embedded resources onto its rows, as PostgREST did (null when not visible). */
+async function embed(db: Db, orgId: string, source: Source, rows: Row[]): Promise<void> {
+  for (const e of source.embeds) {
+    const found = await readRowsByIds<Row>(db, orgId, e.table, rows.map((r) => str(r[e.column])));
+    const byId = new Map(found.map((r) => [String(r.id), r]));
+    for (const row of rows) row[e.as] = byId.get(String(row[e.column] ?? '')) ?? null;
+  }
+}
 
 export function exportFilename(kind: ExportKind, today: string): string {
   return `apx-${SOURCES[kind].filename}-${today}.csv`;
@@ -149,30 +189,50 @@ export async function* exportCsv(ctx: AccessContext, kind: ExportKind): AsyncGen
   assertCan(ctx, 'data.export');
   if (!ctx.orgId) throw new NotFound();
   const source = SOURCES[kind];
-  const db: SupabaseClient = ctx.db;
+  const db: Db = ctx.db;
+  const orgId = ctx.orgId;
 
   // `bank_transactions.category_account_id` is an org-composite reference with no simple foreign
   // key PostgREST can embed (ADR-044.8), so the category names are read once and joined here.
-  const categoryNames = kind === 'bank_transactions' ? await accountNames(db, ctx.orgId, ctx.requestId) : null;
+  const categoryNames = kind === 'bank_transactions' ? await accountNames(db, orgId) : null;
 
-  yield csvLine(source.columns.map((c) => c.header));
-  for (let offset = 0; ; offset += PAGE) {
-    let query = db.from(source.table).select(source.select).eq('organization_id', ctx.orgId);
-    if (source.acceptedOnly) query = query.eq('record_status', 'accepted');
-    for (const column of source.order) query = query.order(column, { ascending: true });
-    const { data, error } = await query.range(offset, offset + PAGE - 1);
-    if (error) throw toMotionError(error, ctx.requestId);
-    const rows = (data ?? []) as unknown as Row[];
+  const emit = function* (rows: Row[]): Generator<string> {
     for (const row of rows) {
       if (categoryNames !== null) row.category_name = categoryNames.get(String(row.category_account_id ?? '')) ?? null;
       yield csvLine(source.columns.map((c) => c.cell(row)));
     }
-    if (rows.length < PAGE) break;
+  };
+
+  yield csvLine(source.columns.map((c) => c.header));
+  const orderField = source.orderField;
+  if (orderField === null) {
+    const rows = (await readRows<Row>(db, orgId, source.table)).sort(metricOrder);
+    for (let i = 0; i < rows.length; i += PAGE) {
+      const page = rows.slice(i, i + PAGE);
+      await embed(db, orgId, source, page);
+      yield* emit(page);
+    }
+    return;
+  }
+
+  let after: [unknown, string] | null = null;
+  for (;;) {
+    const cursor: [unknown, string] | null = after;
+    const page: Row[] = await readRows<Row>(db, orgId, source.table, (q): Query => {
+      const ordered = q.orderBy(orderField).orderBy(documentIdField()).limit(PAGE);
+      return cursor === null ? ordered : ordered.startAfter(cursor[0], cursor[1]);
+    });
+    if (page.length === 0) break;
+    const last: Row = page[page.length - 1]!;
+    after = [last[orderField] ?? null, String(last.id)];
+    const rows = source.acceptedOnly ? page.filter((r) => r.record_status === 'accepted') : page;
+    await embed(db, orgId, source, rows);
+    yield* emit(rows);
+    if (page.length < PAGE) break;
   }
 }
 
-async function accountNames(db: SupabaseClient, orgId: string, requestId?: string): Promise<Map<string, string>> {
-  const { data, error } = await db.from('accounts').select('id, name').eq('organization_id', orgId);
-  if (error) throw toMotionError(error, requestId);
-  return new Map(((data ?? []) as Array<{ id: string; name: string }>).map((a) => [a.id, a.name]));
+async function accountNames(db: Db, orgId: string): Promise<Map<string, string>> {
+  const rows = await readRows<{ id: string; name: string }>(db, orgId, 'accounts');
+  return new Map(rows.map((a) => [a.id, a.name]));
 }

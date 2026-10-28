@@ -4,49 +4,33 @@ import {
   composePeriod, computeCoverage, computeFingerprint, ENGINE_VERSION,
   type AggregateCell, type EngineContext, type PeriodRef,
 } from '@/modules/financial-engine';
-import { adminSql, clientFor, createAuthUser, resetFixtures } from './setup';
+import { aggregatePeriods } from '@/core/db';
+import { periodId } from '@/db/app/shared';
+import { orgCollection, orgRow } from '@/db/schema';
+import { deleteOrg, fs } from './setup';
+import { seedBatch, seedDocument, seedLedgerEntry, seedOrg } from '../fixtures/seed';
 
 /**
- * The engine end to end (FINANCIAL_ENGINE.md §1–§4): real records, through the SQL aggregation, the
- * composition and the metric modules, to figures.
+ * The engine end to end (FINANCIAL_ENGINE.md §1–§4): real records, through the aggregation
+ * (`api_server.aggregate_periods`), the composition and the metric modules, to figures.
  *
  * The guarantee under test is §1.1's: the same accepted records and the same engine version must
  * produce the same numbers, every time. And §1.5's: a figure that cannot be computed is NULL with a
  * reason, never zero.
  */
 
-let ownerId: string;
+const RUN = `e2e${Date.now().toString(36)}`;
 let orgId: string;
 let mayPeriod: PeriodRef;
 let accounts: EngineContext['accounts'];
+let chart: Readonly<Record<string, string>>;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
-function accountId(category: string): string {
-  return one(`
-    select id from public.accounts
-     where organization_id = '${orgId}' and standard_category = '${category}' and is_system`);
-}
+const accountId = (category: string): string => chart[category]!;
 
 /** Reads the aggregate exactly as the engine's repository does. */
-function loadAggregate(from: string, to: string): AggregateCell[] {
-  const raw = adminSql(`
-    select coalesce(json_agg(json_build_object(
-             'period_id', a.period_id, 'source', a.source,
-             'standard_category', a.standard_category, 'account_id', a.account_id,
-             'counterparty_id', a.counterparty_id, 'bank_account_id', a.bank_account_id,
-             'balance_kind', a.balance_kind, 'balance_basis', a.balance_basis,
-             'invoice_type', a.invoice_type, 'transfer_kind', a.transfer_kind,
-             'unpaired_transfer', a.unpaired_transfer,
-             -- Cast to text: JSON renders numeric unquoted and would drop the trailing zeros that
-             -- make 20000.00 a money value rather than a float (ADR-006).
-             'debit', a.debit::text, 'credit', a.credit::text, 'amount', a.amount::text,
-             'row_count', a.row_count, 'min_date', a.min_date, 'max_date', a.max_date,
-             'fallback_rows', a.fallback_rows)
-             order by a.source::text, a.standard_category::text), '[]')::text
-      from app.aggregate_periods('${orgId}', '${from}', '${to}') a`);
-
-  return (JSON.parse(raw) as Record<string, unknown>[]).map((r) => ({
+async function loadAggregate(from: string, to: string): Promise<AggregateCell[]> {
+  const rows = await aggregatePeriods(orgId, from, to, new Date().toISOString());
+  return rows.map((r) => ({
     periodId: r.period_id as string,
     source: r.source as AggregateCell['source'],
     standardCategory: r.standard_category as AggregateCell['standardCategory'],
@@ -69,58 +53,40 @@ function loadAggregate(from: string, to: string): AggregateCell[] {
 }
 
 beforeAll(async () => {
-  resetFixtures();
-  ownerId = createAuthUser('e2e-engine@itest.motion');
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', {
-    p_name: 'ITest Engine E2E',
-  });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
+  const seeded = await seedOrg({ name: `ITest Engine E2E ${RUN}`, ownerEmail: `owner@${RUN}.engine.itest.motion` });
+  orgId = seeded.orgId;
+  chart = seeded.accounts;
 
-  const periodRow = adminSql(`
-    select id || '|' || period_start::text || '|' || period_end::text || '|' || label
-      from public.fiscal_periods
-     where organization_id = '${orgId}' and period_start = '2026-05-01'`);
-  const [id, periodStart, periodEnd, label] = periodRow.split('|') as [string, string, string, string];
+  const may = (await orgRow(fs(), orgId, 'fiscal_periods', periodId(orgId, '2026-05-01')).get()).data()!;
   mayPeriod = {
-    id, periodStart, periodEnd, fiscalYear: 2026, fiscalQuarter: 2, label, isComplete: false,
+    id: String(may.id), periodStart: String(may.period_start), periodEnd: String(may.period_end),
+    fiscalYear: 2026, fiscalQuarter: 2, label: String(may.label), isComplete: false,
   };
 
-  const raw = adminSql(`
-    select coalesce(json_agg(json_build_object(
-      'id', id, 'code', code, 'name', name,
-      'standardCategory', standard_category, 'accountType', account_type, 'isSystem', is_system)), '[]')::text
-      from public.accounts where organization_id = '${orgId}'`);
-  accounts = JSON.parse(raw) as EngineContext['accounts'];
+  accounts = (await orgCollection(fs(), orgId, 'accounts').get()).docs.map((d) => ({
+    id: d.id, code: d.get('code') as string | null, name: String(d.get('name')),
+    standardCategory: d.get('standard_category'), accountType: d.get('account_type'), isSystem: d.get('is_system') === true,
+  })) as unknown as EngineContext['accounts'];
 
   // A month of trading: revenue 20,000; cost of sales 6,000; payroll 5,000; marketing 1,000.
-  const post = (category: string, direction: string, amount: string, day: string) => adminSql(`
-    insert into public.ledger_entries
-           (organization_id, entry_date, account_id, direction, amount, period_id, record_status)
-    values ('${orgId}', '2026-05-${day}', '${accountId(category)}', '${direction}', ${amount},
-            '00000000-0000-0000-0000-000000000000', 'accepted')`);
+  const post = (category: string, direction: 'debit' | 'credit', amount: string, day: string) =>
+    seedLedgerEntry(orgId, { date: `2026-05-${day}`, accountId: accountId(category), direction, amount });
 
-  post('revenue', 'credit', '20000.00', '10');
-  post('cost_of_sales', 'debit', '6000.00', '12');
-  post('payroll', 'debit', '5000.00', '25');
-  post('marketing', 'debit', '1000.00', '20');
+  await post('revenue', 'credit', '20000.00', '10');
+  await post('cost_of_sales', 'debit', '6000.00', '12');
+  await post('payroll', 'debit', '5000.00', '25');
+  await post('marketing', 'debit', '1000.00', '20');
 
   // A general ledger batch declaring the whole month, so the period is covered (§2.2).
-  const doc = one(`
-    insert into public.source_documents
-           (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-    values ('${orgId}', '${orgId}/e2e/gl.csv', 'gl.csv', 'text/csv', 10, decode('e5','hex'),
-            'ready', 'general_ledger')
-    returning id`);
-  adminSql(`
-    insert into public.import_batches
-           (organization_id, source_document_id, import_type, target_table, status,
-            extraction_method, period_start, period_end, committed_at)
-    values ('${orgId}', '${doc}', 'general_ledger', 'ledger_entries', 'committed',
-            'csv', '2026-05-01', '2026-05-31', now())`);
+  const doc = await seedDocument(orgId, 'gl.csv', 'general_ledger');
+  await seedBatch(orgId, {
+    importType: 'general_ledger', target: 'ledger_entries', start: '2026-05-01', end: '2026-05-31', documentId: doc,
+  });
 });
 
-afterAll(() => resetFixtures());
+afterAll(async () => {
+  if (orgId) await deleteOrg(orgId);
+});
 
 function contextFor(): EngineContext {
   return {
@@ -143,8 +109,8 @@ function contextFor(): EngineContext {
   };
 }
 
-function computeMay() {
-  const cells = loadAggregate('2026-05-01', '2026-05-31');
+async function computeMay() {
+  const cells = await loadAggregate('2026-05-01', '2026-05-31');
   const rowCounts: Record<string, number> = {};
   for (const cell of cells) {
     if (cell.periodId !== mayPeriod.id) continue;
@@ -165,12 +131,12 @@ function computeMay() {
   });
 }
 
-const valueOf = (results: ReturnType<typeof computeMay>, key: string): string | null =>
+const valueOf = (results: Awaited<ReturnType<typeof computeMay>>, key: string): string | null =>
   results.find((r) => r.key === key && r.dimensionType === 'none')?.value ?? null;
 
 describe('a month of real ledger entries becomes figures', () => {
-  it('computes the P&L from the ledger, in the right signs', () => {
-    const results = computeMay();
+  it('computes the P&L from the ledger, in the right signs', async () => {
+    const results = await computeMay();
 
     // The account-type rule: revenue is a credit balance and reads positive (§3).
     expect(valueOf(results, 'revenue')).toBe('20000.00');
@@ -182,28 +148,28 @@ describe('a month of real ledger entries becomes figures', () => {
     expect(valueOf(results, 'net_profit')).toBe('8000.00');
   });
 
-  it('records the basis and the assurance the source earns', () => {
-    const revenue = computeMay().find((r) => r.key === 'revenue');
+  it('records the basis and the assurance the source earns', async () => {
+    const revenue = (await computeMay()).find((r) => r.key === 'revenue');
     expect(revenue?.basis).toBe('ledger');
     // A ledger aggregate is calculated, not verified: it is a sum, not a stated balance.
     expect(revenue?.assurance).toBe('calculated');
   });
 
-  it('states the margins as ratios, not percentages', () => {
-    const results = computeMay();
+  it('states the margins as ratios, not percentages', async () => {
+    const results = await computeMay();
     // 14,000 / 20,000.
     expect(valueOf(results, 'gross_margin')).toBe('0.700000');
     expect(valueOf(results, 'net_margin')).toBe('0.400000');
   });
 
-  it('carries components so a reader can redo the arithmetic (§1.7)', () => {
-    const grossProfit = computeMay().find((r) => r.key === 'gross_profit');
+  it('carries components so a reader can redo the arithmetic (§1.7)', async () => {
+    const grossProfit = (await computeMay()).find((r) => r.key === 'gross_profit');
     expect(grossProfit?.components).toHaveProperty('revenue');
     expect(grossProfit?.components).toHaveProperty('cost_of_sales');
   });
 
-  it('carries an evidence descriptor naming account ids, never a category (ADR-034)', () => {
-    const revenue = computeMay().find((r) => r.key === 'revenue');
+  it('carries an evidence descriptor naming account ids, never a category (ADR-034)', async () => {
+    const revenue = (await computeMay()).find((r) => r.key === 'revenue');
     expect(revenue?.evidenceQuery?.kind).toBe('leaf');
 
     const descriptor = revenue?.evidenceQuery?.kind === 'leaf'
@@ -216,20 +182,20 @@ describe('a month of real ledger entries becomes figures', () => {
     expect(descriptor?.filters.account_ids).toContain(accountId('revenue'));
   });
 
-  it('points a derived metric at the snapshots it came from', () => {
-    const operatingProfit = computeMay().find((r) => r.key === 'operating_profit');
+  it('points a derived metric at the snapshots it came from', async () => {
+    const operatingProfit = (await computeMay()).find((r) => r.key === 'operating_profit');
     expect(operatingProfit?.evidenceQuery?.kind).toBe('derived');
   });
 });
 
 describe('determinism (§1.1)', () => {
-  it('produces byte-identical results from the same records', () => {
-    const first = JSON.stringify(computeMay());
-    const second = JSON.stringify(computeMay());
+  it('produces byte-identical results from the same records', async () => {
+    const first = JSON.stringify(await computeMay());
+    const second = JSON.stringify(await computeMay());
     expect(second).toBe(first);
   });
 
-  it('produces the same fingerprint from the same metadata', () => {
+  it('produces the same fingerprint from the same metadata', async () => {
     const inputs = {
       organizationId: orgId, engineVersion: ENGINE_VERSION,
       periodFrom: mayPeriod.id, periodTo: mayPeriod.id,
@@ -241,8 +207,8 @@ describe('determinism (§1.1)', () => {
     expect(computeFingerprint(inputs)).toBe(computeFingerprint(inputs));
   });
 
-  it('is unaffected by the order the aggregate arrives in', () => {
-    const cells = loadAggregate('2026-05-01', '2026-05-31');
+  it('is unaffected by the order the aggregate arrives in', async () => {
+    const cells = await loadAggregate('2026-05-01', '2026-05-31');
     const coverage = computeCoverage({
       period: mayPeriod,
       batches: [{
@@ -265,7 +231,7 @@ describe('determinism (§1.1)', () => {
 });
 
 describe('a period nothing covers is NULL with a reason, never zero (§1.5)', () => {
-  it('writes no_source_covers_period rather than a zero P&L', () => {
+  it('writes no_source_covers_period rather than a zero P&L', async () => {
     const emptyPeriod: PeriodRef = {
       ...mayPeriod, id: mayPeriod.id, periodStart: '2026-01-01', periodEnd: '2026-01-31',
       label: 'Jan 2026',
@@ -286,28 +252,23 @@ describe('a period nothing covers is NULL with a reason, never zero (§1.5)', ()
 });
 
 describe('the aggregate reflects only what the engine may see', () => {
-  it('drops a row the moment it is superseded', () => {
-    const before = loadAggregate('2026-05-01', '2026-05-31')
+  it('drops a row the moment it is superseded', async () => {
+    const before = (await loadAggregate('2026-05-01', '2026-05-31'))
       .filter((c) => c.source === 'ledger' && c.standardCategory === 'revenue')[0];
     expect(before?.amount).toBe('-20000.00');
 
-    const kept = one(`
-      select id from public.ledger_entries
-       where organization_id = '${orgId}' and amount = 20000.00 limit 1`);
-    const extra = one(`
-      insert into public.ledger_entries
-             (organization_id, entry_date, account_id, direction, amount, period_id, record_status)
-      values ('${orgId}', '2026-05-28', '${accountId('revenue')}', 'credit', 500.00,
-              '00000000-0000-0000-0000-000000000000', 'accepted')
-      returning id`);
+    const kept = (await orgCollection(fs(), orgId, 'ledger_entries').where('amount', '==', '20000.00').limit(1).get()).docs[0]!.id;
+    const extra = await seedLedgerEntry(orgId, {
+      date: '2026-05-28', accountId: accountId('revenue'), direction: 'credit', amount: '500.00',
+    });
 
-    const withExtra = loadAggregate('2026-05-01', '2026-05-31')
+    const withExtra = (await loadAggregate('2026-05-01', '2026-05-31'))
       .filter((c) => c.source === 'ledger' && c.standardCategory === 'revenue')[0];
     expect(withExtra?.amount).toBe('-20500.00');
 
-    adminSql(`update public.ledger_entries set superseded_by = '${kept}' where id = '${extra}'`);
+    await orgRow(fs(), orgId, 'ledger_entries', extra).update({ superseded_by: kept, superseded_at: new Date().toISOString() });
 
-    const after = loadAggregate('2026-05-01', '2026-05-31')
+    const after = (await loadAggregate('2026-05-01', '2026-05-31'))
       .filter((c) => c.source === 'ledger' && c.standardCategory === 'revenue')[0];
     expect(after?.amount, 'a superseded row leaves the figures at once').toBe('-20000.00');
   });

@@ -2,6 +2,7 @@ import 'server-only';
 import { QuotaExceeded, UpstreamError, toMotionError } from '@/core/errors';
 import { beginPortfolioTurn, finishPortfolioTurn } from '@/core/db/server-rpc';
 import { log } from '@/core/logging';
+import { ownPortfolioTurns } from '@/db/app/platform-reads';
 import { callModel, userQuestion, untrustedJson, type ModelCall, type ModelTransport } from '@/modules/ai';
 import {
   BRIEFING_PROMPT_VERSION, BRIEFING_TOOL, MAX_QUESTION_CHARS, SubmissionSchema, buildDigest, factForModel, groundBriefing, phrasesForModel,
@@ -189,16 +190,10 @@ function persistable(briefing: Briefing, digest: Digest): PersistedAnswer {
   };
 }
 
-/** The caller's own recent turns, newest first. RLS returns nobody else's. */
+/** The caller's own recent turns, newest first. The read policy returns nobody else's. */
 export async function listAdviserTurns(ctx: PortfolioContext, limit = 10): Promise<AdviserTurn[]> {
-  const { data, error } = await ctx.db
-    .from('portfolio_ai_turns')
-    .select('id, question, status, grounding_status, created_at, answer')
-    .eq('user_id', ctx.userId)
-    .order('created_at', { ascending: false })
-    .limit(limit);
-  if (error) throw toMotionError(error, ctx.requestId);
-  return ((data ?? []) as Array<{ id: string; question: string; status: AdviserTurn['status']; grounding_status: AdviserStatus | null; created_at: string; answer: PersistedAnswer | null }>)
+  const rows = await ownPortfolioTurns(ctx.db, limit);
+  return (rows as unknown as Array<{ id: string; question: string; status: AdviserTurn['status']; grounding_status: AdviserStatus | null; created_at: string; answer: PersistedAnswer | null }>)
     .map((row) => ({
       id: row.id, question: row.question, status: row.status, groundingStatus: row.grounding_status,
       createdAt: row.created_at, answer: row.answer,

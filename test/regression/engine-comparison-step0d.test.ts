@@ -5,7 +5,7 @@ import { ENGINE_VERSION } from '@/modules/financial-engine';
 import { calculateAndAlert } from '../fixtures/adr120-orgs';
 import { engineDump } from '../fixtures/engine-dump';
 import { identityDump, seedStep0dOrgs } from '../fixtures/step0d-orgs';
-import { adminSql } from '../integration/setup';
+import { removeSeeded } from '../fixtures/seed';
 
 /**
  * Step 0D's extension of the engine comparison: AI-read inputs, carried opening cash, mixed
@@ -24,13 +24,12 @@ it('seeds, computes and dumps the Step 0D comparison set', async () => {
     const dumps: Record<string, unknown> = {};
     for (const [key, id] of Object.entries(orgs)) {
       await calculateAndAlert(id);
-      dumps[key] = { ...engineDump(id), identities: identityDump(id) };
+      dumps[key] = { ...await engineDump(id), identities: await identityDump(id) };
     }
     mkdirSync(out, { recursive: true });
     writeFileSync(path.join(out, `${label}-step0d.json`),
       `${JSON.stringify({ engineVersion: ENGINE_VERSION, label, organisations: dumps }, null, 1)}\n`);
   } finally {
-    adminSql(`delete from public.organizations where id in (${Object.values(orgs).map((id) => `'${id}'`).join(',')});
-      delete from auth.users where email like '%@${tag}.%';`);
+    await removeSeeded(Object.values(orgs), `@${tag}.`);
   }
 }, 1_800_000);

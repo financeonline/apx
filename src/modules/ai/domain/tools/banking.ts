@@ -5,6 +5,7 @@ import {
   bankAccountCards, categoryShares, loadPeriodSummary, loadRecurringPayments,
 } from '@/modules/dashboard';
 import { Decimal } from '@/core/money';
+import { organisationOf } from '../../services/organisation';
 import type { PeriodRef } from '../periods';
 import { untrusted } from '../untrusted';
 import { count, fail, money, noData, ok, ratio, resolvePeriodArg, subject } from './envelope';
@@ -24,8 +25,7 @@ import type { ToolCallContext, ToolDefinition } from './types';
 const SOURCE = { source: 'imported_statements', connected: false } as const;
 
 async function baseCurrency(call: ToolCallContext): Promise<string> {
-  const { data } = await call.ctx.db.from('organizations').select('base_currency').eq('id', call.ctx.orgId!).maybeSingle();
-  return ((data as { base_currency?: string } | null)?.base_currency) ?? 'GBP';
+  return (await organisationOf(call.ctx, call.ctx.orgId)).baseCurrency;
 }
 
 const ref = (p: { id: string; label: string }): PeriodRef => ({ id: p.id, label: p.label });

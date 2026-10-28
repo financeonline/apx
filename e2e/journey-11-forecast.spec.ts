@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { cleanUpOwn, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, onboard, seedUser, signIn, uniqueName } from './fixtures';
+import { orgIdBySlug, periodOf, seedMonthlyFigures, seedRun } from './firestore';
 
 /**
  * The forecast page (REQ-FC-01/02/05; ADR-099).
@@ -15,15 +16,8 @@ const ORG = uniqueName('Forecast Ltd');
 test.afterAll(() => cleanUpOwn([ORG, `${ORG} Thin`], ['fc-owner', 'fc-thin']));
 
 /** Six steady months, written the way the engine writes them. */
-function seedHistory(orgId: string): void {
-  const runId = sql(`
-    with q as (
-      insert into public.calculation_runs
-             (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-      select '${orgId}', 'recalc_manual', '1.0.0', p.id, p.id, '2026-08-31', 'succeeded'
-        from public.fiscal_periods p
-       where p.organization_id = '${orgId}' and p.period_start = '2026-08-01'
-      returning id) select * from q`);
+async function seedHistory(orgId: string): Promise<void> {
+  const runId = await seedRun(orgId, { periodFrom: await periodOf(orgId, '2026-08-01'), asOf: '2026-08-31' });
 
   const monthly: Record<string, string> = {
     revenue: '10000', cost_of_sales: '4000', operating_expenses: '3000',
@@ -31,31 +25,12 @@ function seedHistory(orgId: string): void {
     receivables: '5000', payables: '2000', closing_cash: '20000',
   };
 
-  for (let i = 0; i < 6; i += 1) {
-    const start = `2026-${String(8 - i).padStart(2, '0')}-01`;
-    const periodId = sql(`
-      select id from public.fiscal_periods
-       where organization_id = '${orgId}' and period_start = '${start}'`);
-    sql(`update public.fiscal_periods set is_complete = true where id = '${periodId}'`);
-    for (const [key, value] of Object.entries(monthly)) {
-      const snapshotId = sql(`
-        with q as (
-          insert into public.metric_snapshots
-                 (organization_id, calculation_run_id, period_id, metric_key, dimension_type,
-                  value, unit, currency, basis, assurance_level, data_quality)
-          values ('${orgId}', '${runId}', '${periodId}', '${key}', 'none',
-                  ${value}, 'money', 'GBP', 'ledger', 'verified', '{"completeness": 1, "proxy": false, "warnings": [], "missing": []}'::jsonb)
-          returning id) select * from q`);
-      sql(`
-        insert into public.metric_current
-               (organization_id, period_id, metric_key, dimension_type, snapshot_id, calculation_run_id)
-        values ('${orgId}', '${periodId}', '${key}', 'none', '${snapshotId}', '${runId}')`);
-    }
-  }
+  const starts = Array.from({ length: 6 }, (_, i) => `2026-${String(8 - i).padStart(2, '0')}-01`);
+  await seedMonthlyFigures(orgId, { runId, periodStarts: starts, values: monthly });
 }
 
 test('an organisation with too little history is told so, and given no number', async ({ page }) => {
-  const owner = seedUser('fc-thin');
+  const owner = await seedUser('fc-thin');
   await signIn(page, owner);
   const slug = await onboard(page, `${ORG} Thin`);
 
@@ -76,11 +51,11 @@ test('an organisation with too little history is told so, and given no number', 
 });
 
 test('a forecast is shown as an expectation, never as a result', async ({ page }) => {
-  const owner = seedUser('fc-owner');
+  const owner = await seedUser('fc-owner');
   await signIn(page, owner);
   const slug = await onboard(page, ORG);
-  const orgId = sql(`select id from public.organizations where slug = '${slug}'`);
-  seedHistory(orgId);
+  const orgId = await orgIdBySlug(slug);
+  await seedHistory(orgId);
 
   // Reached from Money, because the primary navigation is fixed at seven items (§3.1, ADR-037).
   await page.goto(`/app/${slug}/money`);

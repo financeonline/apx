@@ -1,6 +1,6 @@
 import 'server-only';
 import { z } from 'zod';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { callApi } from '@/core/db';
 import { ValidationError } from '@/core/errors';
 
@@ -32,7 +32,7 @@ export const ProductInput = z.object({
   isActive: z.boolean().optional(),
 });
 
-export async function upsertProduct(db: SupabaseClient, orgId: string, input: unknown, requestId?: string): Promise<string> {
+export async function upsertProduct(db: Db, orgId: string, input: unknown, requestId?: string): Promise<string> {
   const p = parse(ProductInput, input);
   return callApi<string>(db, 'upsert_product', { p_org: orgId, p_input: {
     ...(p.id ? { id: p.id } : {}), name: p.name, kind: p.kind,
@@ -43,7 +43,7 @@ export async function upsertProduct(db: SupabaseClient, orgId: string, input: un
 
 export const ChannelInput = z.object({ id: uuid.optional(), name: z.string().trim().min(1).max(120), isActive: z.boolean().optional() });
 
-export async function upsertChannel(db: SupabaseClient, orgId: string, input: unknown, requestId?: string): Promise<string> {
+export async function upsertChannel(db: Db, orgId: string, input: unknown, requestId?: string): Promise<string> {
   const p = parse(ChannelInput, input);
   return callApi<string>(db, 'upsert_channel', { p_org: orgId, p_input: {
     ...(p.id ? { id: p.id } : {}), name: p.name, ...(p.isActive !== undefined ? { is_active: p.isActive } : {}),
@@ -60,7 +60,7 @@ export const CampaignInput = z.object({
   notes: z.string().trim().max(2000).optional(),
 });
 
-export async function upsertCampaign(db: SupabaseClient, orgId: string, input: unknown, requestId?: string): Promise<string> {
+export async function upsertCampaign(db: Db, orgId: string, input: unknown, requestId?: string): Promise<string> {
   const p = parse(CampaignInput, input);
   return callApi<string>(db, 'upsert_campaign', { p_org: orgId, p_input: {
     ...(p.id ? { id: p.id } : {}), name: p.name,
@@ -74,7 +74,7 @@ export async function upsertCampaign(db: SupabaseClient, orgId: string, input: u
 
 export const SpendInput = z.object({ campaignId: uuid, periodId: uuid, amount: Money, note: z.string().trim().max(500).optional() });
 
-export async function setCampaignSpend(db: SupabaseClient, orgId: string, input: unknown, requestId?: string): Promise<string> {
+export async function setCampaignSpend(db: Db, orgId: string, input: unknown, requestId?: string): Promise<string> {
   const p = parse(SpendInput, input);
   return callApi<string>(db, 'set_campaign_spend', {
     p_org: orgId, p_campaign: p.campaignId, p_period: p.periodId, p_amount: p.amount, p_note: p.note ?? null,
@@ -95,7 +95,7 @@ export const OpportunityInput = z.object({
   notes: z.string().trim().max(2000).optional(),
 }).refine((o) => o.id !== undefined || (o.name !== undefined && o.name.length > 0), { message: 'A name is required', path: ['name'] });
 
-export async function upsertOpportunity(db: SupabaseClient, orgId: string, input: unknown, requestId?: string): Promise<string> {
+export async function upsertOpportunity(db: Db, orgId: string, input: unknown, requestId?: string): Promise<string> {
   const p = parse(OpportunityInput, input);
   return callApi<string>(db, 'upsert_opportunity', { p_org: orgId, p_input: {
     ...(p.id ? { id: p.id } : {}),
@@ -123,7 +123,7 @@ export const InvoiceLinesInput = z.object({
 });
 
 /** Replaces an invoice's product lines. Σ lines ≤ the invoice's net amount is enforced in SQL. */
-export async function setInvoiceLines(db: SupabaseClient, input: unknown, requestId?: string): Promise<number> {
+export async function setInvoiceLines(db: Db, input: unknown, requestId?: string): Promise<number> {
   const p = parse(InvoiceLinesInput, input);
   return callApi<number>(db, 'set_invoice_lines', {
     p_invoice: p.invoiceId,

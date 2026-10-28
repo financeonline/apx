@@ -2,7 +2,7 @@
  * Calendar-month period maths, fiscal-year mapping and period completeness
  * (ADR-007, ADR-030, ADR-047.6, CD-09).
  *
- * Pure: no I/O, no Supabase, no React, and no ambient clock — "now" is always injected as a
+ * Pure: no I/O, no database, no React, and no ambient clock — "now" is always injected as a
  * `Clock` (ADR-030.5, FINANCIAL_ENGINE.md §1.1).
  */
 

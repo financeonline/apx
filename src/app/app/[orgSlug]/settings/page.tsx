@@ -1,5 +1,5 @@
 import { Building2, Globe, Landmark, Receipt, ScrollText, Store, TriangleAlert, Users } from 'lucide-react';
-import { getAccessContext, taxSettingsOf, vatStatusOf } from '@/modules/tenancy';
+import { getAccessContext, organizationOf, taxSettingsOf, vatStatusOf } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardHeader, CardBody } from '@/components/ui/surfaces';
 import { ShortcutLink } from '@/components/dashboard/department-card';
@@ -16,11 +16,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
   const ctx = await getAccessContext(orgSlug);
   requirePermission(ctx, 'settings.manage');
 
-  const { data } = await ctx.db
-    .from('organizations')
-    .select('name, timezone, fiscal_year_start_month, base_currency, country_code, status, settings')
-    .eq('id', ctx.orgId!)
-    .single();
+  const data = await organizationOf(ctx);
 
   const tax = taxSettingsOf(data?.settings);
 

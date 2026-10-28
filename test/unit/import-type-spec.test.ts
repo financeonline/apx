@@ -1,4 +1,4 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
@@ -6,56 +6,35 @@ import {
   pdfHandling, targetFor,
 } from '@/modules/imports';
 import { ValidationError } from '@/core/errors';
+import {
+  DOCUMENT_KINDS as DB_DOCUMENT_KINDS, IMPORT_TYPES as DB_IMPORT_TYPES, importTargetOf,
+} from '@/db/app/imports-shared';
+import { INVOICE_TYPES } from '@/db/app/imports-records';
 
 /**
  * One table decides each import type's record target, source-document kind and invoice side
- * (`IMPORT_TYPE_SPECS`). Its twin facts live in SQL, so this file reads the migrations themselves:
- * the wizard once kept a private copy of the target map that disagreed with `api.start_import_batch`
- * for receipts and both reports, and passed the import type as a `document_kind_enum` value — which
- * it is not for invoice lists and receipts. Neither drift was visible to a test that only compared
- * TypeScript with TypeScript.
+ * (`IMPORT_TYPE_SPECS`). Its twin facts live in the database layer (`src/db`, the port of the SQL
+ * enums and of `api.start_import_batch`), so this file checks the table against THOSE: the wizard
+ * once kept a private copy of the target map that disagreed with `api.start_import_batch` for
+ * receipts and both reports, and passed the import type as a `document_kind_enum` value — which it
+ * is not for invoice lists and receipts.
  */
 
-const MIGRATIONS = path.resolve(process.cwd(), 'supabase/migrations');
-const migrationFiles = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort();
-
-/** The newest definition of a function, as the database ends up with it. */
-function latestDefinition(fn: string): string {
-  let found: string | null = null;
-  for (const file of migrationFiles) {
-    const sql = readFileSync(path.join(MIGRATIONS, file), 'utf8');
-    const start = sql.search(new RegExp(`create (or replace )?function ${fn.replace('.', '\\.')}\\(`));
-    if (start >= 0) found = sql.slice(start);
-  }
-  if (found === null) throw new Error(`${fn} is not defined in any migration`);
-  return found.slice(0, found.indexOf('$$;') + 3);
-}
-
-/** The enum's values as the database ends up with them: its CREATE, plus every later ADD VALUE. */
+/** The enum values the database layer accepts. */
+const ENUMS: Record<string, readonly string[]> = {
+  import_type_enum: DB_IMPORT_TYPES,
+  document_kind_enum: DB_DOCUMENT_KINDS,
+  invoice_type_enum: INVOICE_TYPES,
+};
 function enumValues(name: string): string[] {
-  let values: string[] | null = null;
-  for (const file of migrationFiles) {
-    const sql = readFileSync(path.join(MIGRATIONS, file), 'utf8');
-    const match = new RegExp(`create type public\\.${name} as enum\\s*\\(([^)]*)\\)`).exec(sql);
-    if (match) values = [...match[1]!.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!);
-    for (const added of sql.matchAll(new RegExp(`alter type public\\.${name} add value (?:if not exists )?'([a-z_]+)'`, 'g'))) {
-      if (values !== null && !values.includes(added[1]!)) values.push(added[1]!);
-    }
-  }
-  if (values === null) throw new Error(`${name} is not defined`);
-  return values;
+  const values = ENUMS[name];
+  if (!values) throw new Error(`${name} is not defined`);
+  return [...values];
 }
 
-/** `api.start_import_batch`'s CASE, read as the database will execute it. */
+/** `api.start_import_batch`'s target for every type, as the database layer computes it. */
 function sqlTargets(): Record<string, string> {
-  const body = latestDefinition('api.start_import_batch');
-  const block = /v_target := case p_import_type([\s\S]*?)end::public\.import_target_enum/.exec(body);
-  if (!block) throw new Error('the target CASE was not found');
-  const cases = Object.fromEntries(
-    [...block[1]!.matchAll(/when '([a-z_]+)' then '([a-z_]+)'/g)].map((m) => [m[1]!, m[2]!]),
-  );
-  const fallback = /else '([a-z_]+)'/.exec(block[1]!)![1]!;
-  return Object.fromEntries(IMPORT_TYPES.map((t) => [t, cases[t] ?? fallback]));
+  return Object.fromEntries(DB_IMPORT_TYPES.map((t) => [t, importTargetOf(t)]));
 }
 
 describe('the import type table agrees with the database', () => {

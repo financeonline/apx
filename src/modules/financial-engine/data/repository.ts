@@ -1,6 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import { asDate, globalRow, orgCollection, orgRow } from '@/db/schema';
+import type { Db } from '@/db/types';
 import { aggregatePeriods, aggregateTransferLegs, bankDailyMovements, batchCoverage } from '@/core/db';
 import type {
   AccountRef, AggregateCell, AssuranceLevel, BankAccountRef, CounterpartyRef, OrganizationSettings, PeriodRef,
@@ -13,23 +13,49 @@ import type { OpeningJournalLine, PreJournalLine } from '../domain/receivables-i
 /**
  * The engine's reads (FINANCIAL_ENGINE.md §2.4 step 4).
  *
- * Everything runs inside a job under `withOrgScope`, so the client here is the service role and the
- * organization filter on every query is the tenant boundary rather than a hint. That is why each
- * function takes `orgId` explicitly and passes it to `.eq('organization_id', …)` without exception —
- * the lint rule `motion/no-unscoped-service-query` fails the build if one is forgotten.
+ * Everything runs inside a job under `withOrgScope`, so the handle here is the server's and the
+ * organisation named on every read is the tenant boundary rather than a hint. That is why each
+ * function takes `orgId` explicitly and reads `organizations/{orgId}/…` (FIRESTORE_DATA_MODEL.md §3)
+ * without exception: there is no query here that could reach another organisation's rows.
  *
- * The heavy lifting is a single SQL aggregation. The engine never iterates raw records: chunk cost
- * is proportional to periods × dimensions, not rows.
+ * The heavy lifting is the aggregation (`api_server.aggregate_periods`, computed over the rows by
+ * `src/db/app/engine-aggregate.ts`). The domain never iterates raw records: chunk cost is
+ * proportional to periods × dimensions, not rows.
+ *
+ * The SQL filters `record_status = 'accepted' and superseded_by is null` and `created_at <= instant`
+ * are applied exactly; where Firestore would need a composite index for a range on a second field,
+ * the equality filters run in the query and the range is applied to the rows here.
  */
 
-function unwrap<T>(data: T[] | null, error: unknown): T[] {
-  if (error) throw toMotionError(error);
-  return data ?? [];
+/** Firestore `in` takes at most 30 values. */
+const IN_LIMIT = 30;
+
+type DocumentData = FirebaseFirestore.DocumentData;
+type Query = FirebaseFirestore.Query;
+
+const rowsOf = async (q: Query): Promise<DocumentData[]> => (await q.get()).docs.map((d) => d.data());
+
+/** `record_status = 'accepted' and superseded_by is null` — the rows the engine may see at all. */
+const current = (q: Query): Query => q.where('record_status', '==', 'accepted').where('superseded_by', '==', null);
+
+/** `created_at <= p_aggregated_at`, compared as instants (the strings may differ in format). */
+function visibleAt(row: DocumentData, aggregatedAt: string): boolean {
+  const created = asDate(row.created_at);
+  const at = asDate(aggregatedAt);
+  return created !== null && at !== null && created.getTime() <= at.getTime();
 }
+
+function chunked<T>(values: readonly T[]): T[][] {
+  const out: T[][] = [];
+  for (let i = 0; i < values.length; i += IN_LIMIT) out.push(values.slice(i, i + IN_LIMIT));
+  return out;
+}
+
+const byId = (a: DocumentData, b: DocumentData): number => String(a.id).localeCompare(String(b.id));
 
 /** L0. One row per period × source × category × account × counterparty × bank account. */
 export async function loadAggregates(
-  scoped: SupabaseClient,
+  scoped: Db,
   orgId: string,
   from: string,
   to: string,
@@ -88,7 +114,7 @@ export interface TransferLeg {
 }
 
 export async function loadTransferLegs(
-  scoped: SupabaseClient, orgId: string, from: string, to: string, aggregatedAt: string,
+  scoped: Db, orgId: string, from: string, to: string, aggregatedAt: string,
 ): Promise<TransferLeg[]> {
   const rows = await aggregateTransferLegs(orgId, from, to, aggregatedAt);
   void scoped;
@@ -104,7 +130,7 @@ export async function loadTransferLegs(
 
 /** The declared export ranges coverage is computed from (§2.2). */
 export async function loadCoverageBatches(
-  scoped: SupabaseClient, orgId: string, from: string, to: string,
+  scoped: Db, orgId: string, from: string, to: string,
 ): Promise<CoverageBatch[]> {
   const rows = await batchCoverage(orgId, from, to);
   void scoped;
@@ -138,15 +164,11 @@ export async function loadCoverageBatches(
 }
 
 export async function loadPeriods(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<PeriodRef[]> {
-  const { data, error } = await scoped
-    .from('fiscal_periods')
-    .select('id, period_start, period_end, fiscal_year, fiscal_quarter, label, is_complete')
-    .eq('organization_id', orgId)
-    .order('period_start');
+  const rows = await rowsOf(orgCollection(scoped.fs, orgId, 'fiscal_periods').orderBy('period_start'));
 
-  return unwrap(data, error).map((r) => ({
+  return rows.map((r) => ({
     id: r.id as string,
     periodStart: r.period_start as string,
     periodEnd: r.period_end as string,
@@ -158,16 +180,11 @@ export async function loadPeriods(
 }
 
 export async function loadAccounts(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<AccountRef[]> {
-  // Paged (ADR-120 hardening): an account past the 1,000th row was invisible to every family —
-  // its ledger cells folded into nothing and a receivables account went unrecognised.
-  const rows = await paged(
-    (from, to) => scoped.from('accounts')
-      .select('id, code, name, standard_category, account_type, is_system, loan_security')
-      .eq('organization_id', orgId).order('id').range(from, to),
-    (r) => r,
-  );
+  // Every row (ADR-120 hardening: an account past PostgREST's 1,000th row was invisible to every
+  // family — its ledger cells folded into nothing and a receivables account went unrecognised).
+  const rows = (await rowsOf(orgCollection(scoped.fs, orgId, 'accounts'))).sort(byId);
 
   return rows.map((r) => ({
     id: r.id as string,
@@ -181,16 +198,11 @@ export async function loadAccounts(
 }
 
 export async function loadCounterparties(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<CounterpartyRef[]> {
-  // Paged (ADR-120 hardening): a purchase invoice's expense category comes from its supplier, so a
-  // supplier past the 1,000th row sent its purchases to `uncategorised` and out of `payables_days`.
-  const rows = await paged(
-    (from, to) => scoped.from('counterparties')
-      .select('id, name, kind, merged_into_id, default_expense_category')
-      .eq('organization_id', orgId).order('id').range(from, to),
-    (r) => r,
-  );
+  // Every row (ADR-120 hardening): a purchase invoice's expense category comes from its supplier, so
+  // a supplier past PostgREST's 1,000th row sent its purchases to `uncategorised`.
+  const rows = (await rowsOf(orgCollection(scoped.fs, orgId, 'counterparties'))).sort(byId);
 
   return rows.map((r) => ({
     id: r.id as string,
@@ -202,35 +214,25 @@ export async function loadCounterparties(
 }
 
 export async function loadBankAccounts(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<BankAccountRef[]> {
-  const rows = await paged(
-    (from, to) => scoped.from('bank_accounts')
-      .select('id, name, account_type, opening_balance, opening_balance_date, is_active')
-      .eq('organization_id', orgId).order('id').range(from, to),
-    (r) => r,
-  );
+  const rows = (await rowsOf(orgCollection(scoped.fs, orgId, 'bank_accounts'))).sort(byId);
 
   return rows.map((r) => ({
     id: r.id as string,
     name: r.name as string,
     accountType: r.account_type as BankAccountRef['accountType'],
-    openingBalance: r.opening_balance === null ? null : String(r.opening_balance),
-    openingBalanceDate: r.opening_balance_date as string | null,
+    openingBalance: r.opening_balance === null || r.opening_balance === undefined ? null : String(r.opening_balance),
+    openingBalanceDate: (r.opening_balance_date as string | null | undefined) ?? null,
     isActive: Boolean(r.is_active),
   }));
 }
 
 export async function loadSettings(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<OrganizationSettings> {
-  const { data, error } = await scoped
-    .from('organizations')
-    .select('base_currency, fiscal_year_start_month, timezone, settings')
-    .eq('id', orgId)
-    .maybeSingle();
-
-  if (error) throw toMotionError(error);
+  const snap = await globalRow(scoped.fs, 'organizations', orgId).get();
+  const data = snap.exists ? snap.data()! : null;
   const settings = (data?.settings ?? {}) as Record<string, unknown>;
 
   return {
@@ -267,17 +269,10 @@ export async function loadSettings(
  * `alerts.evaluate` already takes its instant from this row (§8.3); the run loop now does too.
  */
 export async function loadRunStartedAt(
-  scoped: SupabaseClient, orgId: string, runId: string,
+  scoped: Db, orgId: string, runId: string,
 ): Promise<string> {
-  const { data, error } = await scoped
-    .from('calculation_runs')
-    .select('started_at')
-    .eq('organization_id', orgId)
-    .eq('id', runId)
-    .maybeSingle();
-
-  if (error) throw toMotionError(error);
-  const startedAt = (data as { started_at?: string | null } | null)?.started_at ?? null;
+  const snap = await orgRow(scoped.fs, orgId, 'calculation_runs', runId).get();
+  const startedAt = snap.exists ? ((snap.get('started_at') as string | null | undefined) ?? null) : null;
   if (startedAt === null) {
     // Falling back to the process clock is what this function exists to stop, so it refuses instead:
     // a run that cannot say which instant it read at cannot write a reproducible descriptor (§2.4
@@ -312,32 +307,20 @@ export interface FingerprintSources {
  * Asked once per run, over the two sources a P&L is ever computed from.
  */
 export async function loadCostOfSalesEverUsed(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<boolean> {
-  const { data: accounts, error: accountsError } = await scoped
-    .from('accounts')
-    .select('id, is_system')
-    .eq('organization_id', orgId)
-    .eq('standard_category', 'cost_of_sales');
-  if (accountsError) throw toMotionError(accountsError);
-
-  const rows = (accounts ?? []) as Array<{ id: string; is_system: boolean }>;
+  const rows = (await rowsOf(orgCollection(scoped.fs, orgId, 'accounts')
+    .where('standard_category', '==', 'cost_of_sales'))) as Array<{ id: string; is_system: boolean }>;
   // An account the customer created is the answer on its own: they made it deliberately.
   if (rows.some((account) => !account.is_system)) return true;
   if (rows.length === 0) return false;
 
   const ids = rows.map((account) => account.id);
   for (const table of ['ledger_entries', 'period_balances'] as const) {
-    const { data, error } = await scoped
-      .from(table)
-      .select('id')
-      .eq('organization_id', orgId)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null)
-      .in('account_id', ids)
-      .limit(1);
-    if (error) throw toMotionError(error);
-    if ((data ?? []).length > 0) return true;
+    for (const chunk of chunked(ids)) {
+      const hit = await current(orgCollection(scoped.fs, orgId, table)).where('account_id', 'in', chunk).limit(1).get();
+      if (!hit.empty) return true;
+    }
   }
 
   return false;
@@ -353,29 +336,21 @@ export async function loadCostOfSalesEverUsed(
  * turning a line the ledger never stated into a zero and a 100% margin.
  */
 export async function loadCostOfSalesInInvoices(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<boolean> {
-  const { data: suppliers, error: suppliersError } = await scoped
-    .from('counterparties')
-    .select('id')
-    .eq('organization_id', orgId)
-    .eq('default_expense_category', 'cost_of_sales');
-  if (suppliersError) throw toMotionError(suppliersError);
-  const supplierIds = (suppliers ?? []).map((c) => c.id as string);
+  const suppliers = await rowsOf(orgCollection(scoped.fs, orgId, 'counterparties')
+    .where('default_expense_category', '==', 'cost_of_sales'));
+  const supplierIds = suppliers.map((c) => c.id as string);
   if (supplierIds.length === 0) return false;
 
-  const { data: purchases, error: purchasesError } = await scoped
-    .from('invoices')
-    .select('id')
-    .eq('organization_id', orgId)
-    .eq('record_status', 'accepted')
-    .is('superseded_by', null)
-    .neq('status', 'void')
-    .in('invoice_type', ['purchase', 'purchase_credit_note'])
-    .in('counterparty_id', supplierIds)
-    .limit(1);
-  if (purchasesError) throw toMotionError(purchasesError);
-  return (purchases ?? []).length > 0;
+  // One `in` per query: the supplier list is the query's, the type and void filters are applied here.
+  for (const chunk of chunked(supplierIds)) {
+    const purchases = await rowsOf(current(orgCollection(scoped.fs, orgId, 'invoices')).where('counterparty_id', 'in', chunk));
+    if (purchases.some((i) => i.status !== 'void' && (i.invoice_type === 'purchase' || i.invoice_type === 'purchase_credit_note'))) {
+      return true;
+    }
+  }
+  return false;
 }
 
 /**
@@ -390,7 +365,7 @@ export async function loadCostOfSalesInInvoices(
  * because a period id says nothing about when the period was.
  */
 export async function loadFirstPeriodWithData(
-  scoped: SupabaseClient, orgId: string, allPeriods: readonly PeriodRef[],
+  scoped: Db, orgId: string, allPeriods: readonly PeriodRef[],
 ): Promise<string | null> {
   const dated = [
     ['ledger_entries', 'entry_date'],
@@ -401,27 +376,13 @@ export async function loadFirstPeriodWithData(
   const periodIds = new Set<string>();
 
   for (const [table, dateColumn] of dated) {
-    const { data } = await scoped
-      .from(table)
-      .select(`period_id, ${dateColumn}`)
-      .eq('organization_id', orgId)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null)
-      .order(dateColumn, { ascending: true })
-      .limit(1);
-    const periodId = (data?.[0] as { period_id?: string } | undefined)?.period_id;
+    const first = await current(orgCollection(scoped.fs, orgId, table)).orderBy(dateColumn, 'asc').limit(1).get();
+    const periodId = first.docs[0]?.get('period_id') as string | undefined;
     if (periodId !== undefined) periodIds.add(periodId);
   }
 
-  const { data: balances } = await scoped
-    .from('period_balances')
-    .select('period_id')
-    .eq('organization_id', orgId)
-    .eq('record_status', 'accepted')
-    .is('superseded_by', null);
-  for (const row of (balances ?? []) as Array<{ period_id: string }>) {
-    periodIds.add(row.period_id);
-  }
+  const balances = await current(orgCollection(scoped.fs, orgId, 'period_balances')).select('period_id').get();
+  for (const row of balances.docs) periodIds.add(String(row.get('period_id')));
 
   for (const period of allPeriods) {
     if (periodIds.has(period.id)) return period.id;
@@ -430,47 +391,36 @@ export async function loadFirstPeriodWithData(
 }
 
 export async function loadFingerprintSources(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<FingerprintSources> {
+  const fs = scoped.fs;
   const [events, accounts, counterparties, history, attestations] = await Promise.all([
-    scoped.from('record_status_events').select('at').eq('organization_id', orgId)
-      .order('at', { ascending: false }).limit(1),
-    scoped.from('accounts').select('id, standard_category').eq('organization_id', orgId),
-    scoped.from('counterparties').select('id, merged_into_id').eq('organization_id', orgId)
-      .not('merged_into_id', 'is', null),
-    scoped.from('category_history').select('id, bank_transaction_id').eq('organization_id', orgId)
-      .is('valid_to', null),
+    rowsOf(orgCollection(fs, orgId, 'record_status_events').orderBy('at', 'desc').limit(1)),
+    rowsOf(orgCollection(fs, orgId, 'accounts').select('id', 'standard_category')),
+    rowsOf(orgCollection(fs, orgId, 'counterparties').where('merged_into_id', '!=', null).select('id', 'merged_into_id')),
+    rowsOf(orgCollection(fs, orgId, 'category_history').where('valid_to', '==', null).select('id', 'bank_transaction_id')),
     // Step 0F: an owner's completeness attestation changes figures without moving any record.
-    scoped.from('report_completeness_attestations').select('id, import_batch_id, period_start')
-      .eq('organization_id', orgId).order('attested_at').order('id'),
+    rowsOf(orgCollection(fs, orgId, 'report_completeness_attestations').select('id', 'import_batch_id', 'period_start', 'attested_at')),
   ]);
+  // `order by attested_at, id`: the last in time order is the current one.
+  attestations.sort((a, b) => (asDate(a.attested_at)?.getTime() ?? 0) - (asDate(b.attested_at)?.getTime() ?? 0)
+    || String(a.id).localeCompare(String(b.id)));
 
   const rowCounts: Record<string, number> = {};
   for (const table of ['ledger_entries', 'period_balances', 'invoices', 'bank_transactions'] as const) {
-    const { count } = await scoped
-      .from(table)
-      .select('id', { count: 'exact', head: true })
-      .eq('organization_id', orgId)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null);
-    rowCounts[table] = count ?? 0;
+    const counted = await current(orgCollection(fs, orgId, table)).count().get();
+    rowCounts[table] = counted.data().count;
   }
 
   return {
-    maxRecordEventAt: (events.data?.[0]?.at as string | undefined) ?? null,
+    maxRecordEventAt: (events[0]?.at as string | undefined) ?? null,
     rowCounts,
-    accountCategories: Object.fromEntries(
-      (accounts.data ?? []).map((a) => [a.id as string, a.standard_category as string]),
-    ),
-    counterpartyMerges: Object.fromEntries(
-      (counterparties.data ?? []).map((c) => [c.id as string, c.merged_into_id as string]),
-    ),
-    categoryHistoryHeads: Object.fromEntries(
-      (history.data ?? []).map((h) => [h.bank_transaction_id as string, h.id as string]),
-    ),
+    accountCategories: Object.fromEntries(accounts.map((a) => [a.id as string, a.standard_category as string])),
+    counterpartyMerges: Object.fromEntries(counterparties.map((c) => [c.id as string, c.merged_into_id as string])),
+    categoryHistoryHeads: Object.fromEntries(history.map((h) => [h.bank_transaction_id as string, h.id as string])),
     // The current attestation per (import, month): the last in time order.
     completenessHeads: Object.fromEntries(
-      (attestations.data ?? []).map((a) => [`${a.import_batch_id as string}|${a.period_start as string}`, a.id as string]),
+      attestations.map((a) => [`${a.import_batch_id as string}|${a.period_start as string}`, a.id as string]),
     ),
   };
 }
@@ -493,26 +443,36 @@ export interface StoredObservation {
 }
 
 export async function loadCurrentObservations(
-  scoped: SupabaseClient, orgId: string, periodIds: readonly string[], metricKeys: readonly string[],
+  scoped: Db, orgId: string, periodIds: readonly string[], metricKeys: readonly string[],
 ): Promise<StoredObservation[]> {
   if (periodIds.length === 0 || metricKeys.length === 0) return [];
-  // Paged: the comparison set (every variance base × dimension × up to thirteen periods) passes
-  // PostgREST's silent 1,000-row cap for any organisation with a real chart of accounts (ADR-120).
-  const rows = await paged(
-    (from, to) => scoped
-      .from('metric_current')
-      .select('period_id, metric_key, dimension_type, dimension_id, dimension_key, snapshot_id, metric_snapshots!inner(value, basis, assurance_level, data_quality)')
-      .eq('organization_id', orgId)
-      .in('period_id', [...periodIds])
-      .in('metric_key', [...metricKeys])
-      .order('period_id').order('metric_key').order('dimension_type')
-      .order('dimension_id', { nullsFirst: true }).order('dimension_key', { nullsFirst: true })
-      .range(from, to),
-    (r) => r,
-  );
+  // Every row (ADR-120: the comparison set — every variance base × dimension × up to thirteen
+  // periods — passed PostgREST's silent 1,000-row cap). The pointer is read by period, the metric
+  // keys are applied here (one `in` per query), and the snapshot is a second read (the old
+  // `metric_snapshots!inner` embed: a pointer whose snapshot is missing is dropped).
+  const fs = scoped.fs;
+  const keys = new Set(metricKeys);
+  const pointers = (await Promise.all(chunked([...new Set(periodIds)]).map((chunk) =>
+    rowsOf(orgCollection(fs, orgId, 'metric_current').where('period_id', 'in', chunk))))).flat()
+    .filter((r) => keys.has(String(r.metric_key)));
+  const nullsFirst = (a: unknown, b: unknown): number => {
+    if (a === b) return 0;
+    if (a === null || a === undefined) return -1;
+    if (b === null || b === undefined) return 1;
+    return String(a) < String(b) ? -1 : 1;
+  };
+  pointers.sort((a, b) => nullsFirst(a.period_id, b.period_id) || nullsFirst(a.metric_key, b.metric_key)
+    || nullsFirst(a.dimension_type, b.dimension_type) || nullsFirst(a.dimension_id, b.dimension_id)
+    || nullsFirst(a.dimension_key, b.dimension_key));
+  const snapshotIds = [...new Set(pointers.map((r) => String(r.snapshot_id)))];
+  const snapshots = new Map<string, DocumentData>();
+  for (let i = 0; i < snapshotIds.length; i += 300) {
+    const refs = snapshotIds.slice(i, i + 300).map((id) => orgRow(fs, orgId, 'metric_snapshots', id));
+    for (const snap of await fs.getAll(...refs)) if (snap.exists) snapshots.set(snap.id, snap.data()!);
+  }
 
-  return rows.flatMap((r) => {
-    const s = r.metric_snapshots as unknown as { value: unknown; basis: string; assurance_level: string; data_quality: StoredObservation['dataQuality'] } | null;
+  return pointers.flatMap((r) => {
+    const s = snapshots.get(String(r.snapshot_id)) as { value: unknown; basis: string; assurance_level: string; data_quality: StoredObservation['dataQuality'] } | undefined;
     if (!s) return [];
     return [{
       periodId: r.period_id as string,
@@ -534,26 +494,6 @@ export async function loadCurrentObservations(
 // ---------------------------------------------------------------------------------------------
 
 /**
- * PostgREST returns at most `max_rows` (1,000) rows per request and truncates SILENTLY (the Phase 15
- * lesson, ADR-114): a list read in one request is a list that is quietly short past the thousandth
- * row. Every raw-row reader here pages until a short page, ordered by id so pages never overlap.
- */
-const PAGE = 1000;
-
-async function paged<T>(
-  fetchPage: (from: number, to: number) => PromiseLike<{ data: unknown[] | null; error: unknown }>,
-  map: (row: Record<string, unknown>) => T,
-): Promise<T[]> {
-  const out: T[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await fetchPage(from, from + PAGE - 1);
-    const rows = unwrap(data as Record<string, unknown>[] | null, error);
-    out.push(...rows.map(map));
-    if (rows.length < PAGE) return out;
-  }
-}
-
-/**
  * The invoice rows receivables and payables are aged from (§3.4).
  *
  * The CURRENT row of every accepted, non-superseded invoice (ADR-047.10) visible at the chunk's
@@ -566,20 +506,12 @@ async function paged<T>(
  * copy of it. Recorded in ADR-120 as a known scaling finding.
  */
 export async function loadAgingInvoices(
-  scoped: SupabaseClient, orgId: string, issuedBy: string, aggregatedAt: string,
+  scoped: Db, orgId: string, issuedBy: string, aggregatedAt: string,
 ): Promise<AgingInvoice[]> {
-  return paged(
-    (from, to) => scoped
-      .from('invoices')
-      .select('id, invoice_type, counterparty_id, issue_date, due_date, total_amount, amount_paid, balance_due, paid_date, status')
-      .eq('organization_id', orgId)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null)
-      .lte('created_at', aggregatedAt)
-      .lte('issue_date', issuedBy)
-      .order('id')
-      .range(from, to),
-    (r) => ({
+  const rows = (await rowsOf(current(orgCollection(scoped.fs, orgId, 'invoices'))))
+    .filter((r) => visibleAt(r, aggregatedAt) && String(r.issue_date) <= issuedBy)
+    .sort(byId);
+  return rows.map((r) => ({
       id: r.id as string,
       invoiceType: r.invoice_type as AgingInvoice['invoiceType'],
       counterpartyId: (r.counterparty_id as string | null) ?? null,
@@ -590,8 +522,7 @@ export async function loadAgingInvoices(
       balanceDue: String(r.balance_due),
       paidDate: (r.paid_date as string | null) ?? null,
       status: r.status as AgingInvoice['status'],
-    }),
-  );
+    }));
 }
 
 /**
@@ -600,27 +531,18 @@ export async function loadAgingInvoices(
  * from March knows nothing of what was owed in February.
  */
 export async function loadOpeningJournal(
-  scoped: SupabaseClient, orgId: string, aggregatedAt: string,
+  scoped: Db, orgId: string, aggregatedAt: string,
 ): Promise<OpeningJournalLine[] | null> {
-  const lines = await paged(
-    (from, to) => scoped
-      .from('ledger_entries')
-      .select('id, account_id, period_id, entry_date, direction, amount')
-      .eq('organization_id', orgId)
-      .eq('is_opening_balance', true)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null)
-      .lte('created_at', aggregatedAt)
-      .order('id')
-      .range(from, to),
-    (r) => ({
-      accountId: r.account_id as string,
-      periodId: r.period_id as string,
-      entryDate: r.entry_date as string,
-      debit: r.direction === 'debit' ? String(r.amount) : '0',
-      credit: r.direction === 'credit' ? String(r.amount) : '0',
-    }),
-  );
+  const rows = (await rowsOf(current(orgCollection(scoped.fs, orgId, 'ledger_entries')).where('is_opening_balance', '==', true)))
+    .filter((r) => visibleAt(r, aggregatedAt))
+    .sort(byId);
+  const lines = rows.map((r) => ({
+    accountId: r.account_id as string,
+    periodId: r.period_id as string,
+    entryDate: r.entry_date as string,
+    debit: r.direction === 'debit' ? String(r.amount) : '0',
+    credit: r.direction === 'credit' ? String(r.amount) : '0',
+  }));
   return lines.length === 0 ? null : lines;
 }
 
@@ -629,27 +551,17 @@ export async function loadOpeningJournal(
  * (ADR-124 D-4): the part of a month that an opening journal dated inside it already contains.
  */
 export async function loadLinesBeforeJournal(
-  scoped: SupabaseClient, orgId: string, periodId: string, journalDate: string, aggregatedAt: string,
+  scoped: Db, orgId: string, periodId: string, journalDate: string, aggregatedAt: string,
 ): Promise<PreJournalLine[]> {
-  return paged(
-    (from, to) => scoped
-      .from('ledger_entries')
-      .select('id, account_id, direction, amount')
-      .eq('organization_id', orgId)
-      .eq('period_id', periodId)
-      .lt('entry_date', journalDate)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null)
-      .lte('created_at', aggregatedAt)
-      .order('id')
-      .range(from, to),
-    (r) => ({
-      journalDate,
-      accountId: r.account_id as string,
-      debit: r.direction === 'debit' ? String(r.amount) : '0',
-      credit: r.direction === 'credit' ? String(r.amount) : '0',
-    }),
-  );
+  const rows = (await rowsOf(current(orgCollection(scoped.fs, orgId, 'ledger_entries')).where('period_id', '==', periodId)))
+    .filter((r) => String(r.entry_date) < journalDate && visibleAt(r, aggregatedAt))
+    .sort(byId);
+  return rows.map((r) => ({
+    journalDate,
+    accountId: r.account_id as string,
+    debit: r.direction === 'debit' ? String(r.amount) : '0',
+    credit: r.direction === 'credit' ? String(r.amount) : '0',
+  }));
 }
 
 /**
@@ -664,30 +576,26 @@ export async function loadLinesBeforeJournal(
  * has no score. A different config than the deployed one means its history is re-scored.
  */
 export async function loadLatestHealthConfigVersion(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<string | null> {
-  const { data, error } = await scoped
-    .from('health_scores')
-    .select('config_version, created_at')
-    .eq('organization_id', orgId)
-    .order('created_at', { ascending: false })
-    .limit(1);
-  const rows = unwrap(data, error) as Array<{ config_version: string }>;
-  return rows[0]?.config_version ?? null;
+  const rows = await rowsOf(orgCollection(scoped.fs, orgId, 'health_scores').orderBy('created_at', 'desc').limit(1));
+  return (rows[0]?.config_version as string | undefined) ?? null;
+}
+
+/**
+ * The organisation's latest succeeded run: `order by finished_at desc nulls last`. Firestore sorts
+ * null first ascending, so descending puts a null `finished_at` last, as PostgreSQL did.
+ */
+async function latestSucceededRun(scoped: Db, orgId: string): Promise<DocumentData | null> {
+  const rows = await rowsOf(orgCollection(scoped.fs, orgId, 'calculation_runs')
+    .where('status', '==', 'succeeded').orderBy('finished_at', 'desc').limit(1));
+  return rows[0] ?? null;
 }
 
 export async function loadLatestEngineVersion(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<string | null> {
-  const { data, error } = await scoped
-    .from('calculation_runs')
-    .select('engine_version, finished_at')
-    .eq('organization_id', orgId)
-    .eq('status', 'succeeded')
-    .order('finished_at', { ascending: false, nullsFirst: false })
-    .limit(1);
-  const rows = unwrap(data, error) as Array<{ engine_version: string }>;
-  return rows[0]?.engine_version ?? null;
+  return ((await latestSucceededRun(scoped, orgId))?.engine_version as string | undefined) ?? null;
 }
 
 /**
@@ -695,17 +603,9 @@ export async function loadLatestEngineVersion(
  * month that was current when it last ran. Null for an organisation never run.
  */
 export async function loadLatestRunAsOf(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<string | null> {
-  const { data, error } = await scoped
-    .from('calculation_runs')
-    .select('as_of, finished_at')
-    .eq('organization_id', orgId)
-    .eq('status', 'succeeded')
-    .order('finished_at', { ascending: false, nullsFirst: false })
-    .limit(1);
-  const rows = unwrap(data, error) as Array<{ as_of: string | null }>;
-  return rows[0]?.as_of ?? null;
+  return ((await latestSucceededRun(scoped, orgId))?.as_of as string | null | undefined) ?? null;
 }
 
 /** A committed bank statement: its declared range and the balances printed on it (IMP-BAL). */
@@ -731,35 +631,28 @@ export interface StatementBatch {
  * reading never reaches these columns" (migration 20260905000032).
  */
 export async function loadStatements(
-  scoped: SupabaseClient, orgId: string,
+  scoped: Db, orgId: string,
 ): Promise<StatementBatch[]> {
-  return paged(
-    (from, to) => scoped
-      .from('import_batches')
-      .select('id, bank_account_id, period_start, period_end, committed_at, statement_opening_balance, statement_closing_balance, batch_issues, extraction_method')
-      .eq('organization_id', orgId)
-      .eq('status', 'committed')
-      .eq('target_table', 'bank_transactions')
-      .not('bank_account_id', 'is', null)
-      .order('id')
-      .range(from, to),
-    (r) => {
-      const issues = Array.isArray(r.batch_issues) ? (r.batch_issues as Array<{ code?: unknown }>) : [];
-      return {
-        batchId: r.id as string,
-        bankAccountId: r.bank_account_id as string,
-        periodStart: r.period_start as string,
-        periodEnd: r.period_end as string,
-        committedAt: String(r.committed_at),
-        openingBalance: r.statement_opening_balance === null ? null : String(r.statement_opening_balance),
-        closingBalance: r.statement_closing_balance === null ? null : String(r.statement_closing_balance),
-        unreconciled: issues.some((issue) => issue.code === 'IMP-BAL-006' || issue.code === 'IMP-BAL-007'),
-        // ADR-130: what commit stamped on this statement's rows, from the same two facts.
-        assurance: statementRecordAssurance(
-          r.extraction_method === null || r.extraction_method === undefined ? null : String(r.extraction_method),
-          issues.some((issue) => issue.code === 'IMP-BAL-006' || issue.code === 'IMP-BAL-007'),
-        ),
-      };
-    },
-  );
+  const rows = (await rowsOf(orgCollection(scoped.fs, orgId, 'import_batches')
+    .where('status', '==', 'committed').where('target_table', '==', 'bank_transactions')))
+    .filter((r) => r.bank_account_id !== null && r.bank_account_id !== undefined)
+    .sort(byId);
+  return rows.map((r) => {
+    const issues = Array.isArray(r.batch_issues) ? (r.batch_issues as Array<{ code?: unknown }>) : [];
+    return {
+      batchId: r.id as string,
+      bankAccountId: r.bank_account_id as string,
+      periodStart: r.period_start as string,
+      periodEnd: r.period_end as string,
+      committedAt: String(r.committed_at),
+      openingBalance: r.statement_opening_balance == null ? null : String(r.statement_opening_balance),
+      closingBalance: r.statement_closing_balance == null ? null : String(r.statement_closing_balance),
+      unreconciled: issues.some((issue) => issue.code === 'IMP-BAL-006' || issue.code === 'IMP-BAL-007'),
+      // ADR-130: what commit stamped on this statement's rows, from the same two facts.
+      assurance: statementRecordAssurance(
+        r.extraction_method === null || r.extraction_method === undefined ? null : String(r.extraction_method),
+        issues.some((issue) => issue.code === 'IMP-BAL-006' || issue.code === 'IMP-BAL-007'),
+      ),
+    };
+  });
 }

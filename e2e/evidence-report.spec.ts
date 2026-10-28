@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { seededOrgSlug, sql } from './fixtures';
+import { seededOrgSlug } from './fixtures';
+import { jobsOf, orgIdBySlug } from './firestore';
 
 /**
  * The Monthly Management Report on screen and as a PDF (ADR-024; plan Phase 13).
@@ -47,11 +48,8 @@ test.describe('the monthly report', () => {
 
     // The job is queued, not run inline: the button asks, the worker renders.
     expect(
-      Number(sql(`
-        select count(*) from public.jobs j
-         join public.organizations o on o.id = j.organization_id
-        where o.slug = '${slug}' and j.job_type = 'report.render'
-          and j.payload->>'periodId' = '${periodId}'`).trim()),
+      (await jobsOf(await orgIdBySlug(slug))).filter((j) => j.job_type === 'report.render'
+        && (j.payload as { periodId?: unknown } | null)?.periodId === periodId).length,
       'a render was queued',
     ).toBeGreaterThan(0);
   });

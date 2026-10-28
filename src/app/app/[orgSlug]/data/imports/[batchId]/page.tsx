@@ -4,7 +4,9 @@ import {
   ClipboardCheck, Copy, FileSearch, FileText, FileUp, ListChecks, Scale, ScanText, Sparkles, Table as TableIcon, TriangleAlert,
 } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
-import { loadBatchReview, loadReportCompleteness, type BatchIssueGroup } from '@/modules/imports';
+import {
+  documentHasTextLayer, listExpenseAccounts, loadBatchReview, loadReportCompleteness, organizationFacts, type BatchIssueGroup,
+} from '@/modules/imports';
 import { PageHeader, Card, CardBody, Badge, Banner, IconBadge } from '@/components/ui/surfaces';
 import { THead, TBody, TR, TD } from '@/components/ui/table';
 import { Table } from '@/components/ui/shadcn';
@@ -163,19 +165,18 @@ export default async function ReviewBatchPage({
 
   // §5.4: "Read with AI" exists only for a text-layer PDF the deterministic parser could not read,
   // in an organisation that has enabled it. The job re-checks all three when it runs.
-  const [{ data: documentRow }, { data: orgRow }] = await Promise.all([
-    ctx.db.from('source_documents').select('has_text_layer').eq('organization_id', ctx.orgId!).eq('id', review.batch.sourceDocumentId).maybeSingle(),
-    ctx.db.from('organizations').select('features').eq('id', ctx.orgId!).maybeSingle(),
+  const [hasTextLayer, org] = await Promise.all([
+    documentHasTextLayer(ctx.db, ctx.orgId!, review.batch.sourceDocumentId),
+    organizationFacts(ctx.db, ctx.orgId!),
   ]);
-  const aiFlag = (orgRow as { features: Record<string, unknown> } | null)?.features?.ai_pdf_extraction === true;
+  const aiFlag = org.features.ai_pdf_extraction === true;
   const isReceipts = review.batch.importType === 'receipts';
   const aiReadingOffered = !isReceipts && review.batch.status === 'failed' && review.batch.extractionMethod === 'pdf_text'
-    && (documentRow as { has_text_layer: boolean | null } | null)?.has_text_layer === true && aiFlag;
+    && hasTextLayer === true && aiFlag;
   // ADR-150: a receipt photo or PDF waits here to be read; the reviewer names the expense account.
   const receiptWaiting = isReceipts && review.batch.status === 'failed' && review.batch.extractionMethod === 'pdf_text';
   const expenseAccounts = receiptWaiting && aiFlag
-    ? (((await ctx.db.from('accounts').select('id, code, name').eq('organization_id', ctx.orgId!)
-      .eq('account_type', 'expense').eq('is_active', true).order('name')).data ?? []) as Array<{ id: string; code: string | null; name: string }>)
+    ? (await listExpenseAccounts(ctx.db, ctx.orgId!))
       .map((a) => ({ id: a.id, label: a.code ? `${a.code} · ${a.name}` : a.name }))
     : [];
   const balancesNeeded = review.batch.status === 'awaiting_review' && review.batch.targetTable === 'bank_transactions'

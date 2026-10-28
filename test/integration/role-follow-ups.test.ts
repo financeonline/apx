@@ -1,21 +1,25 @@
+import { createHash } from 'node:crypto';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { isMotionError } from '@/core/errors';
-import type { EffectiveRole } from '@/core/permissions';
 import { assignAction, assignableOwners } from '@/modules/actions';
 import { loadHome } from '@/modules/dashboard';
 import { loadDataCompliance } from '@/modules/departments';
 import { listNotifications, unreadCount } from '@/modules/engagement';
 import { getMonthlyReport, getMonthlySummary, listAvailable } from '@/modules/reporting';
 import { checkAffordability, listScenarios } from '@/modules/scenarios';
+import { decideAccessRequest, requestAccess, type AccessContext } from '@/modules/tenancy';
+import { auth } from '@/db/firestore';
+import { periodId as periodIdOf } from '@/db/app/shared';
+import { globalRow, orgRow, overrideId } from '@/db/schema';
+import type { Db } from '@/db/types';
+import { clientFor, createAuthUser, fs, rpc as callRpc, sqlstate } from './setup';
 import {
-  agreedPermissions, decideAccessRequest, requestAccess, type AccessContext,
-} from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
+  addMember, assign, ctxFor as contextFor, dropOrg, dropPlatformUser, makePlatformUser, rawCount, seedRow,
+} from './tenancy-fixtures';
 
 /**
- * ADR-172's follow-ups against the database: what a 3rd party, an accountant and a Financial Analyst
- * meet on the pages that broke when the detail tables closed to the 3rd party.
+ * ADR-172's follow-ups against the data layer: what a 3rd party, an accountant and a Financial
+ * Analyst meet on the pages that broke when the detail tables closed to the 3rd party.
  *
  *   - Home: a 3rd party in a company WITH records is shown its figures, never "upload your first
  *     file" (`api.has_accepted_records`), and the Monthly Management Report opens without the Action
@@ -31,7 +35,7 @@ import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
  */
 
 const RUN = `f${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.followups.itest`;
+const DOMAIN = `${RUN}.followups.itest.motion`;
 
 type Who = 'owner' | 'accountant' | 'client' | 'third' | 'analyst';
 const ids = {} as Record<Who, string>;
@@ -41,21 +45,13 @@ let periodId: string;
 let actionId: string;
 
 const email = (who: Who) => `${who}@${DOMAIN}`;
-const db = (who: Who): SupabaseClient => clientFor(ids[who], { email: email(who) });
-const rpc = (who: Who, fn: string, args: Record<string, unknown>) => db(who).schema('api').rpc(fn, args);
+const db = (who: Who): Db => clientFor(ids[who], { email: email(who) });
+const rpc = (who: Who, fn: string, args: Record<string, unknown>) => callRpc(db(who), fn, args);
 
 /** The context a page hands a service, from the same api.my_access the resolver calls. */
 async function ctxFor(who: Who): Promise<AccessContext> {
-  const { data, error } = await rpc(who, 'my_access', { p_slug: slug });
-  if (error) throw new Error(error.message);
-  const row = (data as Array<{ role: EffectiveRole; overrides: unknown; permissions: string[] }>)[0];
-  if (!row) throw new Error(`${who} has no access to ${slug}`);
-  return {
-    userId: ids[who], orgId, orgSlug: slug, effectiveRole: row.role,
-    permissions: agreedPermissions(row.role, row.overrides, row.permissions).agreed,
-    actorType: who === 'analyst' ? 'employee' : 'user', db: db(who), requestId: `itest-${RUN}`,
-    now: () => new Date(), organizationStatus: 'active',
-  };
+  const ctx = await contextFor(ids[who], orgId, { email: email(who), requestId: `itest-${RUN}` });
+  return { ...ctx, actorType: who === 'analyst' ? 'employee' : 'user', organizationStatus: 'active' };
 }
 
 async function outcome(work: Promise<unknown>): Promise<string> {
@@ -68,68 +64,72 @@ async function outcome(work: Promise<unknown>): Promise<string> {
 }
 
 beforeAll(async () => {
-  for (const who of ['owner', 'accountant', 'client', 'third', 'analyst'] as Who[]) ids[who] = createAuthUser(email(who));
+  for (const who of ['owner', 'accountant', 'client', 'third', 'analyst'] as Who[]) ids[who] = await createAuthUser(email(who));
   const created = await rpc('owner', 'create_organization', { p_name: `ITest Followups ${RUN}` });
   if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
   orgId = created.data as string;
-  slug = adminSql(`select slug from public.organizations where id = '${orgId}'`);
+  slug = String((await globalRow(fs(), 'organizations', orgId).get()).get('slug'));
 
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role) values
-      ('${orgId}', '${ids.accountant}', 'accountant'),
-      ('${orgId}', '${ids.client}', 'client'),
-      ('${orgId}', '${ids.third}', 'third_party');
-    insert into public.platform_users (user_id, platform_role) values ('${ids.analyst}', 'employee');
-    insert into public.organization_assignments (organization_id, employee_user_id) values ('${orgId}', '${ids.analyst}');
-    update public.profiles set full_name = 'Accountant ${RUN}' where id = '${ids.accountant}';
-    update public.profiles set full_name = 'Client ${RUN}' where id = '${ids.client}';
-    update public.profiles set full_name = 'Third ${RUN}' where id = '${ids.third}';
-    update public.profiles set full_name = 'Analyst ${RUN}' where id = '${ids.analyst}';`);
+  await addMember(orgId, ids.accountant, 'accountant');
+  await addMember(orgId, ids.client, 'client');
+  await addMember(orgId, ids.third, 'third_party');
+  await makePlatformUser(ids.analyst, 'employee');
+  await assign(orgId, ids.analyst, { endsAt: new Date(Date.now() + 365 * 86_400_000).toISOString() });
+  for (const who of ['accountant', 'client', 'third', 'analyst'] as Who[]) {
+    const name = `${who[0]!.toUpperCase()}${who.slice(1)} ${RUN}`;
+    await globalRow(fs(), 'profiles', ids[who]).update({ full_name: name });
+  }
 
   // One accepted record, one complete month with a figure and a score, an open action given to the
   // accountant, an open alert, and an import waiting for review.
-  periodId = adminSql(`
-    do $$
-    declare v_org uuid := '${orgId}'; v_acct uuid; v_period uuid; v_run uuid; v_snap uuid; v_health uuid; v_doc uuid;
-    begin
-      insert into public.accounts (organization_id, name, normalized_name, account_type, standard_category)
-      values (v_org, 'F${RUN} Sales', 'f${RUN} sales', 'income', 'revenue') returning id into v_acct;
-      insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, record_status)
-      values (v_org, '2026-03-10', v_acct, 'credit', 100, 'accepted') returning period_id into v_period;
-      update public.fiscal_periods set is_complete = true where id = v_period;
-      insert into public.calculation_runs (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-      values (v_org, 'recalc_manual', '1.0.0', v_period, v_period, '2026-03-31', 'succeeded') returning id into v_run;
-      insert into public.metric_snapshots
-        (organization_id, calculation_run_id, period_id, metric_key, unit, basis, assurance_level, value, currency, data_quality)
-      values (v_org, v_run, v_period, 'revenue', 'money', 'ledger', 'verified', 100, 'GBP',
-              '{"completeness": 1, "warnings": [], "missing": []}'::jsonb) returning id into v_snap;
-      insert into public.metric_current (organization_id, period_id, metric_key, snapshot_id, calculation_run_id)
-      values (v_org, v_period, 'revenue', v_snap, v_run);
-      insert into public.health_scores (organization_id, calculation_run_id, period_id, score, dimensions_used, dimensions_total, config_version)
-      values (v_org, v_run, v_period, 70, 5, 5, 'v1') returning id into v_health;
-      insert into public.health_current (organization_id, period_id, health_score_id) values (v_org, v_period, v_health);
-      insert into public.alerts (organization_id, rule_key, rule_version, severity, period_id, title, explanation, dedupe_key, key_kind, calculation_run_id)
-      values (v_org, 'itest.rule', '1', 'high', v_period, 'Overdue', 'F${RUN} Customer is 60 days overdue', 'f${RUN}-d', 'state', v_run);
-      insert into public.actions (organization_id, title, owner_user_id) values (v_org, 'F${RUN} chase the invoice', '${ids.accountant}');
-      insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status)
-      values (v_org, v_org::text || '/doc/f${RUN}.csv', 'f${RUN}.csv', 'text/csv', 10, extensions.digest('f${RUN}', 'sha256'), 'ready')
-      returning id into v_doc;
-      insert into public.import_batches (organization_id, source_document_id, import_type, target_table, period_start, period_end, status)
-      values (v_org, v_doc, 'general_ledger', 'ledger_entries', '2026-03-01', '2026-03-31', 'awaiting_review');
-    end $$;
-    select period_id from public.ledger_entries where organization_id = '${orgId}' limit 1;`).split('\n').pop()!.trim();
-  actionId = adminSql(`select id from public.actions where organization_id = '${orgId}' limit 1`);
-});
+  periodId = periodIdOf(orgId, '2026-03-01');
+  const acct = await seedRow(orgId, 'accounts', {
+    name: `F${RUN} Sales`, normalized_name: `f${RUN} sales`, account_type: 'income', standard_category: 'revenue',
+  });
+  await seedRow(orgId, 'ledger_entries', {
+    entry_date: '2026-03-10', period_id: periodId, account_id: acct.id, direction: 'credit', amount: '100.00', record_status: 'accepted',
+  });
+  await orgRow(fs(), orgId, 'fiscal_periods', periodId).update({ is_complete: true });
+  const run = await seedRow(orgId, 'calculation_runs', {
+    trigger: 'recalc_manual', engine_version: '1.0.0', period_from: periodId, period_to: periodId, as_of: '2026-03-31', status: 'succeeded',
+  });
+  const snap = await seedRow(orgId, 'metric_snapshots', {
+    calculation_run_id: run.id, period_id: periodId, metric_key: 'revenue', unit: 'money', basis: 'ledger',
+    assurance_level: 'verified', value: '100.00', currency: 'GBP', data_quality: { completeness: 1, warnings: [], missing: [] },
+  });
+  await seedRow(orgId, 'metric_current', { period_id: periodId, metric_key: 'revenue', snapshot_id: snap.id, calculation_run_id: run.id });
+  const health = await seedRow(orgId, 'health_scores', {
+    calculation_run_id: run.id, period_id: periodId, score: 70, dimensions_used: 5, dimensions_total: 5, config_version: 'v1',
+  });
+  await seedRow(orgId, 'health_current', { period_id: periodId, health_score_id: health.id, calculation_run_id: run.id });
+  await seedRow(orgId, 'alerts', {
+    rule_key: 'itest.rule', rule_version: '1', severity: 'high', period_id: periodId, title: 'Overdue',
+    explanation: `F${RUN} Customer is 60 days overdue`, dedupe_key: `f${RUN}-d`, key_kind: 'state', calculation_run_id: run.id,
+  });
+  const action = await seedRow(orgId, 'actions', { title: `F${RUN} chase the invoice`, owner_user_id: ids.accountant });
+  actionId = String(action.id);
+  const doc = await seedRow(orgId, 'source_documents', {
+    storage_path: `${orgId}/doc/f${RUN}.csv`, original_filename: `f${RUN}.csv`, mime_type: 'text/csv', byte_size: 10,
+    sha256: createHash('sha256').update(`f${RUN}`).digest('hex'), status: 'ready',
+  });
+  await seedRow(orgId, 'import_batches', {
+    source_document_id: doc.id, import_type: 'general_ledger', target_table: 'ledger_entries',
+    period_start: '2026-03-01', period_end: '2026-03-31', status: 'awaiting_review',
+  });
+}, 120_000);
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Followups%${RUN}';
-    delete from public.platform_users where user_id in (select id from auth.users where email like '%@${DOMAIN}');
-    delete from public.api_rate_limits where actor_user_id in (select id from auth.users where email like '%@${DOMAIN}');
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Followups %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.followups.itest' and created_at < now() - interval '1 hour';`);
-});
+afterAll(async () => {
+  if (orgId) await dropOrg(orgId);
+  await dropPlatformUser(ids.analyst);
+  for (const id of Object.values(ids)) {
+    await auth().deleteUser(id).catch(() => undefined);
+    await fs().collection('profiles').doc(id).delete();
+    const limits = await fs().collection('api_rate_limits').where('actor_user_id', '==', id).get();
+    for (const d of limits.docs) await d.ref.delete();
+  }
+  const events = await fs().collection('audit_events').where('organization_id', '==', orgId).get();
+  for (const d of events.docs) await d.ref.delete();
+}, 120_000);
 
 describe('Home and the reports, for a 3rd party', () => {
   it('shows a company with records its figures, never "upload your first file"', async () => {
@@ -179,9 +179,11 @@ describe('Home and the reports, for a 3rd party', () => {
 
 describe('the inbox is personal and shows only what one may still open', () => {
   it('gives a 3rd party their own notifications, drops kinds they cannot open, and opens a decision on "Your access"', async () => {
-    adminSql(`insert into public.notifications (organization_id, user_id, kind, title, body, href) values
-      ('${orgId}', '${ids.third}', 'action_comment', 'New comment on "F${RUN} chase the invoice"', 'detail', '/app/${slug}/actions/${actionId}'),
-      ('${orgId}', '${ids.client}', 'report_ready', 'Someone else''s', null, null)`);
+    await seedRow(orgId, 'notifications', {
+      user_id: ids.third, kind: 'action_comment', title: `New comment on "F${RUN} chase the invoice"`, body: 'detail',
+      href: `/app/${slug}/actions/${actionId}`,
+    });
+    await seedRow(orgId, 'notifications', { user_id: ids.client, kind: 'report_ready', title: "Someone else's", body: null, href: null });
     const third = await ctxFor('third');
     const { id } = await requestAccess(third, { permissions: ['financials.view'], message: 'For the loan review.' });
     await decideAccessRequest(await ctxFor('owner'), { id, approve: false, note: 'Not yet.' });
@@ -192,7 +194,7 @@ describe('the inbox is personal and shows only what one may still open', () => {
     expect(items[0]!.body).toBe('Not yet.');
     expect(await unreadCount(third)).toBe(1);
     // The action comment is still stored — only no longer shown to someone without the Action Centre.
-    expect(Number(adminSql(`select count(*) from public.notifications where user_id = '${ids.third}' and kind = 'action_comment'`))).toBe(1);
+    expect(await rawCount(orgId, 'notifications', ['kind', 'action_comment'])).toBe(1);
   });
 });
 
@@ -204,14 +206,17 @@ describe('an action goes only to someone who can see the Action Centre', () => {
   });
 
   it('refuses a client whose Action Centre is switched off, and accepts them once it is back', async () => {
-    adminSql(`insert into public.member_permission_overrides (organization_id, user_id, permission, granted)
-      values ('${orgId}', '${ids.client}', 'actions.view', false)`);
+    const off = orgRow(fs(), orgId, 'member_permission_overrides', overrideId(ids.client, 'actions.view'));
+    await off.set({
+      organization_id: orgId, user_id: ids.client, permission: 'actions.view', granted: false, set_by: null,
+      set_at: new Date().toISOString(), set_by_owner: false, ceiling_withhold: false,
+    });
     try {
       expect(sqlstate((await rpc('owner', 'assign_action', { p_action: actionId, p_owner: ids.client })).error)).toBe('22023');
       const offered = (await assignableOwners(await ctxFor('owner'))).map((o) => o.userId);
       expect(offered).not.toContain(ids.client);
     } finally {
-      adminSql(`delete from public.member_permission_overrides where organization_id = '${orgId}' and user_id = '${ids.client}'`);
+      await off.delete();
     }
     expect((await rpc('owner', 'assign_action', { p_action: actionId, p_owner: ids.client })).error).toBeNull();
     expect((await rpc('owner', 'assign_action', { p_action: actionId, p_owner: ids.accountant })).error).toBeNull();
@@ -243,7 +248,7 @@ describe('"Data & compliance" for an accountant', () => {
     expect(view.myActions?.open).toBe(1);
     expect(view.myActions?.top.map((a) => a.id)).toEqual([actionId]);
     expect(view.tax).not.toBeNull();
-    const country = adminSql(`select country_code from public.organizations where id = '${orgId}'`);
+    const country = String((await globalRow(fs(), 'organizations', orgId).get()).get('country_code'));
     if (country === 'GB' || country === 'AE') expect(view.tax!.corporationTax?.dueDate).toMatch(/^\d{4}-\d{2}-\d{2}$/);
   });
 

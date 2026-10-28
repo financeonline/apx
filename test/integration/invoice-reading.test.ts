@@ -1,6 +1,7 @@
-import { beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startImport } from '@/modules/imports';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { clientFor, createAuthUser, deleteOrg, rpc } from './setup';
+import { makeOrg, rowOf, rowsOf } from './f-fixtures';
 
 /**
  * ADR-175 on a real database: ONE invoice as a photo, with the fields the reviewer checked on the
@@ -10,7 +11,7 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  */
 
 const RUN = `t${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.invoicereading.itest`;
+const DOMAIN = `${RUN}.invoicereading.itest.motion`;
 let owner: string;
 let orgId: string;
 const ownerDb = () => clientFor(owner, { email: `owner@${DOMAIN}` });
@@ -24,10 +25,12 @@ const checked = {
 };
 
 beforeAll(async () => {
-  owner = createAuthUser(`owner@${DOMAIN}`);
-  const r = await ownerDb().schema('api').rpc('create_organization', { p_name: `ITest InvoiceReading ${RUN}` });
-  if (r.error) throw new Error(r.error.message);
-  orgId = r.data as unknown as string;
+  owner = await createAuthUser(`owner@${DOMAIN}`);
+  orgId = await makeOrg(owner, `ITest Docs InvoiceReading ${RUN}`);
+});
+
+afterAll(async () => {
+  await deleteOrg(orgId);
 });
 
 
@@ -60,27 +63,28 @@ describe('one invoice read on the upload page (ADR-175)', () => {
     expect(result.counts).toMatchObject({ valid: 1 });
     expect(result.counterpartiesCreated).toBe(1);
 
-    const batch = adminSql(`select extraction_method || '|' || period_start || '|' || period_end || '|' || (confirmations -> 'IMP-INV-013' -> 'value' ->> 'opening')
-      || '|' || array_to_string(required_confirmations, ',') from public.import_batches where id = '${result.batchId}'`).trim();
-    expect(batch).toBe('ocr|2026-09-18|2026-09-18|partial|IMP-RANGE-015,IMP-INV-013');
+    const b = (await rowOf(orgId, 'import_batches', result.batchId))!;
+    const opening = ((b.confirmations as Record<string, { value?: { opening?: string } }>)['IMP-INV-013'])?.value?.opening;
+    expect([b.extraction_method, b.period_start, b.period_end, opening, (b.required_confirmations as string[]).join(',')].join('|'))
+      .toBe('ocr|2026-09-18|2026-09-18|partial|IMP-RANGE-015,IMP-INV-013');
 
-    const { error: rangeError } = await ownerDb().schema('api').rpc('record_batch_confirmation', {
+    const { error: rangeError } = await rpc(ownerDb(), 'record_batch_confirmation', {
       p_batch: result.batchId, p_code: 'IMP-RANGE-015', p_value: { period_start: '2026-09-18', period_end: '2026-09-18' },
     });
     expect(rangeError, rangeError?.message).toBeNull();
-    const { error } = await ownerDb().schema('api').rpc('commit_import_batch', { p_batch: result.batchId });
+    const { error } = await rpc(ownerDb(), 'commit_import_batch', { p_batch: result.batchId });
     expect(error, error?.message).toBeNull();
 
-    const invoice = adminSql(`select i.invoice_type || '|' || c.name || '|' || i.issue_date || '|' || i.due_date || '|' || i.subtotal || '|'
-        || i.tax_amount || '|' || i.total_amount || '|' || i.assurance_level || '|' || (i.source_document_id = '${result.documentId}')
-      from public.invoices i join public.counterparties c on c.id = i.counterparty_id
-     where i.organization_id = '${orgId}' and i.invoice_number = 'CPS-4471'`).trim();
-    expect(invoice).toBe('purchase|Coastal Packaging Supplies Ltd|2026-09-18|2026-10-18|640.00|128.00|768.00|verified|true');
+    const [i] = await rowsOf(orgId, 'invoices', { invoice_number: 'CPS-4471' });
+    const c = await rowOf(orgId, 'counterparties', String(i!.counterparty_id));
+    expect([i!.invoice_type, c?.name, i!.issue_date, i!.due_date, i!.subtotal, i!.tax_amount, i!.total_amount,
+      i!.assurance_level, i!.source_document_id === result.documentId].join('|'))
+      .toBe('purchase|Coastal Packaging Supplies Ltd|2026-09-18|2026-10-18|640.00|128.00|768.00|verified|true');
   });
 
   it('refuses the ocr method in SQL for anything but an invoice', async () => {
-    const doc = adminSql(`select id from public.source_documents where organization_id = '${orgId}' limit 1`).trim();
-    const { error } = await ownerDb().schema('api').rpc('start_import_batch', {
+    const [doc] = (await rowsOf(orgId, 'source_documents')).map((d) => String(d.id));
+    const { error } = await rpc(ownerDb(), 'start_import_batch', {
       p_document: doc, p_import_type: 'general_ledger', p_opts: { extraction_method: 'ocr' },
     });
     expect(error?.message).toMatch(/only a sales or purchase invoice/);

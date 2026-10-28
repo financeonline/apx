@@ -1,6 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import { orgRowById, orgRows } from '@/db/rls';
+import type { Db } from '@/db/types';
 import type { ImportBatch, ImportRow, SourceDocument } from '../domain/types';
 
 /**
@@ -8,28 +8,27 @@ import type { ImportBatch, ImportRow, SourceDocument } from '../domain/types';
  * owner/admin/employee/super-admin allow-list) rather than on plain membership, because the raw file
  * and the mapping expose more than the finished figures do (ADR-038.4). A client role therefore gets
  * zero rows here, not an error — which is the right answer to a question they may not ask.
+ *
+ * Reads go through `src/db/rls.ts` (FIRESTORE_DATA_MODEL.md §5), which applies each table's policy.
  */
 
 interface Page { readonly limit: number; readonly offset: number }
 
-function unwrap<T>(data: T[] | null, error: unknown, requestId?: string): T[] {
-  if (error) throw toMotionError(error, requestId);
-  return data ?? [];
-}
+type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any -- a stored document, read field by field below
+
+/** `app.import_batch_in_review`: the states in which a batch's file payload is still readable. */
+const IN_REVIEW: ReadonlySet<string> = new Set(['created', 'parsing', 'mapping', 'validating', 'awaiting_review', 'failed']);
 
 export async function listDocuments(
-  db: SupabaseClient, orgId: string, page: Page, requestId?: string,
+  db: Db, orgId: string, page: Page, _requestId?: string,
 ): Promise<SourceDocument[]> {
-  const { data, error } = await db
-    .from('source_documents')
-    .select(`id, original_filename, mime_type, byte_size, document_kind, status,
-             page_count, has_text_layer, uploaded_by, created_at`)
-    .eq('organization_id', orgId)
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false })
-    .range(page.offset, page.offset + page.limit - 1);
+  const rows = await orgRows<Row>(db, orgId, 'source_documents', (q) => q
+    .where('deleted_at', '==', null)
+    .orderBy('created_at', 'desc')
+    .offset(page.offset)
+    .limit(page.limit));
 
-  return unwrap(data, error, requestId).map((r) => ({
+  return rows.map((r) => ({
     id: r.id,
     originalFilename: r.original_filename,
     mimeType: r.mime_type,
@@ -44,18 +43,14 @@ export async function listDocuments(
 }
 
 export async function listBatches(
-  db: SupabaseClient, orgId: string, page: Page, requestId?: string,
+  db: Db, orgId: string, page: Page, _requestId?: string,
 ): Promise<ImportBatch[]> {
-  const { data, error } = await db
-    .from('import_batches')
-    .select(`id, source_document_id, import_type, target_table, bank_account_id, status,
-             row_counts, period_start, period_end, balance_basis, committed_at, rolled_back_at,
-             extraction_method, error_summary, extraction_stats, page_confirmations, source_document_id`)
-    .eq('organization_id', orgId)
-    .order('created_at', { ascending: false })
-    .range(page.offset, page.offset + page.limit - 1);
+  const rows = await orgRows<Row>(db, orgId, 'import_batches', (q) => q
+    .orderBy('created_at', 'desc')
+    .offset(page.offset)
+    .limit(page.limit));
 
-  return unwrap(data, error, requestId).map((r) => ({
+  return rows.map((r) => ({
     id: r.id,
     sourceDocumentId: r.source_document_id,
     importType: r.import_type,
@@ -80,57 +75,39 @@ export async function listBatches(
  * the file as it arrived, including columns nobody mapped, and level-4 evidence highlighting depends
  * on it still being there (DATABASE_ARCHITECTURE.md §5).
  *
- * `raw_data` and `mapped_data` (the same text, verbatim and unmasked) are not selectable on
- * `import_rows` since the ADR-172 hardening (migration 20261018000033). They come from the definer
- * view `import_rows_review`, which returns them while the batch is IN REVIEW (not yet in the books)
- * to whoever holds `imports.review` and reads the lines (`banking.view` or `financials.view`). It is
- * read with the same filters, order and page as the rows, so the two line up row for row; a committed
- * batch's rows come back with no payload (the review page does not list them, and the committed
- * records are read through their own tables, masked).
+ * `raw_data` and `mapped_data` (the same text, verbatim and unmasked) are returned only while the
+ * batch is IN REVIEW (not yet in the books), to whoever holds `imports.review` and reads the lines
+ * (`banking.view` or `financials.view`) — the rule of the PostgreSQL view `import_rows_review`
+ * (ADR-172 hardening). The `import_rows` read policy already requires those permissions; the
+ * in-review rule is applied here from the batch's own status. A committed batch's rows come back
+ * with no payload (the review page does not list them, and the committed records are read through
+ * their own tables, masked).
  */
 export async function listBatchRows(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   batchId: string,
   filter: { readonly status?: ImportRow['status'] },
   page: Page,
-  requestId?: string,
+  _requestId?: string,
 ): Promise<ImportRow[]> {
-  let query = db
-    .from('import_rows')
-    .select(`id, row_number, source_ref, source_page, status, issues,
-             reviewer_decision, reviewer_reason, committed_table, committed_record_id`)
-    .eq('organization_id', orgId)
-    .eq('batch_id', batchId);
-  let payloadQuery = db
-    .from('import_rows_review')
-    .select('id, raw_data, mapped_data')
-    .eq('organization_id', orgId)
-    .eq('batch_id', batchId);
-
-  if (filter.status) {
-    query = query.eq('status', filter.status);
-    payloadQuery = payloadQuery.eq('status', filter.status);
-  }
-
-  const [{ data, error }, payload] = await Promise.all([
-    query.order('row_number').range(page.offset, page.offset + page.limit - 1),
-    payloadQuery.order('row_number').range(page.offset, page.offset + page.limit - 1),
+  const [rows, batch] = await Promise.all([
+    orgRows<Row>(db, orgId, 'import_rows', (q) => {
+      let query = q.where('batch_id', '==', batchId);
+      if (filter.status) query = query.where('status', '==', filter.status);
+      return query.orderBy('row_number').offset(page.offset).limit(page.limit);
+    }),
+    orgRowById<Row>(db, orgId, 'import_batches', batchId),
   ]);
-  const payloads = new Map(
-    unwrap(payload.data, payload.error, requestId).map((r) => [
-      r.id as string,
-      { raw: (r.raw_data as Record<string, unknown> | null) ?? {}, mapped: r.mapped_data as ImportRow['mappedData'] },
-    ]),
-  );
+  const payloadReadable = batch !== null && IN_REVIEW.has(String(batch.status));
 
-  return unwrap(data, error, requestId).map((r) => ({
+  return rows.map((r) => ({
     id: r.id,
     rowNumber: r.row_number,
     sourceRef: r.source_ref,
     sourcePage: (r.source_page as number | null) ?? null,
-    rawData: payloads.get(r.id as string)?.raw ?? {},
-    mappedData: payloads.get(r.id as string)?.mapped ?? null,
+    rawData: payloadReadable ? ((r.raw_data as Record<string, unknown> | null) ?? {}) : {},
+    mappedData: payloadReadable ? ((r.mapped_data as ImportRow['mappedData']) ?? null) : null,
     status: r.status,
     issues: r.issues ?? [],
     reviewerDecision: r.reviewer_decision,
@@ -142,15 +119,11 @@ export async function listBatchRows(
 
 /** Counts by status for the review header, without pulling every row across the wire. */
 export async function countRowsByStatus(
-  db: SupabaseClient, orgId: string, batchId: string, requestId?: string,
+  db: Db, orgId: string, batchId: string, _requestId?: string,
 ): Promise<Record<string, number>> {
-  const { data, error } = await db
-    .from('import_rows')
-    .select('status')
-    .eq('organization_id', orgId)
-    .eq('batch_id', batchId);
-
-  const rows = unwrap(data, error, requestId);
+  const rows = await orgRows<Row>(db, orgId, 'import_rows', (q) => q
+    .where('batch_id', '==', batchId)
+    .select('status'));
   const counts: Record<string, number> = {};
   for (const row of rows) counts[row.status] = (counts[row.status] ?? 0) + 1;
   return counts;

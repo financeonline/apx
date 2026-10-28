@@ -1,5 +1,11 @@
 # MOTION — Service Architecture
 
+> **Database note (2026-10-28, ADR-178).** APX now runs entirely on Firebase (Firestore, Firebase
+> Authentication, Firebase Storage); Supabase has been removed. Where this document says PostgreSQL,
+> RLS, SQL functions, triggers, Supabase Auth or Supabase Storage, read `FIRESTORE_DATA_MODEL.md` for
+> what replaced each one (§1 what runs where, §2 the security model, §4 triggers, §9 tests). The
+> rules described here still hold; only where they are enforced changed.
+
 Depends on: `ARCHITECTURAL_DECISIONS.md` (ADR-003, ADR-008, ADR-013, ADR-014, ADR-015, ADR-020, ADR-022), `DATABASE_ARCHITECTURE.md`, `RBAC_MATRIX.md`, `TENANCY_MODEL.md`, `IMPORT_ENGINE.md`, `AI_ARCHITECTURE.md`, `FINANCIAL_ENGINE.md`, `EVIDENCE_MODEL.md`
 Consumed by: `IMPLEMENTATION_PLAN.md`, `TEST_STRATEGY.md`, `ROUTE_ARCHITECTURE.md`
 

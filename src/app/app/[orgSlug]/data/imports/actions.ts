@@ -5,7 +5,7 @@ import { revalidatePath } from 'next/cache';
 import { getAccessContext } from '@/modules/tenancy';
 import { callApi, enqueueServerJob } from '@/core/db';
 import { parseMoney } from '@/core/money';
-import { setStatementBalancesAndRevalidate } from '@/modules/imports';
+import { loadPageConfirmationFacts, setStatementBalancesAndRevalidate } from '@/modules/imports';
 import { assertCan } from '@/core/permissions';
 import { ValidationError } from '@/core/errors';
 import {
@@ -318,17 +318,12 @@ export async function confirmPdfPageAction(_previous: ActionResult | null, form:
     const page = Number.parseInt(text(form, 'page'), 10);
     if (!Number.isInteger(page) || page < 1) throw new Error('Which page?');
 
-    const { data: batch, error } = await ctx.db.from('import_batches').select('extraction_stats, statement_opening_balance, statement_closing_balance')
-      .eq('organization_id', ctx.orgId).eq('id', batchId).maybeSingle();
-    if (error) throw error;
-    const stats = (batch?.extraction_stats ?? {}) as { confidence?: Record<string, string>; balances_read?: { opening?: string; closing?: string } };
-    const typed = batch as { statement_opening_balance: number | string | null; statement_closing_balance: number | string | null } | null;
+    const facts = await loadPageConfirmationFacts(ctx.db, ctx.orgId, batchId, page);
+    const stats = facts.extractionStats;
+    const typed = { statement_opening_balance: facts.statementOpeningBalance, statement_closing_balance: facts.statementClosingBalance };
     const same = (a?: string, b?: number | string | null) => a !== undefined && b !== null && b !== undefined && parseMoney(a).equals(parseMoney(String(b)));
     const copiedFromModel = same(stats.balances_read?.opening, typed?.statement_opening_balance) && same(stats.balances_read?.closing, typed?.statement_closing_balance);
-    const { data: rows, error: rowsError } = await ctx.db.from('import_rows').select('status, issues, reviewer_decision')
-      .eq('organization_id', ctx.orgId).eq('batch_id', batchId).eq('source_page', page);
-    if (rowsError) throw rowsError;
-    const pageRows = (rows ?? []) as Array<{ status: string; issues: Array<{ code: string }>; reviewer_decision: string }>;
+    const pageRows = facts.pageRows;
     const lineCountAgrees = pageRows.every((r) => !r.issues.some((i) => i.code === 'IMP-PDF-002'));
     const pageWide = stats.confidence?.[String(page)] === 'high' && lineCountAgrees && !copiedFromModel;
     const everyRowDecided = pageRows.every((r) => r.reviewer_decision !== 'none' || r.status === 'skipped');

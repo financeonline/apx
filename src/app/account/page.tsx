@@ -9,7 +9,8 @@ import { AiKeyForm } from './ai-key-form';
 import { AiModelForm } from './ai-model-form';
 import { ProviderActivation } from './provider-activation';
 import { timeZoneOptions } from '@/components/time-zones';
-import { getPlatformContext } from '@/modules/tenancy';
+import { getPlatformContext, sessionUserOf } from '@/modules/tenancy';
+import { callApi } from '@/core/db/api-rpc';
 import { loadAiModelSettings, loadOpenAiKeyStatus, type AiModelSettings } from '@/modules/platform';
 import { SignOutButton } from '@/components/dashboard/sign-out-button';
 
@@ -23,21 +24,22 @@ interface ProfileRow {
 
 export default async function AccountPage() {
   const db = await createUserClient();
-  const { data: session } = await db.auth.getUser();
-  if (!session.user) redirect('/sign-in?next=/account');
+  const user = sessionUserOf(db);
+  if (!user) redirect('/sign-in?next=/account');
 
-  const { data } = await db.schema('api').rpc('my_profile');
-  const profile = (data as ProfileRow[] | null)?.[0];
+  const profile = (await callApi<ProfileRow[] | null>(db, 'my_profile', {}))?.[0];
 
   // ADR-157: the AI provider key is managed here, by the super admin only; nobody else's profile
   // shows it.
-  const { data: roleRows } = await db.schema('api').rpc('my_platform_role');
-  const role = (roleRows as Array<{ platform_role: string; status: string }> | null)?.[0];
+  const role = (await callApi<Array<{ platform_role: string; status: string }> | null>(db, 'my_platform_role', {}))?.[0];
   const superAdmin = role?.platform_role === 'super_admin' && role.status === 'active';
   let aiKey: { configured: boolean; ending: string | null; updatedAt: string | null } | null = null;
   if (superAdmin) {
-    const { data: keyRows } = await db.schema('api').rpc('ai_api_key_status');
-    const row = (keyRows as Array<{ configured: boolean; ending: string | null; updated_at: string | null }> | null)?.[0];
+    // api.ai_api_key_status is the platform area's; until it is ported the card says "not set".
+    const keyRows = await callApi<Array<{ configured: boolean; ending: string | null; updated_at: string | null }> | null>(
+      db, 'ai_api_key_status', {},
+    ).catch(() => null);
+    const row = keyRows?.[0];
     aiKey = { configured: row?.configured === true, ending: row?.ending ?? null, updatedAt: row?.updated_at ?? null };
   }
   const serverFallback = Boolean(process.env.ANTHROPIC_API_KEY);
@@ -71,7 +73,7 @@ export default async function AccountPage() {
             <CardBody>
               <ProfileForm
                 fullName={profile?.full_name ?? ''}
-                email={profile?.email ?? session.user.email ?? ''}
+                email={profile?.email ?? user.email ?? ''}
                 timezone={profile?.timezone ?? 'Europe/London'}
                 timeZones={timeZoneOptions(profile?.timezone ?? 'Europe/London')}
               />

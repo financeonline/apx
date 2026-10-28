@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { listCampaignSpend, listProducts } from '@/modules/commercial';
 import { categoryLabel, loadDimensioned, loadMetricSeries, loadPeriods, type SnapshotRow } from '@/modules/dashboard';
 import { listAccounts } from '@/modules/financials';
@@ -29,10 +29,10 @@ import * as repo from '../data/financials-repository';
  *     Commercial (`listCampaignSpend`, the rows Marketing Efficiency reads — ADR-147).
  *   - Product sales are the invoice lines attributed to Commercial's products (ADR-102).
  *
- * `db` is the job's scoped service client; every read names the organisation. The readers are
- * unpaginated and PostgREST caps a response at 1,000 rows, so the snapshot reads go a year (twelve
- * months) at a time and the per-account read a month at a time: seven keys over twelve months, or
- * every expense account in one month, is far inside the cap.
+ * `db` is the job's scoped service handle; every read names the organisation. The snapshot reads go
+ * a year (twelve months) at a time and the per-account read a month at a time — the chunking the
+ * PostgREST row cap once required, kept because it also keeps each Firestore `in` within its 30
+ * values.
  */
 
 const MONTHS_PER_READ = 12;
@@ -57,7 +57,7 @@ function categoryOf(row: SnapshotRow): string | null {
   return typeof fromComponents === 'string' ? fromComponents : null;
 }
 
-export async function loadMarketingFinancials(db: SupabaseClient, orgId: string): Promise<MarketingFinancials | null> {
+export async function loadMarketingFinancials(db: Db, orgId: string): Promise<MarketingFinancials | null> {
   const [settings, periods] = await Promise.all([
     repo.loadFinancialSettings(db, orgId),
     loadPeriods(db, orgId),

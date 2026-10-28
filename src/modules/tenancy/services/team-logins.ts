@@ -1,6 +1,6 @@
 import 'server-only';
 import { z } from 'zod';
-import { createServiceClient } from '@/core/db';
+import { createLogin, deleteLogin, prepareProfile } from '@/db/auth';
 import { assertCan, can, canInviteRole, ceilingAllows } from '@/core/permissions';
 import { ConflictError, NotFound, PermissionDenied, ValidationError } from '@/core/errors';
 import { log } from '@/core/logging';
@@ -16,6 +16,7 @@ import {
   type SwitchablePermission,
 } from '../domain/member-access';
 import { createsMembers, isSwitchable, takesSwitches } from '../domain/permissions';
+import { USER_ID_PATTERN } from '../domain/types';
 
 /**
  * A company creates its team members' logins, and chooses their departments (ADR-173; owner,
@@ -23,7 +24,7 @@ import { createsMembers, isSwitchable, takesSwitches } from '../domain/permissio
  *
  * Creating a login is three steps, so the database decides who may be added and an existing account
  * can never be pulled in: `api.begin_member_login` checks the creator's rights and records a claim;
- * the server creates the login through Auth (email confirmed — the company vouches for it — with the
+ * the server creates the login through Firebase Auth's Admin SDK (email confirmed — the company vouches for it — with the
  * password the creator chose, which stays the person's password); `api.finish_member_login` makes
  * that login a member, only if it was made after the claim, for the claim's email. Auth refuses an
  * email that already has a login, so nobody's existing password is ever set; that person is invited
@@ -128,33 +129,34 @@ export async function createMemberLogin(ctx: AccessContext, input: unknown): Pro
     p_departments: departments,
   }, ctx.requestId);
 
-  const auth = createServiceClient().auth.admin;
-  const { data, error } = await auth.createUser({
-    email: value.email,
-    password: value.password,
-    email_confirm: true,
-    user_metadata: { full_name: value.fullName },
-  });
-  if (error?.code === 'email_exists' || /already (been )?registered/i.test(error?.message ?? '')) {
-    throw new ConflictError('That email already has an APX login. Use a different email for this team member.');
-  }
-  if (error?.code === 'weak_password') {
-    throw new ValidationError('Some details need fixing.', [{ path: 'password', message: 'Choose a stronger password.' }]);
-  }
-  if (error || !data.user) {
-    throw new ValidationError(error?.message ? `The login was not created: ${error.message}` : 'The login was not created.');
+  let uid: string;
+  try {
+    uid = await createLogin({ email: value.email, password: value.password, fullName: value.fullName });
+  } catch (error) {
+    const code = (error as { code?: string }).code ?? '';
+    if (code === 'auth/email-already-exists') {
+      throw new ConflictError('That email already has an APX login. Use a different email for this team member.');
+    }
+    if (code === 'auth/invalid-password') {
+      throw new ValidationError('Some details need fixing.', [{ path: 'password', message: 'Choose a stronger password.' }]);
+    }
+    const message = (error as { message?: string }).message;
+    throw new ValidationError(message ? `The login was not created: ${message}` : 'The login was not created.');
   }
 
   try {
-    await callApi(ctx.db, 'finish_member_login', { p_claim: claim, p_user: data.user.id }, ctx.requestId);
+    // What `app.handle_new_auth_user` did on PostgreSQL: every login has its profile.
+    await prepareProfile(uid, value.email, value.fullName);
+    await callApi(ctx.db, 'finish_member_login', { p_claim: claim, p_user: uid }, ctx.requestId);
   } catch (failure) {
-    const { error: removeError } = await auth.deleteUser(data.user.id);
-    if (removeError) {
-      log.error('tenancy.member_login_cleanup_failed', { requestId: ctx.requestId, userId: data.user.id });
+    try {
+      await deleteLogin(uid);
+    } catch {
+      log.error('tenancy.member_login_cleanup_failed', { requestId: ctx.requestId, userId: uid });
     }
     throw failure;
   }
-  return { userId: data.user.id };
+  return { userId: uid };
 }
 
 interface DepartmentRow {
@@ -179,7 +181,7 @@ export async function setMemberDepartments(
 ): Promise<void> {
   assertCan(ctx, 'users.manage');
   const org = orgOf(ctx);
-  const userId = z.string().uuid().safeParse(input.userId);
+  const userId = z.string().regex(USER_ID_PATTERN).safeParse(input.userId);
   if (!userId.success) throw new ValidationError('Some details need fixing.', [{ path: 'userId', message: 'Not a valid id.' }]);
   if (userId.data === ctx.userId) throw new PermissionDenied('change your own departments');
   // An owner sees every department: only a role that takes switches has departments.

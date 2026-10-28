@@ -1,29 +1,41 @@
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 import { createServiceClient, enqueueNightlySweep, pruneRateLimits } from '@/core/db';
+import { putObject, listOrganizationPrefixes, removeObjectsForOrganization } from '@/core/storage/signer';
+import { storage, storageBucketName } from '@/db/firestore';
+import { globalRow, hashKey, newId, nowIso, orgCollection, orgRow } from '@/db/schema';
 import {
   drainJobs, runStorageCleanupJob, ORPHAN_GRACE_MS, type ClaimedJob, type JobOutcome,
 } from '@/modules/jobs';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished, serviceStorage } from './setup';
+import { createAuthUser, deleteOrg, drainUntilFinished, fs } from './setup';
+import { auditsOf, makeOrg } from './f-fixtures';
+import { freshSha } from './i-fixtures';
 
 /**
  * `storage.cleanup_orphans` — the orphan sweep (SERVICE_ARCHITECTURE.md §7; TENANCY_MODEL.md §8;
  * SECURITY_MODEL.md §5b; ADR-043.4, ADR-062.2).
  *
- * This is the only job in MOTION that destroys customer data, so the interesting assertions are not
- * the ones about what it removes — they are the four about what it must never remove. A sweep that
+ * This is the only job in APX that destroys customer data, so the interesting assertions are not
+ * the ones about what it removes — they are the ones about what it must never remove. A sweep that
  * collected nothing would be a nuisance; a sweep that collected one live file would be an incident,
  * and the failure would surface as a 404 on a download weeks later, with nothing left to explain it.
  *
- * The suite therefore seeds one object for each way an object can be claimed or unclaimed, runs the
- * sweep ONCE, and asserts every outcome against that single run — because "was it removed?" is a
- * property of a sweep, not of a query, and re-running per case would let a bug that only fires on
- * the second pass go unseen.
+ * The suite seeds one object for each way an object can be claimed or unclaimed and asserts every
+ * outcome against ONE sweep, because "was it removed?" is a property of a sweep, not of a query.
+ *
+ * Ageing, on Firebase Storage: an object's `timeCreated` is stamped by Storage and cannot be
+ * backdated (PostgreSQL let the old suite rewrite `storage.objects.created_at`). So instead of
+ * making the objects old, the sweep is run with this process's clock moved forward by twice the
+ * grace period (`vi.setSystemTime`) — the same "everything is beyond the grace period" situation,
+ * measured from the other end. The one object that must be YOUNG is the exception that cannot be
+ * produced that way, so the grace period is proved by its own sweep first, at the real time, when
+ * every seeded object is young: it must remove nothing. Only organisation-scoped sweeps run with
+ * the moved clock, so a sweep here can never age another suite's objects on the shared emulator.
  *
  * Run-unique fixtures (ADR-052.12).
  */
 
 const RUN = `s${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.storage.itest`;
+const DOMAIN = `${RUN}.storage.itest.motion`;
 const SOURCE = 'source-documents';
 const REPORTS = 'reports';
 
@@ -32,7 +44,7 @@ const REPORTS = 'reports';
  * age would keep passing if somebody shortened the grace period to a minute, which is exactly the
  * change this suite exists to catch.
  */
-const AGED_HOURS = (ORPHAN_GRACE_MS / 3_600_000) * 2;
+const AGED_MS = ORPHAN_GRACE_MS * 2;
 
 let ownerA: string;
 let ownerB: string;
@@ -40,7 +52,10 @@ let orgA: string;
 let orgB: string;
 let periodA: string;
 let periodB: string;
+let youngOutcome: JobOutcome;
 let scopedOutcome: JobOutcome;
+let scopedBOutcome: JobOutcome;
+const jobIds: string[] = [];
 
 /** Every fixture key, named so the assertions below read as sentences rather than as paths. */
 const keys = {
@@ -49,220 +64,183 @@ const keys = {
   bOrphan: '', bLive: '', bReportLive: '',
 };
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+const bucketOf = (key: string) => (key.endsWith('.pdf') ? REPORTS : SOURCE);
 
 async function put(bucket: string, key: string): Promise<void> {
+  const orgId = key.split('/')[0]!;
   const type = bucket === REPORTS ? 'application/pdf' : 'text/csv';
-  const { error } = await serviceStorage().storage
-    .from(bucket)
-    .upload(key, new Blob(['fixture'], { type }), { contentType: type, upsert: true });
-  if (error) throw new Error(`fixture object ${key} could not be stored: ${error.message}`);
+  await putObject({ orgId, userId: 'itest' }, bucket, key, new TextEncoder().encode('fixture'), type);
 }
 
-/**
- * Backdates an object so the grace period no longer protects it.
- *
- * Storage stamps `updated_at` from a trigger on every write, so a plain UPDATE cannot make an object
- * look old — the trigger would put the timestamp straight back to now and the fixture would silently
- * test nothing. `session_replication_role = replica` suspends the trigger for the statement.
- */
-function age(bucket: string, key: string): void {
-  adminSql(`
-    set session_replication_role = replica;
-    update storage.objects
-       set created_at = now() - interval '${AGED_HOURS} hours',
-           updated_at = now() - interval '${AGED_HOURS} hours'
-     where bucket_id = '${bucket}' and name = '${key}';
-    reset session_replication_role;`);
+/** Whether the bytes are still in Storage: that is the whole assertion. */
+async function stored(bucket: string, key: string): Promise<boolean> {
+  const [exists] = await storage().bucket(storageBucketName()).file(`${bucket}/${key}`).exists();
+  return exists;
 }
 
-/** Reads `storage.objects` directly: whether the bytes are still there is the whole assertion. */
-function stored(bucket: string, key: string): boolean {
-  return one(`
-    select count(*) from storage.objects
-     where bucket_id = '${bucket}' and name = '${key}'`) === '1';
-}
-
-function seedDocument(
+async function seedDocument(
   orgId: string, documentId: string, path: string,
   options: { softDeleted?: boolean; extractedTextPath?: string } = {},
-): void {
-  adminSql(`
-    insert into public.source_documents
-           (id, organization_id, storage_bucket, storage_path, original_filename, mime_type,
-            byte_size, sha256, status, document_kind, extracted_text_path, deleted_at)
-    values ('${documentId}', '${orgId}', '${SOURCE}', '${path}', 'fixture.csv', 'text/csv', 7,
-            decode(md5('${documentId}'), 'hex'),
-            '${options.softDeleted ? 'deleted' : 'ready'}', 'general_ledger',
-            ${options.extractedTextPath ? `'${options.extractedTextPath}'` : 'null'},
-            ${options.softDeleted ? 'now()' : 'null'})`);
+): Promise<void> {
+  const now = nowIso();
+  await orgRow(fs(), orgId, 'source_documents', documentId).set({
+    id: documentId, organization_id: orgId, storage_bucket: SOURCE, storage_path: path,
+    original_filename: 'fixture.csv', mime_type: 'text/csv', byte_size: 7, sha256: freshSha(),
+    document_kind: 'general_ledger', page_count: null, has_text_layer: null,
+    extracted_text_path: options.extractedTextPath ?? null, status: options.softDeleted ? 'deleted' : 'ready',
+    scan_result: {}, uploaded_by: null, deleted_at: options.softDeleted ? now : null, created_at: now, updated_at: now,
+  });
 }
 
-function seedReportFile(orgId: string, periodId: string, fileId: string, path: string): void {
-  adminSql(`
-    insert into public.report_files
-           (id, organization_id, period_id, report_kind, storage_bucket, storage_path, byte_size)
-    values ('${fileId}', '${orgId}', '${periodId}', 'monthly_management', '${REPORTS}',
-            '${path}', 7)`);
+async function seedReportFile(orgId: string, periodId: string, fileId: string, path: string): Promise<void> {
+  await orgRow(fs(), orgId, 'report_files', fileId).set({
+    id: fileId, organization_id: orgId, period_id: periodId, report_kind: 'monthly_management', job_id: null,
+    storage_bucket: REPORTS, storage_path: path, sha256: null, byte_size: 7, generated_by: null,
+    evidence_bundle_id: null, deleted_at: null, created_at: nowIso(), report_id: null,
+  });
 }
 
-/** A `running` job row, which is the state the worker would have put it in before calling a handler. */
-function claimedJobRow(orgId: string | null): string {
-  return one(`
-    insert into public.jobs (organization_id, job_type, payload, status, locked_at, locked_by,
-                             attempts)
-    values (${orgId === null ? 'null' : `'${orgId}'`}, 'storage.cleanup_orphans', '{}'::jsonb,
-            'running', now(), 'itest-${RUN}', 1)
-    returning id`);
+/** A `running` job document, the state the worker puts a job in before calling its handler. */
+async function claimedJob(orgId: string | null): Promise<ClaimedJob> {
+  const id = newId();
+  const now = nowIso();
+  await globalRow(fs(), 'jobs', id).set({
+    id, organization_id: orgId, job_type: 'storage.cleanup_orphans', idempotency_key: null, payload: {},
+    requested_by: null, status: 'running', attempts: 1, max_attempts: 3, run_after: now, locked_at: now,
+    locked_by: `itest-${RUN}`, last_error: null, result: null, finished_at: null, created_at: now, updated_at: now,
+  });
+  jobIds.push(id);
+  return {
+    jobId: id, organizationId: orgId, jobType: 'storage.cleanup_orphans', payload: {}, requestedBy: null, attempts: 1, maxAttempts: 3,
+  } as ClaimedJob;
+}
+
+/** Runs one organisation's sweep with the clock moved `AGED_MS` forward. */
+async function agedSweep(orgId: string): Promise<JobOutcome> {
+  const job = await claimedJob(orgId);
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(Date.now() + AGED_MS);
+  try {
+    return await runStorageCleanupJob(job, { db: createServiceClient() });
+  } finally {
+    vi.useRealTimers();
+  }
+}
+
+async function firstPeriod(orgId: string): Promise<string> {
+  const snap = await orgCollection(fs(), orgId, 'fiscal_periods').orderBy('period_start').limit(1).get();
+  return snap.docs[0]!.id;
 }
 
 beforeAll(async () => {
-  ownerA = createAuthUser(`owner-a@${DOMAIN}`);
-  ownerB = createAuthUser(`owner-b@${DOMAIN}`);
+  ownerA = await createAuthUser(`owner-a@${DOMAIN}`);
+  ownerB = await createAuthUser(`owner-b@${DOMAIN}`);
+  orgA = await makeOrg(ownerA, `ITest Docs Storage A ${RUN}`);
+  orgB = await makeOrg(ownerB, `ITest Docs Storage B ${RUN}`);
+  periodA = await firstPeriod(orgA);
+  periodB = await firstPeriod(orgB);
 
-  const a = await clientFor(ownerA).schema('api').rpc('create_organization', {
-    p_name: `ITest Storage A ${RUN}`,
-  });
-  if (a.error) throw new Error(`fixture org A failed: ${a.error.message}`);
-  orgA = a.data as unknown as string;
+  const docLiveA = newId();
+  const docSoftDeletedA = newId();
+  const docLiveB = newId();
+  const reportLiveA = newId();
+  const reportOrphanA = newId();
+  const reportLiveB = newId();
 
-  const b = await clientFor(ownerB).schema('api').rpc('create_organization', {
-    p_name: `ITest Storage B ${RUN}`,
-  });
-  if (b.error) throw new Error(`fixture org B failed: ${b.error.message}`);
-  orgB = b.data as unknown as string;
-
-  periodA = one(`
-    select id from public.fiscal_periods where organization_id = '${orgA}'
-     order by period_start limit 1`);
-  periodB = one(`
-    select id from public.fiscal_periods where organization_id = '${orgB}'
-     order by period_start limit 1`);
-
-  const docLiveA = one(`select gen_random_uuid()`);
-  const docSoftDeletedA = one(`select gen_random_uuid()`);
-  const docLiveB = one(`select gen_random_uuid()`);
-  const reportLiveA = one(`select gen_random_uuid()`);
-  const reportOrphanA = one(`select gen_random_uuid()`);
-  const reportLiveB = one(`select gen_random_uuid()`);
-
-  keys.aOrphan = `${orgA}/${one(`select gen_random_uuid()`)}/orphan.csv`;
+  keys.aOrphan = `${orgA}/${newId()}/orphan.csv`;
   keys.aLive = `${orgA}/${docLiveA}/live.csv`;
   keys.aSidecar = `${orgA}/${docLiveA}/text.json`;
-  keys.aYoung = `${orgA}/${one(`select gen_random_uuid()`)}/just-uploaded.csv`;
+  keys.aYoung = `${orgA}/${newId()}/just-uploaded.csv`;
   keys.aSoftDeleted = `${orgA}/${docSoftDeletedA}/removed-by-a-user.csv`;
   keys.aReportLive = `${orgA}/${periodA}/${reportLiveA}.pdf`;
   keys.aReportOrphan = `${orgA}/${periodA}/${reportOrphanA}.pdf`;
-  keys.bOrphan = `${orgB}/${one(`select gen_random_uuid()`)}/orphan.csv`;
+  keys.bOrphan = `${orgB}/${newId()}/orphan.csv`;
   keys.bLive = `${orgB}/${docLiveB}/live.csv`;
   keys.bReportLive = `${orgB}/${periodB}/${reportLiveB}.pdf`;
 
-  seedDocument(orgA, docLiveA, keys.aLive, { extractedTextPath: keys.aSidecar });
-  seedDocument(orgA, docSoftDeletedA, keys.aSoftDeleted, { softDeleted: true });
-  seedDocument(orgB, docLiveB, keys.bLive);
-  seedReportFile(orgA, periodA, reportLiveA, keys.aReportLive);
-  seedReportFile(orgB, periodB, reportLiveB, keys.bReportLive);
+  await seedDocument(orgA, docLiveA, keys.aLive, { extractedTextPath: keys.aSidecar });
+  await seedDocument(orgA, docSoftDeletedA, keys.aSoftDeleted, { softDeleted: true });
+  await seedDocument(orgB, docLiveB, keys.bLive);
+  await seedReportFile(orgA, periodA, reportLiveA, keys.aReportLive);
+  await seedReportFile(orgB, periodB, reportLiveB, keys.bReportLive);
 
-  for (const key of Object.values(keys)) {
-    await put(key.endsWith('.pdf') ? REPORTS : SOURCE, key);
-  }
+  for (const key of Object.values(keys)) await put(bucketOf(key), key);
 
-  // Everything except the in-flight upload is put beyond the grace period, so each case turns on
-  // whether a row claims it rather than on how old it happens to be.
-  for (const [name, key] of Object.entries(keys)) {
-    if (name === 'aYoung') continue;
-    age(key.endsWith('.pdf') ? REPORTS : SOURCE, key);
-  }
+  // 1. At the real time every seeded object is inside the grace period: nothing may go.
+  youngOutcome = await runStorageCleanupJob(await claimedJob(orgA), { db: createServiceClient() });
+  // The in-flight upload has made its point; the aged sweep below would (rightly) see it as old.
+  await removeObjectsForOrganization(orgA, SOURCE, [keys.aYoung]);
 
-  const job: ClaimedJob = {
-    jobId: claimedJobRow(orgA),
-    organizationId: orgA,
-    jobType: 'storage.cleanup_orphans',
-    payload: {},
-    requestedBy: null,
-    attempts: 1,
-    maxAttempts: 3,
-  };
-  scopedOutcome = await runStorageCleanupJob(job, { db: createServiceClient() });
-});
+  // 2. Everything beyond the grace period: each case now turns on whether a row claims it.
+  scopedOutcome = await agedSweep(orgA);
+}, 120_000);
 
 afterAll(async () => {
-  const storage = serviceStorage();
-  await storage.storage.from(SOURCE).remove(
-    Object.values(keys).filter((key) => !key.endsWith('.pdf')),
-  );
-  await storage.storage.from(REPORTS).remove(
-    Object.values(keys).filter((key) => key.endsWith('.pdf')),
-  );
-  adminSql(`
-    delete from public.organizations where name like 'ITest Storage%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Storage %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.storage.itest' and created_at < now() - interval '1 hour';`);
+  for (const [name, key] of Object.entries(keys)) {
+    const orgId = name.startsWith('a') ? orgA : orgB;
+    await removeObjectsForOrganization(orgId, bucketOf(key), [key]).catch(() => undefined);
+  }
+  for (const id of jobIds) await globalRow(fs(), 'jobs', id).delete();
+  await deleteOrg(orgA);
+  await deleteOrg(orgB);
 });
 
 describe('a sweep of one organisation', () => {
   it('succeeds rather than failing for want of a registered handler', () => {
+    expect(youngOutcome.status).toBe('succeeded');
     expect(scopedOutcome.status).toBe('succeeded');
-  });
-
-  it('removes an object that no live row claims', () => {
-    expect(stored(SOURCE, keys.aOrphan)).toBe(false);
-  });
-
-  it('never removes an object a live row still claims', () => {
-    expect(stored(SOURCE, keys.aLive)).toBe(true);
   });
 
   it('never removes an object younger than the grace period', () => {
     /*
      * The case the grace period exists for. The upload order is signer-write → register → finalize
      * (ADR-043.4), so between the object and its row there is a window in which an entirely healthy
-     * upload looks exactly like an orphan — this object is that window, held open.
+     * upload looks exactly like an orphan — at the real time, every seeded object is in that window.
      */
-    expect(stored(SOURCE, keys.aYoung)).toBe(true);
+    expect((youngOutcome.result as { removed: number }).removed).toBe(0);
   });
 
-  it('removes an object whose row has been soft-deleted', () => {
+  it('removes an object that no live row claims', async () => {
+    expect(await stored(SOURCE, keys.aOrphan)).toBe(false);
+  });
+
+  it('never removes an object a live row still claims', async () => {
+    expect(await stored(SOURCE, keys.aLive)).toBe(true);
+  });
+
+  it('removes an object whose row has been soft-deleted', async () => {
     // `api.delete_document` marks the row and the signer removes the object; when that removal fails
     // the row stays `deleted` and this is what finishes the job (ADR-043.4).
-    expect(stored(SOURCE, keys.aSoftDeleted)).toBe(false);
+    expect(await stored(SOURCE, keys.aSoftDeleted)).toBe(false);
   });
 
-  it('never removes the extracted-text sidecar of a live document', () => {
-    // `text.json` has no row of its own — it is claimed through `extracted_text_path`. Sweeping on
-    // `storage_path` alone would delete the extracted text out from under a healthy document.
-    expect(stored(SOURCE, keys.aSidecar)).toBe(true);
+  it('never removes the extracted-text sidecar of a live document', async () => {
+    // `text.json` has no row of its own — it is claimed through `extracted_text_path`.
+    expect(await stored(SOURCE, keys.aSidecar)).toBe(true);
   });
 
-  it('sweeps the reports bucket by the same rule', () => {
-    expect(stored(REPORTS, keys.aReportOrphan)).toBe(false);
-    expect(stored(REPORTS, keys.aReportLive)).toBe(true);
+  it('sweeps the reports bucket by the same rule', async () => {
+    expect(await stored(REPORTS, keys.aReportOrphan)).toBe(false);
+    expect(await stored(REPORTS, keys.aReportLive)).toBe(true);
   });
 
-  it("never touches another organisation's objects", () => {
+  it("never touches another organisation's objects", async () => {
     // B's orphan is as orphaned and as old as A's. The only thing keeping it is the prefix, which is
     // the assertion the signer makes on every key it is handed (TENANCY_MODEL.md §8).
-    expect(stored(SOURCE, keys.bOrphan)).toBe(true);
-    expect(stored(SOURCE, keys.bLive)).toBe(true);
-    expect(stored(REPORTS, keys.bReportLive)).toBe(true);
+    expect(await stored(SOURCE, keys.bOrphan)).toBe(true);
+    expect(await stored(SOURCE, keys.bLive)).toBe(true);
+    expect(await stored(REPORTS, keys.bReportLive)).toBe(true);
   });
 
-  it('reports what it removed, and records it in counts rather than paths', () => {
+  it('reports what it removed, and records it in counts rather than paths', async () => {
     const result = scopedOutcome.result as { removed: number; capped: boolean };
     expect(result.removed, 'A had exactly three orphans: two documents and one report').toBe(3);
     expect(result.capped).toBe(false);
 
-    const audited = one(`
-      select count(*) from public.audit_events
-       where organization_id = '${orgA}' and action = 'storage.orphans_removed'`);
-    expect(audited, 'one audit row per bucket that lost something').toBe('2');
-
-    const paths = one(`
-      select count(*) from public.audit_events
-       where organization_id = '${orgA}' and action = 'storage.orphans_removed'
-         and (after::text like '%orphan.csv%' or after::text like '%.pdf%')`);
-    expect(paths, 'audit metadata carries ids and counts, never filenames (ADR-038.9)').toBe('0');
+    const audited = await auditsOf(orgA, 'storage.orphans_removed');
+    expect(audited, 'one audit row per bucket that lost something').toHaveLength(2);
+    const paths = audited.filter((a) => /orphan\.csv|\.pdf/.test(JSON.stringify(a.after ?? null)));
+    expect(paths, 'audit metadata carries ids and counts, never filenames (ADR-038.9)').toHaveLength(0);
   });
 });
 
@@ -270,32 +248,44 @@ describe('a platform-wide sweep through the queue', () => {
   let jobId: string;
 
   beforeAll(async () => {
-    jobId = one(`
-      insert into public.jobs (organization_id, job_type, payload)
-      values (null, 'storage.cleanup_orphans', '{}'::jsonb)
-      returning id`);
+    // At the real time: a platform-wide sweep with a moved clock would age every other suite's
+    // objects on the shared emulator, so this one proves reach and restraint; removal across
+    // organisations is proved by B's own aged sweep below.
+    const now = nowIso();
+    jobId = newId();
+    await globalRow(fs(), 'jobs', jobId).set({
+      id: jobId, organization_id: null, job_type: 'storage.cleanup_orphans', idempotency_key: null, payload: {},
+      requested_by: null, status: 'queued', attempts: 0, max_attempts: 3, run_after: now, locked_at: null,
+      locked_by: null, last_error: null, result: null, finished_at: null, created_at: now, updated_at: now,
+    });
+    jobIds.push(jobId);
     const status = await drainUntilFinished((max) => drainJobs(max), jobId);
-    expect(status, adminSql(`select coalesce(last_error, '') from public.jobs where id = '${jobId}'`))
-      .toBe('succeeded');
+    const job = (await globalRow(fs(), 'jobs', jobId).get()).data();
+    expect(status, String(job?.last_error ?? '')).toBe('succeeded');
+    scopedBOutcome = await agedSweep(orgB);
+  }, 180_000);
+
+  it('reaches every organisation, not only the one that queued it', async () => {
+    const { organizationIds } = await listOrganizationPrefixes(SOURCE);
+    expect(organizationIds).toEqual(expect.arrayContaining([orgA, orgB]));
+    const result = (await globalRow(fs(), 'jobs', jobId).get()).get('result') as { buckets: Array<{ bucket: string; organisations: number }> };
+    expect(result.buckets.find((b) => b.bucket === SOURCE)!.organisations).toBeGreaterThanOrEqual(2);
+    // And B's orphan, as aged as A's, goes the same way under B's own sweep.
+    expect(scopedBOutcome.status).toBe('succeeded');
+    expect(await stored(SOURCE, keys.bOrphan)).toBe(false);
   });
 
-  it('reaches every organisation, not only the one that queued it', () => {
-    // The same object the organisation-scoped sweep deliberately left alone.
-    expect(stored(SOURCE, keys.bOrphan)).toBe(false);
+  it('still refuses to remove anything a live row claims, in either organisation', async () => {
+    expect(await stored(SOURCE, keys.bLive)).toBe(true);
+    expect(await stored(REPORTS, keys.bReportLive)).toBe(true);
+    expect(await stored(SOURCE, keys.aLive)).toBe(true);
+    expect(await stored(SOURCE, keys.aSidecar)).toBe(true);
+    expect(await stored(REPORTS, keys.aReportLive)).toBe(true);
   });
 
-  it('still refuses to remove anything a live row claims, in either organisation', () => {
-    expect(stored(SOURCE, keys.bLive)).toBe(true);
-    expect(stored(REPORTS, keys.bReportLive)).toBe(true);
-    expect(stored(SOURCE, keys.aLive)).toBe(true);
-    expect(stored(SOURCE, keys.aSidecar)).toBe(true);
-    expect(stored(SOURCE, keys.aYoung)).toBe(true);
-    expect(stored(REPORTS, keys.aReportLive)).toBe(true);
-  });
-
-  it('records the grace period it applied on the job row', () => {
-    const grace = one(`select result ->> 'graceHours' from public.jobs where id = '${jobId}'`);
-    expect(Number(grace)).toBe(ORPHAN_GRACE_MS / 3_600_000);
+  it('records the grace period it applied on the job row', async () => {
+    const result = (await globalRow(fs(), 'jobs', jobId).get()).get('result') as { graceHours: number };
+    expect(Number(result.graceHours)).toBe(ORPHAN_GRACE_MS / 3_600_000);
   });
 });
 
@@ -305,48 +295,46 @@ describe('the platform sweep is scheduled, and it prunes the throttle counter (A
     const first = await enqueueNightlySweep(date);
     const second = await enqueueNightlySweep(date);
     expect(second, 'the same date returns the same job').toBe(first);
-    expect(adminSql(`
-      select job_type || '|' || coalesce(organization_id::text, 'platform') || '|' || idempotency_key
-        from public.jobs where id = '${first}'`)).toBe(`storage.cleanup_orphans|platform|storage.cleanup_orphans:${date}`);
+    const job = (await globalRow(fs(), 'jobs', first).get()).data()!;
+    expect(`${job.job_type}|${job.organization_id ?? 'platform'}|${job.idempotency_key}`)
+      .toBe(`storage.cleanup_orphans|platform|storage.cleanup_orphans:${date}`);
     const other = await enqueueNightlySweep('2031-01-16');
     expect(other).not.toBe(first);
-    adminSql(`delete from public.jobs where id in ('${first}', '${other}')`);
+    jobIds.push(first, other);
   });
 
   it('prunes rate-limit rows older than two days and keeps every live window', async () => {
-    const actor = one(`select gen_random_uuid()`);
-    adminSql(`
-      insert into public.api_rate_limits (actor_user_id, bucket, window_start, count) values
-        ('${actor}', 'rpc', date_trunc('minute', now()) - interval '3 days', 5),
-        ('${actor}', 'rpc', date_trunc('minute', now()) - interval '25 hours', 5),
-        ('${actor}', 'upload:org', date_trunc('day', now()) - interval '1 day', 5),
-        ('${actor}', 'rpc', date_trunc('minute', now()), 5)`);
-
+    const actor = newId();
+    const minute = Math.floor(Date.now() / 60_000) * 60_000;
+    const day = Math.floor(Date.now() / 86_400_000) * 86_400_000;
+    const windows: Array<[string, number]> = [
+      ['rpc', minute - 3 * 86_400_000],
+      ['rpc', minute - 25 * 3_600_000],
+      ['upload:org', day - 86_400_000],
+      ['rpc', minute],
+    ];
+    for (const [bucket, at] of windows) {
+      const windowStart = new Date(at).toISOString();
+      await globalRow(fs(), 'api_rate_limits', hashKey([actor, bucket, windowStart])).set({
+        actor_user_id: actor, bucket, window_start: windowStart, count: 5, updated_at: nowIso(),
+      });
+    }
     const pruned = await pruneRateLimits();
     expect(pruned).toBeGreaterThanOrEqual(1);
 
     // The three-day-old row is gone; the 25-hour, one-day and current rows all stay (two-day keep).
-    expect(adminSql(`select count(*) from public.api_rate_limits where actor_user_id = '${actor}'`)).toBe('3');
-    expect(adminSql(`
-      select count(*) from public.api_rate_limits
-       where actor_user_id = '${actor}' and window_start < now() - interval '2 days'`)).toBe('0');
-    adminSql(`delete from public.api_rate_limits where actor_user_id = '${actor}'`);
+    const left = await fs().collection('api_rate_limits').where('actor_user_id', '==', actor).get();
+    expect(left.size).toBe(3);
+    const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
+    expect(left.docs.filter((d) => String(d.get('window_start')) < twoDaysAgo)).toHaveLength(0);
+    for (const d of left.docs) await d.ref.delete();
   });
 
   it('the platform-wide run reports what it pruned; a per-organisation run leaves the counter alone', async () => {
-    const platformJob = one(`
-      insert into public.jobs (organization_id, job_type, payload, status, locked_at, locked_by, attempts)
-      values (null, 'storage.cleanup_orphans', '{}'::jsonb, 'running', now(), 'itest-${RUN}', 1)
-      returning id`);
-    const platform = await runStorageCleanupJob(
-      { jobId: platformJob, organizationId: null, jobType: 'storage.cleanup_orphans', payload: {}, requestedBy: null, attempts: 1, maxAttempts: 3 },
-      { db: createServiceClient() },
-    );
+    const platform = await runStorageCleanupJob(await claimedJob(null), { db: createServiceClient() });
     expect(platform.status).toBe('succeeded');
     expect(typeof (platform.result as { rateLimitRowsPruned: unknown }).rateLimitRowsPruned).toBe('number');
-
     expect((scopedOutcome.result as { rateLimitRowsPruned: unknown }).rateLimitRowsPruned,
       'a per-organisation sweep does not touch a platform table').toBeNull();
-    adminSql(`delete from public.jobs where id = '${platformJob}'`);
-  });
+  }, 120_000);
 });

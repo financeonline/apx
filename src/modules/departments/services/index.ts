@@ -93,9 +93,7 @@ export async function loadDepartments(ctx: AccessContext): Promise<DepartmentsVi
   const db = ctx.db;
   const base = `/app/${ctx.orgSlug ?? ''}`;
 
-  const { data: orgRow } = await db.from('organizations').select('timezone, base_currency').eq('id', orgId).maybeSingle();
-  const timezone = (orgRow as { timezone?: string } | null)?.timezone ?? 'Europe/London';
-  const currency = (orgRow as { base_currency?: string } | null)?.base_currency ?? 'GBP';
+  const { timezone, currency } = await repo.organisationBasics(db, orgId);
   const today = todayInTimeZone(fixedClock(ctx.now()), timezone);
   const money = (value: string | null) => (value === null ? '—' : formatMoney(value, { currency }));
 

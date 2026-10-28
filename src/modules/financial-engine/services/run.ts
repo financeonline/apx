@@ -1,6 +1,6 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { toMotionError } from '@/core/errors';
 import { bankingRuleVersions } from '@/modules/banking';
 import { log } from '@/core/logging';
@@ -95,7 +95,7 @@ function serialiseSnapshot(periodId: string, result: MetricResult): Record<strin
 }
 
 export interface RunDeps {
-  readonly scoped: SupabaseClient;
+  readonly scoped: Db;
   readonly computePeriod: PeriodComputer;
   /** `api_server` calls, injected so the lint boundary holds and the loop stays testable. */
   readonly startRun: (input: Record<string, unknown>) => Promise<{ runId: string; noChange: boolean }>;
@@ -362,15 +362,15 @@ export async function runCalculation(
     const computedThisRun = new Map<string, readonly MetricResult[]>();
     for (const chunk of chunkPeriods(toWrite)) {
       /*
-       * Each chunk pins its own instant, and reads it from the DATABASE (§2.4 step 4:
-       * `aggregated_at = transaction_timestamp()`).
+       * Each chunk pins its own instant, and reads it through `api_server.aggregation_instant`
+       * (§2.4 step 4: `aggregated_at = transaction_timestamp()` on PostgreSQL).
        *
-       * The clock matters because `app.aggregate_periods` filters `created_at <= aggregated_at` and
-       * `created_at` is stamped by Postgres. Pinning it with the worker's `new Date()` compared two
-       * clocks: whenever the database's ran ahead — it does, by tens of milliseconds, on any host
-       * running Postgres in a container — rows committed BEFORE the run was queued fell the wrong
-       * side of the cutoff and the run computed without them, silently, reporting the shortfall as a
-       * figure (ADR-063).
+       * The clock matters because the aggregation filters `created_at <= aggregated_at`. On
+       * PostgreSQL `created_at` was stamped by the database, and pinning the cutoff with the worker's
+       * `new Date()` compared two clocks: rows committed BEFORE the run was queued fell the wrong
+       * side of the cutoff and the run computed without them, silently (ADR-063). On Firestore every
+       * `created_at` is stamped by the server with `nowIso()`, and the instant comes from the same
+       * place, so the one-clock rule still holds.
        *
        * PER CHUNK, not per run, because ADR-047.7 says so and EVIDENCE_MODEL.md §11 tests it: a run
        * whose middle chunk aggregates after a supersession must resolve chunk-1 descriptors to the

@@ -2,7 +2,14 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '@/core/permissions';
 import { getActionsSummary, listActions, ownerLabel } from '@/modules/actions';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
+import { ensurePeriods, periodId } from '@/db/app/shared';
+import { orgRows } from '@/db/rls';
+import { globalRow, newId, nowIso, orgCollection, orgRow } from '@/db/schema';
+import { auth } from '@/db/firestore';
+import {
+  clientFor, createAuthUser, deleteOrg, fs, rpc as call, serviceClientScoped, sqlstate,
+} from './setup';
+import { addMember, auditEvents, createOrgFixture } from './r-fixtures';
 
 /**
  * The Action Centre against the database (SOW §17; IMPLEMENTATION_PLAN.md Phase 12).
@@ -13,24 +20,23 @@ import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
  * their own. Those are the terms of the assignment, and letting the assignee rewrite them makes the
  * assignment meaningless.
  *
- * Run-unique fixtures (ADR-052.12).
+ * Run-unique fixtures (ADR-052.12), on the Firestore emulator (FIRESTORE_DATA_MODEL.md §9).
  */
 
 const RUN = `a${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.actions.itest`;
+const DOMAIN = `${RUN}.actions.itest.motion`;
 
 let ownerId: string;
 let clientId: string;
 let strangerId: string;
 let orgId: string;
 let otherOrgId: string;
+let may: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 const owner = () => clientFor(ownerId, { email: `owner@${DOMAIN}` });
 const clientUser = () => clientFor(clientId, { email: `client@${DOMAIN}` });
 
-const rpc = (db: ReturnType<typeof clientFor>, fn: string, args: Record<string, unknown>) =>
-  db.schema('api').rpc(fn, args);
+const rpc = (db: ReturnType<typeof clientFor>, fn: string, args: Record<string, unknown>) => call(db, fn, args);
 
 /** The context a page hands a service: the caller's own client and their real permission set. */
 function contextFor(userId: string, role: 'owner' | 'client'): AccessContext {
@@ -45,32 +51,24 @@ const ownerCtx = () => contextFor(ownerId, 'owner');
 const clientCtx = () => contextFor(clientId, 'client');
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  clientId = createAuthUser(`client@${DOMAIN}`);
-  strangerId = createAuthUser(`stranger@${DOMAIN}`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  clientId = await createAuthUser(`client@${DOMAIN}`);
+  strangerId = await createAuthUser(`stranger@${DOMAIN}`);
 
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', {
-    p_name: `ITest Actions ${RUN}`,
-  });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-
-  const other = await clientFor(strangerId).schema('api').rpc('create_organization', {
-    p_name: `ITest Actions Other ${RUN}`,
-  });
-  otherOrgId = other.data as unknown as string;
-
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status)
-    values ('${orgId}', '${clientId}', 'client', 'active')`);
+  orgId = (await createOrgFixture({ name: `ITest Actions ${RUN}`, ownerId })).id;
+  otherOrgId = (await createOrgFixture({ name: `ITest Actions Other ${RUN}`, ownerId: strangerId })).id;
+  await addMember(orgId, clientId, 'client');
+  await ensurePeriods(fs(), orgId, '2026-05-01', '2026-05-01');
+  may = periodId(orgId, '2026-05-01');
 });
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Actions%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Actions %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.actions.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  await deleteOrg(orgId);
+  await deleteOrg(otherOrgId);
+  for (const uid of [ownerId, clientId, strangerId]) {
+    await fs().collection('profiles').doc(uid).delete();
+    await auth().deleteUser(uid).catch(() => undefined);
+  }
 });
 
 async function newAction(over: Record<string, unknown> = {}): Promise<string> {
@@ -83,10 +81,12 @@ async function newAction(over: Record<string, unknown> = {}): Promise<string> {
   return data as unknown as string;
 }
 
-const columnsOf = (actionId: string): string => one(`
-  select title || '|' || priority::text || '|' || coalesce(due_date::text, '-')
-         || '|' || status::text || '|' || coalesce(outcome_notes, '-')
-    from public.actions where id = '${actionId}'`);
+const actionRow = async (actionId: string) => (await orgRow(fs(), orgId, 'actions', actionId).get()).data()!;
+
+const columnsOf = async (actionId: string): Promise<string> => {
+  const a = await actionRow(actionId);
+  return [a.title, a.priority, a.due_date ?? '-', a.status, a.outcome_notes ?? '-'].join('|');
+};
 
 describe('an owner runs the Action Centre', () => {
   it('creates, assigns, edits and completes', async () => {
@@ -101,10 +101,9 @@ describe('an owner runs the Action Centre', () => {
       p_action: actionId, p_status: 'completed', p_outcome: { outcome_notes: 'Collected in full' },
     })).error).toBeNull();
 
-    expect(columnsOf(actionId))
+    expect(await columnsOf(actionId))
       .toBe('Chase the overdue invoices|critical|2026-05-31|completed|Collected in full');
-    expect(one(`select completed_at is not null from public.actions where id = '${actionId}'`))
-      .toBe('t');
+    expect((await actionRow(actionId)).completed_at).not.toBeNull();
   });
 
   it('refuses an owner who cannot see the organisation', async () => {
@@ -132,7 +131,7 @@ describe('a client moves their own action, and only their own (§17, RBAC_MATRIX
       p_patch: { status: 'in_progress', outcome_notes: 'Rang them on Tuesday' },
     });
     expect(error).toBeNull();
-    expect(columnsOf(actionId))
+    expect(await columnsOf(actionId))
       .toBe('Chase the overdue invoices|high|2026-04-30|in_progress|Rang them on Tuesday');
   });
 
@@ -143,14 +142,14 @@ describe('a client moves their own action, and only their own (§17, RBAC_MATRIX
   it('cannot change the title, the priority or the due date of their own action', async () => {
     const actionId = await newAction();
     await rpc(owner(), 'assign_action', { p_action: actionId, p_owner: clientId });
-    const before = columnsOf(actionId);
+    const before = await columnsOf(actionId);
 
     const { error } = await rpc(clientUser(), 'update_own_action', {
       p_action: actionId,
       p_patch: { title: 'Something else entirely', priority: 'low', due_date: '2027-01-01' },
     });
     expect(error, 'the call is accepted; the columns simply do not move').toBeNull();
-    expect(columnsOf(actionId)).toBe(before);
+    expect(await columnsOf(actionId)).toBe(before);
   });
 
   it('cannot touch an action assigned to somebody else', async () => {
@@ -183,14 +182,13 @@ describe('a client moves their own action, and only their own (§17, RBAC_MATRIX
  * The read path the Action Centre page renders from.
  *
  * Its own suite because the page is the only thing that exercises it, and a 500 there is invisible
- * to every test that only calls the `api.*` functions: the writes were green while the list threw
- * on an ambiguous embed.
+ * to every test that only calls the `api.*` functions: the writes were green while the list threw.
  */
 describe('the list a person actually sees', () => {
   it('reads for an owner and for a client alike', async () => {
     const actionId = await newAction({ title: `Named owner ${RUN}` });
     await rpc(owner(), 'assign_action', { p_action: actionId, p_owner: clientId });
-    adminSql(`update public.profiles set full_name = 'Dana Client' where id = '${clientId}'`);
+    await globalRow(fs(), 'profiles', clientId).update({ full_name: 'Dana Client' });
 
     for (const [role, ctx] of [['owner', ownerCtx()], ['client', clientCtx()]] as const) {
       const found = (await listActions(ctx)).find((a) => a.id === actionId);
@@ -199,9 +197,7 @@ describe('the list a person actually sees', () => {
   });
 
   /*
-   * Who a reader is told owns an action.
-   *
-   * `profiles` is own-row-only under RLS, so a name comes from `api.org_members`, which needs
+   * Who a reader is told owns an action. A name comes from `api.org_members`, which needs
    * `users.view` — an owner has it, a client does not. A client who could read colleagues' names
    * off an action list would have been handed the team page sideways, so they see "you" against
    * their own work and "someone here" against everybody else's, which is all the list needs.
@@ -209,7 +205,7 @@ describe('the list a person actually sees', () => {
   it('names a colleague to an owner, and never to a client', async () => {
     const actionId = await newAction({ title: `Named owner two ${RUN}` });
     await rpc(owner(), 'assign_action', { p_action: actionId, p_owner: clientId });
-    adminSql(`update public.profiles set full_name = 'Dana Client' where id = '${clientId}'`);
+    await globalRow(fs(), 'profiles', clientId).update({ full_name: 'Dana Client' });
 
     const asOwner = (await listActions(ownerCtx())).find((a) => a.id === actionId)!;
     expect(asOwner.ownerName).toBe('Dana Client');
@@ -242,68 +238,77 @@ describe('the list a person actually sees', () => {
 
 describe('an action from another organisation does not exist', () => {
   it('is NOT FOUND, never FORBIDDEN (SECURITY_MODEL.md §14)', async () => {
-    const foreign = await clientFor(strangerId, { email: `stranger@${DOMAIN}` })
-      .schema('api').rpc('create_action', {
-        p_org: otherOrgId, p_input: { title: 'Theirs' }, p_source: { type: 'user' },
-      });
+    const foreign = await rpc(clientFor(strangerId, { email: `stranger@${DOMAIN}` }), 'create_action', {
+      p_org: otherOrgId, p_input: { title: 'Theirs' }, p_source: { type: 'user' },
+    });
+    expect(foreign.error).toBeNull();
     const foreignId = foreign.data as unknown as string;
 
     expect(sqlstate((await rpc(owner(), 'set_action_status', {
       p_action: foreignId, p_status: 'completed',
     })).error)).toBe('P0002');
 
-    const { data } = await owner().from('actions').select('id').eq('id', foreignId);
-    expect(data ?? [], 'and it is not readable either').toHaveLength(0);
+    // And it is not readable either: the owner's read of their own organisation never reaches it,
+    // and a read of the other organisation admits nothing.
+    const own = await orgRows(owner(), orgId, 'actions', (q) => q.where('id', '==', foreignId));
+    expect(own).toHaveLength(0);
+    const theirs = await orgRows(owner(), otherOrgId, 'actions');
+    expect(theirs).toHaveLength(0);
   });
 });
+
+/** A succeeded calculation run in May, as the engine would leave it. */
+async function seedRun(): Promise<string> {
+  const id = newId();
+  const now = nowIso();
+  await orgRow(fs(), orgId, 'calculation_runs', id).set({
+    id, organization_id: orgId, job_id: null, trigger: 'recalc_manual', trigger_ref_id: null,
+    engine_version: '1.0.0', period_from: may, period_to: may, as_of: '2026-06-15', as_of_ts: now,
+    status: 'succeeded', failure_reason: null, stale: false, input_fingerprint: null, chunks: [],
+    progress: {}, started_at: now, finished_at: now, duration_ms: 1, error: null, stats: {},
+    created_at: now, updated_at: now,
+  });
+  return id;
+}
+
+/** An alert written the way the engine writes one: through `api_server.persist_alerts`. */
+async function seedAlert(input: {
+  runId: string; severity: string; dedupe: string; ruleKey: string; title: string; explanation: string;
+  next?: string | null; evidence?: unknown[];
+}): Promise<string> {
+  const { data, error } = await call(serviceClientScoped(orgId), 'persist_alerts', {
+    p_org: orgId, p_run: input.runId, p_changes: [{
+      kind: 'insert', dedupe_key: input.dedupe, rule_key: input.ruleKey, rule_version: '1',
+      key_kind: 'state', severity: input.severity, period_id: may, subject_type: 'none', subject_id: null,
+      metric_key: null, title: input.title, explanation: input.explanation,
+      recommended_next_step: input.next ?? null, threshold_summary: {}, evidence: input.evidence ?? [],
+    }],
+  }, { server: true });
+  if (error) throw new Error(`fixture alert failed: ${error.message}`);
+  expect(data).toMatchObject({ inserted: 1 });
+  const snap = await orgCollection(fs(), orgId, 'alerts').where('dedupe_key', '==', input.dedupe).get();
+  return snap.docs[0]!.id;
+}
 
 describe('an action created from an alert keeps what the alert said (§5, ADR-034)', () => {
   let alertId: string;
   let bundleId: string;
 
-  beforeAll(() => {
-    const runId = one(`
-      insert into public.calculation_runs
-             (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-      select '${orgId}', 'recalc_manual', '1.0.0', p.id, p.id, '2026-06-15', 'succeeded'
-        from public.fiscal_periods p
-       where p.organization_id = '${orgId}' and p.period_start = '2026-05-01'
-      returning id`);
-
-    alertId = one(`
-      insert into public.alerts
-             (organization_id, period_id, rule_key, rule_version, severity, key_kind,
-              calculation_run_id, title, explanation, status, recommended_next_step,
-              first_seen_at, dedupe_key)
-      select '${orgId}', p.id, 'concentration.customer', '1', 'high', 'state', '${runId}',
-             'One customer is 41% of revenue',
-             'Acme Trading Ltd is 41% of revenue this month.', 'open',
-             'Talk to your second-biggest customer about more work', now(), 'itest-${RUN}'
-        from public.fiscal_periods p
-       where p.organization_id = '${orgId}' and p.period_start = '2026-05-01'
-      returning id`);
-
-    bundleId = one(`
-      insert into public.evidence_bundles
-             (organization_id, kind, origin_table, origin_id, calculation_run_id, created_by_type)
-      values ('${orgId}', 'alert', 'alerts', '${alertId}', '${runId}', 'system')
-      returning id`);
-
-    adminSql(`
-      insert into public.evidence_items
-             (organization_id, bundle_id, sort_order, item_type, ref_id, label, assurance_level)
-      values ('${orgId}', '${bundleId}', 0, 'calculation_run', '${runId}',
-              'Calculated 15 Jun 2026, engine 1.0.0', 'verified')`);
-
-    const revisionId = one(`
-      insert into public.alert_revisions
-             (organization_id, alert_id, revision_no, rule_version, severity, explanation,
-              calculation_run_id, evidence_bundle_id)
-      values ('${orgId}', '${alertId}', 1, '1', 'high',
-              'Acme Trading Ltd is 41% of revenue this month.', '${runId}', '${bundleId}')
-      returning id`);
-    adminSql(`
-      update public.alerts set current_revision_id = '${revisionId}' where id = '${alertId}'`);
+  beforeAll(async () => {
+    const runId = await seedRun();
+    alertId = await seedAlert({
+      runId, severity: 'high', dedupe: `itest-${RUN}`, ruleKey: 'concentration.customer',
+      title: 'One customer is 41% of revenue',
+      explanation: 'Acme Trading Ltd is 41% of revenue this month.',
+      next: 'Talk to your second-biggest customer about more work',
+      evidence: [{
+        item_type: 'calculation_run', ref_id: runId, query_descriptor: null, descriptor_hash: null,
+        label: 'Calculated 15 Jun 2026, engine 1.0.0', claim: null, assurance_level: 'verified',
+      }],
+    });
+    const alert = (await orgRow(fs(), orgId, 'alerts', alertId).get()).data()!;
+    const revision = (await orgRow(fs(), orgId, 'alert_revisions', alert.current_revision_id).get()).data()!;
+    bundleId = revision.evidence_bundle_id;
   });
 
   it('copies the revision’s text and the alert’s next step', async () => {
@@ -313,14 +318,13 @@ describe('an action created from an alert keeps what the alert said (§5, ADR-03
     expect(error).toBeNull();
     const actionId = data as unknown as string;
 
-    expect(one(`
-      select title || '|' || issue || '|' || recommendation || '|' || source_type::text
-        from public.actions where id = '${actionId}'`))
+    const a = await actionRow(actionId);
+    expect([a.title, a.issue, a.recommendation, a.source_type].join('|'))
       .toBe('One customer is 41% of revenue|Acme Trading Ltd is 41% of revenue this month.'
         + '|Talk to your second-biggest customer about more work|alert');
 
     // The alert points back, so the list shows "converted" rather than offering the button twice.
-    expect(one(`select action_id::text from public.alerts where id = '${alertId}'`)).toBe(actionId);
+    expect((await orgRow(fs(), orgId, 'alerts', alertId).get()).get('action_id')).toBe(actionId);
   });
 
   /*
@@ -332,18 +336,15 @@ describe('an action created from an alert keeps what the alert said (§5, ADR-03
     const { data } = await rpc(owner(), 'create_action_from_alert', { p_alert: alertId, p_input: {} });
     const actionId = data as unknown as string;
 
-    const cloned = one(`
-      select evidence_bundle_id::text from public.actions where id = '${actionId}'`);
+    const cloned = (await actionRow(actionId)).evidence_bundle_id as string;
     expect(cloned).not.toBe(bundleId);
 
-    expect(one(`
-      select kind::text || '|' || origin_table || '|' || origin_id::text
-        from public.evidence_bundles where id = '${cloned}'`))
-      .toBe(`action|actions|${actionId}`);
+    const bundle = (await orgRow(fs(), orgId, 'evidence_bundles', cloned).get()).data()!;
+    expect(`${bundle.kind}|${bundle.origin_table}|${bundle.origin_id}`).toBe(`action|actions|${actionId}`);
 
-    expect(one(`
-      select string_agg(item_type::text || ':' || label, ',' order by sort_order)
-        from public.evidence_items where bundle_id = '${cloned}'`))
+    const items = (await orgCollection(fs(), orgId, 'evidence_items').where('bundle_id', '==', cloned).get())
+      .docs.map((d) => d.data()).sort((x, y) => x.sort_order - y.sort_order);
+    expect(items.map((i) => `${i.item_type}:${i.label}`).join(','))
       .toBe('calculation_run:Calculated 15 Jun 2026, engine 1.0.0');
   });
 
@@ -362,25 +363,10 @@ describe('an action created from an alert keeps what the alert said (§5, ADR-03
  * severity through the real function and reads the row back.
  */
 describe('an alert’s severity decides the action’s priority (ADR-098)', () => {
-  const seedAlert = (severity: string, key: string): string => {
-    const runId = one(`
-      insert into public.calculation_runs
-             (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-      select '${orgId}', 'recalc_manual', '1.0.0', p.id, p.id, '2026-06-15', 'succeeded'
-        from public.fiscal_periods p
-       where p.organization_id = '${orgId}' and p.period_start = '2026-05-01'
-      returning id`);
-    return one(`
-      insert into public.alerts
-             (organization_id, period_id, rule_key, rule_version, severity, key_kind,
-              calculation_run_id, title, explanation, status, first_seen_at, dedupe_key)
-      select '${orgId}', p.id, 'cash.runway_low', '1', '${severity}', 'state', '${runId}',
-             'Runway is short', 'Cash would last under two months.', 'open', now(),
-             'itest-prio-${RUN}-${key}'
-        from public.fiscal_periods p
-       where p.organization_id = '${orgId}' and p.period_start = '2026-05-01'
-      returning id`);
-  };
+  const alertOf = async (severity: string, key: string): Promise<string> => seedAlert({
+    runId: await seedRun(), severity, dedupe: `itest-prio-${RUN}-${key}`, ruleKey: 'cash.runway_low',
+    title: 'Runway is short', explanation: 'Cash would last under two months.',
+  });
 
   const cases: ReadonlyArray<[string, string]> = [
     ['critical', 'critical'], ['high', 'high'], ['medium', 'medium'], ['low', 'low'],
@@ -390,93 +376,86 @@ describe('an alert’s severity decides the action’s priority (ADR-098)', () =
 
   for (const [severity, expected] of cases) {
     it(`a ${severity} alert becomes a ${expected} action`, async () => {
-      const alert = seedAlert(severity, severity);
-      const created = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-        .schema('api').rpc('create_action_from_alert', { p_alert: alert, p_input: {} });
+      const alert = await alertOf(severity, severity);
+      const created = await rpc(owner(), 'create_action_from_alert', { p_alert: alert, p_input: {} });
       expect(created.error, JSON.stringify(created.error)).toBeNull();
-
-      expect(one(`select priority from public.actions where id = '${created.data as string}'`))
-        .toBe(expected);
+      expect((await actionRow(created.data as string)).priority).toBe(expected);
     });
   }
 
   it('ignores a priority the caller supplies rather than letting it contradict the rule', async () => {
-    const alert = seedAlert('critical', 'override');
-    const created = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-      .schema('api').rpc('create_action_from_alert', {
-        p_alert: alert, p_input: { priority: 'low' },
-      });
+    const alert = await alertOf('critical', 'override');
+    const created = await rpc(owner(), 'create_action_from_alert', {
+      p_alert: alert, p_input: { priority: 'low' },
+    });
     expect(created.error).toBeNull();
-
     expect(
-      one(`select priority from public.actions where id = '${created.data as string}'`),
+      (await actionRow(created.data as string)).priority,
       'the rule said critical; a caller saying low does not make it low',
     ).toBe('critical');
   });
 
   it('records the derivation on the audit row, so “why is this critical?” is answerable', async () => {
-    const alert = seedAlert('critical', 'audit');
-    const created = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-      .schema('api').rpc('create_action_from_alert', { p_alert: alert, p_input: {} });
+    const alert = await alertOf('critical', 'audit');
+    const created = await rpc(owner(), 'create_action_from_alert', { p_alert: alert, p_input: {} });
     expect(created.error).toBeNull();
 
-    const after = one(`
-      select after::text from public.audit_events
-       where organization_id = '${orgId}' and action = 'alert.converted_to_action'
-         and target_id = '${alert}' order by id desc limit 1`);
-    expect(after).toMatch(/"severity": ?"critical"/);
-    expect(after).toMatch(/"priority": ?"critical"/);
+    const events = (await auditEvents(orgId, 'alert.converted_to_action')).filter((e) => e.target_id === alert);
+    const after = events[events.length - 1]!.after as Record<string, unknown>;
+    expect(after.severity).toBe('critical');
+    expect(after.priority).toBe('critical');
   });
 
   it('a later change of mind is still possible, and goes through the permission', async () => {
-    const alert = seedAlert('low', 'change');
-    const created = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-      .schema('api').rpc('create_action_from_alert', { p_alert: alert, p_input: {} });
+    const alert = await alertOf('low', 'change');
+    const created = await rpc(owner(), 'create_action_from_alert', { p_alert: alert, p_input: {} });
     const actionId = created.data as string;
-    expect(one(`select priority from public.actions where id = '${actionId}'`)).toBe('low');
+    expect((await actionRow(actionId)).priority).toBe('low');
 
     // Deterministic at creation; changeable afterwards by somebody who may (RBAC_MATRIX §2.1).
-    const patched = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-      .schema('api').rpc('update_action', { p_action: actionId, p_patch: { priority: 'high' } });
+    const patched = await rpc(owner(), 'update_action', { p_action: actionId, p_patch: { priority: 'high' } });
     expect(patched.error, JSON.stringify(patched.error)).toBeNull();
-    expect(one(`select priority from public.actions where id = '${actionId}'`)).toBe('high');
+    expect((await actionRow(actionId)).priority).toBe('high');
   });
 });
 
 describe('an AI recommendation becomes an action only when it was grounded (ADR-032.5)', () => {
-  const conversation = () => one(`
-    select id::text from public.ai_conversations
-     where organization_id = '${orgId}' and user_id = '${ownerId}' limit 1`);
+  let conversationId: string | null = null;
 
-  function message(status: string): string {
-    adminSql(`
-      insert into public.ai_conversations (organization_id, user_id)
-      select '${orgId}', '${ownerId}'
-       where not exists (select 1 from public.ai_conversations
-                          where organization_id = '${orgId}' and user_id = '${ownerId}')`);
-    return one(`
-      insert into public.ai_messages
-             (organization_id, conversation_id, role, structured_response, grounding_status)
-      values ('${orgId}', '${conversation()}', 'assistant',
-              '{"recommended_actions":[{"title":{"statement":"Renegotiate the marketing contract"},
-                 "issue":{"statement":"Marketing spend rose while revenue did not"},
-                 "recommendation":{"statement":"Ask for a lower monthly rate"},
-                 "priority":"high"}]}'::jsonb,
-              '${status}')
-      returning id`);
+  async function message(status: string): Promise<string> {
+    const now = nowIso();
+    if (!conversationId) {
+      conversationId = newId();
+      await orgRow(fs(), orgId, 'ai_conversations', conversationId).set({
+        id: conversationId, organization_id: orgId, user_id: ownerId, title: null, status: 'active',
+        last_message_at: null, created_at: now, updated_at: now,
+      });
+    }
+    const id = newId();
+    await orgRow(fs(), orgId, 'ai_messages', id).set({
+      id, organization_id: orgId, conversation_id: conversationId, role: 'assistant', content: null,
+      structured_response: {
+        recommended_actions: [{
+          title: { statement: 'Renegotiate the marketing contract' },
+          issue: { statement: 'Marketing spend rose while revenue did not' },
+          recommendation: { statement: 'Ask for a lower monthly rate' },
+          priority: 'high',
+        }],
+      },
+      prompt_version: null, model: null, input_tokens: null, output_tokens: null, latency_ms: null,
+      grounding_status: status, grounding_report: null, evidence_bundle_id: null, period_context: {},
+      flagged: false, created_at: now,
+    });
+    return id;
   }
 
   it('creates it from a passed answer, copying the three statements verbatim', async () => {
     const { data, error } = await rpc(owner(), 'create_action_from_recommendation', {
-      p_message: message('passed'), p_index: 0, p_input: {},
+      p_message: await message('passed'), p_index: 0, p_input: {},
     });
     expect(error).toBeNull();
-    const actionId = data as unknown as string;
-
-    expect(one(`
-      select title || '|' || issue || '|' || recommendation || '|' || priority::text
-             || '|' || source_type::text
-        from public.actions where id = '${actionId}'`))
+    const a = await actionRow(data as unknown as string);
+    expect([a.title, a.issue, a.recommendation, a.priority, a.source_type].join('|'))
       .toBe('Renegotiate the marketing contract|Marketing spend rose while revenue did not'
         + '|Ask for a lower monthly rate|high|ai');
   });
@@ -488,19 +467,19 @@ describe('an AI recommendation becomes an action only when it was grounded (ADR-
    */
   it('refuses a degraded answer', async () => {
     expect(sqlstate((await rpc(owner(), 'create_action_from_recommendation', {
-      p_message: message('degraded'), p_index: 0, p_input: {},
+      p_message: await message('degraded'), p_index: 0, p_input: {},
     })).error)).toBe('22023');
   });
 
   it('refuses a failed answer', async () => {
     expect(sqlstate((await rpc(owner(), 'create_action_from_recommendation', {
-      p_message: message('failed'), p_index: 0, p_input: {},
+      p_message: await message('failed'), p_index: 0, p_input: {},
     })).error)).toBe('22023');
   });
 
   it('refuses a recommendation index the answer does not have', async () => {
     expect(sqlstate((await rpc(owner(), 'create_action_from_recommendation', {
-      p_message: message('passed'), p_index: 7, p_input: {},
+      p_message: await message('passed'), p_index: 7, p_input: {},
     })).error)).toBe('P0002');
   });
 
@@ -508,7 +487,7 @@ describe('an AI recommendation becomes an action only when it was grounded (ADR-
     expect(sqlstate((await rpc(owner(), 'create_action', {
       p_org: orgId,
       p_input: { title: 'Laundered' },
-      p_source: { type: 'ai', id: message('degraded') },
+      p_source: { type: 'ai', id: await message('degraded') },
     })).error)).toBe('22023');
   });
 });

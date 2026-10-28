@@ -1,6 +1,6 @@
 /**
  * Filename sanitisation — pure, so a `domain/` module can use it without dragging `server-only` and
- * the Supabase client into its import graph.
+ * the Firebase Admin SDK into its import graph.
  *
  * It lives here rather than in `signer.ts` because two callers need the same rule: the signer, which
  * builds the object key, and `api_server.register_document`'s TypeScript-side twin in document

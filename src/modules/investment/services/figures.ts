@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { loadMarketingFinancials } from '@/modules/marketing';
 import { baseFromYears, investmentSourceNote } from '../domain/figures';
 import type { InvestmentBase } from '../domain/types';
@@ -25,7 +25,7 @@ import type { InvestmentBase } from '../domain/types';
  * Null when APX holds no year with both turnover and net profit, or the base year's turnover is not
  * positive (`baseFromYears`).
  */
-export async function loadInvestmentBase(db: SupabaseClient, orgId: string): Promise<InvestmentBase | null> {
+export async function loadInvestmentBase(db: Db, orgId: string): Promise<InvestmentBase | null> {
   const financials = await loadMarketingFinancials(db, orgId);
   if (financials === null) return null;
   const note = investmentSourceNote(financials.years, financials.currency, financials.sourceNote);

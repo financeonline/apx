@@ -1,11 +1,8 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import { orgRows } from '@/db/rls';
+import type { Db } from '@/db/types';
+import { organizationDoc } from '@/modules/tenancy';
 import type { VatInvoice } from '../domain/vat';
-
-function check(error: unknown, requestId?: string): void {
-  if (error) throw toMotionError(error, requestId);
-}
 
 /**
  * The invoices a VAT quarter reads (ADR-156): the CURRENT row of every accepted, non-superseded
@@ -14,24 +11,17 @@ function check(error: unknown, requestId?: string): void {
  * domain, which owns that rule.
  */
 export async function loadVatInvoices(
-  db: SupabaseClient, orgId: string, from: string, to: string, by: 'issue_date' | 'paid_date', requestId?: string,
+  db: Db, orgId: string, from: string, to: string, by: 'issue_date' | 'paid_date', requestId?: string,
 ): Promise<VatInvoice[]> {
-  const out: VatInvoice[] = [];
-  const PAGE = 1000;
-  for (let start = 0; ; start += PAGE) {
-    const { data, error } = await db
-      .from('invoices')
-      .select('id, invoice_type, status, issue_date, paid_date, subtotal, tax_amount, total_amount, amount_paid')
-      .eq('organization_id', orgId)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null)
-      .gte(by, from)
-      .lte(by, to)
-      .order('id')
-      .range(start, start + PAGE - 1);
-    check(error, requestId);
-    const rows = (data ?? []) as Record<string, unknown>[];
-    out.push(...rows.map((r) => ({
+  void requestId;
+  // The date window is the query (one single-field range, no composite index); the current-row rule
+  // (accepted, not superseded) is applied to the window's rows here.
+  const rows = await orgRows<Record<string, unknown>>(db, orgId, 'invoices', (q) => q
+    .where(by, '>=', from).where(by, '<=', to).orderBy(by));
+  return rows
+    .filter((r) => r.record_status === 'accepted' && (r.superseded_by ?? null) === null)
+    .sort((a, b) => String(a.id).localeCompare(String(b.id)))
+    .map((r) => ({
       id: r.id as string,
       invoiceType: r.invoice_type as VatInvoice['invoiceType'],
       status: r.status as string,
@@ -41,9 +31,7 @@ export async function loadVatInvoices(
       taxAmount: r.tax_amount === null || r.tax_amount === undefined ? null : String(r.tax_amount),
       totalAmount: String(r.total_amount),
       amountPaid: String(r.amount_paid ?? '0'),
-    })));
-    if (rows.length < PAGE) return out;
-  }
+    }));
 }
 
 export interface OrganisationTaxFacts {
@@ -57,14 +45,9 @@ export interface OrganisationTaxFacts {
   readonly ctAssociatedCompanies: number;
 }
 
-export async function loadOrganisationTaxFacts(db: SupabaseClient, orgId: string, requestId?: string): Promise<OrganisationTaxFacts> {
-  const { data, error } = await db
-    .from('organizations')
-    .select('country_code, base_currency, fiscal_year_start_month, timezone, settings')
-    .eq('id', orgId)
-    .maybeSingle();
-  check(error, requestId);
-  const row = (data ?? {}) as Record<string, unknown>;
+export async function loadOrganisationTaxFacts(db: Db, orgId: string, requestId?: string): Promise<OrganisationTaxFacts> {
+  void requestId;
+  const row = (await organizationDoc(db, orgId)) ?? {};
   const settings = (row.settings ?? {}) as Record<string, unknown>;
   const qem = Number(settings.vat_quarter_end_month);
   const scheme = settings.vat_scheme;

@@ -7,6 +7,7 @@ import type { AccessContext } from '@/modules/tenancy';
 import { HORIZON_MONTHS } from '../domain/config';
 import { FORECAST_LEAVES, composeForecast } from '../domain/compose';
 import type { ActualPoint, ForecastResult } from '../domain/types';
+import { readRows, readRowsIn } from '@/db/app/engine-reads';
 import * as repo from '../data/repository';
 
 /**
@@ -87,12 +88,9 @@ export function hasForecast(state: ForecastState): state is ForecastView {
 
 /** The last complete month, which is the last month a forecast may learn from. */
 async function lastCompletePeriodStart(ctx: AccessContext, orgId: string): Promise<string | null> {
-  const { data, error } = await ctx.db
-    .from('fiscal_periods').select('period_start')
-    .eq('organization_id', orgId).eq('is_complete', true)
-    .order('period_start', { ascending: false }).limit(1).maybeSingle();
-  if (error) throw error;
-  return (data as { period_start?: string } | null)?.period_start ?? null;
+  const rows = await readRows(ctx.db, orgId, 'fiscal_periods', (q) => q.where('is_complete', '==', true));
+  const starts = rows.map((r) => String(r.period_start)).sort();
+  return starts.at(-1) ?? null;
 }
 
 function groupHistory(rows: readonly repo.HistoryRow[]): Record<string, ActualPoint[]> {
@@ -286,10 +284,8 @@ export async function loadForecast(ctx: AccessContext): Promise<ForecastState> {
     });
   }
 
-  const periodRows = await ctx.db
-    .from('fiscal_periods').select('id, label, period_start')
-    .eq('organization_id', orgId).in('id', [...byPeriod.keys()]);
-  for (const row of (periodRows.data ?? []) as Array<{ id: string; label: string; period_start: string }>) {
+  const periodRows = await readRowsIn(ctx.db, orgId, 'fiscal_periods', 'id', [...byPeriod.keys()]);
+  for (const row of periodRows as Array<{ id: string; label: string; period_start: string }>) {
     labels.set(row.id, row.label);
     starts.set(row.id, row.period_start);
   }

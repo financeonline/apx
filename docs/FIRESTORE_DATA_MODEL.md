@@ -1,9 +1,10 @@
 # APX — Firestore Data Model and the Port from PostgreSQL
 
-Status: in progress (branch `feat/firebase`, 2026-10-28). Replaces `DATABASE_ARCHITECTURE.md`
-(PostgreSQL / Supabase) as the description of how APX stores data. Owner decision 2026-10-28: full
-move from Supabase to Firebase (Firestore, Firebase Authentication, Firebase Storage); developed and
-tested on the local Firebase emulators first, connected to a real Firebase project later.
+Status: the only database of APX (branch `feat/firebase`, 2026-10-28; ADR-178). Replaces
+`DATABASE_ARCHITECTURE.md` (PostgreSQL / Supabase) as the description of how APX stores data. Owner
+decisions 2026-10-28: full move from Supabase to Firebase (Firestore, Firebase Authentication,
+Firebase Storage), then Supabase removed from the code completely; developed and tested on the local
+Firebase emulators first, connected to a real Firebase project later.
 
 ## 1. What runs where
 

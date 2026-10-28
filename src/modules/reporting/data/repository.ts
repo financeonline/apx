@@ -1,6 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import type { Db } from '@/db/types';
+import { readOrganization, readRowById, readRows, readRowsByIds } from '@/db/app/caller-reads';
 import type { HealthCardView } from '@/modules/health';
 import type { ReportFileRef } from '../domain/types';
 
@@ -21,9 +21,6 @@ export interface ReportFileRow {
   readonly createdAt: string;
 }
 
-const FILE_SELECT =
-  'id, report_kind, period_id, storage_bucket, storage_path, byte_size, created_at, deleted_at';
-
 interface FileRow {
   id: string;
   report_kind: string;
@@ -36,86 +33,69 @@ interface FileRow {
 }
 
 export async function listReportFiles(
-  db: SupabaseClient, orgId: string,
+  db: Db, orgId: string,
 ): Promise<ReportFileRef[]> {
-  const { data, error } = await db
-    .from('report_files')
-    .select(`${FILE_SELECT}, fiscal_periods!inner (label)`)
-    .eq('organization_id', orgId)
-    // Phase 17: an adviser or custom report's PDF names its month too; only the monthly
-    // management report's PDFs belong in this list.
-    .eq('report_kind', 'monthly_management')
-    .is('deleted_at', null)
-    .order('created_at', { ascending: false });
-  if (error) throw toMotionError(error);
+  // Phase 17: an adviser or custom report's PDF names its month too; only the monthly management
+  // report's PDFs belong in this list. Equality filters only (no composite index); newest first in
+  // TypeScript.
+  const rows = (await readRows<FileRow>(db, orgId, 'report_files', (q) => q
+    .where('report_kind', '==', 'monthly_management')
+    .where('deleted_at', '==', null)))
+    .sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
 
-  const rows = (data ?? []) as unknown as Array<FileRow & {
-    fiscal_periods: { label: string } | { label: string }[] | null;
-  }>;
-  return rows.map((row) => {
-    const period = Array.isArray(row.fiscal_periods) ? row.fiscal_periods[0] : row.fiscal_periods;
-    return {
+  // The old `fiscal_periods!inner (label)`: a file whose month the caller cannot read is left out.
+  const periods = await readRowsByIds<{ id: string; label: string }>(
+    db, orgId, 'fiscal_periods', rows.map((row) => row.period_id),
+  );
+  const labels = new Map(periods.map((p) => [p.id, p.label]));
+  return rows
+    .filter((row) => row.period_id !== null && labels.has(row.period_id))
+    .map((row) => ({
       id: row.id,
       // Monthly rows always name their month (`report_files_subject`).
       periodId: row.period_id ?? '',
-      periodLabel: period?.label ?? '',
-      byteSize: row.byte_size,
+      periodLabel: labels.get(row.period_id ?? '') ?? '',
+      byteSize: row.byte_size === null ? null : Number(row.byte_size),
       createdAt: row.created_at,
-    };
-  });
+    }));
 }
 
 /** Resolved by `(organization_id, id)`, so another organisation's id is simply absent (§166). */
 export async function getReportFile(
-  db: SupabaseClient, orgId: string, reportFileId: string,
+  db: Db, orgId: string, reportFileId: string,
 ): Promise<ReportFileRow | null> {
-  const { data, error } = await db
-    .from('report_files').select(FILE_SELECT)
-    .eq('organization_id', orgId).eq('id', reportFileId).maybeSingle();
-  if (error) throw toMotionError(error);
-  if (data === null) return null;
-
-  const row = data as unknown as FileRow;
-  if (row.deleted_at !== null) return null;
+  const row = await readRowById<FileRow>(db, orgId, 'report_files', reportFileId);
+  if (row === null || row.deleted_at !== null) return null;
   return {
     id: row.id,
     reportKind: row.report_kind,
     periodId: row.period_id,
     storageBucket: row.storage_bucket,
     storagePath: row.storage_path,
-    byteSize: row.byte_size,
+    byteSize: row.byte_size === null ? null : Number(row.byte_size),
     createdAt: row.created_at,
   };
 }
 
-export async function organisationName(db: SupabaseClient, orgId: string): Promise<string> {
-  const { data, error } = await db
-    .from('organizations').select('name').eq('id', orgId).maybeSingle();
-  if (error) throw toMotionError(error);
-  return (data as { name?: string } | null)?.name ?? 'Your business';
+export async function organisationName(db: Db, orgId: string): Promise<string> {
+  const org = await readOrganization(db, orgId);
+  return (org?.name as string | undefined) ?? 'Your business';
 }
 
 /** The run the period's figures came from, so the report can say when and by which engine. */
 export async function loadRunFor(
-  db: SupabaseClient, orgId: string, periodId: string,
+  db: Db, orgId: string, periodId: string,
 ): Promise<{ engineVersion: string | null; finishedAt: string | null }> {
-  const { data, error } = await db
-    .from('metric_current')
-    .select('calculation_runs!inner (engine_version, finished_at)')
-    .eq('organization_id', orgId)
-    .eq('period_id', periodId)
-    .limit(1);
-  if (error) throw toMotionError(error);
-
-  const rows = (data ?? []) as unknown as Array<{
-    calculation_runs: { engine_version: string; finished_at: string | null }
-      | { engine_version: string; finished_at: string | null }[] | null;
-  }>;
-  const run = rows[0]?.calculation_runs;
-  const resolved = Array.isArray(run) ? run[0] : run;
+  const cells = await readRows<{ calculation_run_id: string | null }>(
+    db, orgId, 'metric_current', (q) => q.where('period_id', '==', periodId).limit(1),
+  );
+  const runId = cells[0]?.calculation_run_id ?? null;
+  // The old `calculation_runs!inner`: the run as the caller may read it.
+  const run = runId === null ? null
+    : await readRowById<{ engine_version: string; finished_at: string | null }>(db, orgId, 'calculation_runs', runId);
   return {
-    engineVersion: resolved?.engine_version ?? null,
-    finishedAt: resolved?.finished_at ?? null,
+    engineVersion: run?.engine_version ?? null,
+    finishedAt: run?.finished_at ?? null,
   };
 }
 

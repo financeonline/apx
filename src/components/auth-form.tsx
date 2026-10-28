@@ -5,7 +5,11 @@ import { useState, type FormEvent, type InputHTMLAttributes, type ReactNode } fr
 import { useRouter, useSearchParams } from 'next/navigation';
 import { ArrowRight, Eye, EyeOff, Lock, Mail, User, type LucideIcon } from 'lucide-react';
 import { SESSION_ALIVE_COOKIE, SESSION_ONLY_COOKIE, safeNextPath } from '@/core/routing';
-import { supabaseBrowser } from '@/components/supabase-browser';
+import {
+  confirmPasswordReset, createUserWithEmailAndPassword, sendEmailVerification, sendPasswordResetEmail,
+  signInWithEmailAndPassword, updateProfile,
+} from 'firebase/auth';
+import { authErrorMessage, firebaseAuth, openServerSession, usingAuthEmulator } from '@/components/firebase-browser';
 import { Label } from '@/components/ui/shadcn';
 import { NAV_COOKIE } from '@/components/dashboard/nav-cookie';
 import { startNavigationLoading } from '@/components/loading/page-loading';
@@ -86,17 +90,26 @@ function rememberSessionChoice(keep: boolean) {
   document.cookie = `${SESSION_ALIVE_COOKIE}=1; path=/; samesite=lax${secure}`;
 }
 
+/** Why the sign-in page was opened: the proxy and the email links say so in `?error=` / `?verified=`. */
+const ARRIVAL: Record<string, string> = {
+  disabled: 'This account has been switched off. Ask your administrator.',
+  missing_code: 'That link is incomplete. Please request a new one.',
+  exchange_failed: 'That link is no longer valid. Please request a new one.',
+};
+
 /**
- * Real Supabase Auth in every mode — there is no mock path (SECURITY_MODEL.md §3).
- * The browser only ever holds the anon key; it has no table write privilege (ADR-026).
+ * Real Firebase Authentication in every mode — there is no mock path (SECURITY_MODEL.md §3).
+ * The browser proves the password to Firebase and hands the ID token to `/auth/session`, which sets
+ * the httpOnly session cookie; the browser keeps no session of its own and never reads data.
  * Laid out as the client's APX reference (ADR-169).
  */
 export function AuthForm({ mode }: { mode: Mode }) {
   const router = useRouter();
   const params = useSearchParams();
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [notice, setNotice] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(() => ARRIVAL[params.get('error') ?? ''] ?? null);
+  const [notice, setNotice] = useState<string | null>(() =>
+    params.get('verified') === '1' ? 'Email address confirmed. You can log in now.' : null);
   const [showPassword, setShowPassword] = useState(false);
 
   // The same rule the callback applies (ADR-069): `router.push` is not trusted to keep an
@@ -113,46 +126,54 @@ export function AuthForm({ mode }: { mode: Mode }) {
     const email = String(form.get('email') ?? '').trim();
     const password = String(form.get('password') ?? '');
     const fullName = String(form.get('full_name') ?? '').trim();
-    const supabase = supabaseBrowser();
-
     try {
+      const auth = await firebaseAuth();
       if (mode === 'sign-in') {
-        const { error: err } = await supabase.auth.signInWithPassword({ email, password });
-        if (err) throw err;
-        rememberSessionChoice(form.get('keep_signed_in') === 'on');
+        const keep = form.get('keep_signed_in') === 'on';
+        const { user } = await signInWithEmailAndPassword(auth, email, password);
+        await openServerSession(await user.getIdToken(), keep);
+        rememberSessionChoice(keep);
         startNavigationLoading();
         router.push(safeNext);
         router.refresh();
         return;
       }
       if (mode === 'sign-up') {
-        const { error: err } = await supabase.auth.signUp({
-          email,
-          password,
-          options: {
-            data: { full_name: fullName },
-            emailRedirectTo: `${window.location.origin}/auth/callback`,
-          },
-        });
-        if (err) throw err;
+        const { user } = await createUserWithEmailAndPassword(auth, email, password);
+        if (fullName) await updateProfile(user, { displayName: fullName });
+        if (usingAuthEmulator()) {
+          // Locally there is no inbox to confirm from (the local Supabase stack had confirmations off).
+          await openServerSession(await user.getIdToken(true), false);
+          rememberSessionChoice(false);
+          startNavigationLoading();
+          router.push(safeNext);
+          router.refresh();
+          return;
+        }
+        await sendEmailVerification(user, { url: `${window.location.origin}/sign-in?next=${encodeURIComponent(safeNext)}` });
+        await auth.signOut();
         setNotice(
           'Check your email to confirm the address. You can log in once it is confirmed.',
         );
         return;
       }
       if (mode === 'forgot') {
-        const { error: err } = await supabase.auth.resetPasswordForEmail(email, {
-          redirectTo: `${window.location.origin}/auth/callback?next=/reset-password`,
+        await sendPasswordResetEmail(auth, email, { url: `${window.location.origin}/sign-in` }).catch((err: unknown) => {
+          // Never confirm whether an address has an account.
+          if ((err as { code?: string }).code !== 'auth/user-not-found') throw err;
         });
-        if (err) throw err;
         setNotice('If that address has an account, a reset link is on its way.');
         return;
       }
-      const { error: err } = await supabase.auth.updateUser({ password });
-      if (err) throw err;
+      const code = params.get('oobCode');
+      if (!code) {
+        setError('That link is no longer valid. Please request a new one.');
+        return;
+      }
+      await confirmPasswordReset(auth, code, password);
       setNotice('Password saved. You can use it next time you log in.');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'Something went wrong. Please try again.');
+      setError(authErrorMessage(caught));
     } finally {
       setBusy(false);
     }

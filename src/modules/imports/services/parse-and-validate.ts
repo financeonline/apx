@@ -1,6 +1,9 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { ConflictError, ValidationError, toMotionError } from '@/core/errors';
+import type { DocumentData, Query } from 'firebase-admin/firestore';
+import { orgRowById as rlsRowById, orgRows as rlsRows } from '@/db/rls';
+import { orgCollection, orgRow, type OrgTable } from '@/db/schema';
+import type { Db } from '@/db/types';
 import { log } from '@/core/logging';
 import { runPipeline, type PipelineInput, type AccountRef, type CounterpartyRef } from '../domain/pipeline';
 import type { ParsedTable, TargetField, Transforms } from '../domain/pipeline-types';
@@ -16,7 +19,7 @@ import { heldNameKey } from '../domain/mapping';
  * observed about a file, not an intention a user expressed (ADR-043).
  *
  * Note what it does NOT do: decide whether the batch may commit. That is `app.assert_batch_committable`
- * in SQL, re-checked at the moment of commit against data that may have changed since.
+ * (ported to `src/db/app/imports-*.ts`), re-checked at the moment of commit against data that may have changed since.
  */
 
 export interface ParseAndValidateInput {
@@ -36,7 +39,7 @@ export interface ParseAndValidateInput {
 }
 
 export interface ParseAndValidateDeps {
-  readonly db: SupabaseClient;
+  readonly db: Db;
   readonly actorUserId: string;
   readonly today: string;
   readonly baseCurrency: string;
@@ -52,18 +55,42 @@ export interface ParseAndValidateDeps {
   readonly requestId?: string;
 }
 
+/**
+ * Reads for the pipeline. A request reads as the reviewer, through the read policies
+ * (`src/db/rls.ts`). The extraction JOB reads as the server — the service role bypassed row-level
+ * security on PostgreSQL, and `orgRows` admits no row to a service actor — so it reads the
+ * organisation's collection directly, and only the organisation the job is scoped to.
+ */
+function serverRead(db: Db, orgId: string): boolean {
+  if (db.actor.kind !== 'service') return false;
+  if (db.actor.scope !== null && db.actor.scope !== orgId) {
+    throw new ConflictError('The organization scope does not match the organization being read.');
+  }
+  return true;
+}
+
+async function orgRows<T = DocumentData>(db: Db, orgId: string, table: OrgTable, refine?: (q: Query) => Query): Promise<T[]> {
+  if (!serverRead(db, orgId)) return rlsRows<T>(db, orgId, table, refine);
+  const base: Query = orgCollection(db.fs, orgId, table);
+  const snap = await (refine ? refine(base) : base).get();
+  return snap.docs.map((d) => d.data() as T);
+}
+
+async function orgRowById<T = DocumentData>(db: Db, orgId: string, table: OrgTable, id: string): Promise<T | null> {
+  if (!serverRead(db, orgId)) return rlsRowById<T>(db, orgId, table, id);
+  const snap = await orgRow(db.fs, orgId, table, id).get();
+  return snap.exists ? (snap.data() as T) : null;
+}
+
 /** The maximum rows a request may commit synchronously (§11.7, CD-22). */
 export const SYNC_ROW_LIMIT = 5_000;
 
 async function loadAccounts(
-  db: SupabaseClient, orgId: string, requestId?: string,
+  db: Db, orgId: string, _requestId?: string,
 ): Promise<AccountRef[]> {
-  const { data, error } = await db
-    .from('accounts')
-    .select('id, code, name, normalized_name')
-    .eq('organization_id', orgId);
-  if (error) throw toMotionError(error, requestId);
-  return (data ?? []).map((a) => ({
+  const data = await orgRows<Record<string, unknown>>(db, orgId, 'accounts', (q) => q
+    .select('id', 'code', 'name', 'normalized_name'));
+  return data.map((a) => ({
     id: a.id as string,
     code: a.code as string | null,
     normalizedName: a.normalized_name as string,
@@ -71,25 +98,14 @@ async function loadAccounts(
   }));
 }
 
-const COUNTERPARTY_PAGE = 1000;
-
 export async function loadCounterparties(
-  db: SupabaseClient, orgId: string, requestId?: string,
+  db: Db, orgId: string, _requestId?: string,
 ): Promise<CounterpartyRef[]> {
-  // Paged: PostgREST stops at `max_rows` (1,000), and a customer past that line would look new,
-  // could not be created (its name is taken) and would block its invoice row.
-  const data: Array<Record<string, unknown>> = [];
-  for (let from = 0; ; from += COUNTERPARTY_PAGE) {
-    const page = await db
-      .from('counterparties')
-      .select('id, name, normalized_name, merged_into_id')
-      .eq('organization_id', orgId)
-      .order('id')
-      .range(from, from + COUNTERPARTY_PAGE - 1);
-    if (page.error) throw toMotionError(page.error, requestId);
-    data.push(...(page.data ?? []));
-    if ((page.data ?? []).length < COUNTERPARTY_PAGE) break;
-  }
+  // Every one: a customer missing from this list would look new, could not be created (its name is
+  // taken) and would block its invoice row. (PostgREST capped a read at 1,000 rows; Firestore does
+  // not, so the old paging is gone.)
+  const data = await orgRows<Record<string, unknown>>(db, orgId, 'counterparties', (q) => q
+    .select('id', 'name', 'normalized_name', 'merged_into_id'));
 
   /*
    * A merged-away counterparty keeps its name, and `normalized_name` is unique across merged rows
@@ -121,7 +137,7 @@ export async function loadCounterparties(
  * the same data, which is exactly why the filter is on both columns.
  */
 async function loadExistingRecords(
-  db: SupabaseClient, orgId: string, target: ImportTarget, requestId?: string,
+  db: Db, orgId: string, target: ImportTarget, _requestId?: string,
 ) {
   const dateColumn = target === 'bank_transactions' ? 'transaction_date'
     : target === 'ledger_entries' ? 'entry_date'
@@ -132,23 +148,19 @@ async function loadExistingRecords(
   // `period_balances` has no row hash: balances supersede at batch scope (§11), so there is no row
   // duplicate to find, and selecting the column failed every trial balance, P&L and balance sheet.
   // Budget lines likewise (ADR-142): a month's budget replaces the last one at batch scope.
-  const columns: string = target === 'period_balances' || target === 'budget_lines'
-    ? `id, ${dateColumn}, ${amountColumn}`
-    : `id, dedupe_hash, ${dateColumn}, ${amountColumn}`;
-  const { data, error } = await db
-    .from(target)
-    .select(columns)
-    .eq('organization_id', orgId)
-    .eq('record_status', 'accepted')
-    .is('superseded_by', null)
-    .limit(50_000);
-  if (error) throw toMotionError(error, requestId);
+  const columns: string[] = target === 'period_balances' || target === 'budget_lines'
+    ? ['id', dateColumn, amountColumn]
+    : ['id', 'dedupe_hash', dateColumn, amountColumn];
+  const data = await orgRows<Record<string, unknown>>(db, orgId, target, (q) => q
+    .where('record_status', '==', 'accepted')
+    .where('superseded_by', '==', null)
+    .select(...columns)
+    .limit(50_000));
 
-  return (data ?? []).map((r) => {
-    const row = r as unknown as Record<string, unknown>;
+  return data.map((row) => {
     return {
       id: row.id as string,
-      // Postgres returns bytea as `\xabcd`; the pipeline works in lower-case hex.
+      // Stored as lower-case hex (no `\\x`), which is what the pipeline works in.
       dedupeHash: String(row.dedupe_hash ?? '').replace(/^\\x/, ''),
       date: String(row[dateColumn] ?? ''),
       amount: String(row[amountColumn] ?? '0'),
@@ -177,12 +189,7 @@ export async function parseAndValidate(
 
     let bankIdentity;
     if (input.bankAccountId) {
-      const { data } = await deps.db
-        .from('bank_accounts')
-        .select('bank_name, sort_code_masked, account_number_masked, account_type')
-        .eq('organization_id', input.organizationId)
-        .eq('id', input.bankAccountId)
-        .maybeSingle();
+      const data = await orgRowById<Record<string, unknown>>(deps.db, input.organizationId, 'bank_accounts', input.bankAccountId);
       if (data) {
         bankIdentity = {
           bankName: data.bank_name as string | null,
@@ -223,11 +230,18 @@ export async function parseAndValidate(
       const months = [...new Set(result.rows.filter((r) => r.status !== 'error')
         .map((r) => r.mapped.period_start).filter((m): m is string => typeof m === 'string' && m !== ''))];
       if (months.length > 0) {
-        const { count } = await deps.db.from('period_balances').select('id', { count: 'exact', head: true })
-          .eq('organization_id', input.organizationId).eq('balance_kind', kind)
-          .eq('record_status', 'accepted').is('superseded_by', null)
-          .in('period_start', months).neq('import_batch_id', input.batchId);
-        if ((count ?? 0) > 0) requiredConfirmations = [...requiredConfirmations, 'IMP-COV-013'];
+        let count = 0;
+        for (let i = 0; i < months.length && count === 0; i += 30) {
+          const chunk = months.slice(i, i + 30);
+          const current = await orgRows<{ import_batch_id: string | null }>(deps.db, input.organizationId, 'period_balances', (q) => q
+            .where('balance_kind', '==', kind)
+            .where('record_status', '==', 'accepted')
+            .where('superseded_by', '==', null)
+            .where('period_start', 'in', chunk)
+            .select('import_batch_id'));
+          count += current.filter((r) => r.import_batch_id !== input.batchId).length;
+        }
+        if (count > 0) requiredConfirmations = [...requiredConfirmations, 'IMP-COV-013'];
       }
     }
 

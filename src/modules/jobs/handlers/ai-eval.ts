@@ -1,5 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
+import { orgRow } from '@/db/schema';
 import { permissionsFor, type EffectiveRole } from '@/core/permissions';
 import { createConversationAs } from '@/core/db';
 import { log } from '@/core/logging';
@@ -24,14 +25,10 @@ import type { ClaimedJob, JobOutcome } from '../domain/types';
 /** The one seam a test uses: the model transport. Production leaves it unset and gets the live one. */
 export const evalDeps: { transport: ModelTransport | undefined } = { transport: undefined };
 
-async function contextFor(db: SupabaseClient, orgId: string, userId: string, requestId: string): Promise<AccessContext | null> {
-  const { data, error } = await db
-    .from('organization_memberships')
-    .select('role, status')
-    .eq('organization_id', orgId)
-    .eq('user_id', userId)
-    .maybeSingle();
-  if (error) throw new Error(error.message);
+async function contextFor(db: Db, orgId: string, userId: string, requestId: string): Promise<AccessContext | null> {
+  // The membership document is keyed by the member's user id (FIRESTORE_DATA_MODEL.md §3).
+  const snap = await orgRow(db.fs, orgId, 'organization_memberships', userId).get();
+  const data = snap.exists ? snap.data()! : null;
   if (!data || data.status !== 'active') return null;
   const role = data.role as EffectiveRole;
   return {
@@ -45,7 +42,7 @@ export async function runAiEvalJob(job: ClaimedJob, scope: { db: unknown }): Pro
   if (orgId === null) return { status: 'failed', error: 'ai.eval has no organization to ask about' };
   if (job.requestedBy === null) return { status: 'failed', error: 'ai.eval acts as the person who requested it, and nobody did' };
 
-  const db = scope.db as SupabaseClient;
+  const db = scope.db as Db;
   const ctx = await contextFor(db, orgId, job.requestedBy, job.jobId);
   if (ctx === null) return { status: 'failed', error: 'the requester is not an active member of this organisation' };
 

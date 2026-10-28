@@ -1,6 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import type { Db } from '@/db/types';
+import { readRows } from '@/db/app/financials-reads';
 import { log } from '@/core/logging';
 import { planBankingPass, type PassBankAccount, type PassTransaction } from '../domain/pass';
 import type { CategoryAccountRef } from '../domain/categorisation';
@@ -15,74 +15,46 @@ import type { CategorySource, TransferKind } from '../domain/types';
  * differs. Injected into the run loop like the health step, so the engine stays unaware of the
  * banking rules and the banking module can depend on the engine without the engine depending back.
  *
- * `description_raw` is never selected: the pass reads the masked text like every other consumer
+ * `description_raw` is never read: the pass reads the masked text like every other consumer
  * (ADR-038.4), and the keyword rules were written against it.
  */
 export interface BankingStepDeps {
-  readonly scoped: SupabaseClient;
+  readonly scoped: Db;
   readonly applyBankingPass: (
     organizationId: string, runId: string | null, plan: Record<string, unknown>,
   ) => Promise<Record<string, number>>;
 }
 
-const PAGE = 1000;
+type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
-async function loadRows(db: SupabaseClient, orgId: string): Promise<PassTransaction[]> {
-  const out: PassTransaction[] = [];
-  for (let offset = 0; ; offset += PAGE) {
-    const { data, error } = await db
-      .from('bank_transactions')
-      .select(`id, bank_account_id, transaction_date, amount, description_normalized, counterparty_id,
-               category_account_id, category_source, is_transfer, transfer_kind, transfer_pair_id`)
-      .eq('organization_id', orgId)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null)
-      .order('id')
-      .range(offset, offset + PAGE - 1);
-    if (error) throw toMotionError(error);
-    const rows = (data ?? []) as Array<{
-      id: string; bank_account_id: string; transaction_date: string; amount: string;
-      description_normalized: string | null; counterparty_id: string | null;
-      category_account_id: string | null; category_source: CategorySource;
-      is_transfer: boolean; transfer_kind: TransferKind; transfer_pair_id: string | null;
-    }>;
-    for (const r of rows) {
-      out.push({
-        id: r.id,
-        bankAccountId: r.bank_account_id,
-        transactionDate: r.transaction_date,
-        amount: String(r.amount),
-        descriptionNormalized: r.description_normalized,
-        counterpartyId: r.counterparty_id,
-        categoryAccountId: r.category_account_id,
-        categorySource: r.category_source,
-        isTransfer: r.is_transfer,
-        transferKind: r.transfer_kind,
-        transferPairId: r.transfer_pair_id,
-      });
-    }
-    if (rows.length < PAGE) return out;
-  }
+async function loadRows(db: Db, orgId: string): Promise<PassTransaction[]> {
+  const rows = await readRows<Row>(db, orgId, 'bank_transactions', (q) => q
+    .where('record_status', '==', 'accepted')
+    .where('superseded_by', '==', null));
+  rows.sort((x, y) => (x.id < y.id ? -1 : x.id > y.id ? 1 : 0));
+  return rows.map((r) => ({
+    id: r.id,
+    bankAccountId: r.bank_account_id,
+    transactionDate: r.transaction_date,
+    amount: String(r.amount),
+    descriptionNormalized: (r.description_normalized as string | null | undefined) ?? null,
+    counterpartyId: (r.counterparty_id as string | null | undefined) ?? null,
+    categoryAccountId: (r.category_account_id as string | null | undefined) ?? null,
+    categorySource: r.category_source as CategorySource,
+    isTransfer: r.is_transfer === true,
+    transferKind: r.transfer_kind as TransferKind,
+    transferPairId: (r.transfer_pair_id as string | null | undefined) ?? null,
+  }));
 }
 
-async function loadAccounts(db: SupabaseClient, orgId: string): Promise<PassBankAccount[]> {
-  const { data, error } = await db
-    .from('bank_accounts')
-    .select('id, name, account_type, is_active')
-    .eq('organization_id', orgId);
-  if (error) throw toMotionError(error);
-  return ((data ?? []) as Array<{ id: string; name: string; account_type: PassBankAccount['accountType']; is_active: boolean }>)
-    .map((a) => ({ id: a.id, name: a.name, accountType: a.account_type, isActive: a.is_active }));
+async function loadAccounts(db: Db, orgId: string): Promise<PassBankAccount[]> {
+  const rows = await readRows<Row>(db, orgId, 'bank_accounts');
+  return rows.map((a) => ({ id: a.id, name: a.name, accountType: a.account_type as PassBankAccount['accountType'], isActive: a.is_active === true }));
 }
 
-async function loadCategoryAccounts(db: SupabaseClient, orgId: string): Promise<CategoryAccountRef[]> {
-  const { data, error } = await db
-    .from('accounts')
-    .select('id, standard_category')
-    .eq('organization_id', orgId);
-  if (error) throw toMotionError(error);
-  return ((data ?? []) as Array<{ id: string; standard_category: CategoryAccountRef['standardCategory'] }>)
-    .map((a) => ({ id: a.id, standardCategory: a.standard_category }));
+async function loadCategoryAccounts(db: Db, orgId: string): Promise<CategoryAccountRef[]> {
+  const rows = await readRows<Row>(db, orgId, 'accounts');
+  return rows.map((a) => ({ id: a.id, standardCategory: a.standard_category as CategoryAccountRef['standardCategory'] }));
 }
 
 /** Runs the pass for one organisation. Returns the counts `api_server` wrote, for the run's stats. */

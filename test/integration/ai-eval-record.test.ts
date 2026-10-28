@@ -5,7 +5,9 @@ import { drainJobs } from '@/modules/jobs';
 import { PROMPT_VERSION, resolvePeriodContext, runTool, snapshotAccess, type PeriodRow as PeriodRowInput, type RecordedToolCall } from '@/modules/ai';
 import type { AccessContext } from '@/modules/tenancy';
 import { generateForecast } from '@/modules/forecast';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { orgCollection } from '@/db/schema';
+import { addCommittedBatch, addCounterparty, drainJobsOf, dropUsers, dropWhere, enqueue, makeOrg, postLedger } from './ai-fixtures';
+import { clientFor, createAuthUser, deleteOrg, drainUntilFinished, fs } from './setup';
 
 /**
  * The eval corpus's recorded tool outputs (AI_ARCHITECTURE.md §12; TEST_STRATEGY.md §10.3, line
@@ -23,17 +25,11 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
 export const RECORDING_PATH = 'test/fixtures/ai/recorded-tools.json';
 
 const RUN = `ev${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.eval.itest`;
+const DOMAIN = `${RUN}.eval.itest.motion`;
 
 let ownerId: string;
 let orgId: string;
 let periods: PeriodRowInput[] = [];
-
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
-function accountId(category: string): string {
-  return one(`select id from public.accounts where organization_id = '${orgId}' and standard_category = '${category}' and is_system`);
-}
 
 function contextFor(userId: string): AccessContext {
   return {
@@ -106,73 +102,52 @@ export interface Recording {
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest Eval ${RUN}` });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest Eval ${RUN}`);
 
   // One committed batch per month, the shape a real import leaves (a batch declares one period).
-  const batchFor = (start: string, end: string): { documentId: string; batchId: string } => {
-    const documentId = one(`
-      insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-      values ('${orgId}', '${orgId}/eval/gl-${start}.csv', 'gl-${start}.csv', 'text/csv', 10, decode('ee${start.slice(5, 7)}','hex'), 'ready', 'general_ledger') returning id`);
-    const batchId = one(`
-      insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at)
-      values ('${orgId}', '${documentId}', 'general_ledger', 'ledger_entries', 'committed', 'csv', '${start}', '${end}', now()) returning id`);
-    return { documentId, batchId };
-  };
-  const april = batchFor('2026-04-01', '2026-04-30');
-  const may = batchFor('2026-05-01', '2026-05-31');
+  const batchFor = (start: string, end: string) => addCommittedBatch(orgId, {
+    importType: 'general_ledger', targetTable: 'ledger_entries', periodStart: start, periodEnd: end,
+    filename: `gl-${start}.csv`, documentKind: 'general_ledger',
+  });
+  const april = await batchFor('2026-04-01', '2026-04-30');
+  const may = await batchFor('2026-05-01', '2026-05-31');
   let line = 1;
-  const post = (category: string, direction: string, amount: string, date: string, counterparty: string | null = null) => {
-    const { documentId, batchId } = date < '2026-05-01' ? april : may;
+  const post = async (category: string, direction: 'debit' | 'credit', amount: string, date: string, counterparty: string | null = null) => {
     line += 1;
-    const rowId = one(`
-      insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
-      values ('${orgId}', '${batchId}', ${line}, 'csv:row:${line}', '{}'::jsonb, '{}'::jsonb, 'committed') returning id`);
-    const entryId = one(`
-      insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status, source_document_id, import_batch_id, import_row_id, source_ref, counterparty_id)
-      values ('${orgId}', '${date}', '${accountId(category)}', '${direction}', ${amount}, '00000000-0000-0000-0000-000000000000', 'accepted', '${documentId}', '${batchId}', '${rowId}', 'csv:row:${line}', ${counterparty ? `'${counterparty}'` : 'null'}) returning id`);
-    adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id) values ('${orgId}', 'ledger_entries', '${entryId}', 'accepted', '${batchId}')`);
+    await postLedger(orgId, date < '2026-05-01' ? april : may, { category, direction, amount, date, line, counterpartyId: counterparty });
   };
 
   // Two customers, so "who are our biggest customers" has an answer (concentration §3.5).
-  const acme = one(`insert into public.counterparties (organization_id, name, normalized_name, kind) values ('${orgId}', 'Acme Trading Ltd', 'acme trading ltd', 'customer') returning id`);
-  const beta = one(`insert into public.counterparties (organization_id, name, normalized_name, kind) values ('${orgId}', 'Beta Retail', 'beta retail', 'customer') returning id`);
+  const acme = await addCounterparty(orgId, 'Acme Trading Ltd', 'customer');
+  const beta = await addCounterparty(orgId, 'Beta Retail', 'customer');
 
   // April: £18,000 sales (Acme £12,000, Beta £6,000), £5,400 direct costs, £5,000 payroll, £1,200 marketing.
   // The last line of each month falls on its last day: a period is complete only when the source's
   // latest data date reaches the period end (ADR-030.1), and the corpus needs two complete months.
-  post('revenue', 'credit', '12000.00', '2026-04-10', acme);
-  post('revenue', 'credit', '6000.00', '2026-04-18', beta);
-  post('cost_of_sales', 'debit', '5400.00', '2026-04-12');
-  post('payroll', 'debit', '5000.00', '2026-04-25');
-  post('marketing', 'debit', '1200.00', '2026-04-30');
+  await post('revenue', 'credit', '12000.00', '2026-04-10', acme);
+  await post('revenue', 'credit', '6000.00', '2026-04-18', beta);
+  await post('cost_of_sales', 'debit', '5400.00', '2026-04-12');
+  await post('payroll', 'debit', '5000.00', '2026-04-25');
+  await post('marketing', 'debit', '1200.00', '2026-04-30');
   // May: £25,000 sales (Acme £16,000, Beta £9,000), £6,000 direct costs, £5,000 payroll, £3,400 marketing, £900 other running costs.
-  post('revenue', 'credit', '16000.00', '2026-05-10', acme);
-  post('revenue', 'credit', '9000.00', '2026-05-18', beta);
-  post('cost_of_sales', 'debit', '6000.00', '2026-05-12');
-  post('payroll', 'debit', '5000.00', '2026-05-25');
-  post('marketing', 'debit', '3400.00', '2026-05-20');
-  post('operating_expense', 'debit', '900.00', '2026-05-31');
+  await post('revenue', 'credit', '16000.00', '2026-05-10', acme);
+  await post('revenue', 'credit', '9000.00', '2026-05-18', beta);
+  await post('cost_of_sales', 'debit', '6000.00', '2026-05-12');
+  await post('payroll', 'debit', '5000.00', '2026-05-25');
+  await post('marketing', 'debit', '3400.00', '2026-05-20');
+  await post('operating_expense', 'debit', '900.00', '2026-05-31');
 
   // Two runs: the first proves the months complete, the second computes the comparisons that only
   // a complete previous month allows (ADR-030.4) — the state a customer's organisation is in after
   // its nightly run, and the one the corpus's "why did it change" questions need.
   for (const pass of [1, 2]) {
-    const jobId = adminSql(`
-      insert into public.jobs (organization_id, job_type, payload, max_attempts)
-      values ('${orgId}', 'calculation.run', '{"trigger":"recalc_manual","as_of":"2026-06-15"}'::jsonb, 3) returning id`).split('\n')[0]!.trim();
+    const jobId = await enqueue(orgId, 'calculation.run', { trigger: 'recalc_manual', as_of: '2026-06-15' });
     expect(await drainUntilFinished(drainJobs, jobId), `calculation pass ${pass} must succeed`).toBe('succeeded');
   }
   // The alerts the corpus records come from `alerts.evaluate`, queued by the run. In the full
   // suite the queue is shared, so drain until THIS organisation has nothing left in it.
-  for (let round = 0; round < 20; round += 1) {
-    const pending = adminSql(`select count(*) from public.jobs where organization_id = '${orgId}' and status in ('queued', 'running')`);
-    if (pending === '0') break;
-    await drainJobs(5);
-  }
-  expect(adminSql(`select count(*) from public.jobs where organization_id = '${orgId}' and status in ('queued', 'running')`), "the organisation's queue is empty before recording").toBe('0');
+  expect(await drainJobsOf(drainJobs, orgId), "the organisation's queue is empty before recording").toBe(0);
 
   /*
    * A forecast exists only once somebody has asked for one (ADR-099), so the recorder asks — the
@@ -181,20 +156,18 @@ beforeAll(async () => {
    */
   await generateForecast(contextFor(ownerId));
 
-  const withData = new Set(adminSql(`select distinct period_id::text from public.ledger_entries where organization_id = '${orgId}'`).split('\n').map((l) => l.trim()));
-  periods = adminSql(`select id || '|' || label || '|' || period_start || '|' || is_complete from public.fiscal_periods where organization_id = '${orgId}' order by period_start`)
-    .split('\n').filter(Boolean).map((l) => {
-      const [id, label, periodStart, complete] = l.trim().split('|') as [string, string, string, string];
-      return { id, label, periodStart, isComplete: complete === 'true' || complete === 't', hasData: withData.has(id) };
-    });
-});
+  const withData = new Set((await orgCollection(fs(), orgId, 'ledger_entries').select('period_id').get()).docs
+    .map((d) => String(d.get('period_id'))));
+  periods = (await orgCollection(fs(), orgId, 'fiscal_periods').orderBy('period_start').get()).docs.map((d) => ({
+    id: d.id, label: String(d.get('label')), periodStart: String(d.get('period_start')),
+    isComplete: d.get('is_complete') === true, hasData: withData.has(d.id),
+  }));
+}, 300_000);
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Eval%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Eval %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.eval.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  await deleteOrg(orgId);
+  await dropWhere('jobs', 'organization_id', [orgId]);
+  await dropUsers(DOMAIN);
 });
 
 /** Every dotted key path in a value, ids and figures ignored — the SHAPE of a tool's output. */

@@ -1,5 +1,5 @@
-import { toMotionError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
+import { organizationNames, readGlobal } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardBody, EmptyState, Badge, type BadgeTone } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
@@ -16,8 +16,8 @@ export const dynamic = 'force-dynamic';
  * (PRODUCTION_AUDIT.md C3). The default view is therefore the jobs that need a person: dead, failed,
  * and running, newest first; `?status=all` shows the rest.
  *
- * Reads run under the super admin's own client (`jobs_select` is `app.is_super_admin()`), so this
- * page holds no service role and cannot show anything RLS would not.
+ * Reads are made for the super admin under `jobs_select` (`app.is_super_admin()`, applied by
+ * `readGlobal`), so this page cannot show anything the policy would not.
  */
 
 const ATTENTION = ['dead', 'failed', 'running'] as const;
@@ -50,17 +50,17 @@ export default async function PlatformJobsPage({
   const { status } = await searchParams;
   const showAll = status === 'all';
 
-  let query = ctx.db
-    .from('jobs')
-    .select('id, organization_id, job_type, status, attempts, max_attempts, run_after, last_error, created_at, organizations(name)')
-    .order('created_at', { ascending: false })
-    .limit(100);
-  if (!showAll) query = query.in('status', [...ATTENTION]);
-
-  const { data, error } = await query;
-  // Never `data ?? []`: an empty monitor during an outage is the one thing this page must not show.
-  if (error) throw toMotionError(error, ctx.requestId);
-  const jobs = (data ?? []) as unknown as JobRow[];
+  // A failing read throws: an empty monitor during an outage is the one thing this page must not show.
+  const rows = await readGlobal(ctx.db, 'jobs', (q) => (showAll ? q : q.where('status', 'in', [...ATTENTION]))
+    .orderBy('created_at', 'desc').limit(100));
+  // The old `organizations(name)` embed: the organisation's name where the caller reaches it.
+  const names = await organizationNames(ctx.db, rows.map((r) => r.organization_id).filter((id): id is string => typeof id === 'string'));
+  const jobs: JobRow[] = rows.map((r) => ({
+    id: r.id, organization_id: r.organization_id ?? null, job_type: r.job_type, status: r.status,
+    attempts: Number(r.attempts ?? 0), max_attempts: Number(r.max_attempts ?? 0), run_after: r.run_after,
+    last_error: r.last_error ?? null, created_at: r.created_at,
+    organizations: typeof r.organization_id === 'string' && names.has(r.organization_id) ? { name: names.get(r.organization_id)! } : null,
+  }));
 
   return (
     <>

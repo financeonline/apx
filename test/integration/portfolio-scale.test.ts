@@ -3,7 +3,11 @@ import {
   ALERT_DETAIL_CAP, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts, resolvePortfolioContext,
   truncationNote, type PortfolioContext,
 } from '@/modules/portfolio';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { clientFor, createAuthUser, fs } from './setup';
+import {
+  actionDoc, alertDoc, assign, cleanup, healthScoreDoc, periodOf, periodStarts, platformUser, seedOrg, seedRun, writeAll,
+} from './portfolio-fixtures';
+import { orgCollection } from '@/db/schema';
 
 /**
  * The Command Centre at scale (ADR-114; audit of bab3a68, HIGH-A and HIGH-B).
@@ -20,24 +24,22 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  */
 
 const RUN = `ps${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.portfolioscale.itest`;
-const one = (s: string) => adminSql(`with q as (${s}) select * from q`).trim();
+const DOMAIN = `${RUN}.portfolioscale.itest.motion`;
 
 let adviser: string; let healthAdviser: string;
 let X: string; let Y: string; let Z: string;
 const big: string[] = [];
 const all: string[] = [];
+const users: string[] = [];
 /** Per HIGH-B organisation: the period start of its latest scored month, and of the one before. */
 const expectedHealth = new Map<string, { latest: string; previous: string }>();
 const edge: Record<'none' | 'one' | 'gap' | 'incomplete', string> = { none: '', one: '', gap: '', incomplete: '' };
 
+/** An organisation (seeded as `create_organization` leaves one), assigned to `holder` unless ''. */
 async function orgFor(holder: string, name: string): Promise<string> {
-  const creator = createAuthUser(`creator-${all.length}@${DOMAIN}`);
-  const r = await clientFor(creator).schema('api').rpc('create_organization', { p_name: name });
-  if (r.error) throw new Error(r.error.message);
-  const id = r.data as unknown as string;
+  const id = await seedOrg(`ITest ${name}`);
   all.push(id);
-  if (holder !== '') adminSql(`insert into public.organization_assignments (organization_id, employee_user_id) values ('${id}','${holder}')`);
+  if (holder !== '') await assign(id, holder);
   return id;
 }
 
@@ -46,93 +48,95 @@ const ctxFor = async (user: string): Promise<PortfolioContext> => {
   return { ...ctx, now: () => new Date('2026-09-15T12:00:00Z') };
 };
 
-function seedAlerts(org: string, n: number, severity: string, ageDays: number) {
-  const p = one(`select id from public.fiscal_periods where organization_id='${org}' and period_start='2026-08-01'`);
-  const run = one(`insert into public.calculation_runs (organization_id, trigger, engine_version, period_from, period_to, as_of, status) values ('${org}','recalc_manual','1.0.0','${p}','${p}','2026-09-15','succeeded') returning id`);
-  adminSql(`insert into public.alerts (organization_id, period_id, rule_key, rule_version, severity, key_kind, calculation_run_id, title, explanation, status, first_seen_at, dedupe_key)
-    select '${org}','${p}','cash.decline','1','${severity}','state','${run}','${severity} ' || g,'seeded','open',
-           now() - interval '${ageDays} days' + (g || ' seconds')::interval,'${RUN}-${org}-${severity}-' || g
-      from generate_series(1, ${n}) g`);
+const ago = (days: number, seconds: number) => new Date(Date.now() - days * 86_400_000 + seconds * 1000).toISOString();
+
+async function seedAlerts(org: string, n: number, severity: string, ageDays: number) {
+  const p = periodOf(org, '2026-08-01');
+  const run = await seedRun(org, p);
+  const docs = Array.from({ length: n }, (_, i) => alertDoc(org, p, run, severity, `${severity} ${i + 1}`, {
+    firstSeenAt: ago(ageDays, i + 1), dedupe: `${RUN}-${org}-${severity}-${i + 1}`,
+  }));
+  await writeAll(org, 'alerts', docs);
 }
 
-function seedActions(org: string, n: number, priority: string, due: string | null, ageDays: number) {
-  adminSql(`insert into public.actions (organization_id, title, priority, due_date, status, source_type, created_at)
-    select '${org}', '${priority} action ' || g, '${priority}', ${due === null ? 'null' : `'${due}'`}, 'open', 'user',
-           now() - interval '${ageDays} days' + (g || ' seconds')::interval
-      from generate_series(1, ${n}) g`);
-}
-
-/** Every fiscal period start of `org`, oldest first. */
-function periodStarts(org: string): string[] {
-  return adminSql(`select period_start from public.fiscal_periods where organization_id='${org}' order by period_start`)
-    .split('\n').map((l) => l.trim()).filter(Boolean);
+async function seedActions(org: string, n: number, priority: string, due: string | null, ageDays: number) {
+  const docs = Array.from({ length: n }, (_, i) => actionDoc(org, `${priority} action ${i + 1}`, priority, due, {
+    createdAt: ago(ageDays, i + 1),
+  }));
+  await writeAll(org, 'actions', docs);
 }
 
 /** Score every complete month of `org`; `score(periodStart)` returns the score or null to skip the month. */
-function scoreMonths(org: string, complete: 'all' | 'past', score: (periodStart: string) => number | null) {
-  adminSql(`update public.fiscal_periods set is_complete = ${complete === 'all' ? 'true' : `(period_start < '2026-09-01')`} where organization_id='${org}'`);
-  const periods = adminSql(`select id || '|' || period_start from public.fiscal_periods where organization_id='${org}' order by period_start`)
-    .split('\n').map((l) => l.trim()).filter(Boolean).map((l) => l.split('|') as [string, string]);
-  const run = one(`insert into public.calculation_runs (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-    values ('${org}','recalc_manual','1.0.0','${periods[0]![0]}','${periods[periods.length - 1]![0]}','2026-09-15','succeeded') returning id`);
-  const values = periods.flatMap(([id, start]) => {
+async function scoreMonths(org: string, complete: 'all' | 'past', score: (periodStart: string) => number | null) {
+  const starts = await periodStarts(org);
+  const writer = fs().bulkWriter();
+  for (const start of starts) {
+    void writer.update(orgCollection(fs(), org, 'fiscal_periods').doc(periodOf(org, start)), {
+      is_complete: complete === 'all' ? true : start < '2026-09-01',
+    });
+  }
+  await writer.close();
+  const run = await seedRun(org, periodOf(org, starts[0]!));
+  const scores = starts.flatMap((start) => {
     const s = score(start);
-    return s === null ? [] : [`('${org}','${id}','${run}',${s},5,6,'[]'::jsonb,'health.config.v1')`];
+    return s === null ? [] : [healthScoreDoc(org, periodOf(org, start), run, s)];
   });
-  if (values.length === 0) return;
-  adminSql(`with s as (insert into public.health_scores (organization_id, period_id, calculation_run_id, score, dimensions_used, dimensions_total, breakdown, config_version)
-      values ${values.join(',')} returning id, period_id, calculation_run_id)
-    insert into public.health_current (organization_id, period_id, health_score_id, calculation_run_id) select '${org}', period_id, id, calculation_run_id from s`);
+  if (scores.length === 0) return;
+  await writeAll(org, 'health_scores', scores);
+  await writeAll(org, 'health_current', scores.map((h) => ({
+    organization_id: org, period_id: h.period_id, health_score_id: h.id, calculation_run_id: run,
+    previous_health_score_id: null, updated_at: h.created_at,
+  })), (d) => String(d.period_id));
 }
 
 beforeAll(async () => {
-  adviser = createAuthUser(`adviser@${DOMAIN}`);
-  healthAdviser = createAuthUser(`health-adviser@${DOMAIN}`);
-  adminSql(`insert into public.platform_users (user_id, platform_role) values ('${adviser}','employee'), ('${healthAdviser}','employee')`);
+  adviser = await createAuthUser(`adviser@${DOMAIN}`);
+  healthAdviser = await createAuthUser(`health-adviser@${DOMAIN}`);
+  users.push(adviser, healthAdviser);
+  await platformUser(adviser, 'employee');
+  await platformUser(healthAdviser, 'employee');
 
   // ---- HIGH-A: X holds 1,050 NEW low alerts and 1,020 NEW low actions; Y's serious facts are OLD ----
   X = await orgFor(adviser, `PS X ${RUN}`);
   Y = await orgFor(adviser, `PS Y ${RUN}`);
   Z = await orgFor('', `PS Z unauthorised ${RUN}`);   // assigned to nobody
-  seedAlerts(X, 1050, 'low', 1);
-  seedAlerts(Y, 3, 'critical', 60);
-  seedAlerts(Z, 200, 'critical', 90);
-  seedActions(X, 1020, 'low', null, 1);
-  seedActions(Y, 2, 'medium', '2026-08-01', 60);
-  seedActions(Y, 1, 'critical', '2026-12-01', 60);
-  seedActions(Z, 300, 'critical', '2026-01-01', 90);
+  await seedAlerts(X, 1050, 'low', 1);
+  await seedAlerts(Y, 3, 'critical', 60);
+  await seedAlerts(Z, 200, 'critical', 90);
+  await seedActions(X, 1020, 'low', null, 1);
+  await seedActions(Y, 2, 'medium', '2026-08-01', 60);
+  await seedActions(Y, 1, 'critical', '2026-12-01', 60);
+  await seedActions(Z, 300, 'critical', '2026-01-01', 90);
 
   // ---- HIGH-B: 45 clients, 24 complete months each; the latest month At risk, the one before Stable ----
-  // `create_organization` materialises twelve months back and twelve forward from the database's
-  // `now()`, so WHICH 24 months exist depends on the day the suite runs. The latest and previous
-  // month are read from each organisation's own periods, never hard-coded to one calendar month.
+  // Organisations get twelve months back and twelve forward from today, so WHICH 24 months exist
+  // depends on the day the suite runs. The latest and previous month are read from each
+  // organisation's own periods, never hard-coded to one calendar month.
   for (let i = 0; i < 45; i += 1) {
     const org = await orgFor(healthAdviser, `PS Health ${String(i).padStart(2, '0')} ${RUN}`);
     big.push(org);
-    const starts = periodStarts(org);
-    // 45 × 24 = 1,080 scored months: past PostgREST's 1,000-row cap, which is the point of HIGH-B.
+    const starts = await periodStarts(org);
+    // 45 × 24 = 1,080 scored months: past the old 1,000-row cap, which is the point of HIGH-B.
     if (starts.length !== 24) throw new Error(`expected 24 fiscal periods for ${org}, found ${starts.length}`);
     const latest = starts[starts.length - 1]!;
     expectedHealth.set(org, { latest, previous: starts[starts.length - 2]! });
-    scoreMonths(org, 'all', (start) => (start === latest ? 35 : 70));
+    await scoreMonths(org, 'all', (start) => (start === latest ? 35 : 70));
   }
   // Edge cases, same portfolio.
   edge.none = await orgFor(healthAdviser, `PS Edge none ${RUN}`);
   edge.one = await orgFor(healthAdviser, `PS Edge one ${RUN}`);
-  scoreMonths(edge.one, 'past', (start) => (start === '2026-08-01' ? 64 : null));
+  await scoreMonths(edge.one, 'past', (start) => (start === '2026-08-01' ? 64 : null));
   edge.gap = await orgFor(healthAdviser, `PS Edge gap ${RUN}`);
   // The latest complete month (Aug 2026) has no score; Jul and Jun do.
-  scoreMonths(edge.gap, 'past', (start) => (start === '2026-07-01' ? 58 : start === '2026-06-01' ? 81 : null));
+  await scoreMonths(edge.gap, 'past', (start) => (start === '2026-07-01' ? 58 : start === '2026-06-01' ? 81 : null));
   edge.incomplete = await orgFor(healthAdviser, `PS Edge incomplete ${RUN}`);
   // A score written for an INCOMPLETE month is not the latest complete month's.
-  scoreMonths(edge.incomplete, 'past', (start) => (start === '2026-10-01' ? 12 : start === '2026-08-01' ? 77 : start === '2026-07-01' ? 76 : null));
+  await scoreMonths(edge.incomplete, 'past', (start) => (start === '2026-10-01' ? 12 : start === '2026-08-01' ? 77 : start === '2026-07-01' ? 76 : null));
 }, 900_000);
 
-afterAll(() => {
-  adminSql(`delete from public.organizations where id in (${all.map((o) => `'${o}'`).join(',')});
-            delete from public.platform_users where user_id in ('${adviser}','${healthAdviser}');
-            delete from auth.users where email like '%@${DOMAIN}';`);
-});
+afterAll(async () => {
+  await cleanup(all, users);
+}, 300_000);
 
 describe('HIGH-A — counts and attention come from the full population, not a capped list', () => {
   it('1,053 standing alerts: every count is complete, and Y\'s old critical alerts still count', async () => {

@@ -1,7 +1,11 @@
 import { readFileSync } from 'node:fs';
+import Decimal from 'decimal.js';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startImport } from '@/modules/imports';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, deleteOrg, fs, rpc as call } from './setup';
+import { addMember, auditsOf, makeOrg, seedBankAccount } from './f-fixtures';
+import { where } from './i-fixtures';
 
 /**
  * Every import type the upload form offers, through the real wizard AND commit
@@ -18,7 +22,7 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  */
 
 const RUN = `t${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.wizardtypes.itest`;
+const DOMAIN = `${RUN}.wizardtypes.itest.motion`;
 
 let ownerId: string;
 let clientId: string;
@@ -27,9 +31,8 @@ let orgId: string;
 let otherOrgId: string;
 let bankAccountId: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 const ownerDb = () => clientFor(ownerId, { email: `owner@${DOMAIN}` });
-const rpc = (fn: string, args: Record<string, unknown>) => ownerDb().schema('api').rpc(fn, args);
+const rpc = (fn: string, args: Record<string, unknown>) => call(ownerDb(), fn, args);
 
 function fixture(name: string, mime = 'text/csv'): File {
   return new File([new Uint8Array(readFileSync(`fixtures/imports/${name}`))], name, { type: mime });
@@ -52,9 +55,7 @@ async function upload(name: string, importType: string, opts: { bank?: string | 
 
 /** Answers every confirmation the batch raised, as the review screen would, then commits. */
 async function confirmAndCommit(batchId: string) {
-  const required = adminSql(`
-    select coalesce(string_agg(c, ','), '') from public.import_batches b, unnest(b.required_confirmations) c
-     where b.organization_id = '${orgId}' and b.id = '${batchId}'`).split(',').filter(Boolean);
+  const required = ((await orgRow(fs(), orgId, 'import_batches', batchId).get()).get('required_confirmations') as string[]) ?? [];
   for (const code of required) {
     const value = code === 'IMP-RANGE-015' ? { period_start: '2026-08-01', period_end: '2026-08-31' }
       : code === 'IMP-TB-012' ? { balance_basis: 'cumulative' }
@@ -70,37 +71,36 @@ async function confirmAndCommit(batchId: string) {
   return data as { status: string; committed: number };
 }
 
-const documentKindOf = (documentId: string) => one(`
-  select document_kind::text from public.source_documents where organization_id = '${orgId}' and id = '${documentId}'`);
-const batchOf = (batchId: string) => one(`
-  select import_type || ':' || target_table || ':' || status from public.import_batches
-   where organization_id = '${orgId}' and id = '${batchId}'`);
-const countOf = (sql: string) => Number(one(sql));
+const documentKindOf = async (documentId: string) => String((await orgRow(fs(), orgId, 'source_documents', documentId).get()).get('document_kind'));
+const batchOf = async (batchId: string) => {
+  const b = (await orgRow(fs(), orgId, 'import_batches', batchId).get()).data()!;
+  return `${b.import_type}:${b.target_table}:${b.status}`;
+};
+/** Batches started from documents with this file name. */
+async function batchesFor(filename: string): Promise<number> {
+  let n = 0;
+  for (const d of await where(orgId, 'source_documents', { original_filename: filename })) {
+    n += (await where(orgId, 'import_batches', { source_document_id: d.id })).length;
+  }
+  return n;
+}
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  clientId = createAuthUser(`client@${DOMAIN}`);
-  outsiderId = createAuthUser(`outsider@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest WizardTypes ${RUN}` });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-  const other = await clientFor(outsiderId).schema('api').rpc('create_organization', { p_name: `ITest WizardTypes Other ${RUN}` });
-  if (other.error) throw new Error(`fixture org failed: ${other.error.message}`);
-  otherOrgId = other.data as unknown as string;
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  clientId = await createAuthUser(`client@${DOMAIN}`);
+  outsiderId = await createAuthUser(`outsider@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest WizardTypes ${RUN}`);
+  otherOrgId = await makeOrg(outsiderId, `ITest WizardTypes Other ${RUN}`);
+  await addMember(orgId, clientId, 'client');
+  bankAccountId = await seedBankAccount(orgId, { name: 'Business Current', bankName: 'Test Bank', accountNumber: '****4321' });
+}, 60_000);
 
-  adminSql(`
-    set local app.bootstrap = 'on';
-    insert into public.organization_memberships (organization_id, user_id, role)
-    values ('${orgId}', '${clientId}', 'client');`);
-  bankAccountId = one(`
-    insert into public.bank_accounts (organization_id, name, account_type, bank_name, account_number_masked, is_active)
-    values ('${orgId}', 'Business Current', 'current', 'Test Bank', '****4321', true) returning id`);
-});
-
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest WizardTypes%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';`);
+afterAll(async () => {
+  for (const id of [orgId, otherOrgId]) {
+    const jobs = await fs().collection('jobs').where('organization_id', '==', id).get();
+    await Promise.all(jobs.docs.map((d) => d.ref.delete()));
+    await deleteOrg(id);
+  }
 });
 
 describe('a sales invoice list, upload to commit', () => {
@@ -109,27 +109,26 @@ describe('a sales invoice list, upload to commit', () => {
   it('uploads as an invoice document into an invoices batch, creating its customers', async () => {
     const result = await upload('sales_invoices.csv', 'sales_invoices');
     batchId = result.batchId;
-    expect(documentKindOf(result.documentId)).toBe('invoice');
-    expect(batchOf(batchId)).toBe('sales_invoices:invoices:awaiting_review');
+    expect(await documentKindOf(result.documentId)).toBe('invoice');
+    expect(await batchOf(batchId)).toBe('sales_invoices:invoices:awaiting_review');
     expect(result.counterpartiesCreated).toBe(3);
-    expect(one(`select string_agg(distinct kind::text, ',') from public.counterparties where organization_id = '${orgId}'`)).toBe('customer');
-    expect(countOf(`select count(*) from public.audit_events where organization_id = '${orgId}' and action = 'counterparty.created'`)).toBe(3);
+    expect([...new Set((await where(orgId, 'counterparties', {})).map((c) => c.kind))].join(',')).toBe('customer');
+    expect(await auditsOf(orgId, 'counterparty.created')).toHaveLength(3);
   });
 
   it('commits every row as an invoice, the credit note stored positive and subtracted by type', async () => {
     const result = await confirmAndCommit(batchId);
     expect(result.status).toBe('committed');
     expect(result.committed).toBe(4);
-    expect(one(`
-      select string_agg(invoice_number || '=' || invoice_type || '/' || status || '/' || total_amount, ',' order by invoice_number)
-        from public.invoices where organization_id = '${orgId}' and import_batch_id = '${batchId}' and record_status = 'accepted'`))
+    expect((await where(orgId, 'invoices', { import_batch_id: batchId, record_status: 'accepted' }))
+      .sort((a, b) => String(a.invoice_number).localeCompare(String(b.invoice_number)))
+      .map((i) => `${i.invoice_number}=${i.invoice_type}/${i.status}/${i.total_amount}`).join(','))
       .toBe('CN-1003=sales_credit_note/paid/300.00,INV-1001=sales/paid/1200.00,INV-1002=sales/open/600.00,INV-1004=sales/partially_paid/2400.00');
     // §13: every invoice names its document, batch, row and line.
-    expect(countOf(`
-      select count(*) from public.invoices where organization_id = '${orgId}' and import_batch_id = '${batchId}'
-         and source_document_id is not null and import_row_id is not null and source_ref like 'csv:row:%'`)).toBe(4);
+    expect((await where(orgId, 'invoices', { import_batch_id: batchId }))
+      .filter((i) => i.source_document_id && i.import_row_id && String(i.source_ref).startsWith('csv:row:'))).toHaveLength(4);
     // A recalculation was queued, as for every commit.
-    expect(one(`select (calculation_job_id is not null)::text from public.import_batches where id = '${batchId}'`)).toBe('true');
+    expect((await orgRow(fs(), orgId, 'import_batches', batchId).get()).get('calculation_job_id')).toBeTruthy();
   });
 
   it('flags the same invoices uploaded again in another file as duplicates, not new invoices', async () => {
@@ -145,44 +144,43 @@ describe('a sales invoice list, upload to commit', () => {
   it('rolls back cleanly: the invoices leave the figures, the customers remain', async () => {
     const { error } = await rpc('rollback_import_batch', { p_batch: batchId, p_reason: 'itest rollback' });
     expect(error, error?.message).toBeNull();
-    expect(countOf(`select count(*) from public.invoices where organization_id = '${orgId}' and import_batch_id = '${batchId}' and record_status = 'accepted'`)).toBe(0);
-    expect(countOf(`select count(*) from public.counterparties where organization_id = '${orgId}'`)).toBe(3);
+    expect(await where(orgId, 'invoices', { import_batch_id: batchId, record_status: 'accepted' })).toHaveLength(0);
+    expect(await where(orgId, 'counterparties', {})).toHaveLength(3);
   });
 });
 
 describe('purchase invoices and reports', () => {
   it('a purchase list creates suppliers and makes a known customer both', async () => {
     const result = await upload('purchase_invoices.csv', 'purchase_invoices');
-    expect(documentKindOf(result.documentId)).toBe('invoice');
+    expect(await documentKindOf(result.documentId)).toBe('invoice');
     expect((await confirmAndCommit(result.batchId)).committed).toBe(2);
-    expect(one(`select kind::text from public.counterparties where organization_id = '${orgId}' and normalized_name = 'acme ltd'`)).toBe('both');
-    expect(one(`select string_agg(distinct invoice_type::text, ',') from public.invoices where import_batch_id = '${result.batchId}'`)).toBe('purchase');
+    expect((await where(orgId, 'counterparties', { normalized_name: 'acme ltd' }))[0]?.kind).toBe('both');
+    expect([...new Set((await where(orgId, 'invoices', { import_batch_id: result.batchId })).map((i) => i.invoice_type))].join(',')).toBe('purchase');
   });
 
   it('a sales report commits into invoices under its own document kind', async () => {
     const result = await upload('sales_report.csv', 'sales_report');
-    expect(documentKindOf(result.documentId)).toBe('sales_report');
-    expect(batchOf(result.batchId)).toBe('sales_report:invoices:awaiting_review');
+    expect(await documentKindOf(result.documentId)).toBe('sales_report');
+    expect(await batchOf(result.batchId)).toBe('sales_report:invoices:awaiting_review');
     expect((await confirmAndCommit(result.batchId)).committed).toBe(2);
   });
 
   it('a purchase report commits into invoices as purchases', async () => {
     const result = await upload('purchase_report.csv', 'purchase_report');
-    expect(documentKindOf(result.documentId)).toBe('purchase_report');
+    expect(await documentKindOf(result.documentId)).toBe('purchase_report');
     expect((await confirmAndCommit(result.batchId)).committed).toBe(1);
-    expect(one(`select invoice_type::text from public.invoices where import_batch_id = '${result.batchId}'`)).toBe('purchase');
+    expect((await where(orgId, 'invoices', { import_batch_id: result.batchId })).map((i) => i.invoice_type).join(',')).toBe('purchase');
   });
 });
 
 describe('receipts', () => {
   it('commit as ledger entries against the expense accounts they name, with no bank account', async () => {
     const result = await upload('receipts.csv', 'receipts');
-    expect(documentKindOf(result.documentId)).toBe('receipt');
-    expect(batchOf(result.batchId)).toBe('receipts:ledger_entries:awaiting_review');
+    expect(await documentKindOf(result.documentId)).toBe('receipt');
+    expect(await batchOf(result.batchId)).toBe('receipts:ledger_entries:awaiting_review');
     expect((await confirmAndCommit(result.batchId)).committed).toBe(2);
-    expect(one(`
-      select string_agg(direction::text || ' ' || amount, ',' order by amount)
-        from public.ledger_entries where organization_id = '${orgId}' and import_batch_id = '${result.batchId}'`))
+    expect((await where(orgId, 'ledger_entries', { import_batch_id: result.batchId }))
+      .sort((a, b) => new Decimal(String(a.amount)).comparedTo(String(b.amount))).map((e) => `${e.direction} ${e.amount}`).join(','))
       .toBe('debit 18.99,debit 42.50');
   });
 });
@@ -190,10 +188,10 @@ describe('receipts', () => {
 describe('balance sheets', () => {
   it('commit into period balances as balance_sheet rows', async () => {
     const result = await upload('balance_sheet.csv', 'balance_sheet');
-    expect(documentKindOf(result.documentId)).toBe('balance_sheet');
-    expect(batchOf(result.batchId)).toBe('balance_sheet:period_balances:awaiting_review');
+    expect(await documentKindOf(result.documentId)).toBe('balance_sheet');
+    expect(await batchOf(result.batchId)).toBe('balance_sheet:period_balances:awaiting_review');
     expect((await confirmAndCommit(result.batchId)).committed).toBe(4);
-    expect(one(`select string_agg(distinct balance_kind::text, ',') from public.period_balances where import_batch_id = '${result.batchId}'`))
+    expect([...new Set((await where(orgId, 'period_balances', { import_batch_id: result.batchId })).map((b) => b.balance_kind))].join(','))
       .toBe('balance_sheet');
   });
 });
@@ -202,16 +200,15 @@ describe('refusals and fences', () => {
   it('row errors stop only their rows: an unknown status and a name carrying an amount', async () => {
     const result = await upload('sales_invoices_problems.csv', 'sales_invoices');
     expect(result.counts.error).toBe(2);
-    expect(countOf(`select count(*) from public.counterparties where organization_id = '${orgId}' and name like '%45000%'`)).toBe(0);
+    expect((await where(orgId, 'counterparties', {})).filter((c) => String(c.name).includes('45000'))).toHaveLength(0);
   });
 
   it('stores an invoice PDF as a source document, starting no batch and importing no figures', async () => {
     await expect(upload('bank_text.pdf', 'purchase_invoices', { mime: 'application/pdf' }))
       .rejects.toThrow(/stored as a source document/);
-    expect(one(`select document_kind::text || ':' || status::text from public.source_documents
-                 where organization_id = '${orgId}' and original_filename = 'bank_text.pdf'`)).toBe('invoice:ready');
-    expect(countOf(`select count(*) from public.import_batches b join public.source_documents d on d.id = b.source_document_id
-                     where b.organization_id = '${orgId}' and d.original_filename = 'bank_text.pdf'`)).toBe(0);
+    expect((await where(orgId, 'source_documents', { original_filename: 'bank_text.pdf' })).map((d) => `${d.document_kind}:${d.status}`).join(','))
+      .toBe('invoice:ready');
+    expect(await batchesFor('bank_text.pdf')).toBe(0);
   });
 
   it('refuses a bank account on an invoice import', async () => {
@@ -223,10 +220,10 @@ describe('refusals and fences', () => {
   });
 
   it('an outsider cannot add counterparties to this organisation\'s batch', async () => {
-    const batch = one(`select id from public.import_batches where organization_id = '${orgId}' and import_type = 'sales_report' limit 1`);
-    const { error } = await clientFor(outsiderId).schema('api').rpc('create_import_counterparties', { p_batch: batch, p_names: ['Intruder'] });
-    expect(error?.code).toBe('P0002');
-    expect(countOf(`select count(*) from public.counterparties where organization_id in ('${orgId}', '${otherOrgId}') and name = 'Intruder'`)).toBe(0);
+    const [batch] = await where(orgId, 'import_batches', { import_type: 'sales_report' });
+    const { error } = await call(clientFor(outsiderId), 'create_import_counterparties', { p_batch: batch!.id, p_names: ['Intruder'] });
+    expect(error?.code).toBe('NOT_FOUND');
+    expect([...await where(orgId, 'counterparties', { name: 'Intruder' }), ...await where(otherOrgId, 'counterparties', { name: 'Intruder' })]).toHaveLength(0);
   });
 });
 
@@ -244,7 +241,7 @@ describe('a blank optional date is no date', () => {
     });
     const committed = await confirmAndCommit(result.batchId);
     expect(committed.committed).toBe(2);
-    expect(one(`select coalesce(paid_date::text, 'NULL') from public.invoices where organization_id = '${orgId}' and invoice_number = 'BL-2'`)).toBe('NULL');
-    expect(one(`select paid_date::text from public.invoices where organization_id = '${orgId}' and invoice_number = 'BL-1'`)).toBe('2026-08-20');
+    expect((await where(orgId, 'invoices', { invoice_number: 'BL-2' }))[0]?.paid_date ?? 'NULL').toBe('NULL');
+    expect((await where(orgId, 'invoices', { invoice_number: 'BL-1' }))[0]?.paid_date).toBe('2026-08-20');
   });
 });

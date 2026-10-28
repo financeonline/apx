@@ -5,7 +5,7 @@
  * recommendation — that boundary is a type boundary (§1.1), and it is what makes every figure here
  * unit-testable against a golden number.
  *
- * `domain/` is pure: no Supabase, no Next.js, no clock, no randomness. "Today" is an explicit
+ * `domain/` is pure: no database, no Next.js, no clock, no randomness. "Today" is an explicit
  * `asOf` input used only for aging and runway.
  */
 

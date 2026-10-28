@@ -1,7 +1,11 @@
 import { expect, test } from '@playwright/test';
 import {
-  cleanUpOwn, drainQueue, GL_CSV, importLedger, seedUser, signIn, sql, uniqueName,
+  cleanUpOwn, drainQueue, GL_CSV, importLedger, seedUser, signIn, uniqueName,
 } from './fixtures';
+import {
+  addAssignment, addMembership, addPlatformUser, backend, callAs, orgIdBySlug, orgRows, periodOf, seedAction, seedAlert,
+  seedRun,
+} from './firestore';
 
 /**
  * Journey 15 — the Command Centre (SOW §18; ADR-112, as amended 2026-10-14).
@@ -25,11 +29,11 @@ test.afterAll(() => cleanUpOwn([ORG_A, ORG_B], ['j15-owner', 'j15-adviser', 'j15
 const PORTFOLIO_PATHS = ['/portfolio', '/portfolio/alerts', '/portfolio/actions', '/portfolio/analyst', '/portfolio/report'];
 
 test('an employee assigned two organisations sees both on the Command Centre; their owner and a client see no portfolio', async ({ page }) => {
-  const owner = seedUser('j15-owner');
-  const adviser = seedUser('j15-adviser');
-  const client = seedUser('j15-client');
+  const owner = await seedUser('j15-owner');
+  const adviser = await seedUser('j15-adviser');
+  const client = await seedUser('j15-client');
   // A Financial Analyst: a platform employee, signed in with a password like everyone else (ADR-161).
-  sql(`insert into public.platform_users (user_id, platform_role) values ('${adviser.userId}', 'employee')`);
+  await addPlatformUser(adviser.userId, 'employee');
   await signIn(page, owner);
 
   // ---- Two organisations, one with figures --------------------------------------------------
@@ -43,23 +47,24 @@ test('an employee assigned two organisations sees both on the Command Centre; th
   const slugA = await onboard(ORG_A);
   await importLedger(page, slugA, GL_CSV);
   await drainQueue(page, slugA);
-  // A second organisation, created by the product's own RPC as this owner: onboarding is a
+  // A second organisation, created by the product's own function as this owner: onboarding is a
   // first-organisation form, and the switcher has no "create another" (a settings concern).
-  const orgA = sql(`select id from public.organizations where slug = '${slugA}'`);
-  const orgB = sql(`select api.create_organization('${ORG_B}')
-    from (select set_config('request.jwt.claims', '{"sub":"${owner.userId}","role":"authenticated","email":"${owner.email}"}', true) as c) s
-    where s.c is not null`);
-  const slugB = sql(`select slug from public.organizations where id = '${orgB}'`);
+  const orgA = await orgIdBySlug(slugA);
+  const orgB = await callAs<string>(owner.userId, 'create_organization', { p_name: ORG_B });
+  const { setup } = await backend();
+  const slugB = String((await setup.fs().collection('organizations').doc(orgB).get()).get('slug'));
 
   // A serious alert and an overdue action in A, seeded the way the jobs write them, so the queue
   // has something deterministic to rank.
-  const periodA = sql(`select id from public.fiscal_periods where organization_id = '${orgA}' and period_start = '2026-05-01'`);
-  sql(`insert into public.actions (organization_id, title, priority, due_date, status, source_type, created_by)
-       values ('${orgA}', 'Chase the two largest unpaid invoices', 'high', '2026-01-15', 'open', 'user', '${owner.userId}')`);
-  const runA = sql(`with q as (insert into public.calculation_runs (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-       values ('${orgA}', 'recalc_manual', '1.0.0', '${periodA}', '${periodA}', '2026-06-15', 'succeeded') returning id) select id from q`);
-  sql(`insert into public.alerts (organization_id, period_id, rule_key, rule_version, severity, key_kind, calculation_run_id, title, explanation, status, first_seen_at, dedupe_key)
-       values ('${orgA}', '${periodA}', 'cash.runway_low', '1', 'critical', 'state', '${runA}', 'Cash runway is under two months', 'Seeded for journey 15.', 'open', now(), 'j15-${slugA}')`);
+  const periodA = await periodOf(orgA, '2026-05-01');
+  await seedAction(orgA, {
+    title: 'Chase the two largest unpaid invoices', priority: 'high', due: '2026-01-15', status: 'open', createdBy: owner.userId,
+  });
+  const runA = await seedRun(orgA, { periodFrom: periodA, asOf: '2026-06-15' });
+  await seedAlert(orgA, {
+    periodId: periodA, runId: runA, ruleKey: 'cash.runway_low', severity: 'critical',
+    title: 'Cash runway is under two months', explanation: 'Seeded for journey 15.', dedupeKey: `j15-${slugA}`,
+  });
 
   // ---- The owner of both: no Command Centre, and nothing that says one exists --------------------
   for (const path of [...PORTFOLIO_PATHS, `/portfolio/clients/${orgA}`]) {
@@ -72,8 +77,8 @@ test('an employee assigned two organisations sees both on the Command Centre; th
   await expect(page.getByRole('link', { name: /command centre/i })).toHaveCount(0);
 
   // ---- The Financial Analyst assigned to both ----------------------------------------------------
-  sql(`insert into public.organization_assignments (organization_id, employee_user_id)
-       values ('${orgA}', '${adviser.userId}'), ('${orgB}', '${adviser.userId}')`);
+  await addAssignment(orgA, adviser.userId);
+  await addAssignment(orgB, adviser.userId);
   await page.context().clearCookies();
   await signIn(page, adviser);
 
@@ -97,10 +102,20 @@ test('an employee assigned two organisations sees both on the Command Centre; th
   await page.screenshot({ path: `${SHOTS}/command-centre-1440.png`, fullPage: true });
 
   // ---- Advisory opportunities (ADR-148): A's latest month shows campaigns paying back ----------
-  sql(`set session_replication_role = replica;
-       update public.health_scores set breakdown = coalesce((select jsonb_agg(d) from jsonb_array_elements(breakdown) d where d->>'key' <> 'marketing_efficiency'), '[]'::jsonb)
-         || '[{"key":"marketing_efficiency","included":true,"score":80,"rules":[{"rule":"M1","points":20,"result":">= 3x","value":"3.2","skipped_reason":null}]}]'::jsonb
-        where id in (select health_score_id from public.health_current where organization_id = '${orgA}')`);
+  // Written straight onto A's current scores: a health score is immutable to the product, and there
+  // are no triggers to step around now — the document simply says what the engine would have.
+  {
+    const { schema } = await backend();
+    const marketing = {
+      key: 'marketing_efficiency', included: true, score: 80,
+      rules: [{ rule: 'M1', points: 20, result: '>= 3x', value: '3.2', skipped_reason: null }],
+    };
+    for (const current of await orgRows(orgA, 'health_current')) {
+      const ref = schema.orgRow(setup.fs(), orgA, 'health_scores', String(current.health_score_id));
+      const breakdown = ((await ref.get()).get('breakdown') ?? []) as Array<{ key?: unknown }>;
+      await ref.update({ breakdown: [...breakdown.filter((d) => d.key !== 'marketing_efficiency'), marketing] });
+    }
+  }
   await page.reload();
   const opportunities = page.getByRole('region', { name: /advisory opportunities/i });
   await expect(opportunities.getByRole('link', { name: ORG_A, exact: true })).toBeVisible();
@@ -111,7 +126,7 @@ test('an employee assigned two organisations sees both on the Command Centre; th
   const clientOpps = page.getByRole('region', { name: /advisory opportunities/i });
   await clientOpps.getByRole('button', { name: 'Record as an action' }).first().click();
   await expect(clientOpps.getByText(`Added to ${ORG_A}'s Action Centre.`)).toBeVisible({ timeout: 15_000 });
-  expect(sql(`select count(*) from public.actions where organization_id = '${orgA}' and source_type = 'health_score' and title = 'Campaigns paying back'`)).toBe('1');
+  expect((await orgRows(orgA, 'actions', (a) => a.source_type === 'health_score' && a.title === 'Campaigns paying back')).length).toBe(1);
   // ---- The Portfolio Report (ADR-149): on screen and as a PDF -----------------------------------
   await page.goto('/portfolio/report');
   await expect(page.getByRole('heading', { level: 1, name: 'Portfolio Report' })).toBeVisible();
@@ -144,17 +159,24 @@ test('an employee assigned two organisations sees both on the Command Centre; th
   // The badge is the server's stored grounding status, never a client-side judgement (ADR-115). No
   // model runs in this environment, so two answered turns are stored the way the server finishes
   // them — one the grounder degraded, one it passed — and the page must label each accordingly.
-  const storeTurn = (question: string, grounding: 'passed' | 'degraded') => {
-    const answer = JSON.stringify({
+  const storeTurn = async (question: string, grounding: 'passed' | 'degraded') => {
+    const { schema } = await backend();
+    const answer = {
       briefing: { mode: 'answer', headline: { text: `${ORG_A} needs attention.`, facts: [] }, clients: [], notes: [], limitations: [] },
       clients: [], refs: [],
+    };
+    // The document `portfolio_ai_start_turn` creates once `portfolio_ai_finish_turn` has answered it
+    // (src/db/api_server/ai.ts), with every field present.
+    const id = schema.newId();
+    const now = schema.nowIso();
+    await schema.globalRow(setup.fs(), 'portfolio_ai_turns', id).set({
+      id, user_id: adviser.userId, question, scope_organization_ids: [orgA], status: 'answered', answer,
+      grounding_status: grounding, model: null, prompt_version: 'adviser-v4.0', input_tokens: null,
+      output_tokens: null, created_at: now, finished_at: now,
     });
-    sql(`with q as (insert into public.portfolio_ai_turns (user_id, question, scope_organization_ids, status, answer, grounding_status, prompt_version, finished_at)
-         values ('${adviser.userId}', '${question}', array['${orgA}']::uuid[], 'answered', '${answer}'::jsonb, '${grounding}', 'adviser-v4.0', now())
-         returning id) select id from q`);
   };
-  storeTurn('What changed at Alpha this month', 'degraded');
-  storeTurn('Which clients need attention', 'passed');
+  await storeTurn('What changed at Alpha this month', 'degraded');
+  await storeTurn('Which clients need attention', 'passed');
   await page.reload();
   const answerCard = (question: string) => page.locator('section')
     .filter({ has: page.getByRole('heading', { level: 2, name: question, exact: true }) })
@@ -178,8 +200,7 @@ test('an employee assigned two organisations sees both on the Command Centre; th
   await page.setViewportSize({ width: 1280, height: 800 });
 
   // ---- A client of B: no portfolio, and no confirmation that one exists ---------------------------
-  sql(`insert into public.organization_memberships (organization_id, user_id, role, status)
-       values ('${orgB}', '${client.userId}', 'client', 'active')`);
+  await addMembership(orgB, client.userId, 'client');
   await page.context().clearCookies();
   await signIn(page, client);
   expect((await page.goto(`/app/${slugB}/home`))?.status()).toBe(200);

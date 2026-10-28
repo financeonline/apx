@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { cleanUpOwn, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, onboard, seedUser, signIn, uniqueName, type SeededUser } from './fixtures';
+import { addMembership, orgIdBySlug } from './firestore';
 
 /**
  * The route → RBAC status matrix (ROUTE_ARCHITECTURE.md §11; ADR-091).
@@ -19,9 +20,9 @@ import { cleanUpOwn, onboard, seedUser, signIn, sql, uniqueName } from './fixtur
 
 const ORG_NAME = uniqueName('Authz Ltd');
 
-let owner: ReturnType<typeof seedUser>;
-let client: ReturnType<typeof seedUser>;
-let stranger: ReturnType<typeof seedUser>;
+let owner: SeededUser;
+let client: SeededUser;
+let stranger: SeededUser;
 let org: { id: string; slug: string };
 
 /**
@@ -31,18 +32,17 @@ let org: { id: string; slug: string };
  * product cannot produce.
  */
 test.beforeAll(async ({ browser }) => {
-  owner = seedUser('authz-owner');
-  client = seedUser('authz-client');
-  stranger = seedUser('authz-stranger');
+  owner = await seedUser('authz-owner');
+  client = await seedUser('authz-client');
+  stranger = await seedUser('authz-stranger');
 
   const page = await browser.newPage();
   await signIn(page, owner);
   const slug = await onboard(page, ORG_NAME);
   await page.close();
 
-  org = { slug, id: sql(`select id from public.organizations where slug = '${slug}'`) };
-  sql(`insert into public.organization_memberships (organization_id, user_id, role, status)
-       values ('${org.id}', '${client.userId}', 'client', 'active')`);
+  org = { slug, id: await orgIdBySlug(slug) };
+  await addMembership(org.id, client.userId, 'client');
 });
 
 test.afterAll(() => cleanUpOwn([ORG_NAME], ['authz-owner', 'authz-client', 'authz-stranger']));

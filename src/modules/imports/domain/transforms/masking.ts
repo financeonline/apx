@@ -6,12 +6,12 @@
  * account number must not survive into it.
  *
  * ────────────────────────────────────────────────────────────────────────────────────────────────
- * THIS FUNCTION HAS A SQL TWIN: `app.mask_description()` in
- * `supabase/migrations/20260905000018_triggers_financial.sql`, a BEFORE INSERT OR UPDATE trigger on
- * `public.bank_transactions`. The two MUST agree character for character: the trigger is what
+ * THIS FUNCTION HAS A TWIN in the database layer: `maskDescription` in
+ * `src/db/app/imports-records.ts` (the port of the `app.mask_description()` trigger on
+ * `bank_transactions`). The two MUST agree character for character: the database layer is what
  * actually writes the column, and this copy is what the import preview and the row-validation
  * screen show the reviewer. A divergence would show a reviewer one string and store another.
- * A parity test asserts they agree on the same inputs.
+ * A parity test (test/unit/import-transforms.test.ts) asserts they agree on the same inputs.
  * ────────────────────────────────────────────────────────────────────────────────────────────────
  *
  * The SQL is, verbatim:

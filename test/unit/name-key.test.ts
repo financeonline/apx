@@ -2,9 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { heldNameKey, storedNameKey } from '@/modules/imports';
 
 /**
- * The identity key's matching rules (ADR-136), stated as cases. The same table runs against the
- * database's `app.normalize_name` in supabase/tests/21_unicode_names.test.sql, and the two
- * implementations are compared over every code point in test/integration/unicode-names.test.ts.
+ * The identity key's matching rules (ADR-136), stated as cases. The database layer stores the same
+ * key (`normalizeName`, the port of `app.normalize_name`), and test/integration/unicode-names.test.ts
+ * compares the two over every code point.
  */
 
 /** Pairs that are ONE name. */

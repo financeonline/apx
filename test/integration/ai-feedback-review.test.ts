@@ -1,8 +1,11 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { permissionsFor, type EffectiveRole } from '@/core/permissions';
+import { persistAssistantTurn } from '@/core/db';
 import { countOpenFeedback, createConversation, listFeedback, loadFeedback, reviewFeedback, submitFeedback } from '@/modules/ai';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { orgCollection, orgRow } from '@/db/schema';
+import { addPlatformUser, assign, dropUsers, makeOrg } from './ai-fixtures';
+import { clientFor, createAuthUser, deleteOrg, fs } from './setup';
 
 /**
  * The review queue (AI_ARCHITECTURE.md §13; RBAC_MATRIX.md §2.1; ADR-082): who sees which reports,
@@ -10,7 +13,7 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  */
 
 const RUN = `fr${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.review.itest`;
+const DOMAIN = `${RUN}.review.itest.motion`;
 
 let ownerId: string;
 let employeeId: string;
@@ -19,8 +22,6 @@ let adminId: string;
 let orgId: string;
 let feedbackId: string;
 let messageId: string;
-
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 
 function orgContext(userId: string, role: EffectiveRole): AccessContext {
   return {
@@ -40,45 +41,58 @@ function platformContext(userId: string, role: 'super_admin' | 'employee'): Acce
   };
 }
 
+const STRUCTURED = {
+  mode: 'answer',
+  direct_answer: { statement: 'Sales were £1 in May 2026.', kind: 'deterministic_calculation', period: 'May 2026', evidence_refs: [], numbers: [], entity_refs: [] },
+  key_findings: [], causes: [], risks: [], opportunities: [], recommended_actions: [],
+  confidence: { data_quality_notes: [] }, evidence: [], unsupported: [],
+};
+
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  employeeId = createAuthUser(`employee@${DOMAIN}`);
-  strangerEmployeeId = createAuthUser(`stranger@${DOMAIN}`);
-  adminId = createAuthUser(`admin@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest Review ${RUN}` });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-  adminSql(`
-    insert into public.platform_users (user_id, platform_role, status) values
-      ('${employeeId}', 'employee', 'active'), ('${strangerEmployeeId}', 'employee', 'active'), ('${adminId}', 'super_admin', 'active');
-    insert into public.organization_assignments (organization_id, employee_user_id, assigned_by, status)
-    values ('${orgId}', '${employeeId}', '${adminId}', 'active');`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  employeeId = await createAuthUser(`employee@${DOMAIN}`);
+  strangerEmployeeId = await createAuthUser(`stranger@${DOMAIN}`);
+  adminId = await createAuthUser(`admin@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest Review ${RUN}`);
+  await addPlatformUser(employeeId, 'employee');
+  await addPlatformUser(strangerEmployeeId, 'employee');
+  await addPlatformUser(adminId, 'super_admin');
+  await assign(orgId, employeeId, 'active', adminId);
 
   const owner = orgContext(ownerId, 'owner');
   const conversationId = await createConversation(owner);
-  messageId = one(`
-    insert into public.ai_messages (organization_id, conversation_id, role, structured_response, grounding_status, grounding_report, prompt_version, model)
-    values ('${orgId}', '${conversationId}', 'assistant',
-            '{"mode":"answer","direct_answer":{"statement":"Sales were £1 in May 2026.","kind":"deterministic_calculation","period":"May 2026","evidence_refs":[],"numbers":[],"entity_refs":[]},"key_findings":[],"causes":[],"risks":[],"opportunities":[],"recommended_actions":[],"confidence":{"data_quality_notes":[]},"evidence":[],"unsupported":[]}'::jsonb,
-            'degraded', '{"mismatches":[{"path":"key_findings[0]","statement":"Marketing was £9,999.","reason":"no such figure"}]}'::jsonb, 'analyst-v3.0', 'scripted') returning id`);
-  adminSql(`
-    insert into public.ai_tool_calls (organization_id, message_id, sequence, tool_name, input, authorized, output_summary, duration_ms)
-    values ('${orgId}', '${messageId}', 1, 'get_metric', '{"metric_key":"revenue"}'::jsonb, true, '{"ok":true}'::jsonb, 12)`);
+  // The answer and its tool call, as the server records them.
+  ({ messageId } = await persistAssistantTurn({ userId: ownerId, requestId: `itest-${RUN}` }, {
+    organizationId: orgId, conversationId,
+    assistant: {
+      structured_response: STRUCTURED, grounding_status: 'degraded',
+      grounding_report: { mismatches: [{ path: 'key_findings[0]', statement: 'Marketing was £9,999.', reason: 'no such figure' }] },
+      period_context: null, prompt_version: 'analyst-v3.0', model: 'scripted', input_tokens: 1, output_tokens: 1,
+      latency_ms: 1, title: null,
+    },
+    toolCalls: [{
+      sequence: 1, tool_name: 'get_metric', input: { metric_key: 'revenue' }, authorized: true, denial_reason: null,
+      output_hash: null, output_summary: { ok: true }, duration_ms: 12, error: null, returned_ids: [], returned_hashes: [],
+    }],
+    bundle: null,
+  }));
   feedbackId = await submitFeedback(owner, { messageId, type: 'incorrect', comment: 'The May figure is wrong.' });
 });
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Review%${RUN}';
-    delete from public.platform_users where user_id in (select id from auth.users where email like '%@${DOMAIN}');
-    delete from auth.users where email like '%@${DOMAIN}';`);
+afterAll(async () => {
+  await deleteOrg(orgId);
+  await dropUsers(DOMAIN);
 });
+
+const feedback = async () => (await orgRow(fs(), orgId, 'ai_feedback', feedbackId).get()).data()!;
+const flagged = async () => (await orgRow(fs(), orgId, 'ai_messages', messageId).get()).get('flagged');
 
 describe('who sees the queue', () => {
   it('a super admin sees the open report, with the answer, the removed sentence and the tool calls', async () => {
     const ctx = platformContext(adminId, 'super_admin');
     const open = await listFeedback(ctx, 'open');
     expect(open.map((f) => f.id)).toContain(feedbackId);
+    expect(open.find((f) => f.id === feedbackId)?.groundingStatus).toBe('degraded');
     expect(await countOpenFeedback(ctx)).toBeGreaterThan(0);
 
     const detail = await loadFeedback(ctx, feedbackId);
@@ -105,18 +119,31 @@ describe('who sees the queue', () => {
 describe('reviewing', () => {
   it('the assigned employee marks it reviewed: the message wears the badge, the note is kept, the audit says so', async () => {
     await reviewFeedback(platformContext(employeeId, 'employee'), { feedbackId, status: 'reviewed', note: 'Looked at it.' });
-    expect(adminSql(`select status || '|' || resolution_note from public.ai_feedback where id = '${feedbackId}'`)).toBe('reviewed|Looked at it.');
-    expect(adminSql(`select flagged from public.ai_messages where id = '${messageId}'`)).toBe('t');
-    expect(adminSql(`select count(*) from public.audit_events where organization_id = '${orgId}' and action = 'ai.feedback_reviewed'`)).toBe('1');
-    expect((await listFeedback(platformContext(adminId, 'super_admin'), 'open')).map((f) => f.id)).not.toContain(feedbackId);
+    const f = await feedback();
+    expect(`${f.status}|${f.resolution_note}`).toBe('reviewed|Looked at it.');
+    expect(f.reviewed_by).toBe(employeeId);
+    expect(await flagged()).toBe(true);
+    const audit = await fs().collection('audit_events').where('target_id', '==', feedbackId).get();
+    expect(audit.docs.filter((d) => d.get('action') === 'ai.feedback_reviewed')).toHaveLength(1);
+    expect((await listFeedback(platformContext(adminId, 'super_admin'), 'open')).map((x) => x.id)).not.toContain(feedbackId);
+    expect((await listFeedback(platformContext(adminId, 'super_admin'), 'all')).map((x) => x.id)).toContain(feedbackId);
   });
 
   it('a super admin dismisses it and the badge comes off', async () => {
     await reviewFeedback(platformContext(adminId, 'super_admin'), { feedbackId, status: 'dismissed' });
-    expect(adminSql(`select flagged from public.ai_messages where id = '${messageId}'`)).toBe('f');
+    expect(await flagged()).toBe(false);
   });
 
   it('an owner cannot review, whatever the form says', async () => {
     await expect(reviewFeedback(orgContext(ownerId, 'owner'), { feedbackId, status: 'actioned' })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
+  });
+
+  it('the review queue refuses to reopen an item, and an unassigned employee cannot review it at all', async () => {
+    const { API_FUNCTIONS } = await import('@/db/api');
+    await expect(API_FUNCTIONS.review_ai_feedback!(clientFor(adminId), { p_feedback: feedbackId, p_status: 'open' }))
+      .rejects.toMatchObject({ code: 'VALIDATION' });
+    await expect(API_FUNCTIONS.review_ai_feedback!(clientFor(strangerEmployeeId), { p_feedback: feedbackId, p_status: 'actioned' }))
+      .rejects.toMatchObject({ code: 'NOT_FOUND' });
+    expect((await orgCollection(fs(), orgId, 'ai_feedback').get()).size).toBe(1);
   });
 });

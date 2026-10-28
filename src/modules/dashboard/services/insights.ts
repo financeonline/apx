@@ -1,5 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { orgRows } from '@/db/rls';
+import type { Db } from '@/db/types';
 import { Decimal, formatMoney, formatPercent, parseDecimalOrNull } from '@/core/money';
 import { varianceKey } from '@/modules/financial-engine';
 import * as repo from '../data/repository';
@@ -120,7 +121,7 @@ function byMagnitude(a: MovementView, b: MovementView): number {
 }
 
 export async function loadInsights(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   requestId?: string,
@@ -160,11 +161,8 @@ export async function loadInsights(
 
   // The drivers: which category or account moved, from the dimensioned snapshots the engine wrote.
   const accountNames = new Map<string, string>();
-  const { data: accountRows } = await db
-    .from('accounts')
-    .select('id, name')
-    .eq('organization_id', orgId);
-  for (const row of accountRows ?? []) accountNames.set(row.id as string, row.name as string);
+  const accountRows = await orgRows<{ id: string; name: string }>(db, orgId, 'accounts');
+  for (const row of accountRows) accountNames.set(row.id, row.name);
 
   for (const key of RANKED_DIMENSIONED) {
     const dimensioned = await repo.loadDimensioned(

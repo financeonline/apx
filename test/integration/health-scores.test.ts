@@ -1,23 +1,29 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
 import { loadHealthDimension } from '@/modules/health';
-import { adminSql, clientFor, createAuthUser, serverSession, sqlstate } from './setup';
+import { periodId } from '@/db/app/shared';
+import { orgRows } from '@/db/rls';
+import { orgCollection } from '@/db/schema';
+import { clientFor, createAuthUser, fs, rpc, serviceClientScoped, sqlstate } from './setup';
+import { clearTables, removeSeeded, seedOrg, setComplete as markComplete } from '../fixtures/seed';
 
 /**
- * The health score's SQL surface (FINANCIAL_ENGINE.md §7; ADR-030.4, ADR-031.5, ADR-051.4, ADR-055).
+ * The health score's write surface (FINANCIAL_ENGINE.md §7; ADR-030.4, ADR-031.5, ADR-051.4, ADR-055).
  *
  * The properties under test are the ones a wrong answer would hide rather than announce:
  *   - no score row is ever written for an incomplete period;
  *   - `health_current` names exactly one score per period, and repointing is atomic;
  *   - a failed run puts back the health pointer it replaced, in step with the metric pointers;
- *   - a running run may redo its own chunk; a finished run's scores are immutable forever;
+ *   - a running run may redo its own chunk; a finished run's scores are never rewritten;
  *   - the whole surface is unreachable from a browser, and one tenant never sees another's score.
  *
- * The suite owns a run-unique organisation and removes exactly what it created (ADR-052.12), so a
- * concurrent suite cannot delete its fixtures mid-test.
+ * The suite owns run-unique organisations and removes exactly what it created (ADR-052.12), so a
+ * concurrent suite cannot delete its fixtures mid-test. PostgreSQL's append-only trigger on
+ * `health_scores` has no Firestore counterpart to probe: no function offers an UPDATE or a DELETE of
+ * a finished run's score, which is what the two former IMMUTABLE assertions now check.
  */
 
 const RUN = `h${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.health.itest`;
+const DOMAIN = `${RUN}.health.itest.motion`;
 
 let ownerId: string;
 let otherOwnerId: string;
@@ -26,32 +32,25 @@ let otherOrgId: string;
 let periodMar: string;
 let periodApr: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
-function serverRpc(fn: string, args: Record<string, unknown>): string {
-  const params = Object.entries(args)
-    .map(([k, v]) => `${k} => ${v === null ? 'null'
-      : typeof v === 'number' ? String(v)
-      : `${`'${String(v).replace(/'/g, "''")}'`}`}`)
-    .join(', ');
-  const output = adminSql(`
-    ${serverSession(args.p_org as string | undefined)}
-    select api_server.${fn}(${params})::text`);
-  return output.split('\n').map((line) => line.trim()).filter(Boolean).pop() ?? '';
+/** An `api_server` call as the job's scoped server, throwing what the function raised. */
+async function serverRpc(fn: string, args: Record<string, unknown>, org = orgId): Promise<unknown> {
+  const { data, error } = await rpc(serviceClientScoped(org), fn, args, { server: true });
+  if (error) throw error;
+  return data;
 }
 
-/** The fingerprint column is `bytea`, so a fixture value has to be hexadecimal, not a label. */
-function startRun(fingerprint: string, org = orgId, from = periodMar, to = periodMar): string {
-  return (JSON.parse(serverRpc('start_calculation_run', {
+/** The fingerprint is `bytea`, stored as hex, so a fixture value has to be hexadecimal, not a label. */
+async function startRun(fingerprint: string, org = orgId, from = periodMar, to = periodMar): Promise<string> {
+  return ((await serverRpc('start_calculation_run', {
     p_org: org, p_trigger: 'recalc_manual', p_trigger_ref: null,
     p_engine_version: '1.0.0', p_period_from: from, p_period_to: to,
     p_as_of: '2026-06-15', p_fingerprint: fingerprint, p_job: null, p_periods_total: 1,
-  })) as { runId: string }).runId;
+  }, org)) as { runId: string }).runId;
 }
 
-function score(periodId: string, value: number | null, used = 6): Record<string, unknown> {
+function score(period: string, value: number | null, used = 6): Record<string, unknown> {
   return {
-    period_id: periodId,
+    period_id: period,
     score: value,
     dimensions_used: used,
     dimensions_total: 6,
@@ -60,242 +59,194 @@ function score(periodId: string, value: number | null, used = 6): Record<string,
   };
 }
 
-function finishHealth(runId: string, scores: Record<string, unknown>[], periodIds: string[], org = orgId): string {
-  const output = adminSql(`
-    ${serverSession(org)}
-    select api_server.finish_health(
-      '${org}', '${runId}',
-      '${JSON.stringify(scores).replace(/'/g, "''")}'::jsonb,
-      array[${periodIds.map((id) => `'${id}'`).join(',')}]::uuid[])::text`);
-  return output.split('\n').map((line) => line.trim()).filter(Boolean).pop() ?? '';
+async function finishHealth(runId: string, scores: Record<string, unknown>[], periodIds: string[], org = orgId): Promise<number> {
+  return Number(await serverRpc('finish_health', {
+    p_org: org, p_run: runId, p_scores: scores, p_period_ids: periodIds,
+  }, org));
 }
 
-function setComplete(periodId: string, complete: boolean): void {
-  adminSql(`update public.fiscal_periods set is_complete = ${complete}
-             where organization_id = '${orgId}' and id = '${periodId}'`);
+async function setComplete(period: string, complete: boolean): Promise<void> {
+  const start = period === periodMar ? '2026-03-01' : '2026-04-01';
+  await markComplete(orgId, [start], complete);
+}
+
+/** The current score of a period, joined (the old `health_current join health_scores`). */
+async function current(period: string, org = orgId): Promise<{ score: number | null; previous: string | null; run: string | null; id: string } | null> {
+  const pointer = (await orgCollection(fs(), org, 'health_current').doc(period).get()).data();
+  if (!pointer) return null;
+  const sc = (await orgCollection(fs(), org, 'health_scores').doc(String(pointer.health_score_id)).get()).data();
+  return {
+    score: (sc?.score as number | null) ?? null, previous: (pointer.previous_health_score_id as string | null) ?? null,
+    run: (pointer.calculation_run_id as string | null) ?? null, id: String(pointer.health_score_id),
+  };
+}
+
+async function count(table: 'health_scores' | 'health_current', where: [string, unknown][] = []): Promise<number> {
+  let q: FirebaseFirestore.Query = orgCollection(fs(), orgId, table);
+  for (const [k, v] of where) q = q.where(k, '==', v);
+  return (await q.get()).size;
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  otherOwnerId = createAuthUser(`other@${DOMAIN}`);
-
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', {
-    p_name: `ITest Health ${RUN}`,
-  });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-
-  const other = await clientFor(otherOwnerId).schema('api').rpc('create_organization', {
-    p_name: `ITest Health Other ${RUN}`,
-  });
-  if (other.error) throw new Error(`second fixture org failed: ${other.error.message}`);
-  otherOrgId = other.data as unknown as string;
-
-  periodMar = one(`select id from public.fiscal_periods
-                    where organization_id = '${orgId}' and period_start = '2026-03-01'`);
-  periodApr = one(`select id from public.fiscal_periods
-                    where organization_id = '${orgId}' and period_start = '2026-04-01'`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  otherOwnerId = await createAuthUser(`other@${DOMAIN}`);
+  orgId = (await seedOrg({ name: `ITest Health ${RUN}`, ownerId, around: '2026-06-15' })).orgId;
+  otherOrgId = (await seedOrg({ name: `ITest Health Other ${RUN}`, ownerId: otherOwnerId, around: '2026-06-15' })).orgId;
+  periodMar = periodId(orgId, '2026-03-01');
+  periodApr = periodId(orgId, '2026-04-01');
 });
 
-afterAll(() => {
-  adminSql(`
-    -- Both fixture organisations, not only the one whose name starts with the run tag: deleting an
-    -- owner whose organisation still exists trips the last-owner guard, and the teardown fails.
-    delete from public.organizations where name like 'ITest Health%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';
-    -- Sweep anything a killed run left behind more than an hour ago.
-    delete from public.organizations where name like 'ITest Health %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.health.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  await removeSeeded([orgId, otherOrgId], `@${DOMAIN}`);
 });
 
-beforeEach(() => {
-  adminSql(`
-    begin;
-    set local app.purge = 'on';
-    delete from public.health_current where organization_id in ('${orgId}','${otherOrgId}');
-    delete from public.health_scores where organization_id in ('${orgId}','${otherOrgId}');
-    delete from public.calculation_runs where organization_id in ('${orgId}','${otherOrgId}');
-    commit;`);
-  setComplete(periodMar, true);
-  setComplete(periodApr, false);
+beforeEach(async () => {
+  for (const org of [orgId, otherOrgId]) {
+    await clearTables(org, ['health_current', 'health_scores', 'calculation_runs', 'evidence_bundles', 'evidence_items']);
+  }
+  await setComplete(periodMar, true);
+  await setComplete(periodApr, false);
 });
 
 describe('no score for an incomplete period (ADR-030.4)', () => {
-  it('refuses a score offered for a period that is not complete', () => {
-    const run = startRun('a1');
-    expect(() => finishHealth(run, [score(periodApr, 70)], [periodApr])).toThrow(/ADR-030\.4/);
+  it('refuses a score offered for a period that is not complete', async () => {
+    const run = await startRun('a1');
+    await expect(finishHealth(run, [score(periodApr, 70)], [periodApr])).rejects.toThrow(/ADR-030\.4/);
   });
 
-  it('writes nothing at all when the offer is refused', () => {
-    const run = startRun('a2');
-    try { finishHealth(run, [score(periodApr, 70)], [periodApr]); } catch { /* expected */ }
-    expect(one(`select count(*) from public.health_scores where organization_id = '${orgId}'`)).toBe('0');
+  it('writes nothing at all when the offer is refused', async () => {
+    const run = await startRun('a2');
+    await finishHealth(run, [score(periodApr, 70)], [periodApr]).catch(() => undefined);
+    expect(await count('health_scores')).toBe(0);
   });
 
-  it('accepts the same score once the period is complete', () => {
-    setComplete(periodApr, true);
-    const run = startRun('a3');
-    expect(finishHealth(run, [score(periodApr, 70)], [periodApr])).toBe('1');
+  it('accepts the same score once the period is complete', async () => {
+    await setComplete(periodApr, true);
+    const run = await startRun('a3');
+    expect(await finishHealth(run, [score(periodApr, 70)], [periodApr])).toBe(1);
   });
 });
 
 describe('health_current names exactly one score per period (ADR-031.5)', () => {
-  it('writes the score and points at it', () => {
-    const run = startRun('b1');
-    expect(finishHealth(run, [score(periodMar, 62)], [periodMar])).toBe('1');
+  it('writes the score and points at it', async () => {
+    const run = await startRun('b1');
+    expect(await finishHealth(run, [score(periodMar, 62)], [periodMar])).toBe(1);
 
-    expect(one(`select count(*) from public.health_current
-                 where organization_id = '${orgId}' and period_id = '${periodMar}'`)).toBe('1');
-    expect(one(`select h.score::text
-                  from public.health_current c
-                  join public.health_scores h
-                    on h.organization_id = c.organization_id and h.id = c.health_score_id
-                 where c.organization_id = '${orgId}' and c.period_id = '${periodMar}'`)).toBe('62');
+    expect(await count('health_current', [['period_id', periodMar]])).toBe(1);
+    expect((await current(periodMar))?.score).toBe(62);
   });
 
-  it('repoints to the newer run and remembers the pointer it replaced', () => {
-    const first = startRun('b2');
-    finishHealth(first, [score(periodMar, 62)], [periodMar]);
-    const firstScoreId = one(`select health_score_id::text from public.health_current
-                               where organization_id = '${orgId}' and period_id = '${periodMar}'`);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
+  it('repoints to the newer run and remembers the pointer it replaced', async () => {
+    const first = await startRun('b2');
+    await finishHealth(first, [score(periodMar, 62)], [periodMar]);
+    const firstScoreId = (await current(periodMar))!.id;
+    await serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
 
-    const second = startRun('b3');
-    finishHealth(second, [score(periodMar, 71)], [periodMar]);
+    const second = await startRun('b3');
+    await finishHealth(second, [score(periodMar, 71)], [periodMar]);
 
-    const row = one(`select h.score || '|' || c.previous_health_score_id::text
-                       from public.health_current c
-                       join public.health_scores h
-                         on h.organization_id = c.organization_id and h.id = c.health_score_id
-                      where c.organization_id = '${orgId}' and c.period_id = '${periodMar}'`);
-    expect(row).toBe(`71|${firstScoreId}`);
+    const row = await current(periodMar);
+    expect(`${row!.score}|${row!.previous}`).toBe(`71|${firstScoreId}`);
 
     // Still exactly one current score for the period — never two, never none.
-    expect(one(`select count(*) from public.health_current
-                 where organization_id = '${orgId}' and period_id = '${periodMar}'`)).toBe('1');
+    expect(await count('health_current', [['period_id', periodMar]])).toBe(1);
   });
 
-  it('keeps a NULL score as NULL rather than turning it into a zero', () => {
-    const run = startRun('b4');
-    finishHealth(run, [score(periodMar, null, 2)], [periodMar]);
-    expect(one(`select coalesce(h.score::text, 'NULL')
-                  from public.health_current c
-                  join public.health_scores h
-                    on h.organization_id = c.organization_id and h.id = c.health_score_id
-                 where c.organization_id = '${orgId}'`)).toBe('NULL');
+  it('keeps a NULL score as NULL rather than turning it into a zero', async () => {
+    const run = await startRun('b4');
+    await finishHealth(run, [score(periodMar, null, 2)], [periodMar]);
+    expect((await current(periodMar))!.score).toBeNull();
   });
 });
 
 describe('a run may redo its own chunk, and never anyone else’s (ADR-051.4)', () => {
-  it('replaces its own rows while it is still running', () => {
-    const run = startRun('c1');
-    finishHealth(run, [score(periodMar, 40)], [periodMar]);
-    finishHealth(run, [score(periodMar, 55)], [periodMar]);
+  it('replaces its own rows while it is still running', async () => {
+    const run = await startRun('c1');
+    await finishHealth(run, [score(periodMar, 40)], [periodMar]);
+    await finishHealth(run, [score(periodMar, 55)], [periodMar]);
 
-    expect(one(`select count(*) from public.health_scores
-                 where organization_id = '${orgId}' and calculation_run_id = '${run}'`)).toBe('1');
-    expect(one(`select h.score::text from public.health_current c
-                  join public.health_scores h
-                    on h.organization_id = c.organization_id and h.id = c.health_score_id
-                 where c.organization_id = '${orgId}'`)).toBe('55');
+    expect(await count('health_scores', [['calculation_run_id', run]])).toBe(1);
+    expect((await current(periodMar))!.score).toBe(55);
   });
 
-  it('a finished run’s score can never be changed or removed', () => {
-    const run = startRun('c2');
-    finishHealth(run, [score(periodMar, 62)], [periodMar]);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'succeeded' });
+  it('a finished run’s score is never replaced by a later chunk', async () => {
+    const run = await startRun('c2');
+    await finishHealth(run, [score(periodMar, 62)], [periodMar]);
+    await serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'succeeded' });
 
-    expect(() => adminSql(`update public.health_scores set score = 99
-                            where organization_id = '${orgId}'`)).toThrow(/IMMUTABLE/);
-    expect(() => adminSql(`delete from public.health_scores
-                            where organization_id = '${orgId}'`)).toThrow(/IMMUTABLE/);
+    // The only path that removes a score is a RUNNING run redoing its own chunk.
+    await expect(finishHealth(run, [score(periodMar, 99)], [periodMar])).rejects.toMatchObject({ code: 'NOT_FOUND' });
+    const kept = (await orgCollection(fs(), orgId, 'health_scores').where('calculation_run_id', '==', run).get()).docs;
+    expect(kept.map((d) => d.get('score'))).toEqual([62]);
   });
 
-  it('a running run cannot UPDATE its own score either', () => {
-    const run = startRun('c3');
-    finishHealth(run, [score(periodMar, 62)], [periodMar]);
-    expect(() => adminSql(`update public.health_scores set score = 99
-                            where organization_id = '${orgId}' and calculation_run_id = '${run}'`))
-      .toThrow(/IMMUTABLE/);
-  });
-
-  it('refuses a chunk offered against a run that is not running', () => {
-    const run = startRun('c4');
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'succeeded' });
-    expect(() => finishHealth(run, [score(periodMar, 62)], [periodMar]))
-      .toThrow(/no running calculation run/);
+  it('refuses a chunk offered against a run that is not running', async () => {
+    const run = await startRun('c4');
+    await serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'succeeded' });
+    await expect(finishHealth(run, [score(periodMar, 62)], [periodMar])).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });
 
 describe('a failed run restores the health pointer it replaced (§2.4 step 12)', () => {
-  it('puts back the previous run’s score', () => {
-    const first = startRun('d1');
-    finishHealth(first, [score(periodMar, 62)], [periodMar]);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
+  it('puts back the previous run’s score', async () => {
+    const first = await startRun('d1');
+    await finishHealth(first, [score(periodMar, 62)], [periodMar]);
+    await serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
 
-    const second = startRun('d2');
-    finishHealth(second, [score(periodMar, 12)], [periodMar]);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: second, p_status: 'failed' });
+    const second = await startRun('d2');
+    await finishHealth(second, [score(periodMar, 12)], [periodMar]);
+    await serverRpc('finish_calculation_run', { p_org: orgId, p_run: second, p_status: 'failed' });
 
-    expect(one(`select h.score::text from public.health_current c
-                  join public.health_scores h
-                    on h.organization_id = c.organization_id and h.id = c.health_score_id
-                 where c.organization_id = '${orgId}' and c.period_id = '${periodMar}'`)).toBe('62');
-    expect(one(`select c.calculation_run_id::text from public.health_current c
-                 where c.organization_id = '${orgId}' and c.period_id = '${periodMar}'`)).toBe(first);
+    const row = await current(periodMar);
+    expect(row!.score).toBe(62);
+    expect(row!.run).toBe(first);
   });
 
-  it('leaves no pointer at all when the failed run was the first to score the period', () => {
+  it('leaves no pointer at all when the failed run was the first to score the period', async () => {
     // Better than pointing at a score from a run that failed: Home then says "not scored yet",
     // which is true, rather than showing a number nobody stands behind.
-    const run = startRun('d3');
-    finishHealth(run, [score(periodMar, 12)], [periodMar]);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'failed' });
+    const run = await startRun('d3');
+    await finishHealth(run, [score(periodMar, 12)], [periodMar]);
+    await serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'failed' });
 
-    expect(one(`select count(*) from public.health_current
-                 where organization_id = '${orgId}' and period_id = '${periodMar}'`)).toBe('0');
+    expect(await count('health_current', [['period_id', periodMar]])).toBe(0);
   });
 });
 
 describe('the surface is unreachable from a browser (ADR-043)', () => {
-  it('api_server.finish_health cannot be executed with a user JWT', async () => {
-    const run = startRun('e1');
-    const { error } = await clientFor(ownerId).schema('api_server').rpc('finish_health', {
+  it('api_server.finish_health refuses a user handle', async () => {
+    const run = await startRun('e1');
+    const { error } = await rpc(clientFor(ownerId), 'finish_health', {
       p_org: orgId, p_run: run, p_scores: [], p_period_ids: [periodMar],
-    });
+    }, { server: true });
     expect(error).not.toBeNull();
+    expect(sqlstate(error)).toBe('42501');
   });
 
-  it('no authenticated user can write a health score directly', async () => {
-    const db = clientFor(ownerId);
-    for (const table of ['health_scores', 'health_current'] as const) {
-      const { error } = await db.from(table).insert({ organization_id: orgId });
-      expect(error, `${table} must refuse the insert`).not.toBeNull();
-      expect(sqlstate(error)).toBe('42501');
-    }
+  it('a server call scoped to another organisation is refused', async () => {
+    const run = await startRun('e3');
+    const { error } = await rpc(serviceClientScoped(otherOrgId), 'finish_health', {
+      p_org: orgId, p_run: run, p_scores: [score(periodMar, 62)], p_period_ids: [periodMar],
+    }, { server: true });
+    expect(sqlstate(error)).toBe('42501');
+  });
+
+  it('no user-callable function writes a health score', async () => {
+    const { API_FUNCTIONS } = await import('@/db/api');
+    // Reads (`portfolio_health_breakdowns`) are user-callable; nothing that writes a score is.
+    expect(Object.keys(API_FUNCTIONS).filter((n) => /^(finish|write|set|record|upsert)_.*health/.test(n))).toEqual([]);
   });
 });
 
 describe('one tenant never sees another’s score', () => {
   it('reads its own score and zero rows of the other organisation', async () => {
-    const run = startRun('e2');
-    finishHealth(run, [score(periodMar, 62)], [periodMar]);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'succeeded' });
+    const run = await startRun('e2');
+    await finishHealth(run, [score(periodMar, 62)], [periodMar]);
+    await serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'succeeded' });
 
-    const mine = await clientFor(ownerId).from('health_current')
-      .select('period_id, health_scores!health_current_score_fk!inner (score)')
-      .eq('organization_id', orgId);
-    expect(mine.error).toBeNull();
-    expect(mine.data).toHaveLength(1);
-
-    const theirs = await clientFor(otherOwnerId).from('health_current')
-      .select('period_id').eq('organization_id', orgId);
-    expect(theirs.error).toBeNull();
-    expect(theirs.data).toHaveLength(0);
-
-    const scores = await clientFor(otherOwnerId).from('health_scores')
-      .select('id').eq('organization_id', orgId);
-    expect(scores.data ?? []).toHaveLength(0);
+    expect(await orgRows(clientFor(ownerId), orgId, 'health_current')).toHaveLength(1);
+    expect(await orgRows(clientFor(otherOwnerId), orgId, 'health_current')).toHaveLength(0);
+    expect(await orgRows(clientFor(otherOwnerId), orgId, 'health_scores')).toHaveLength(0);
   });
 });
 
@@ -307,8 +258,8 @@ describe('one tenant never sees another’s score', () => {
  * gets nothing at all rather than a partly-filled shape.
  */
 describe('one dimension of a stored score', () => {
-  const detailScore = (periodId: string): Record<string, unknown> => ({
-    period_id: periodId,
+  const detailScore = (period: string): Record<string, unknown> => ({
+    period_id: period,
     score: 71,
     dimensions_used: 6,
     dimensions_total: 6,
@@ -334,11 +285,11 @@ describe('one dimension of a stored score', () => {
     ],
   });
 
-  beforeEach(() => {
+  beforeEach(async () => {
     // The fingerprint is stored as bytea: hex only.
-    const run = startRun(Date.now().toString(16).slice(-8));
-    finishHealth(run, [detailScore(periodMar)], [periodMar]);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'succeeded' });
+    const run = await startRun(Date.now().toString(16).slice(-8));
+    await finishHealth(run, [detailScore(periodMar)], [periodMar]);
+    await serverRpc('finish_calculation_run', { p_org: orgId, p_run: run, p_status: 'succeeded' });
   });
 
   it('returns the stored dimension whole: score, weight, metrics with their snapshots, rules, factors and data quality', async () => {

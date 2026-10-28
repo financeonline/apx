@@ -1,7 +1,9 @@
 import 'server-only';
 import { assertCan } from '@/core/permissions';
-import { NotFound, toMotionError } from '@/core/errors';
+import { NotFound } from '@/core/errors';
 import { callApi } from '@/core/db/api-rpc';
+import { locateOrgRow, reachableOrganizations } from '@/db/app/ai-reads';
+import { orgQuery, orgRowById, orgRows } from '@/db/rls';
 import type { AccessContext } from '@/modules/tenancy';
 import type { SubmitAnswer } from '../domain/contract';
 import type { FeedbackType } from './feedback';
@@ -9,8 +11,8 @@ import type { FeedbackType } from './feedback';
 /**
  * The review queue (AI_ARCHITECTURE.md §13, CD-25; ROUTE_ARCHITECTURE.md §154).
  *
- * Reads run under the reviewer's own client: RLS admits a super admin to every organisation and an
- * assigned employee to theirs, and nothing else (ADR-082). `api.review_ai_feedback` is the
+ * Reads go through each table's read policy (`src/db/rls.ts`) for the reviewer: a super admin
+ * reaches every organisation and an assigned employee theirs, and nothing else (ADR-082). `api.review_ai_feedback` is the
  * authority for the write — it re-checks the permission in the item's organisation, refuses `open`,
  * flags or unflags the message and audits — and this service adds nothing to that.
  */
@@ -53,14 +55,9 @@ export interface FeedbackDetail extends FeedbackListItem {
   }>;
 }
 
-const BASE_SELECT = 'id, organization_id, message_id, alert_id, feedback_type, status, comment, created_at, organizations(name, slug)';
-const LIST_SELECT = `${BASE_SELECT}, ai_messages(grounding_status)`;
-// One embed of the message: PostgREST refuses the same relation embedded twice in a select.
-const DETAIL_SELECT = `${BASE_SELECT}, reviewed_at, resolution_note, ai_messages(conversation_id, structured_response, grounding_status, grounding_report, evidence_bundle_id, prompt_version, model)`;
+type Row = Record<string, unknown>;
 
-function toItem(row: Record<string, unknown>): FeedbackListItem {
-  const org = row.organizations as { name: string; slug: string } | null;
-  const message = row.ai_messages as { grounding_status: string } | null;
+function toItem(row: Row, org: { name: string; slug: string } | undefined, message: Row | null): FeedbackListItem {
   return {
     id: row.id as string,
     organizationId: row.organization_id as string,
@@ -72,46 +69,60 @@ function toItem(row: Record<string, unknown>): FeedbackListItem {
     createdAt: row.created_at as string,
     messageId: (row.message_id as string | null) ?? null,
     alertId: (row.alert_id as string | null) ?? null,
-    groundingStatus: message?.grounding_status ?? null,
+    groundingStatus: (message?.grounding_status as string | undefined) ?? null,
   };
 }
 
-/** Open items first, newest first; `all` includes what has been dealt with. */
+/** The messages a list of reports names, read under the `ai_messages` policy (≤ 30 per `in`). */
+async function messagesOf(ctx: AccessContext, orgId: string, ids: string[]): Promise<Map<string, Row>> {
+  const unique = [...new Set(ids)];
+  const out = new Map<string, Row>();
+  for (let i = 0; i < unique.length; i += 30) {
+    const chunk = unique.slice(i, i + 30);
+    const rows = await orgRows<Row>(ctx.db, orgId, 'ai_messages', (q) => q.where('id', 'in', chunk));
+    for (const r of rows) out.set(String(r.id), r);
+  }
+  return out;
+}
+
+/**
+ * Open items first, newest first; `all` includes what has been dealt with. The queue spans every
+ * organisation the reviewer reaches, each read under its own `ai_feedback` policy (Firestore keeps
+ * a tenant's rows under it, so the one cross-tenant SELECT is one read per organisation).
+ */
 export async function listFeedback(ctx: AccessContext, scope: 'open' | 'all' = 'open'): Promise<FeedbackListItem[]> {
   assertCan(ctx, 'platform.ai_feedback.review');
-  let query = ctx.db.from('ai_feedback').select(LIST_SELECT).order('created_at', { ascending: false }).limit(200);
-  if (scope === 'open') query = query.eq('status', 'open');
-  const { data, error } = await query;
-  if (error) throw toMotionError(error, ctx.requestId);
-  return ((data ?? []) as unknown as Record<string, unknown>[]).map(toItem);
+  const orgs = await reachableOrganizations(ctx.db);
+  const perOrg = await Promise.all(orgs.map(async (org) => {
+    const rows = await orgRows<Row>(ctx.db, org.organization_id, 'ai_feedback', (q) => {
+      const filtered = scope === 'open' ? q.where('status', '==', 'open') : q;
+      return filtered.orderBy('created_at', 'desc').limit(200);
+    });
+    const messages = await messagesOf(ctx, org.organization_id, rows.map((r) => r.message_id).filter((id): id is string => typeof id === 'string'));
+    return rows.map((r) => toItem(r, org, typeof r.message_id === 'string' ? messages.get(r.message_id) ?? null : null));
+  }));
+  return perOrg.flat()
+    .sort((a, b) => (a.createdAt < b.createdAt ? 1 : a.createdAt > b.createdAt ? -1 : 0))
+    .slice(0, 200);
 }
 
 /** One item with everything a reviewer needs: the answer, its grounding report, the tool calls. */
 export async function loadFeedback(ctx: AccessContext, feedbackId: string): Promise<FeedbackDetail> {
   assertCan(ctx, 'platform.ai_feedback.review');
-  const { data, error } = await ctx.db
-    .from('ai_feedback')
-    .select(DETAIL_SELECT)
-    .eq('id', feedbackId)
-    .maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
-  if (!data) throw new NotFound();
-  const row = data as unknown as Record<string, unknown>;
-  const message = row.ai_messages as {
-    conversation_id: string; structured_response: SubmitAnswer | null; grounding_status: string; grounding_report: unknown;
-    evidence_bundle_id: string | null; prompt_version: string | null; model: string | null;
-  } | null;
+  const orgId = await locateOrgRow(ctx.db, 'ai_feedback', feedbackId);
+  const row = orgId ? await orgRowById<Row>(ctx.db, orgId, 'ai_feedback', feedbackId) : null;
+  if (!orgId || !row) throw new NotFound();
+  const org = (await reachableOrganizations(ctx.db)).find((o) => o.organization_id === orgId);
+  const message = typeof row.message_id === 'string'
+    ? await orgRowById<Row>(ctx.db, orgId, 'ai_messages', row.message_id)
+    : null;
 
   let toolCalls: FeedbackDetail['toolCalls'] = [];
   if (message) {
-    const calls = await ctx.db
-      .from('ai_tool_calls')
-      .select('sequence, tool_name, authorized, denial_reason, error, duration_ms, output_summary')
-      .eq('organization_id', row.organization_id as string)
-      .eq('message_id', row.message_id as string)
-      .order('sequence');
-    if (calls.error) throw toMotionError(calls.error, ctx.requestId);
-    toolCalls = ((calls.data ?? []) as Record<string, unknown>[]).map((c) => ({
+    const calls = await orgRows<Row>(ctx.db, orgId, 'ai_tool_calls', (q) => q
+      .where('message_id', '==', row.message_id as string)
+      .orderBy('sequence'));
+    toolCalls = calls.map((c) => ({
       seq: c.sequence as number, toolName: c.tool_name as string, authorized: Boolean(c.authorized),
       denialReason: (c.denial_reason as string | null) ?? null, error: (c.error as string | null) ?? null,
       durationMs: (c.duration_ms as number | null) ?? null, outputSummary: c.output_summary,
@@ -119,15 +130,15 @@ export async function loadFeedback(ctx: AccessContext, feedbackId: string): Prom
   }
 
   return {
-    ...toItem(row),
+    ...toItem(row, org, message),
     reviewedAt: (row.reviewed_at as string | null) ?? null,
     resolutionNote: (row.resolution_note as string | null) ?? null,
-    conversationId: message?.conversation_id ?? null,
-    structured: message?.structured_response ?? null,
+    conversationId: (message?.conversation_id as string | undefined) ?? null,
+    structured: (message?.structured_response as SubmitAnswer | null | undefined) ?? null,
     groundingReport: message?.grounding_report ?? null,
-    evidenceBundleId: message?.evidence_bundle_id ?? null,
-    promptVersion: message?.prompt_version ?? null,
-    model: message?.model ?? null,
+    evidenceBundleId: (message?.evidence_bundle_id as string | null | undefined) ?? null,
+    promptVersion: (message?.prompt_version as string | null | undefined) ?? null,
+    model: (message?.model as string | null | undefined) ?? null,
     toolCalls,
   };
 }
@@ -141,9 +152,15 @@ export async function reviewFeedback(
   }, ctx.requestId);
 }
 
-/** Open items, for the platform overview. */
+/** Open items, for the platform overview — counted under each organisation's `ai_feedback` policy. */
 export async function countOpenFeedback(ctx: AccessContext): Promise<number> {
-  const { count, error } = await ctx.db.from('ai_feedback').select('id', { count: 'exact', head: true }).eq('status', 'open');
-  if (error) throw toMotionError(error, ctx.requestId);
-  return count ?? 0;
+  const orgs = await reachableOrganizations(ctx.db);
+  const counts = await Promise.all(orgs.map(async (org) => {
+    const scoped = await orgQuery(ctx.db, org.organization_id, 'ai_feedback');
+    if (!scoped) return 0;
+    const open = scoped.query.where('status', '==', 'open');
+    if (scoped.keep) return (await orgRows(ctx.db, org.organization_id, 'ai_feedback', (q) => q.where('status', '==', 'open'))).length;
+    return (await open.count().get()).data().count;
+  }));
+  return counts.reduce((a, b) => a + b, 0);
 }

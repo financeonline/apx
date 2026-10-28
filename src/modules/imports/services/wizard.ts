@@ -1,5 +1,7 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { orgRowById, orgRows } from '@/db/rls';
+import { globalRow } from '@/db/schema';
+import type { Db } from '@/db/types';
 import {
   failImportBatch, registerDocument, finalizeUpload, setBatchValidation, writeImportRows,
 } from '@/core/db';
@@ -39,7 +41,7 @@ export interface StartImportInput {
   readonly organizationId: string;
   readonly userId: string;
   readonly requestId: string;
-  readonly db: SupabaseClient;
+  readonly db: Db;
   readonly file: File;
   readonly importType: ImportType;
   readonly periodStart: string;
@@ -232,7 +234,7 @@ export function proposeColumnMap(
  * nobody can answer for leaves no batch behind (ADR-058.1).
  */
 async function resolveTransforms(
-  db: SupabaseClient,
+  db: Db,
   organizationId: string,
   input: { importType: ImportType; bankAccountId: string | null },
   columnMap: Readonly<Record<string, TargetField>>,
@@ -259,15 +261,10 @@ async function resolveTransforms(
 }
 
 async function loadBankAccountType(
-  db: SupabaseClient, orgId: string, bankAccountId: string,
+  db: Db, orgId: string, bankAccountId: string,
 ): Promise<BankAccountType | null> {
-  const { data } = await db
-    .from('bank_accounts')
-    .select('account_type')
-    .eq('organization_id', orgId)
-    .eq('id', bankAccountId)
-    .maybeSingle();
-  return (data as { account_type?: BankAccountType } | null)?.account_type ?? null;
+  const data = await orgRowById<{ account_type?: BankAccountType }>(db, orgId, 'bank_accounts', bankAccountId);
+  return data?.account_type ?? null;
 }
 
 export async function startImport(input: StartImportInput): Promise<StartImportResult> {
@@ -517,7 +514,7 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
 }
 
 export interface ValidateBatchInput {
-  readonly db: SupabaseClient;
+  readonly db: Db;
   readonly organizationId: string;
   readonly actor: { userId: string; requestId: string };
   readonly batchId: string;
@@ -539,13 +536,10 @@ export async function validateBatch(input: ValidateBatchInput): Promise<{
 }> {
   const { db, organizationId, actor, batchId } = input;
 
-  const { data: org } = await db
-    .from('organizations')
-    .select('base_currency, timezone')
-    .eq('id', organizationId)
-    .maybeSingle();
-
-  const settings = org as { base_currency?: string; timezone?: string } | null;
+  // Two settings of the organisation the caller is already working in (the batch's own functions
+  // re-check access); read directly, as `organizations` has no row policy of its own in src/db/rls.ts.
+  const org = await globalRow(db.fs, 'organizations', organizationId).get();
+  const settings = org.exists ? (org.data() as { base_currency?: string; timezone?: string }) : null;
   const today = new Intl.DateTimeFormat('en-CA', {
     timeZone: settings?.timezone ?? 'UTC', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date());
@@ -661,12 +655,10 @@ async function createMissingReferences(
 }
 
 async function loadAccountRefs(
-  db: SupabaseClient, orgId: string,
+  db: Db, orgId: string,
 ): Promise<Array<{ id: string; code: string | null; normalizedName: string }>> {
-  const { data } = await db
-    .from('accounts')
-    .select('id, code, normalized_name')
-    .eq('organization_id', orgId);
-  return ((data ?? []) as Array<{ id: string; code: string | null; normalized_name: string }>)
+  const data = await orgRows<{ id: string; code: string | null; normalized_name: string }>(db, orgId, 'accounts', (q) => q
+    .select('id', 'code', 'normalized_name'));
+  return data
     .map((row) => ({ id: row.id, code: row.code, normalizedName: row.normalized_name }));
 }

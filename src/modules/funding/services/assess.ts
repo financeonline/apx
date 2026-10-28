@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { finishFunding } from '@/core/db';
 import { log } from '@/core/logging';
 import { ENGINE_VERSION, bankCoverageFor, invoiceOutstandingAt } from '@/modules/financial-engine';
@@ -23,7 +23,7 @@ export type FundingTrigger = 'enablement_backfill' | 'calculation_run' | 'nightl
 const LOOKBACK = 12;
 
 export async function runFundingAssessment(
-  scoped: SupabaseClient, orgId: string, trigger: FundingTrigger,
+  scoped: Db, orgId: string, trigger: FundingTrigger,
 ): Promise<{ written: number; assessed: number }> {
   const organisation = await repo.loadOrganisation(scoped, orgId);
   // ADR-121: nothing is calculated while the flag is off.

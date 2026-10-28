@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import {
-  GL_CSV, addBankAccount, cleanUpOwn, drainQueue, importLedger, importStatement, onboard, seedUser, signIn, sql, uniqueName,
+  GL_CSV, addBankAccount, cleanUpOwn, drainQueue, importLedger, importStatement, onboard, seedUser, signIn, uniqueName,
 } from './fixtures';
+import { orgIdBySlug, orgRowById, orgRows } from './firestore';
 
 /**
  * Journey 18 — Intelligent Reporting (Phase 17, ADR-141).
@@ -27,7 +28,7 @@ function londonDate(offsetDays: number): string {
 
 test('a daily brief is produced, kept, drilled to its records and printed', async ({ page }) => {
   test.setTimeout(240_000);
-  await signIn(page, seedUser(OWNERS.brief));
+  await signIn(page, await seedUser(OWNERS.brief));
   const slug = await onboard(page, ORGS.brief);
 
   const yesterday = londonDate(-1);
@@ -60,9 +61,8 @@ test('a daily brief is produced, kept, drilled to its records and printed', asyn
   await drainQueue(page, slug);
   await page.reload();
 
-  const reportId = sql(`
-    select r.id from public.reports r join public.organizations o on o.id = r.organization_id
-     where o.slug = '${slug}' and r.report_kind = 'daily_brief' and r.window_start = '${yesterday}'`).trim();
+  const reportId = (await orgRows(await orgIdBySlug(slug), 'reports',
+    (r) => r.report_kind === 'daily_brief' && r.window_start === yesterday)).map((r) => String(r.id)).join('\n');
   expect(reportId).toMatch(/^[0-9a-f-]{36}$/);
   await page.goto(`/app/${slug}/reports/r/${reportId}`);
 
@@ -87,7 +87,7 @@ test('a daily brief is produced, kept, drilled to its records and printed', asyn
 
 test('a custom report is built from the analyst\'s own answers and kept for its author', async ({ page }) => {
   test.setTimeout(300_000);
-  await signIn(page, seedUser(OWNERS.custom));
+  await signIn(page, await seedUser(OWNERS.custom));
   const slug = await onboard(page, ORGS.custom);
   await importLedger(page, slug, GL_CSV);
   await drainQueue(page, slug);
@@ -106,5 +106,6 @@ test('a custom report is built from the analyst\'s own answers and kept for its 
   await expect(page.getByText('Looking at: Cash.')).toBeVisible();
 
   const reportId = page.url().match(/\/reports\/r\/([0-9a-f-]{36})$/)![1]!;
-  expect(sql(`select report_kind || '|' || origin from public.reports where id = '${reportId}'`).trim()).toBe('custom_ai|requested');
+  const report = await orgRowById(await orgIdBySlug(slug), 'reports', reportId);
+  expect(`${String(report?.report_kind)}|${String(report?.origin)}`).toBe('custom_ai|requested');
 });

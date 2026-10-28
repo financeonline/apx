@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { ENGINE_VERSION, varianceKey } from '@/modules/financial-engine';
 import { metricAvailability, type AvailabilityInput } from '@/modules/financials';
 import {
@@ -243,7 +243,7 @@ export interface LoadHomeOptions {
 }
 
 export async function loadHome(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   requestId?: string,
@@ -404,7 +404,7 @@ export interface TrendSeries {
 }
 
 export async function loadTrend(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   periods: readonly PeriodLabel[],
   requestId?: string,
@@ -445,7 +445,7 @@ export { BASIS_TEXT, changeFrom };
  * front of the six cards a reader came for.
  */
 export async function loadHealthTrend(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   periods: readonly PeriodLabel[],
   requestId?: string,

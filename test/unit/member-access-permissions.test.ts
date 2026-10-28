@@ -1,6 +1,4 @@
 import { describe, it, expect } from 'vitest';
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { PERMISSIONS, type Permission } from '@/core/permissions/catalogue';
 import { ROLE_MATRIX, type EffectiveRole } from '@/core/permissions/matrix';
 import { can } from '@/core/permissions/check';
@@ -19,11 +17,12 @@ import {
   takesSwitches,
   withinOwnRights,
 } from '@/modules/tenancy';
+import { SWITCHABLE_PERMISSIONS as DB_SWITCHABLE_PERMISSIONS, overridableRole } from '@/db/app/access';
 
 /**
  * Effective permissions in TypeScript (ADR-172): role defaults, then the person's switches — the
  * twin of `app.effective_permission`. The integration suite drives both against the same rows; this
- * file pins the rule itself, and pins the SQL switchable list to the contract's.
+ * file pins the rule itself, and pins the database layer's switchable list to the contract's.
  */
 
 const ALL_ROLES: readonly EffectiveRole[] = [
@@ -54,19 +53,12 @@ describe('the contract and the code agree', () => {
     }
   });
 
-  it('the SQL switchable list (app.switchable_permissions) equals the contract, in order', () => {
-    const sql = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261018000019_member_access.sql'), 'utf8');
-    const body = sql.slice(sql.indexOf('create function app.switchable_permissions()'));
-    const array = body.slice(body.indexOf('array['), body.indexOf(']::text[]'));
-    const listed = [...array.matchAll(/'([a-z_.]+)'/g)].map((m) => m[1]);
-    expect(listed).toEqual([...SWITCHABLE_PERMISSIONS]);
+  it('the database layer’s switchable list (app.switchable_permissions) equals the contract, in order', () => {
+    expect([...DB_SWITCHABLE_PERMISSIONS]).toEqual([...SWITCHABLE_PERMISSIONS]);
   });
 
-  it('the SQL overridable roles (app.overridable_role) are exactly the roles that take switches', () => {
-    const sql = readFileSync(resolve(process.cwd(), 'supabase/migrations/20261018000019_member_access.sql'), 'utf8');
-    const body = sql.slice(sql.indexOf('create function app.overridable_role'));
-    const listed = [...body.slice(0, body.indexOf('$$;')).matchAll(/'([a-z_]+)'/g)].map((m) => m[1]).sort();
-    expect(listed).toEqual(ALL_ROLES.filter(takesSwitches).sort());
+  it('the database layer’s overridable roles (app.overridable_role) are exactly the roles that take switches', () => {
+    expect(ALL_ROLES.filter(overridableRole)).toEqual(ALL_ROLES.filter(takesSwitches));
   });
 });
 

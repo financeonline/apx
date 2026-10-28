@@ -6,7 +6,7 @@ import { can } from '@/core/permissions';
 import { callApi } from '@/core/db';
 import { systemClock, todayInTimeZone } from '@/core/periods';
 import { getActionsSummary } from '@/modules/actions';
-import { loadHome, loadTopRisks, loadTrend } from '@/modules/dashboard';
+import { loadHome, loadOrganizationFacts, loadTopRisks, loadTrend } from '@/modules/dashboard';
 import { loadDataCompliance, type DataComplianceView } from '@/modules/departments';
 import { listAvailable } from '@/modules/reporting';
 import { fundingEnabled } from '@/modules/funding';
@@ -177,7 +177,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
     // Someone without `financials.view` sees their reports here (Departments carries everyone else's).
     can(ctx, 'reports.view') && !seesDetail ? homeReports(ctx, base) : Promise.resolve(null),
     callApi<Array<{ full_name: string | null }>>(ctx.db, 'my_profile', {}, ctx.requestId),
-    ctx.db.from('organizations').select('name, base_currency').eq('id', ctx.orgId!).maybeSingle(),
+    loadOrganizationFacts(ctx.db, ctx.orgId!),
   ]);
 
   const askCard = ask === null ? null : <RequestMoreCard href={`${base}/access`} waitingSince={ask.waitingSince} />;
@@ -199,9 +199,8 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
   ];
   const moreHref = can(ctx, DEPARTMENTS_PERMISSION) ? `${base}/departments` : null;
 
-  const orgRow = org.data as { name?: string; base_currency?: string } | null;
-  const orgName = orgRow?.name ?? 'Your company';
-  const currency = orgRow?.base_currency ?? 'GBP';
+  const orgName = org?.name ?? 'Your company';
+  const currency = org?.baseCurrency ?? 'GBP';
   const firstName = profile?.[0]?.full_name?.trim().split(/\s+/)[0];
   const greeting = `Welcome back${firstName ? `, ${firstName}` : ''}. Your business, in perspective.`;
 

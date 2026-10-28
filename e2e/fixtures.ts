@@ -1,7 +1,9 @@
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
+import {
+  backend, callAs, deleteOrganization, deleteUser, jobsOf, orgIdBySlug, usersWhere,
+} from './firestore';
 
 /**
  * Seeding and signing in for the journeys (TEST_STRATEGY.md §12).
@@ -9,17 +11,9 @@ import { expect, type Page } from '@playwright/test';
  * Every journey creates its own organisation with a run-unique name and removes exactly that
  * (ADR-052.12). A shared seed would make two journeys delete each other's fixtures halfway through,
  * which is how an e2e suite earns a reputation for being flaky and stops being read.
+ *
+ * Fixtures are written to the Firebase emulators through `./firestore` (FIRESTORE_DATA_MODEL.md §9).
  */
-
-const DB_CONTAINER = process.env.MOTION_DB_CONTAINER ?? 'supabase_db_MOTION';
-
-export function sql(statement: string): string {
-  return execFileSync(
-    'docker',
-    ['exec', '-i', DB_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-c', statement],
-    { encoding: 'utf8' },
-  ).trim();
-}
 
 /** Where the setup project leaves the signed-in state and the organisation it seeded. */
 export const AUTH_STATE = 'e2e/.auth/owner.json';
@@ -55,29 +49,12 @@ export interface SeededUser {
  * itself: a journey about importing should fail when importing breaks, not when an email confirmation
  * changes.
  */
-export function seedUser(localPart: string): SeededUser {
+export async function seedUser(localPart: string): Promise<SeededUser> {
   const email = `${localPart}@${EMAIL_DOMAIN}`;
-  const userId = sql(`
-    with created as (
-      insert into auth.users (
-        id, instance_id, aud, role, email, encrypted_password,
-        email_confirmed_at, created_at, updated_at,
-        raw_app_meta_data, raw_user_meta_data,
-        -- GoTrue reads these as NOT NULL text. A hand-inserted row leaves them NULL, and every
-        -- sign-in then fails with "Database error querying schema" — which looks like a broken
-        -- database and is really a broken fixture.
-        confirmation_token, recovery_token, email_change_token_new, email_change,
-        email_change_token_current, phone_change, phone_change_token, reauthentication_token
-      )
-      values (
-        gen_random_uuid(), '00000000-0000-0000-0000-000000000000', 'authenticated', 'authenticated',
-        '${email}', crypt('${PASSWORD}', gen_salt('bf')),
-        now(), now(), now(), '{"provider":"email","providers":["email"]}'::jsonb, '{}'::jsonb,
-        '', '', '', '', '', '', '', ''
-      )
-      returning id
-    )
-    select id from created`);
+  // A Firebase Auth account with its email already verified, and the `profiles` document signing up
+  // creates (`ensureProfile`) — what the hand-inserted `auth.users` row and its trigger used to be.
+  const { setup } = await backend();
+  const userId = await setup.createAuthUser(email, PASSWORD);
   return { email, password: PASSWORD, userId };
 }
 
@@ -90,19 +67,15 @@ export async function signIn(page: Page, user: SeededUser): Promise<void> {
   await page.waitForURL(/\/(onboarding|app|select-organization|portfolio)/, { timeout: 30_000 });
 }
 
-/** An organisation with the caller as owner, created the way the product creates one. */
-export function seedOrganization(name: string, ownerId: string): { id: string; slug: string } {
-  const row = sql(`
-    select set_config('request.jwt.claims',
-      json_build_object('sub', '${ownerId}', 'role', 'authenticated',
-                        'email', (select email from auth.users where id = '${ownerId}'))::text,
-      false);
-    with created as (select api.create_organization('${name}') as id)
-    select created.id::text || '|' || o.slug
-      from created join public.organizations o on o.id = created.id`);
-  const last = row.split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? '';
-  const [id, slug] = last.split('|');
-  return { id: id!, slug: slug! };
+/**
+ * An organisation with the caller as owner, created the way the product creates one: the
+ * `api.create_organization` port, called as that person.
+ */
+export async function seedOrganization(name: string, ownerId: string): Promise<{ id: string; slug: string }> {
+  const id = await callAs<string>(ownerId, 'create_organization', { p_name: name });
+  const { setup } = await backend();
+  const slug = String((await setup.fs().collection('organizations').doc(id).get()).get('slug'));
+  return { id, slug };
 }
 
 /**
@@ -125,12 +98,11 @@ export async function drainQueue(page: Page, orgSlug?: string): Promise<void> {
   const secret = process.env.CRON_SECRET;
   expect(secret, 'CRON_SECRET must be set for the journeys to drain the queue').toBeTruthy();
 
-  const outstanding = (): number => {
-    if (orgSlug === undefined) return 0;
-    return Number(sql(`
-      select count(*) from public.jobs j
-       join public.organizations o on o.id = j.organization_id
-      where o.slug = '${orgSlug}' and j.status in ('queued', 'running')`).trim() || '0');
+  const orgId = orgSlug === undefined ? undefined : await orgIdBySlug(orgSlug);
+  const outstanding = async (): Promise<number> => {
+    if (orgId === undefined) return 0;
+    const jobs = await jobsOf(orgId);
+    return jobs.filter((j) => j.status === 'queued' || j.status === 'running').length;
   };
 
   for (let round = 0; round < 12; round += 1) {
@@ -142,7 +114,7 @@ export async function drainQueue(page: Page, orgSlug?: string): Promise<void> {
     if (orgSlug === undefined) return;
     // A calculation enqueues an alert pass, so "nothing left" is checked after each round rather
     // than assumed after the first.
-    if (outstanding() === 0) return;
+    if (await outstanding() === 0) return;
   }
 }
 
@@ -154,17 +126,14 @@ export async function drainQueue(page: Page, orgSlug?: string): Promise<void> {
  * is precisely the flakiness this file's own header warns about, and which it then caused
  * (ADR-058.10).
  */
-export function cleanUpOwn(orgNames: readonly string[], emailPrefixes: readonly string[]): void {
-  if (orgNames.length > 0) {
-    const names = orgNames.map((n) => `'${n.replace(/'/g, "''")}'`).join(', ');
-    sql(`delete from public.organizations where name in (${names})`);
+export async function cleanUpOwn(orgNames: readonly string[], emailPrefixes: readonly string[]): Promise<void> {
+  const { setup } = await backend();
+  for (const name of orgNames) {
+    const orgs = await setup.fs().collection('organizations').where('name', '==', name).get();
+    for (const o of orgs.docs) await deleteOrganization(o.id);
   }
-  for (const prefix of emailPrefixes) {
-    sql(`
-      delete from public.platform_users where user_id in
-        (select id from auth.users where email = '${prefix}@${EMAIL_DOMAIN}');
-      delete from auth.users where email = '${prefix}@${EMAIL_DOMAIN}'`);
-  }
+  const emails = new Set(emailPrefixes.map((prefix) => `${prefix}@${EMAIL_DOMAIN}`));
+  for (const user of await usersWhere((email) => emails.has(email))) await deleteUser(user.uid);
 }
 
 /**
@@ -173,12 +142,17 @@ export function cleanUpOwn(orgNames: readonly string[], emailPrefixes: readonly 
  * Age-based, and run once at the start by the setup project — never mid-run, where it could delete
  * an organisation another project is using.
  */
-export function sweepOldFixtures(): void {
-  sql(`
-    delete from public.organizations where name like '%e2e%' and created_at < now() - interval '2 hours';
-    delete from public.platform_users where user_id in
-      (select id from auth.users where email like '%.e2e.motion' and created_at < now() - interval '2 hours');
-    delete from auth.users where email like '%.e2e.motion' and created_at < now() - interval '2 hours';`);
+export async function sweepOldFixtures(): Promise<void> {
+  const { setup } = await backend();
+  const cutoff = new Date(Date.now() - 2 * 60 * 60 * 1000);
+  // `created_at` is an ISO string, so "older than two hours" is a string comparison.
+  const old = await setup.fs().collection('organizations').where('created_at', '<', cutoff.toISOString()).get();
+  for (const o of old.docs) {
+    if (String(o.get('name') ?? '').includes('e2e')) await deleteOrganization(o.id);
+  }
+  for (const user of await usersWhere((email) => email.endsWith('.e2e.motion'))) {
+    if (user.createdAt < cutoff) await deleteUser(user.uid);
+  }
 }
 
 export function uniqueName(label: string): string {

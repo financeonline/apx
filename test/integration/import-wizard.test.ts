@@ -3,7 +3,10 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { loadBatchReview, setStatementBalancesAndRevalidate, startImport } from '@/modules/imports';
 import { permissionsFor } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, deleteOrg, fs } from './setup';
+import { makeOrg, seedBankAccount } from './f-fixtures';
+import { where } from './i-fixtures';
 
 /**
  * The import wizard, end to end (IMPORT_ENGINE.md §2–§11).
@@ -22,13 +25,19 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  */
 
 const RUN = `w${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.wizard.itest`;
+const DOMAIN = `${RUN}.wizard.itest.motion`;
 
 let ownerId: string;
 let orgId: string;
 let bankAccountId: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+/** How many batches were started from documents with this file name. */
+async function batchesFor(filename: string): Promise<number> {
+  const docs = await where(orgId, 'source_documents', { original_filename: filename });
+  let n = 0;
+  for (const d of docs) n += (await where(orgId, 'import_batches', { source_document_id: d.id })).length;
+  return n;
+}
 
 /** The owner's own client — what every read in the app runs under. */
 const userDb = () => clientFor(ownerId, { email: `owner@${DOMAIN}` });
@@ -60,26 +69,15 @@ async function runWizard(file: File, importType = 'bank_statement', account = ba
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', {
-    p_name: `ITest Wizard ${RUN}`,
-  });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest Wizard ${RUN}`);
+  bankAccountId = await seedBankAccount(orgId, { name: 'Business Current', bankName: 'Test Bank', accountNumber: '****1234' });
+}, 60_000);
 
-  bankAccountId = one(`
-    insert into public.bank_accounts
-           (organization_id, name, account_type, bank_name, account_number_masked, is_active)
-    values ('${orgId}', 'Business Current', 'current', 'Test Bank', '****1234', true)
-    returning id`);
-});
-
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Wizard%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Wizard %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.wizard.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  const jobs = await fs().collection('jobs').where('organization_id', '==', orgId).get();
+  await Promise.all(jobs.docs.map((d) => d.ref.delete()));
+  await deleteOrg(orgId);
 });
 
 describe('a statement goes in through the wizard', () => {
@@ -97,10 +95,8 @@ describe('a statement goes in through the wizard', () => {
     expect(Object.values(result.columnMap)).toContain('description');
   });
 
-  it('kept every source line as a row, including any that cannot import (SOW §23)', () => {
-    const rows = Number(one(`
-      select count(*) from public.import_rows
-       where organization_id = '${orgId}' and batch_id = '${batchId}'`));
+  it('kept every source line as a row, including any that cannot import (SOW §23)', async () => {
+    const rows = (await where(orgId, 'import_rows', { batch_id: batchId })).length;
 
     const sourceLines = readFileSync('fixtures/imports/csv-with-preamble.csv', 'utf8')
       .split('\n').filter((line) => line.trim() !== '').length;
@@ -113,11 +109,8 @@ describe('a statement goes in through the wizard', () => {
     expect(rows).toBe(sourceLines);
   });
 
-  it('marked the preamble as unusable rather than discarding it (§5.2)', () => {
-    const statuses = one(`
-      select string_agg(distinct status::text, ',' order by status::text)
-        from public.import_rows
-       where organization_id = '${orgId}' and batch_id = '${batchId}'`);
+  it('marked the preamble as unusable rather than discarding it (§5.2)', async () => {
+    const statuses = [...new Set((await where(orgId, 'import_rows', { batch_id: batchId })).map((r) => String(r.status)))].sort().join(',');
     // At least one row is not importable, and it is on the screen with its reason.
     expect(statuses).toMatch(/error|warning/);
   });
@@ -163,35 +156,27 @@ describe('a statement with one signed amount column', () => {
    * status rather than taking the column wholesale — and `headerRow` below asserts that the header
    * line is one of the ones held back, rather than quietly becoming a transaction.
    */
-  const amountsOf = (batchId: string): string[] => adminSql(`
-    select coalesce(string_agg(mapped_data->>'amount', ',' order by row_number), '')
-      from public.import_rows
-     where organization_id = '${orgId}' and batch_id = '${batchId}'
-       and status in ('valid', 'warning') and mapped_data->>'amount' is not null`)
-    .split(',').filter((a) => a !== '');
+  const amountsOf = async (batchId: string): Promise<string[]> => (await where(orgId, 'import_rows', { batch_id: batchId }))
+    .filter((r) => (r.status === 'valid' || r.status === 'warning') && r.mapped_data?.amount != null)
+    .sort((a, b) => Number(a.row_number) - Number(b.row_number))
+    .map((r) => String(r.mapped_data.amount));
 
   /** The status the file's own header line was given. */
-  const headerRowStatus = (batchId: string): string => adminSql(`
-    select status::text from public.import_rows
-     where organization_id = '${orgId}' and batch_id = '${batchId}'
-       and mapped_data->>'amount' = 'Amount'`);
+  const headerRowStatus = async (batchId: string): Promise<string> => (await where(orgId, 'import_rows', { batch_id: batchId }))
+    .filter((r) => r.mapped_data?.amount === 'Amount').map((r) => String(r.status)).join(',');
 
   it('negates a card export, because on a card a purchase is money going out (ADR-028)', async () => {
-    const cardId = one(`
-      insert into public.bank_accounts
-             (organization_id, name, account_type, bank_name, account_number_masked, is_active)
-      values ('${orgId}', 'Company Card', 'credit_card', 'Test Bank', '****9911', true)
-      returning id`);
+    const cardId = await seedBankAccount(orgId, { name: 'Company Card', type: 'credit_card', bankName: 'Test Bank', accountNumber: '****9911' });
 
     const result = await runWizard(fixtureFile('bank_positive_out.csv'), 'bank_statement', cardId);
-    expect(amountsOf(result.batchId)).toEqual(expectedAmounts('bank_positive_out'));
+    expect(await amountsOf(result.batchId)).toEqual(expectedAmounts('bank_positive_out'));
 
     /*
      * The header line reached the sign transform as data, carrying the literal text "Amount" in
      * the money column. It becomes ONE held-back row; before ADR-058.5 it threw, and the whole
      * import died on its first line.
      */
-    expect(headerRowStatus(result.batchId)).toMatch(/error|skipped/);
+    expect(await headerRowStatus(result.batchId)).toMatch(/error|skipped/);
   });
 
   it('refuses the same shape on a current account rather than guessing', async () => {
@@ -199,18 +184,14 @@ describe('a statement with one signed amount column', () => {
       .rejects.toThrow(/single amount column/);
   });
 
-  it('left nothing behind when it refused', () => {
-    const batches = Number(one(`
-      select count(*) from public.import_batches b
-       join public.source_documents d
-         on d.organization_id = b.organization_id and d.id = b.source_document_id
-      where b.organization_id = '${orgId}' and d.original_filename = 'bank_signed.csv'`));
+  it('left nothing behind when it refused', async () => {
+    const batches = await batchesFor('bank_signed.csv');
     expect(batches, 'a question nobody answered started no batch').toBe(0);
   });
 
   it('needs no answer at all when the file has separate money-in and money-out columns', async () => {
     const result = await runWizard(fixtureFile('bank_out_in_columns.csv'));
-    expect(amountsOf(result.batchId)).toEqual(expectedAmounts('bank_out_in_columns'));
+    expect(await amountsOf(result.batchId)).toEqual(expectedAmounts('bank_out_in_columns'));
   });
 });
 
@@ -225,12 +206,8 @@ describe('the same file twice is caught before it is parsed (§2.5)', () => {
       .rejects.toThrow(/already been uploaded/);
   });
 
-  it('leaves no second batch behind when it refuses', () => {
-    const batches = Number(one(`
-      select count(*) from public.import_batches b
-       join public.source_documents d
-         on d.organization_id = b.organization_id and d.id = b.source_document_id
-      where b.organization_id = '${orgId}' and d.original_filename = 'csv-with-preamble.csv'`));
+  it('leaves no second batch behind when it refuses', async () => {
+    const batches = await batchesFor('csv-with-preamble.csv');
     expect(batches, 'the refused upload started nothing').toBe(1);
   });
 });
@@ -242,12 +219,7 @@ describe('a file MOTION cannot read is refused before anything is stored', () =>
     await expect(runWizard(renamed)).rejects.toThrow(/not a CSV file/);
 
     // Nothing was stored, and no batch was started, so there is no orphan to clean up.
-    const batches = Number(one(`
-      select count(*) from public.import_batches b
-       join public.source_documents d
-         on d.organization_id = b.organization_id and d.id = b.source_document_id
-      where b.organization_id = '${orgId}' and d.original_filename = 'fake_csv.csv'`));
-    expect(batches).toBe(0);
+    expect(await batchesFor('fake_csv.csv')).toBe(0);
   });
 
 });
@@ -270,10 +242,9 @@ describe('a PDF statement goes in through the same wizard', () => {
     expect(result.parseFailure).toBeUndefined();
     expect(result.columns).toEqual(['Date', 'Description', 'Paid out', 'Paid in', 'Balance']);
 
-    const batch = one(`
-      select b.extraction_method::text || '|' || b.status::text || '|' || coalesce(b.statement_opening_balance::text, '-') || '|' || coalesce(b.statement_closing_balance::text, '-')
-        from public.import_batches b where b.id = '${result.batchId}'`);
-    expect(batch).toBe('pdf_text|awaiting_review|1000.00|7320.14');
+    const b = (await orgRow(fs(), orgId, 'import_batches', result.batchId).get()).data()!;
+    expect(`${b.extraction_method}|${b.status}|${b.statement_opening_balance ?? '-'}|${b.statement_closing_balance ?? '-'}`)
+      .toBe('pdf_text|awaiting_review|1000.00|7320.14');
 
     const review = (await loadBatchReview(userDb(), orgId, result.batchId))!;
     // 28 transactions and 7 lines of page furniture, every one of them kept (SOW §23).
@@ -290,14 +261,9 @@ describe('a PDF statement goes in through the same wizard', () => {
 
   it('stores a scanned statement, opens no batch, and says what to do instead (§5.5)', async () => {
     await expect(runWizard(pdf('bank_scanned.pdf'))).rejects.toThrow(/scanned image/);
-    const doc = one(`
-      select d.status::text || '|' || coalesce(d.has_text_layer::text, 'null') from public.source_documents d
-       where d.organization_id = '${orgId}' and d.original_filename = 'bank_scanned.pdf'`);
-    expect(doc).toBe('unreadable|false');
-    expect(one(`
-      select count(*) from public.import_batches b join public.source_documents d
-        on d.organization_id = b.organization_id and d.id = b.source_document_id
-       where b.organization_id = '${orgId}' and d.original_filename = 'bank_scanned.pdf'`)).toBe('0');
+    const [doc] = await where(orgId, 'source_documents', { original_filename: 'bank_scanned.pdf' });
+    expect(`${doc?.status}|${doc?.has_text_layer ?? 'null'}`).toBe('unreadable|false');
+    expect(await batchesFor('bank_scanned.pdf')).toBe(0);
   });
 
   it('stores a text PDF with no transaction table and fails its batch with the reason (§5.3)', async () => {
@@ -312,11 +278,10 @@ describe('a PDF statement goes in through the same wizard', () => {
 
     const result = await runWizard(file);
     expect(result.parseFailure).toMatch(/could not find a transaction table/);
-    const batch = one(`
-      select b.status::text || '|' || b.extraction_method::text || '|' || coalesce(b.error_summary ->> 'message', '-')
-        from public.import_batches b where b.id = '${result.batchId}'`);
-    expect(batch).toMatch(/^failed\|pdf_text\|APX could not find a transaction table/);
-    expect(one(`select status::text from public.source_documents where id = '${result.documentId}'`)).toBe('ready');
+    const b = (await orgRow(fs(), orgId, 'import_batches', result.batchId).get()).data()!;
+    expect(`${b.status}|${b.extraction_method}|${(b.error_summary as { message?: string } | null)?.message ?? '-'}`)
+      .toMatch(/^failed\|pdf_text\|APX could not find a transaction table/);
+    expect((await orgRow(fs(), orgId, 'source_documents', result.documentId).get()).get('status')).toBe('ready');
   });
 
   it('lets a reviewer type the printed balances and judges the statement again (§5.3, ADR-085)', async () => {

@@ -1,87 +1,74 @@
-import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { startImport, storedNameKey } from '@/modules/imports';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { heldNameKey, normalizeName } from '@/db/app/shared';
+import { newId, nowIso, orgCollection, orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, fs, rpc } from './setup';
+import { dropOrg } from './tenancy-fixtures';
+import { removeSeeded } from '../fixtures/seed';
 
 /**
- * Unicode identity for names (ADR-136), on a real database.
+ * Unicode identity for names (ADR-136), on the Firestore emulator.
  *
- * 1. The TypeScript key the import path matches with IS the database's `app.normalize_name`, for
- *    every code point Postgres has assigned.
- * 2. The read-only collision report computes the migration's key, character for character.
- * 3. Customers in Japanese, Arabic, Greek, Cyrillic and accented Latin go through the real wizard
+ * 1. The key the import path matches with (`storedNameKey`, proven equal to PostgreSQL's
+ *    `app.normalize_name` for every assigned code point while PostgreSQL ran) IS the key the data
+ *    layer stores and guards with (`normalizeName`, `src/db/app/shared.ts`), for every code point
+ *    the runtime has assigned.
+ * 2. Customers in Japanese, Arabic, Greek, Cyrillic and accented Latin go through the real wizard
  *    and commit: distinct names stay distinct, the same name in another case is one customer, and
  *    every display name is stored exactly as the file had it.
+ * 3. A held name (a collision the migration left) is refused, and the "Name decisions" screen's two
+ *    decisions resolve it through the audited `api.*` functions.
+ *
+ * The read-only collision report's check (its SQL key function equals the deployed
+ * `app.normalize_name`, read from `pg_proc`) was about the PostgreSQL catalog and is gone with it.
  *
  * Run-unique fixtures (ADR-052.12).
  */
 
 const RUN = `t${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.unicodenames.itest`;
+const DOMAIN = `${RUN}.unicodenames.itest.motion`;
 
 let ownerId: string;
 let orgId: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 const ownerDb = () => clientFor(ownerId, { email: `owner@${DOMAIN}` });
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest UnicodeNames ${RUN}` });
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  const created = await rpc<string>(clientFor(ownerId), 'create_organization', { p_name: `ITest UnicodeNames ${RUN}` });
   if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
+  orgId = created.data!;
 });
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest UnicodeNames%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';`);
+afterAll(async () => {
+  if (orgId) await dropOrg(orgId);
+  await removeSeeded([], DOMAIN);
 });
 
-describe('the TypeScript key is the database key', () => {
-  it('for every code point Postgres has assigned, between two letters', () => {
+describe('the import key is the stored key', () => {
+  it('for every code point the runtime has assigned, between two letters', () => {
     const mismatches: string[] = [];
     let compared = 0;
-    // Chunked: each psql call returns a few hundred kilobytes.
-    for (let from = 1; from <= 0x10ffff; from += 0x8000) {
-      const to = Math.min(from + 0x7fff, 0x10ffff);
-      const out = adminSql(`
-        select cp || '|' || app.normalize_name('a' || chr(cp) || 'b')
-          from generate_series(${from}, ${to}) cp
-         where (cp < 55296 or cp > 57343) and unicode_assigned(chr(cp))
-         order by cp`);
-      if (out === '') continue;
-      for (const line of out.split('\n')) {
-        const bar = line.indexOf('|');
-        const cp = Number(line.slice(0, bar));
-        const dbKey = line.slice(bar + 1);
-        compared += 1;
-        const tsKey = storedNameKey(`a${String.fromCodePoint(cp)}b`);
-        if (tsKey !== dbKey && mismatches.length < 20) mismatches.push(`U+${cp.toString(16).toUpperCase()} db="${dbKey}" ts="${tsKey}"`);
+    for (let cp = 1; cp <= 0x10ffff; cp += 1) {
+      if (cp >= 0xd800 && cp <= 0xdfff) continue;
+      const ch = String.fromCodePoint(cp);
+      if (/\p{Cn}/u.test(ch)) continue;
+      compared += 1;
+      const name = `a${ch}b`;
+      const stored = normalizeName(name);
+      const imported = storedNameKey(name);
+      if (stored !== imported && mismatches.length < 20) {
+        mismatches.push(`U+${cp.toString(16).toUpperCase()} stored="${stored}" import="${imported}"`);
       }
     }
-    expect(compared, 'Postgres 17 assigns well over 100,000 code points').toBeGreaterThan(100_000);
+    expect(compared, 'well over 100,000 assigned code points').toBeGreaterThan(100_000);
     expect(mismatches).toEqual([]);
   });
 
   it('for whole names in five scripts', () => {
-    const names = ['Müller GmbH', 'Müller GmbH', 'Möller GmbH', '株式会社トヨタ', 'ｶﾌﾞｼｷｶﾞｲｼｬ', 'شركة الأمل', 'متجر ٣',
+    const names = ['Müller GmbH', 'Müller GmbH', 'Möller GmbH', '株式会社トヨタ', 'ｶﾌﾞｼｷｶﾞｲｼｬ', 'شركة الأمل', 'متجر ٣',
       'ΟΔΟΣ Α.Ε.', 'οδος α.ε.', 'ООО «Ромашка»', 'İzmir Ltd', 'Ａｃｍｅ & Co.', 'Straße', 'q̃x'];
-    const literal = names.map((n) => `(${names.indexOf(n)}, '${n.replace(/'/g, "''")}')`).join(', ');
-    const out = adminSql(`select app.normalize_name(n) from (values ${literal}) v(i, n) order by i`).split('\n');
-    expect(out).toEqual(names.map(storedNameKey));
-  });
-});
-
-describe('the read-only collision report', () => {
-  it('computes the key with the migration\'s own function body', () => {
-    const report = readFileSync('scripts/sql/unicode-names-dry-run.sql', 'utf8');
-    const reportBody = /create function pg_temp\.name_key[\s\S]*?\$\$([\s\S]*?)\$\$/.exec(report)?.[1];
-    const deployed = adminSql(`
-      select prosrc from pg_proc where proname = 'normalize_name' and pronamespace = 'app'::regnamespace`);
-    const squash = (s: string | undefined) => (s ?? '').replace(/\s+/g, ' ').trim();
-    expect(squash(reportBody)).not.toBe('');
-    expect(squash(reportBody)).toBe(squash(deployed));
+    expect(names.map(normalizeName)).toEqual(names.map(storedNameKey));
   });
 });
 
@@ -99,27 +86,29 @@ describe('customers in five scripts, through the wizard and commit', () => {
   });
 
   const commit = async (batchId: string) => {
-    const required = adminSql(`
-      select coalesce(string_agg(c, ','), '') from public.import_batches b, unnest(b.required_confirmations) c
-       where b.organization_id = '${orgId}' and b.id = '${batchId}'`).split(',').filter(Boolean);
+    const batch = await orgRow(fs(), orgId, 'import_batches', batchId).get();
+    const required = ((batch.get('required_confirmations') as string[] | undefined) ?? []).filter(Boolean);
     for (const code of required) {
       const value = code === 'IMP-RANGE-015' ? { period_start: '2026-08-01', period_end: '2026-08-31' }
         : code === 'IMP-INV-013' ? { opening: 'complete' } // R-2: the list holds every invoice unpaid at its start
         : { answer: 'yes' };
-      const { error } = await ownerDb().schema('api').rpc('record_batch_confirmation', { p_batch: batchId, p_code: code, p_value: value });
+      const { error } = await rpc(ownerDb(), 'record_batch_confirmation', { p_batch: batchId, p_code: code, p_value: value });
       expect(error, `${code}: ${error?.message}`).toBeNull();
     }
-    const { data, error } = await ownerDb().schema('api').rpc('commit_import_batch', { p_batch: batchId });
+    const { data, error } = await rpc(ownerDb(), 'commit_import_batch', { p_batch: batchId });
     expect(error, error?.message).toBeNull();
     return data as { committed: number };
   };
 
-  const customers = () => adminSql(`
-    select name || '=' || normalized_name from public.counterparties
-     where organization_id = '${orgId}' order by name collate "C"`).split('\n').filter(Boolean);
-  const bookedTo = (batchId: string) => adminSql(`
-    select i.invoice_number || '>' || c.name from public.invoices i join public.counterparties c on c.id = i.counterparty_id
-     where i.organization_id = '${orgId}' and i.import_batch_id = '${batchId}' order by i.invoice_number`).split('\n');
+  const byteOrder = (a: string, b: string) => (a < b ? -1 : a > b ? 1 : 0);
+  const customers = async () => (await orgCollection(fs(), orgId, 'counterparties').get()).docs
+    .map((d) => `${String(d.get('name'))}=${String(d.get('normalized_name'))}`).sort(byteOrder);
+  const bookedTo = async (batchId: string) => {
+    const invoices = (await orgCollection(fs(), orgId, 'invoices').where('import_batch_id', '==', batchId).get()).docs.map((d) => d.data());
+    const parties = await fs().getAll(...invoices.map((i) => orgRow(fs(), orgId, 'counterparties', String(i.counterparty_id))));
+    const nameOf = new Map(parties.map((p) => [p.id, String(p.get('name'))]));
+    return invoices.map((i) => `${String(i.invoice_number)}>${nameOf.get(String(i.counterparty_id))}`).sort(byteOrder);
+  };
 
   it('creates one customer per name, keeps every display name, and books each invoice to its own', async () => {
     const result = await upload('unicode-1.csv', [
@@ -134,7 +123,7 @@ describe('customers in five scripts, through the wizard and commit', () => {
     ]);
     expect((await commit(result.batchId)).committed).toBe(8);
 
-    expect(customers()).toEqual([
+    expect(await customers()).toEqual([
       'Muller GmbH=muller gmbh',
       'Möller GmbH=möller gmbh',
       'Müller GmbH=müller gmbh',
@@ -143,7 +132,7 @@ describe('customers in five scripts, through the wizard and commit', () => {
       'شركة الأمل=شركة الأمل',
       '株式会社トヨタ=株式会社トヨタ',
     ]);
-    expect(bookedTo(result.batchId)).toEqual([
+    expect(await bookedTo(result.batchId)).toEqual([
       'U-01>株式会社トヨタ', 'U-02>شركة الأمل', 'U-03>ΟΔΟΣ Α.Ε.', 'U-04>ΟΔΟΣ Α.Ε.',
       'U-05>ООО «Ромашка»', 'U-06>Müller GmbH', 'U-07>Möller GmbH', 'U-08>Muller GmbH',
     ]);
@@ -156,66 +145,68 @@ describe('customers in five scripts, through the wizard and commit', () => {
       'V-03,株式会社トヨタ,2026-08-13,2026-09-12,30.00',
     ]);
     expect((await commit(result.batchId)).committed).toBe(3);
-    expect(customers()).toHaveLength(7);
-    expect(bookedTo(result.batchId)).toEqual(['V-01>Müller GmbH', 'V-02>ООО «Ромашка»', 'V-03>株式会社トヨタ']);
+    expect(await customers()).toHaveLength(7);
+    expect(await bookedTo(result.batchId)).toEqual(['V-01>Müller GmbH', 'V-02>ООО «Ромашка»', 'V-03>株式会社トヨタ']);
   });
 
   it('a name whose records are held for a decision is refused, and nothing is booked to either', async () => {
-    adminSql(`
-      insert into public.counterparties (organization_id, name, kind) values ('${orgId}', 'İzmir Ltd', 'customer');
-      update public.counterparties set normalized_name = app.held_name_key('izmir ltd', id)
-       where organization_id = '${orgId}' and name = 'İzmir Ltd';
-      insert into public.counterparties (organization_id, name, kind) values ('${orgId}', 'Izmir Holding', 'customer');
-      update public.counterparties set normalized_name = app.held_name_key('izmir ltd', id)
-       where organization_id = '${orgId}' and name = 'Izmir Holding';`);
+    await heldPair('İzmir Ltd', 'Izmir Holding', 'izmir ltd');
     const result = await upload('unicode-3.csv', ['W-01,IZMIR LTD,2026-08-14,2026-09-13,40.00', 'W-02,Müller GmbH,2026-08-14,2026-09-13,50.00']);
-    const rows = adminSql(`
-      select row_number || ':' || status || ':' || coalesce((select string_agg(i ->> 'code', ',') from jsonb_array_elements(issues) i), '')
-        from public.import_rows where batch_id = '${result.batchId}' and row_number > 1 order by row_number`).split('\n');
+    const rows = (await orgCollection(fs(), orgId, 'import_rows').where('batch_id', '==', result.batchId).get()).docs
+      .map((d) => d.data()).filter((r) => Number(r.row_number) > 1).sort((a, b) => Number(a.row_number) - Number(b.row_number))
+      .map((r) => `${String(r.row_number)}:${String(r.status)}:${((r.issues ?? []) as Array<{ code: string }>).map((i) => i.code).join(',')}`);
     expect(rows[0]).toMatch(/:error:.*IMP-CP-019/);
     expect(rows[1]).not.toMatch(/:error:/);
-    expect(one(`select count(*) from public.counterparties where organization_id = '${orgId}' and normalized_name = 'izmir ltd'`)).toBe('0');
+    const plain = await orgCollection(fs(), orgId, 'counterparties').where('normalized_name', '==', 'izmir ltd').get();
+    expect(plain.size).toBe(0);
   });
 });
 
 /**
+ * Two counterparties held under one name, as the migration leaves a collision: both rows on held
+ * keys (`app.held_name_key`). Seeded directly — no writing function would create a collision.
+ */
+async function heldPair(a: string, b: string, key: string): Promise<[string, string]> {
+  const now = nowIso();
+  const ids: Array<[string, string]> = [];
+  for (const name of [a, b]) {
+    const id = newId();
+    await orgRow(fs(), orgId, 'counterparties', id).set({
+      id, organization_id: orgId, name, normalized_name: heldNameKey(key, id), kind: 'customer',
+      default_expense_category: null, external_ref: null, email: null, notes: null, is_active: true,
+      merged_into_id: null, created_at: now, updated_at: now,
+    });
+    ids.push([name, id]);
+  }
+  ids.sort((x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
+  return [ids[0]![1], ids[1]![1]];
+}
+
+/**
  * D-5 (owner decision): the decisions the "Name decisions" screen makes, through the same audited
- * `api.*` functions. Two records held under one name (as the migration leaves a collision).
+ * `api.*` functions.
  */
 describe('D-5 · resolving a held name', () => {
-  const held = (a: string, b: string, key: string): [string, string] => {
-    // Seeded as the migration leaves a collision: both rows on held keys. The name trigger would refuse
-    // the second insert (the two names share a key), so it is bypassed for the seed only.
-    const ids = adminSql(`
-      set session_replication_role = replica;
-      insert into public.counterparties (id, organization_id, name, normalized_name, kind)
-      select g, '${orgId}', n, app.held_name_key('${key}', g), 'customer'
-        from (values (gen_random_uuid(), '${a}'), (gen_random_uuid(), '${b}')) v(g, n);
-      set session_replication_role = origin;
-      select string_agg(id::text, ',' order by name) from public.counterparties where organization_id = '${orgId}' and name in ('${a}', '${b}');`)
-      .split('\n').pop()!.trim().split(',');
-    return [ids[0]!, ids[1]!];
-  };
-  const keyOf = (id: string) => one(`select normalized_name from public.counterparties where id = '${id}'`).trim();
+  const keyOf = async (id: string) => String((await orgRow(fs(), orgId, 'counterparties', id).get()).get('normalized_name'));
 
   it('"the same business": merge one into the other, re-save it — it takes the plain key, the other is merged, both audited', async () => {
-    const [keep, other] = held('Cafe Rouge', 'CAFE ROUGE.', 'cafe rouge');
-    const merge = await ownerDb().schema('api').rpc('merge_counterparties', { p_from: other, p_into: keep });
+    const [keep, other] = await heldPair('Cafe Rouge', 'CAFE ROUGE.', 'cafe rouge');
+    const merge = await rpc(ownerDb(), 'merge_counterparties', { p_from: other, p_into: keep });
     expect(merge.error, merge.error?.message).toBeNull();
-    const resave = await ownerDb().schema('api').rpc('update_counterparty', { p_counterparty: keep, p_patch: { name: 'Cafe Rouge' } });
+    const resave = await rpc(ownerDb(), 'update_counterparty', { p_counterparty: keep, p_patch: { name: 'Cafe Rouge' } });
     expect(resave.error, resave.error?.message).toBeNull();
-    expect(keyOf(keep)).toBe('cafe rouge');
-    expect(one(`select merged_into_id::text from public.counterparties where id = '${other}'`).trim()).toBe(keep);
-    expect(Number(one(`select count(*) from public.audit_events where organization_id = '${orgId}' and target_id in ('${keep}', '${other}')`).trim()))
-      .toBeGreaterThanOrEqual(2);
+    expect(await keyOf(keep)).toBe('cafe rouge');
+    expect((await orgRow(fs(), orgId, 'counterparties', other).get()).get('merged_into_id')).toBe(keep);
+    const events = await fs().collection('audit_events').where('organization_id', '==', orgId).get();
+    expect(events.docs.filter((e) => [keep, other].includes(String(e.get('target_id')))).length).toBeGreaterThanOrEqual(2);
   });
 
   it('"different businesses": rename one, re-save the other — two names, nothing held', async () => {
-    const [a, b] = held('Nord Ltd', 'NORD LTD', 'nord ltd');
+    const [a, b] = await heldPair('Nord Ltd', 'NORD LTD', 'nord ltd');
     // While another held record of the name remains, the name cannot be taken: refused, not decided.
-    expect((await ownerDb().schema('api').rpc('update_counterparty', { p_counterparty: a, p_patch: { name: 'Nord Ltd' } })).error).not.toBeNull();
-    expect((await ownerDb().schema('api').rpc('update_counterparty', { p_counterparty: b, p_patch: { name: 'Nord Ltd (Leeds)' } })).error).toBeNull();
-    expect((await ownerDb().schema('api').rpc('update_counterparty', { p_counterparty: a, p_patch: { name: 'Nord Ltd' } })).error).toBeNull();
-    expect([keyOf(a), keyOf(b)]).toEqual(['nord ltd', 'nord ltd leeds']);
+    expect((await rpc(ownerDb(), 'update_counterparty', { p_counterparty: a, p_patch: { name: 'Nord Ltd' } })).error).not.toBeNull();
+    expect((await rpc(ownerDb(), 'update_counterparty', { p_counterparty: b, p_patch: { name: 'Nord Ltd (Leeds)' } })).error).toBeNull();
+    expect((await rpc(ownerDb(), 'update_counterparty', { p_counterparty: a, p_patch: { name: 'Nord Ltd' } })).error).toBeNull();
+    expect([await keyOf(a), await keyOf(b)]).toEqual(['nord ltd', 'nord ltd leeds']);
   });
 });

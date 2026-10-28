@@ -1,19 +1,17 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import { callApi } from '@/core/db';
+import type { Query } from 'firebase-admin/firestore';
+import { orgRowById, orgRows } from '@/db/rls';
+import { orgCollection, orgRow } from '@/db/schema';
+import type { Db } from '@/db/types';
 import type { Action, ActionPriority, ActionSource, ActionStatus } from '../domain/types';
 
 /**
  * Action reads (SERVICE_ARCHITECTURE.md §4.13).
  *
- * Reads go through RLS on the caller's client; every write goes through an `api.*` function
+ * Reads go through the ported row policies (`src/db/rls.ts`) for the caller; every write goes through an `api.*` function
  * (ADR-026). Nothing here writes.
  */
-
-const SELECT = `
-  id, title, issue, recommendation, priority, owner_user_id, due_date, status,
-  source_type, source_id, evidence_bundle_id, outcome_notes, outcome_value, outcome_currency,
-  completed_at, dismissed_reason, created_at`;
 
 interface Row {
   id: string;
@@ -50,7 +48,7 @@ function toAction(row: Row, names: ReadonlyMap<string, string>): Action {
     sourceId: row.source_id,
     evidenceBundleId: row.evidence_bundle_id,
     outcomeNotes: row.outcome_notes,
-    // NUMERIC arrives as a string from PostgREST and stays one (ADR-006).
+    // NUMERIC is stored as a decimal string and stays one (ADR-006).
     outcomeValue: row.outcome_value === null ? null : String(row.outcome_value),
     outcomeCurrency: row.outcome_currency,
     completedAt: row.completed_at,
@@ -72,12 +70,11 @@ function toAction(row: Row, names: ReadonlyMap<string, string>): Action {
  * their own work and "someone here" against everybody else's, which is all the list needs to say.
  */
 async function ownerNames(
-  db: SupabaseClient, orgId: string, ids: readonly (string | null)[], resolve: boolean,
+  db: Db, orgId: string, ids: readonly (string | null)[], resolve: boolean,
 ): Promise<Map<string, string>> {
   if (!resolve || ids.every((id) => id === null)) return new Map();
 
-  const { data, error } = await db.schema('api').rpc('org_members', { p_org: orgId });
-  if (error) throw toMotionError(error);
+  const data = await callApi<unknown[] | null>(db, 'org_members', { p_org: orgId });
 
   return new Map(
     ((data ?? []) as Array<{ user_id: string; full_name: string | null }>)
@@ -96,43 +93,60 @@ export interface ActionFilter {
   readonly dueOnOrBefore?: string;
 }
 
+/**
+ * A user reads through the `actions` policy (`src/db/rls.ts`). The server — the `report.render` job
+ * listing open actions for the monthly PDF — read with the service role, which bypassed RLS; a
+ * service handle therefore reads the collection directly, but only of the organisation it is scoped
+ * to (ADR-090), as the alerts and reporting readers do.
+ */
+async function actionRows(db: Db, orgId: string, refine: (q: Query) => Query): Promise<Row[]> {
+  if (db.actor.kind === 'service') {
+    if (db.actor.scope !== null && db.actor.scope !== orgId) return [];
+    const snap = await refine(orgCollection(db.fs, orgId, 'actions')).get();
+    return snap.docs.map((d) => d.data() as Row);
+  }
+  return orgRows<Row>(db, orgId, 'actions', refine);
+}
+
+async function actionRowById(db: Db, orgId: string, actionId: string): Promise<Row | null> {
+  if (db.actor.kind === 'service') {
+    if ((db.actor.scope !== null && db.actor.scope !== orgId) || !actionId) return null;
+    const snap = await orgRow(db.fs, orgId, 'actions', actionId).get();
+    return snap.exists ? (snap.data() as Row) : null;
+  }
+  return orgRowById<Row>(db, orgId, 'actions', actionId);
+}
+
 export async function listActions(
-  db: SupabaseClient, orgId: string, filter: ActionFilter = {}, resolveNames = false,
+  db: Db, orgId: string, filter: ActionFilter = {}, resolveNames = false,
 ): Promise<Action[]> {
-  let query = db.from('actions').select(SELECT).eq('organization_id', orgId);
-  if (filter.status !== undefined && filter.status.length > 0) {
-    query = query.in('status', [...filter.status]);
-  }
-  if (filter.ownerUserId !== undefined) query = query.eq('owner_user_id', filter.ownerUserId);
-  if (filter.sourceType !== undefined) query = query.eq('source_type', filter.sourceType);
-  if (filter.priority !== undefined && filter.priority.length > 0) {
-    query = query.in('priority', [...filter.priority]);
-  }
   /*
-   * `lte` and not `is not null` + `lte`: PostgREST leaves NULLs out of a comparison, which is the
-   * behaviour this wants. An action with no due date is not due — it is simply undated, and putting
-   * it in "due soon" would invent a deadline nobody set.
+   * One single-field filter runs in the query (status, the common one); the rest — owner, source,
+   * priority, the due-date bound — and the newest-first order are applied here, so no filter
+   * combination needs a composite index. An action list is one organisation's, and small.
    */
-  if (filter.dueOnOrBefore !== undefined) query = query.lte('due_date', filter.dueOnOrBefore);
+  const rows = await actionRows(db, orgId, (q) => (
+    filter.status !== undefined && filter.status.length > 0 ? q.where('status', 'in', [...filter.status]) : q));
+  const bounded = rows.filter((row) => (filter.ownerUserId === undefined || row.owner_user_id === filter.ownerUserId)
+    && (filter.sourceType === undefined || row.source_type === filter.sourceType)
+    && (filter.priority === undefined || filter.priority.length === 0 || filter.priority.includes(row.priority))
+    /*
+     * A row with no due date is left out of a due-date bound, as SQL's `<=` left NULLs out.
+     * An action with no due date is not due — it is simply undated, and putting it in "due soon"
+     * would invent a deadline nobody set.
+     */
+    && (filter.dueOnOrBefore === undefined || (row.due_date !== null && row.due_date <= filter.dueOnOrBefore)));
+  bounded.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0));
 
-  const { data, error } = await query.order('created_at', { ascending: false });
-  if (error) throw toMotionError(error);
-
-  const rows = (data ?? []) as unknown as Row[];
-  const names = await ownerNames(db, orgId, rows.map((row) => row.owner_user_id), resolveNames);
-  return rows.map((row) => toAction(row, names));
+  const names = await ownerNames(db, orgId, bounded.map((row) => row.owner_user_id), resolveNames);
+  return bounded.map((row) => toAction(row, names));
 }
 
 export async function getAction(
-  db: SupabaseClient, orgId: string, actionId: string, resolveNames = false,
+  db: Db, orgId: string, actionId: string, resolveNames = false,
 ): Promise<Action | null> {
-  const { data, error } = await db
-    .from('actions').select(SELECT)
-    .eq('organization_id', orgId).eq('id', actionId).maybeSingle();
-  if (error) throw toMotionError(error);
-  if (data === null) return null;
-
-  const row = data as unknown as Row;
+  const row = await actionRowById(db, orgId, actionId);
+  if (row === null) return null;
   return toAction(row, await ownerNames(db, orgId, [row.owner_user_id], resolveNames));
 }
 
@@ -141,7 +155,7 @@ export async function getAction(
  * who can see the Action Centre (`actions.view`).
  */
 export async function assignableOwners(
-  db: SupabaseClient, orgId: string,
+  db: Db, orgId: string,
 ): Promise<Array<{ userId: string; name: string }>> {
   /*
    * ADR-172 follow-up: `api.action_assignees` — the active members and assigned Financial Analysts
@@ -149,8 +163,7 @@ export async function assignableOwners(
    * `actions.assign`, the permission the picker serves; the `api.org_members` this used needed
    * `users.view`, which a Financial Analyst does not hold, and listed people with no Action Centre.
    */
-  const { data, error } = await db.schema('api').rpc('action_assignees', { p_org: orgId });
-  if (error) throw toMotionError(error);
+  const data = await callApi<unknown[] | null>(db, 'action_assignees', { p_org: orgId });
 
   return ((data ?? []) as Array<{ user_id: string; full_name: string | null }>)
     .map((row) => ({ userId: row.user_id, name: row.full_name ?? 'A colleague' }))

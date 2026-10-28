@@ -1,7 +1,11 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
 
 import { loadInsights } from '@/modules/dashboard';
-import { adminSql, clientFor, createAuthUser, resetFixtures } from './setup';
+import { ensurePeriods, periodId } from '@/db/app/shared';
+import { auth } from '@/db/firestore';
+import { metricCellId, newId, nowIso, orgCollection, orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, deleteOrg, fs } from './setup';
+import { createOrgFixture } from './r-fixtures';
 
 /**
  * Insights (UX_ARCHITECTURE.md §3.1, §6; IMPLEMENTATION_PLAN.md Phase 7 slice 5).
@@ -9,7 +13,13 @@ import { adminSql, clientFor, createAuthUser, resetFixtures } from './setup';
  * The property under test: **movements are ranked by MONEY, not by percentage.** A category that
  * doubled from £40 to £80 is not news; one that rose 12% on £90,000 is. Ranking by percentage would
  * put the noise at the top of the page every month, which is the failure this page exists to avoid.
+ *
+ * Snapshots and their `metric_current` pointers are written as fixtures in the shapes the engine
+ * writes (FIRESTORE_DATA_MODEL.md §3: values are decimal strings); the page's read is the real one.
  */
+
+const RUN = `i${Date.now().toString(36)}`;
+const DOMAIN = `${RUN}.insights.itest.motion`;
 
 let ownerId: string;
 let orgId: string;
@@ -19,76 +29,76 @@ let april: string;
 let january: string;
 let runId: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
-function writeMetric(periodId: string, key: string, value: string | null, over: {
+async function writeMetric(period: string, key: string, value: string | null, over: {
   dimensionType?: string; dimensionId?: string | null; dimensionKey?: string | null;
   components?: Record<string, unknown>; quality?: Record<string, unknown>;
-} = {}): void {
-  const snapshotId = one(`
-    insert into public.metric_snapshots
-           (organization_id, calculation_run_id, period_id, metric_key, dimension_type, dimension_id,
-            dimension_key, value, unit, currency, basis, assurance_level, data_quality, components)
-    values ('${orgId}', '${runId}', '${periodId}', '${key}',
-            '${over.dimensionType ?? 'none'}',
-            ${over.dimensionId ? `'${over.dimensionId}'` : 'null'},
-            ${over.dimensionKey ? `'${over.dimensionKey}'` : 'null'},
-            ${value === null ? 'null' : value}, 'money', 'GBP', 'ledger', 'verified',
-            '${JSON.stringify(over.quality ?? { completeness: 1, proxy: false, warnings: [], missing: [] })}'::jsonb,
-            '${JSON.stringify(over.components ?? {})}'::jsonb)
-    returning id`);
-
-  adminSql(`
-    insert into public.metric_current
-           (organization_id, period_id, metric_key, dimension_type, dimension_id, dimension_key,
-            snapshot_id, calculation_run_id)
-    values ('${orgId}', '${periodId}', '${key}', '${over.dimensionType ?? 'none'}',
-            ${over.dimensionId ? `'${over.dimensionId}'` : 'null'},
-            ${over.dimensionKey ? `'${over.dimensionKey}'` : 'null'}, '${snapshotId}', '${runId}')
-    on conflict do nothing`);
+} = {}): Promise<void> {
+  const snapshotId = newId();
+  const now = nowIso();
+  const dimension = {
+    dimension_type: over.dimensionType ?? 'none',
+    dimension_id: over.dimensionId ?? null,
+    dimension_key: over.dimensionKey ?? null,
+  };
+  await orgRow(fs(), orgId, 'metric_snapshots', snapshotId).set({
+    id: snapshotId, organization_id: orgId, calculation_run_id: runId, period_id: period, metric_key: key,
+    ...dimension, value, unit: 'money', currency: 'GBP', basis: 'ledger', assurance_level: 'verified',
+    data_quality: over.quality ?? { completeness: 1, proxy: false, warnings: [], missing: [] },
+    components: over.components ?? {}, evidence_query: null, created_at: now,
+  });
+  // `on conflict do nothing`: the first pointer to a cell stands.
+  const cell = orgRow(fs(), orgId, 'metric_current', metricCellId({ period_id: period, metric_key: key, ...dimension }));
+  if (!(await cell.get()).exists) {
+    await cell.set({
+      organization_id: orgId, period_id: period, metric_key: key, ...dimension, snapshot_id: snapshotId,
+      calculation_run_id: runId, previous_snapshot_id: null, updated_at: now,
+    });
+  }
 }
 
-beforeAll(async () => {
-  resetFixtures();
-  ownerId = createAuthUser('insights-owner@itest.motion');
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', {
-    p_name: 'ITest Insights',
-  });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-  orgSlug = one(`select slug from public.organizations where id = '${orgId}'`);
+const complete = async (...ids: string[]) => {
+  for (const id of ids) await orgRow(fs(), orgId, 'fiscal_periods', id).update({ is_complete: true });
+};
 
-  const periodId = (start: string) => one(`
-    select id from public.fiscal_periods
-     where organization_id = '${orgId}' and period_start = '${start}'`);
-  january = periodId('2026-01-01');
-  march = periodId('2026-03-01');
-  april = periodId('2026-04-01');
+beforeAll(async () => {
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  const org = await createOrgFixture({ name: `ITest Insights ${RUN}`, ownerId });
+  orgId = org.id;
+  orgSlug = org.slug;
+  await ensurePeriods(fs(), orgId, '2026-01-01', '2026-04-01');
+  january = periodId(orgId, '2026-01-01');
+  march = periodId(orgId, '2026-03-01');
+  april = periodId(orgId, '2026-04-01');
 });
 
-afterAll(() => resetFixtures());
+afterAll(async () => {
+  await deleteOrg(orgId);
+  await fs().collection('profiles').doc(ownerId).delete();
+  await auth().deleteUser(ownerId).catch(() => undefined);
+});
 
-beforeEach(() => {
-  adminSql(`
-    begin;
-    set local app.purge = 'on';
-    delete from public.metric_current where organization_id = '${orgId}';
-    delete from public.metric_snapshots where organization_id = '${orgId}';
-    delete from public.calculation_runs where organization_id = '${orgId}';
-    update public.fiscal_periods set is_complete = false where organization_id = '${orgId}';
-    commit;`);
+beforeEach(async () => {
+  for (const table of ['metric_current', 'metric_snapshots', 'calculation_runs'] as const) {
+    await fs().recursiveDelete(orgCollection(fs(), orgId, table));
+  }
+  const periods = await orgCollection(fs(), orgId, 'fiscal_periods').get();
+  for (const p of periods.docs) await p.ref.update({ is_complete: false });
 
-  runId = one(`
-    insert into public.calculation_runs
-           (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-    values ('${orgId}', 'recalc_manual', '1.0.0', '${january}', '${april}', '2026-06-15', 'succeeded')
-    returning id`);
+  runId = newId();
+  const now = nowIso();
+  await orgRow(fs(), orgId, 'calculation_runs', runId).set({
+    id: runId, organization_id: orgId, job_id: null, trigger: 'recalc_manual', trigger_ref_id: null,
+    engine_version: '1.0.0', period_from: january, period_to: april, as_of: '2026-06-15', as_of_ts: now,
+    status: 'succeeded', failure_reason: null, stale: false, input_fingerprint: null, chunks: [],
+    progress: {}, started_at: now, finished_at: now, duration_ms: 1, error: null, stats: {},
+    created_at: now, updated_at: now,
+  });
 });
 
 describe('two months are needed before anything can have changed (§6)', () => {
   it('shows the empty state with fewer than two months of data', async () => {
-    adminSql(`update public.fiscal_periods set is_complete = true where id = '${march}'`);
-    writeMetric(march, 'revenue', '20000.00');
+    await complete(march);
+    await writeMetric(march, 'revenue', '20000.00');
 
     const state = await loadInsights(clientFor(ownerId), orgId, orgSlug);
     expect(state.kind).toBe('needs_two_periods');
@@ -96,23 +106,21 @@ describe('two months are needed before anything can have changed (§6)', () => {
 });
 
 describe('movements are ranked by money, not by percentage', () => {
-  beforeEach(() => {
-    adminSql(`
-      update public.fiscal_periods set is_complete = true
-       where id in ('${march}', '${april}')`);
-    writeMetric(march, 'revenue', '90000.00');
-    writeMetric(april, 'revenue', '100800.00');
+  beforeEach(async () => {
+    await complete(march, april);
+    await writeMetric(march, 'revenue', '90000.00');
+    await writeMetric(april, 'revenue', '100800.00');
 
     // A large movement on a large base: 12% of £90,000.
-    writeMetric(april, 'revenue.variance.prev_period', '10800.00', {
+    await writeMetric(april, 'revenue.variance.prev_period', '10800.00', {
       components: { current: '100800.00', comparison: '90000.00', pct_change: '0.12' },
     });
     // A spectacular percentage on a trivial base: £40 doubling.
-    writeMetric(april, 'operating_expenses.variance.prev_period', '40.00', {
+    await writeMetric(april, 'operating_expenses.variance.prev_period', '40.00', {
       components: { current: '80.00', comparison: '40.00', pct_change: '1.0' },
     });
     // A middling movement.
-    writeMetric(april, 'cost_of_sales.variance.prev_period', '3000.00', {
+    await writeMetric(april, 'cost_of_sales.variance.prev_period', '3000.00', {
       components: { current: '9000.00', comparison: '6000.00', pct_change: '0.5' },
     });
   });
@@ -177,12 +185,10 @@ describe('movements are ranked by money, not by percentage', () => {
 
 describe('the drivers behind a movement come from dimensioned snapshots', () => {
   it('names the category that moved', async () => {
-    adminSql(`
-      update public.fiscal_periods set is_complete = true
-       where id in ('${march}', '${april}')`);
-    writeMetric(march, 'revenue', '90000.00');
-    writeMetric(april, 'revenue', '90000.00');
-    writeMetric(april, 'expense_by_category.variance.prev_period', '2900.00', {
+    await complete(march, april);
+    await writeMetric(march, 'revenue', '90000.00');
+    await writeMetric(april, 'revenue', '90000.00');
+    await writeMetric(april, 'expense_by_category.variance.prev_period', '2900.00', {
       dimensionType: 'standard_category', dimensionKey: 'marketing',
       components: { current: '6300.00', comparison: '3400.00', pct_change: '0.85' },
     });
@@ -201,12 +207,10 @@ describe('the drivers behind a movement come from dimensioned snapshots', () => 
 describe('a gap in the data is stated, not hidden (§6)', () => {
   it('says which month it is really comparing with', async () => {
     // March compared with January, because February was never uploaded.
-    adminSql(`
-      update public.fiscal_periods set is_complete = true
-       where id in ('${january}', '${march}')`);
-    writeMetric(january, 'revenue', '80000.00');
-    writeMetric(march, 'revenue', '90000.00');
-    writeMetric(march, 'revenue.variance.prev_period', '10000.00', {
+    await complete(january, march);
+    await writeMetric(january, 'revenue', '80000.00');
+    await writeMetric(march, 'revenue', '90000.00');
+    await writeMetric(march, 'revenue.variance.prev_period', '10000.00', {
       components: { current: '90000.00', comparison: '80000.00', pct_change: '0.125' },
     });
 
@@ -220,11 +224,9 @@ describe('a gap in the data is stated, not hidden (§6)', () => {
   });
 
   it('reports an adjacent comparison as adjacent', async () => {
-    adminSql(`
-      update public.fiscal_periods set is_complete = true
-       where id in ('${march}', '${april}')`);
-    writeMetric(march, 'revenue', '90000.00');
-    writeMetric(april, 'revenue', '100000.00');
+    await complete(march, april);
+    await writeMetric(march, 'revenue', '90000.00');
+    await writeMetric(april, 'revenue', '100000.00');
 
     const state = await loadInsights(clientFor(ownerId), orgId, orgSlug);
     if (state.kind !== 'ready') throw new Error('expected ready');
@@ -234,12 +236,10 @@ describe('a gap in the data is stated, not hidden (§6)', () => {
 
 describe('a variance across two bases is shown without a percentage (ADR-030)', () => {
   it('reports the amount and flags the basis rather than a misleading ratio', async () => {
-    adminSql(`
-      update public.fiscal_periods set is_complete = true
-       where id in ('${march}', '${april}')`);
-    writeMetric(march, 'revenue', '90000.00');
-    writeMetric(april, 'revenue', '100000.00');
-    writeMetric(april, 'revenue.variance.prev_period', '10000.00', {
+    await complete(march, april);
+    await writeMetric(march, 'revenue', '90000.00');
+    await writeMetric(april, 'revenue', '100000.00');
+    await writeMetric(april, 'revenue.variance.prev_period', '10000.00', {
       components: { current: '100000.00', comparison: '90000.00', pct_change: '0.111' },
       quality: { completeness: 1, proxy: false, warnings: ['basis_differs'], missing: [] },
     });

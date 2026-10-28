@@ -1,6 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import type { Db } from '@/db/types';
 import { addDays, todayInTimeZone, fixedClock } from '@/core/periods';
 import { loadHealthTrend, loadLastDataDate, loadPeriods, loadPeriodsWithData } from '@/modules/dashboard';
 import { HEALTH_DISCLAIMER, bandFor, loadHealthCard } from '@/modules/health';
@@ -13,6 +12,7 @@ import {
 export { ADVISER_CONTENT_VERSION, type AdviserContent };
 import * as sources from '../data/brief-sources';
 import { latestMonth } from './brief';
+import { readRows } from '@/db/app/caller-reads';
 
 /**
  * The Accountant/CFO Report (Phase 17; Agreement §22 "adviser-ready client intelligence";
@@ -36,18 +36,18 @@ function cap<T>(items: readonly T[], order: (a: T, b: T) => number): Capped<T> {
 }
 
 async function completedSince(
-  db: SupabaseClient, orgId: string, sinceIso: string,
+  db: Db, orgId: string, sinceIso: string,
 ): Promise<AdviserCompletedAction[]> {
-  const { data, error } = await db.from('actions')
-    .select('id, title, priority, status, due_date, owner_user_id, completed_at, outcome_value, outcome_currency')
-    .eq('organization_id', orgId).eq('status', 'completed').gte('completed_at', sinceIso)
-    .order('completed_at', { ascending: false }).limit(200);
-  if (error) throw toMotionError(error);
-  return ((data ?? []) as Array<{
+  // One range field in Firestore (no composite index); the status, the order and the cap here.
+  const rows = (await readRows<{
     id: string; title: string; priority: BriefActionLine['priority']; status: BriefActionLine['status'];
     due_date: string | null; owner_user_id: string | null; completed_at: string | null;
     outcome_value: string | number | null; outcome_currency: string | null;
-  }>).map((row) => ({
+  }>(db, orgId, 'actions', (q) => q.where('completed_at', '>=', sinceIso)))
+    .filter((row) => row.status === 'completed')
+    .sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)))
+    .slice(0, 200);
+  return rows.map((row) => ({
     id: row.id,
     title: row.title,
     priority: row.priority,
@@ -62,7 +62,7 @@ async function completedSince(
 }
 
 export async function composeAdviserReport(input: {
-  readonly db: SupabaseClient;
+  readonly db: Db;
   readonly orgId: string;
   readonly now: Date;
   readonly requestId?: string;

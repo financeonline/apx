@@ -1,9 +1,10 @@
 import 'server-only';
 import { createHash } from 'node:crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  ConflictError, QuotaExceeded, ValidationError, toMotionError,
+  ConflictError, QuotaExceeded, ValidationError,
 } from '@/core/errors';
+import { orgRows } from '@/db/rls';
+import type { Db } from '@/db/types';
 import { putObject, removeObject, sanitiseFilename, SOURCE_DOCUMENTS_BUCKET } from '@/core/storage/signer';
 import { log } from '@/core/logging';
 import { validateFile, MAX_FILE_BYTES, type FileKind } from '../domain/validate-file';
@@ -82,7 +83,7 @@ function sha256Hex(bytes: Uint8Array): string {
 export interface UploadContext {
   readonly orgId: string;
   readonly userId: string;
-  readonly db: SupabaseClient;
+  readonly db: Db;
   /** Service-role RPC surface, from core/db/server-rpc.ts. */
   readonly registerDocument: (meta: Record<string, unknown>) => Promise<string>;
   readonly finalizeUpload: (
@@ -107,14 +108,13 @@ export async function uploadDocument(ctx: UploadContext, input: UploadInput): Pr
 
   // CD-12: the same bytes twice. Caught BEFORE validation and storage, so a re-upload costs nothing
   // and the user is sent to the batch they already have rather than making a second one.
-  const { data: existing, error: lookupError } = await ctx.db
-    .from('source_documents')
+  // `sha256` is stored as lower-case hex. Read under the caller's policy: a caller who may not see
+  // documents learns nothing here, and `register_document` still refuses the duplicate.
+  const [existing] = await orgRows<{ id: string }>(ctx.db, ctx.orgId, 'source_documents', (q) => q
+    .where('sha256', '==', sha256)
+    .where('deleted_at', '==', null)
     .select('id')
-    .eq('organization_id', ctx.orgId)
-    .eq('sha256', `\\x${sha256}`)
-    .is('deleted_at', null)
-    .maybeSingle();
-  if (lookupError) throw toMotionError(lookupError, ctx.requestId);
+    .limit(1));
   if (existing) {
     throw new ConflictError(
       'This exact file has already been uploaded. Open the earlier import instead of starting a new one.',
@@ -164,7 +164,9 @@ export async function uploadDocument(ctx: UploadContext, input: UploadInput): Pr
 
   await ctx.finalizeUpload(
     documentId, input.bytes.byteLength,
-    { findings: validation.findings, encoding: validation.encoding, delimiter: validation.delimiter },
+    // JSON round trip: the jsonb column never held `undefined` (PostgREST serialised it away), and
+    // Firestore refuses it — an absent encoding or delimiter is simply not recorded.
+    JSON.parse(JSON.stringify({ findings: validation.findings, encoding: validation.encoding, delimiter: validation.delimiter })),
     status,
   );
 

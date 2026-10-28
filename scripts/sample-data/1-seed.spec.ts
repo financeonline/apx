@@ -1,15 +1,19 @@
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { expect, test, type Page } from '@playwright/test';
-import { drainQueue, sql } from '../../e2e/fixtures';
+import {
+  callApiAs, drainQueue, enqueueJob, orgCount, orgIdBySlug, orgRowId, orgRows, organizationsOf,
+  switchFeaturesOn, userIdByEmail,
+} from './firestore';
 
 /**
  * Loads the sample business (generate.py; every figure invented) into the local account, through the
  * product's own screens wherever a screen exists: a bank account, a general ledger, a bank statement,
  * sales and purchase invoices, a budget and two balance sheets. Commercial records (a campaign, its
- * spend and won customers) and the Funding Readiness switch are set directly — those are an
- * adviser's and a platform admin's screens. A second, smaller company gives the Command Centre a
- * portfolio.
+ * spend and won customers) go through the app's own functions as the owner, and the Funding
+ * Readiness switch is set directly — those are an adviser's and a platform admin's screens. A second,
+ * smaller company gives the Command Centre a portfolio. Ids and counts are read from the local
+ * Firebase emulators (./firestore.ts).
  */
 
 const EMAIL = process.env.MOTION_SAMPLE_EMAIL ?? '';
@@ -33,13 +37,15 @@ async function importFile(
   balances?: { opening: string; closing: string },
 ) {
   // Resumable: a file already imported for this type and period is not imported twice.
-  const done = sql(`select count(*) from public.import_batches b join public.organizations o on o.id = b.organization_id
-    where o.slug = '${slug}' and b.import_type = '${type}' and b.status = 'committed' and b.period_start = '${from}' and b.period_end = '${to}'`).trim();
-  if (done !== '0') return;
+  const orgId = await orgIdBySlug(slug);
+  const batches = (status: string) => orgRows(orgId, 'import_batches', [
+    ['import_type', '==', type], ['status', '==', status], ['period_start', '==', from], ['period_end', '==', to],
+  ]);
+  if ((await batches('committed')).length > 0) return;
   // An earlier run uploaded it but stopped at the review: carry on there (the same file again is a duplicate).
-  const pending = sql(`select b.id from public.import_batches b join public.organizations o on o.id = b.organization_id
-    where o.slug = '${slug}' and b.import_type = '${type}' and b.status = 'awaiting_review' and b.period_start = '${from}' and b.period_end = '${to}'
-    order by b.created_at desc limit 1`).trim();
+  const latest = (await batches('awaiting_review'))
+    .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0];
+  const pending = latest ? String(latest.id) : '';
   if (pending !== '') {
     await page.goto(`/app/${slug}/data/imports/${pending}`);
   } else {
@@ -80,11 +86,11 @@ async function importFile(
 
 test('load the sample business', async ({ page }) => {
   await signIn(page);
-  const orgId = sql(`select id from public.organizations where slug = '${SLUG}'`).trim();
-  expect(orgId, `no company with slug ${SLUG}`).toMatch(/^[0-9a-f-]{36}$/);
+  const orgId = await orgIdBySlug(SLUG);
+  const owner = { uid: await userIdByEmail(EMAIL), email: EMAIL };
   // A bank account, the way the Banking page adds one (once).
-  const bankId = () => sql(`select id from public.bank_accounts where organization_id = '${orgId}' and name = 'Business Current'`).trim();
-  if (bankId() === '') {
+  const bankId = () => orgRowId(orgId, 'bank_accounts', [['name', '==', 'Business Current']]);
+  if ((await bankId()) === '') {
     await page.goto(`/app/${SLUG}/money/banking`);
     await page.getByLabel(/what do you call this account/i).fill('Business Current');
     await page.getByLabel(/which bank is it with/i).fill('Sample Bank');
@@ -95,7 +101,7 @@ test('load the sample business', async ({ page }) => {
 
   await importFile(page, SLUG, 'general_ledger', 'gl.csv', '2026-01-01', '2026-09-30');
   // The statement's printed balances (generate.py: opening 18,000.00; closing 35,873.26).
-  await importFile(page, SLUG, 'bank_statement', 'bank.csv', '2026-01-01', '2026-09-30', bankId(), { opening: '18000.00', closing: '35873.26' });
+  await importFile(page, SLUG, 'bank_statement', 'bank.csv', '2026-01-01', '2026-09-30', await bankId(), { opening: '18000.00', closing: '35873.26' });
   await importFile(page, SLUG, 'sales_invoices', 'sales_invoices.csv', '2026-01-01', '2026-09-30');
   await importFile(page, SLUG, 'purchase_invoices', 'purchase_invoices.csv', '2026-01-01', '2026-09-30');
   await importFile(page, SLUG, 'budget', 'budget.csv', '2026-01-01', '2026-09-30');
@@ -104,27 +110,35 @@ test('load the sample business', async ({ page }) => {
   await drainQueue(page, SLUG);
 
   // Commercial records: a campaign with monthly spend that won two customers (ADR-102 attribution).
-  const hasCampaign = sql(`select count(*) from public.campaigns where organization_id = '${orgId}'`).trim() !== '0';
-  const customer = (name: string) => sql(`select id from public.counterparties where organization_id = '${orgId}' and name = '${name}'`).trim();
+  // Written with the app's own functions as the owner; amounts in the company's currency (GBP).
+  const hasCampaign = (await orgCount(orgId, 'campaigns')) > 0;
+  const customer = async (name: string) => {
+    const id = await orgRowId(orgId, 'counterparties', [['name', '==', name]]);
+    expect(id, `the sales invoices name a customer ${name}`).not.toBe('');
+    return id;
+  };
   if (!hasCampaign) {
-  const campaign = sql(`with q as (insert into public.campaigns (organization_id, name, normalized_name, starts_on, status)
-    values ('${orgId}', 'Summer trade promotion', 'summer trade promotion', '2026-06-01', 'active') returning id) select id from q`).trim();
+  const campaign = String(await callApiAs(owner, 'upsert_campaign', {
+    p_org: orgId, p_input: { name: 'Summer trade promotion', starts_on: '2026-06-01', status: 'active' },
+  }));
   for (const [month, amount] of [['06', 1800], ['07', 2100], ['08', 2400], ['09', 2200]] as const) {
-    sql(`insert into public.campaign_spend (organization_id, campaign_id, period_id, amount, currency)
-      select '${orgId}', '${campaign}', id, ${amount}, 'GBP' from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-${month}-01'`);
+    const period = await orgRowId(orgId, 'fiscal_periods', [['period_start', '==', `2026-${month}-01`]]);
+    expect(period, `a fiscal period for 2026-${month}`).not.toBe('');
+    await callApiAs(owner, 'set_campaign_spend', { p_org: orgId, p_campaign: campaign, p_period: period, p_amount: String(amount), p_note: null });
   }
-  sql(`insert into public.opportunities (organization_id, name, stage, counterparty_id, campaign_id, estimated_value, currency, created_on, stage_changed_on, won_on)
-    values ('${orgId}', 'Delta Offices supply contract', 'won', '${customer('Delta Offices')}', '${campaign}', 60000, 'GBP', '2026-05-20', '2026-06-10', '2026-06-10'),
-           ('${orgId}', 'Epsilon Events season', 'won', '${customer('Epsilon Events')}', '${campaign}', 40000, 'GBP', '2026-07-01', '2026-08-03', '2026-08-03')`);
-  sql(`insert into public.opportunities (organization_id, name, stage, estimated_value, currency, created_on, stage_changed_on)
-    values ('${orgId}', 'Zeta Bistro trial order', 'qualified', 8000, 'GBP', '2026-09-02', '2026-09-12'),
-           ('${orgId}', 'Theta Hotel group', 'proposal', 25000, 'GBP', '2026-08-15', '2026-09-20')`);
+  const opportunities = [
+    { name: 'Delta Offices supply contract', stage: 'won', counterparty_id: await customer('Delta Offices'), campaign_id: campaign, estimated_value: '60000', created_on: '2026-05-20', stage_changed_on: '2026-06-10', won_on: '2026-06-10' },
+    { name: 'Epsilon Events season', stage: 'won', counterparty_id: await customer('Epsilon Events'), campaign_id: campaign, estimated_value: '40000', created_on: '2026-07-01', stage_changed_on: '2026-08-03', won_on: '2026-08-03' },
+    { name: 'Zeta Bistro trial order', stage: 'qualified', estimated_value: '8000', created_on: '2026-09-02', stage_changed_on: '2026-09-12' },
+    { name: 'Theta Hotel group', stage: 'proposal', estimated_value: '25000', created_on: '2026-08-15', stage_changed_on: '2026-09-20' },
+  ];
+  for (const input of opportunities) await callApiAs(owner, 'upsert_opportunity', { p_org: orgId, p_input: input });
   }
 
   // Funding Readiness on (a platform admin's switch); the switch queues the assessment of every month.
-  sql(`update public.organizations set features = features || '{"funding_readiness": true, "ai_pdf_extraction": true}'::jsonb where id = '${orgId}'`);
+  await switchFeaturesOn(orgId, ['funding_readiness', 'ai_pdf_extraction']);
   // A full recalculation, so the Health Score reads the campaign records too.
-  sql(`insert into public.jobs (organization_id, job_type, payload, max_attempts) values ('${orgId}', 'calculation.run', '{"trigger":"recalc_manual"}'::jsonb, 3)`);
+  await enqueueJob(orgId, 'calculation.run', { trigger: 'recalc_manual' }, 3);
   await drainQueue(page, SLUG);
 
   // A forecast, the way the Forecast page asks for one.
@@ -133,12 +147,14 @@ test('load the sample business', async ({ page }) => {
   await expect(page.getByText(/based on the last \d+ finished months/i).first()).toBeVisible({ timeout: 60_000 });
 
   // A second company for the Command Centre: smaller, three months, thinner margins.
-  const owner = sql(`select id from auth.users where email = '${EMAIL}'`).trim();
-  const existingB = sql(`select o.slug from public.organizations o join public.organization_memberships m on m.organization_id = o.id
-    where m.user_id = '${owner}' and o.name = 'b'`).trim();
-  const created = existingB !== '' ? existingB : sql(`select set_config('request.jwt.claims', json_build_object('sub', '${owner}', 'role', 'authenticated', 'email', '${EMAIL}')::text, false);
-    with c as (select api.create_organization('b') as id) select o.slug from c join public.organizations o on o.id = c.id`);
-  const slugB = created.split('\n').map((l) => l.trim()).filter(Boolean).pop()!;
+  const existingB = (await organizationsOf(owner.uid)).find((o) => o.name === 'b' && o.status !== 'deleted');
+  let slugB = existingB ? String(existingB.slug) : '';
+  if (slugB === '') {
+    // Created the way the product creates one (`api.create_organization`), with the owner as its owner.
+    const idB = String(await callApiAs(owner, 'create_organization', { p_name: 'b' }));
+    slugB = String((await organizationsOf(owner.uid)).find((o) => o.id === idB)?.slug ?? '');
+    expect(slugB, 'company b was created').not.toBe('');
+  }
   // The session was issued before "b" existed; a fresh sign-in carries it.
   await page.context().clearCookies();
   await signIn(page);
@@ -151,11 +167,19 @@ test('load the sample business', async ({ page }) => {
   await drainQueue(page, SLUG);
   await drainQueue(page, slugB);
 
+  // Each month's current Health Score, in month order: `Jan 2026=71, Feb 2026=NULL, …`.
+  const periods = new Map((await orgRows(orgId, 'fiscal_periods')).map((p) => [String(p.id), p]));
+  const scores = new Map((await orgRows(orgId, 'health_scores')).map((h) => [String(h.id), h]));
+  const health = (await orgRows(orgId, 'health_current'))
+    .map((hc) => ({ period: periods.get(String(hc.period_id)), score: scores.get(String(hc.health_score_id))?.score ?? null }))
+    .filter((r) => r.period !== undefined)
+    .sort((a, b) => String(a.period!.period_start).localeCompare(String(b.period!.period_start)))
+    .map((r) => `${String(r.period!.label)}=${r.score === null ? 'NULL' : String(r.score)}`)
+    .join(', ');
   console.log('SAMPLE', JSON.stringify({
     slugs: [SLUG, slugB],
-    health: sql(`select string_agg(p.label || '=' || coalesce(h.score::text, 'NULL'), ', ' order by p.period_start) from public.health_current hc
-      join public.health_scores h on h.id = hc.health_score_id join public.fiscal_periods p on p.id = hc.period_id where hc.organization_id = '${orgId}'`).trim(),
-    funding: sql(`select count(*) from public.funding_current where organization_id = '${orgId}'`).trim(),
-    reports: sql(`select count(*) from public.reports where organization_id = '${orgId}'`).trim(),
+    health,
+    funding: String(await orgCount(orgId, 'funding_current')),
+    reports: String(await orgCount(orgId, 'reports')),
   }));
 });

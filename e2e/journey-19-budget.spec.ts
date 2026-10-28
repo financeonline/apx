@@ -16,7 +16,7 @@ test.afterAll(() => cleanUpOwn([ORG], [OWNER]));
 
 test('a budget is imported and set beside the month\'s actual figures', async ({ page }) => {
   test.setTimeout(240_000);
-  await signIn(page, seedUser(OWNER));
+  await signIn(page, await seedUser(OWNER));
   const slug = await onboard(page, ORG);
   await importLedger(page, slug, GL_CSV);
   await drainQueue(page, slug);

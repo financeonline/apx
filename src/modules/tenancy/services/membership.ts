@@ -5,7 +5,7 @@ import { assertCan, canInviteRole, canChangeRole, isSelfElevation, canRevokeAssi
 import { PermissionDenied, ValidationError } from '@/core/errors';
 import { callApi } from '../data/rpc';
 import type { AccessContext } from '../context';
-import type { MembershipRole } from '../domain/types';
+import { USER_ID_PATTERN, type MembershipRole } from '../domain/types';
 import { TENANT_ROLES } from '../domain/member-access';
 
 // Every company role, ADR-172's accountant and 3rd party included. Who may grant which is the
@@ -13,6 +13,8 @@ import { TENANT_ROLES } from '../domain/member-access';
 const Role = z.enum(TENANT_ROLES);
 const Email = z.string().trim().toLowerCase().email('Enter a valid email address');
 const Uuid = z.string().uuid();
+/** A person's Firebase Auth uid (`domain/types.ts`). */
+const UserId = z.string().regex(USER_ID_PATTERN, 'Not a valid id.');
 
 function parse<T>(schema: z.ZodType<T>, input: unknown): T {
   const r = schema.safeParse(input);
@@ -136,7 +138,7 @@ export async function changeMemberRole(
   input: { userId: string; fromRole: MembershipRole; toRole: MembershipRole },
 ): Promise<void> {
   assertCan(ctx, 'users.manage');
-  const userId = parse(Uuid, input.userId);
+  const userId = parse(UserId, input.userId);
   const from = parse(Role, input.fromRole);
   const to = parse(Role, input.toRole);
   if (userId === ctx.userId) throw new PermissionDenied('change your own role');
@@ -156,7 +158,7 @@ export async function setMemberStatus(
   await callApi(
     ctx.db,
     'set_member_status',
-    { p_org: ctx.orgId, p_user: parse(Uuid, input.userId), p_status: input.status },
+    { p_org: ctx.orgId, p_user: parse(UserId, input.userId), p_status: input.status },
     ctx.requestId,
   );
 }
@@ -170,7 +172,7 @@ export async function setMemberStatus(
  */
 export async function removeMember(ctx: AccessContext, userId: string): Promise<void> {
   assertCan(ctx, 'users.manage');
-  const removed = parse(Uuid, userId);
+  const removed = parse(UserId, userId);
   await callApi(ctx.db, 'remove_member', { p_org: ctx.orgId, p_user: removed }, ctx.requestId);
   if (endsSessionsOnRemoval(ctx.effectiveRole)) {
     await revokeUserSessions(removed);
@@ -189,7 +191,7 @@ export async function initiateOwnershipTransfer(
   return callApi<string>(
     ctx.db,
     'initiate_ownership_transfer',
-    { p_org: ctx.orgId, p_nominee: parse(Uuid, input.nomineeUserId), p_demote: input.demoteInitiator },
+    { p_org: ctx.orgId, p_nominee: parse(UserId, input.nomineeUserId), p_demote: input.demoteInitiator },
     ctx.requestId,
   );
 }

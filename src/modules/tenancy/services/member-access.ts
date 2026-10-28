@@ -23,6 +23,7 @@ import {
   takesSwitches,
   withinOwnRights,
 } from '../domain/permissions';
+import { isUserId } from '../domain/types';
 
 /**
  * Per-person permissions and "Request more information" (ADR-172), against the contract in
@@ -43,6 +44,12 @@ function uuid(value: unknown, path: string): string {
   const r = Uuid.safeParse(value);
   if (!r.success) throw new ValidationError('Some details need fixing.', [{ path, message: 'Not a valid id.' }]);
   return r.data;
+}
+
+/** A person's Firebase Auth uid (`domain/types.ts`), not a uuid. */
+function userIdOf(value: unknown, path: string): string {
+  if (!isUserId(value)) throw new ValidationError('Some details need fixing.', [{ path, message: 'Not a valid id.' }]);
+  return value;
 }
 
 function orgOf(ctx: AccessContext): string {
@@ -153,7 +160,7 @@ export async function resetMemberPermissions(
   readonly notHeld: readonly SwitchablePermission[];
 }> {
   assertCan(ctx, 'users.manage');
-  const member = (await listMemberPermissions(ctx)).find((m) => m.userId === uuid(userId, 'userId'));
+  const member = (await listMemberPermissions(ctx)).find((m) => m.userId === userIdOf(userId, 'userId'));
   if (!member) throw new NotFound();
   if (!member.editable) throw new PermissionDenied('change this person’s access');
 
@@ -192,7 +199,7 @@ export async function setMemberPermission(
 ): Promise<void> {
   assertCan(ctx, 'users.manage');
   const orgId = orgOf(ctx);
-  const userId = uuid(input.userId, 'userId');
+  const userId = userIdOf(input.userId, 'userId');
   const [permission] = switchables([input.permission], 'permission');
   if (!permission) throw new ValidationError('Choose a permission to change.');
   if (input.granted !== true && input.granted !== false && input.granted !== null) {

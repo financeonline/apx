@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { bandFor } from '../domain/config';
 import type { HealthDimensionKey } from '../domain/config';
 import type { DimensionBreakdown, HealthBand } from '../domain/types';
@@ -37,7 +37,7 @@ export function isNotEnoughData(view: HealthCardView | null): boolean {
 }
 
 export async function loadHealthCard(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   periodId: string,
   previousPeriodId: string | null,
@@ -93,7 +93,7 @@ export interface HealthDimensionView {
 
 /** NULL when the period has no stored score, or the score has no such dimension. */
 export async function loadHealthDimension(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   periodId: string,
   dimension: HealthDimensionKey,
@@ -127,7 +127,7 @@ export interface HealthHistoryPoint {
  * gap where a month was not scoreable instead of quietly joining the two months either side of it.
  */
 export async function loadHealthHistory(
-  db: SupabaseClient, orgId: string, periodIds: readonly string[], requestId?: string,
+  db: Db, orgId: string, periodIds: readonly string[], requestId?: string,
 ): Promise<HealthHistoryPoint[]> {
   const stored = await repo.loadHealthHistory(db, orgId, periodIds, bandFor, requestId);
   const byPeriod = new Map(stored.map((s) => [s.periodId, s]));
@@ -151,7 +151,7 @@ export interface PortfolioScore {
 
 /** Scores for the adviser's portfolio cards, keyed by organisation id (ADR-038.13). */
 export async function loadPortfolioScores(
-  db: SupabaseClient, requestId?: string,
+  db: Db, requestId?: string,
 ): Promise<Map<string, PortfolioScore>> {
   const rows = await repo.loadPortfolioScores(db, requestId);
   return new Map(rows.map((row) => [row.organizationId, {

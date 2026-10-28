@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { seededOrgSlug, sql } from './fixtures';
+import { seededOrgSlug } from './fixtures';
+import { newestFirst, orgIdBySlug, orgRows } from './firestore';
 
 /**
  * `/analyst` and `/analyst/[conversationId]` (ROUTE_ARCHITECTURE.md §121–122; UX_ARCHITECTURE.md
@@ -12,6 +13,17 @@ import { seededOrgSlug, sql } from './fixtures';
  */
 
 const INVENTED = '00000000-0000-4000-8000-000000000000';
+
+/** The organisation's newest conversation, or '' when there is none yet. */
+async function latestConversation(orgId: string): Promise<string> {
+  return String(newestFirst(await orgRows(orgId, 'ai_conversations'))[0]?.id ?? '');
+}
+
+/** The newest feedback left on any message of one conversation. */
+async function latestFeedback(orgId: string, conversationId: string): Promise<unknown> {
+  const messages = new Set((await orgRows(orgId, 'ai_messages', (m) => m.conversation_id === conversationId)).map((m) => m.id));
+  return newestFirst(await orgRows(orgId, 'ai_feedback', (f) => messages.has(f.message_id)))[0]?.feedback_type;
+}
 
 test.describe('the analyst page', () => {
   test('a question is asked, the turn is recorded, and the reader always gets figures', async ({ page }) => {
@@ -32,7 +44,9 @@ test.describe('the analyst page', () => {
     // Either way the page now addresses the recorded conversation, and the rail lists it.
     await expect(page).toHaveURL(/\/analyst\/[0-9a-f-]{36}$/);
     const conversationId = page.url().match(/\/analyst\/([0-9a-f-]{36})$/)![1]!;
-    expect(sql(`select count(*) from public.ai_messages where conversation_id = '${conversationId}' and role = 'assistant'`)).toBe('1');
+    const orgId = await orgIdBySlug(slug);
+    const assistant = await orgRows(orgId, 'ai_messages', (m) => m.conversation_id === conversationId && m.role === 'assistant');
+    expect(assistant.length).toBe(1);
 
     if (await page.getByText(/the analyst isn't available right now|the analyst's answer didn't pass apx's checks/i).first().isVisible()) {
       // §7.2: the facts card, from current snapshots, deterministic.
@@ -50,9 +64,8 @@ test.describe('the analyst page', () => {
 
   test('reporting an answer records feedback', async ({ page }) => {
     const slug = seededOrgSlug();
-    const conversationId = sql(`
-      select c.id from public.ai_conversations c join public.organizations o on o.id = c.organization_id
-       where o.slug = '${slug}' order by c.created_at desc limit 1`);
+    const orgId = await orgIdBySlug(slug);
+    const conversationId = await latestConversation(orgId);
     test.skip(conversationId === '', 'needs the conversation the previous test created');
 
     await page.goto(`/app/${slug}/analyst/${conversationId}`);
@@ -61,22 +74,19 @@ test.describe('the analyst page', () => {
     await page.getByLabel(/which figure/i).fill('It did not answer about May.');
     await page.getByRole('button', { name: /send report/i }).click();
     await expect(page.getByText(/someone will look at this answer/i)).toBeVisible();
-    expect(sql(`select feedback_type from public.ai_feedback f join public.ai_messages m on m.id = f.message_id
-                 where m.conversation_id = '${conversationId}' order by f.created_at desc limit 1`)).toBe('unhelpful');
+    expect(await latestFeedback(orgId, conversationId)).toBe('unhelpful');
   });
 
   test('a reader can say an answer was helpful in one click', async ({ page }) => {
     const slug = seededOrgSlug();
-    const conversationId = sql(`
-      select c.id from public.ai_conversations c join public.organizations o on o.id = c.organization_id
-       where o.slug = '${slug}' order by c.created_at desc limit 1`);
+    const orgId = await orgIdBySlug(slug);
+    const conversationId = await latestConversation(orgId);
     test.skip(conversationId === '', 'needs the conversation the first test created');
 
     await page.goto(`/app/${slug}/analyst/${conversationId}`);
     await page.getByRole('button', { name: /^helpful$/i }).first().click();
     await expect(page.getByText(/noted/i)).toBeVisible();
-    expect(sql(`select feedback_type from public.ai_feedback f join public.ai_messages m on m.id = f.message_id
-                 where m.conversation_id = '${conversationId}' order by f.created_at desc limit 1`)).toBe('helpful');
+    expect(await latestFeedback(orgId, conversationId)).toBe('helpful');
   });
 
   test('a conversation that does not exist is 404', async ({ page }) => {

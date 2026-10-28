@@ -12,6 +12,7 @@ import {
   detectBalanceSign, glFromDebitCredit, glFromSigned, isLiabilityBankAccount, resolveBankSign,
 } from '../../src/modules/imports/domain/transforms/signs';
 import { maskDescription } from '../../src/modules/imports/domain/transforms/masking';
+import { maskDescription as storedMask } from '@/db/app/imports-records';
 
 /** IMPORT_ENGINE.md §6.4. Imported by path; see the note in `import-mapping.test.ts`. */
 
@@ -367,10 +368,9 @@ describe('balance sign (§6.4, ADR-047.3)', () => {
 
 describe('description masking (§6.4, ADR-038.4)', () => {
   /**
-   * Every case here is also what `app.mask_description()` in
-   * `supabase/migrations/20260905000018_triggers_financial.sql` produces. The trigger writes the
-   * column; this function only shows the reviewer what the trigger will write, so the two must
-   * agree — the integration parity test runs the same inputs through Postgres.
+   * Every case here is also what the database layer's `maskDescription` (`src/db/app/imports-records.ts`,
+   * the port of `app.mask_description()`) produces. That one writes the column; this function only
+   * shows the reviewer what will be written, so the two must agree — the last case checks they do.
    */
   it('masks a 6 to 8 digit account number to **** plus the last four', () => {
     expect(maskDescription('PAYMENT 12345678 ACME')).toBe('PAYMENT ****5678 ACME');
@@ -406,5 +406,15 @@ describe('description masking (§6.4, ADR-038.4)', () => {
 
   it('masks every occurrence in one description', () => {
     expect(maskDescription('FROM 12345678 TO 87654321')).toBe('FROM ****5678 TO ****4321');
+  });
+
+  it('shows the reviewer exactly what the database layer stores', () => {
+    const inputs = [
+      'PAYMENT 12345678 ACME', 'INV 1234567', 'INV 123456', 'REF 12345', 'REF 123456789', 'CARD 1234',
+      'SORT 12-34-56', 'SORT 12-34-56 ACC 87654321', 'ACC12345678', '12345678AB', '12345678', '(12345678)',
+      '  DIRECT   DEBIT  ', '', '   ', 'FROM 12345678 TO 87654321', 'TAB\t12345678\nNEXT', 'Café 87654321 Ltd',
+    ];
+    for (const input of inputs) expect(maskDescription(input), input).toBe(storedMask(input));
+    expect(maskDescription(null)).toBe(storedMask(null));
   });
 });

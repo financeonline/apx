@@ -1,6 +1,9 @@
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 import { recordAccessEvent } from '@/core/db';
-import { adminSql, clientFor, createAuthUser, serviceStorage } from './setup';
+import { putObject, redeemDownloadGrant, removeObjectsForOrganization, signDownloadUrl } from '@/core/storage/signer';
+import { createAuthUser, clientFor, deleteOrg, fs, rpc } from './setup';
+import { addMember, makeOrg } from './f-fixtures';
+import { seedDocument as seedDocumentRow } from './i-fixtures';
 
 /**
  * Level 4 of the evidence drawer: the source document, and who may reach it
@@ -10,14 +13,13 @@ import { adminSql, clientFor, createAuthUser, serviceStorage } from './setup';
  * re-reads the row and refuses unless it names this actor, this target, and was written in the last
  * thirty seconds. A download that was not recorded therefore cannot happen, and the whole property
  * rests on `record_access_event` refusing to write a row it should not. That is what this suite is
- * about; it is the verification `IMPLEMENTATION_PLAN.md` Phase 10 slice 2 asks for and that the
- * phase shipped without.
+ * about.
  *
  * Run-unique fixtures (ADR-052.12).
  */
 
 const RUN = `d${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.documents.itest`;
+const DOMAIN = `${RUN}.documents.itest.motion`;
 
 let ownerA: string;
 let clientA: string;
@@ -27,57 +29,39 @@ let orgB: string;
 let documentA: string;
 let documentB: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
-function seedDocument(orgId: string, name: string): string {
-  return one(`
-    insert into public.source_documents
-           (organization_id, storage_path, original_filename, mime_type, byte_size, sha256,
-            status, document_kind)
-    values ('${orgId}', '${orgId}/${name}/f.csv', '${name}.csv', 'text/csv', 12,
-            decode(md5('${orgId}${name}'), 'hex'), 'ready', 'general_ledger')
-    returning id`);
+function seedDocument(orgId: string, name: string): Promise<string> {
+  return seedDocumentRow(orgId, { filename: `${name}.csv`, kind: 'general_ledger', byteSize: 12 });
 }
 
-function auditRowsFor(orgId: string, documentId: string): number {
-  return Number(one(`
-    select count(*) from public.audit_events
-     where organization_id = '${orgId}' and action = 'document.downloaded'
-       and target_id = '${documentId}'`));
+async function downloadsOf(documentId: string, orgId?: string) {
+  let q = fs().collection('audit_events').where('action', '==', 'document.downloaded').where('target_id', '==', documentId);
+  if (orgId) q = q.where('organization_id', '==', orgId);
+  return (await q.get()).docs.map((d) => d.data());
+}
+
+async function auditRowsFor(orgId: string, documentId: string): Promise<number> {
+  return (await downloadsOf(documentId, orgId)).length;
 }
 
 beforeAll(async () => {
-  ownerA = createAuthUser(`owner-a@${DOMAIN}`);
-  clientA = createAuthUser(`client-a@${DOMAIN}`);
-  ownerB = createAuthUser(`owner-b@${DOMAIN}`);
-
-  const a = await clientFor(ownerA).schema('api').rpc('create_organization', { p_name: `ITest Docs A ${RUN}` });
-  if (a.error) throw new Error(`fixture org A failed: ${a.error.message}`);
-  orgA = a.data as unknown as string;
-
-  const b = await clientFor(ownerB).schema('api').rpc('create_organization', { p_name: `ITest Docs B ${RUN}` });
-  if (b.error) throw new Error(`fixture org B failed: ${b.error.message}`);
-  orgB = b.data as unknown as string;
-
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status)
-    values ('${orgA}', '${clientA}', 'client', 'active')`);
-
-  documentA = seedDocument(orgA, 'a');
-  documentB = seedDocument(orgB, 'b');
+  ownerA = await createAuthUser(`owner-a@${DOMAIN}`);
+  clientA = await createAuthUser(`client-a@${DOMAIN}`);
+  ownerB = await createAuthUser(`owner-b@${DOMAIN}`);
+  orgA = await makeOrg(ownerA, `ITest Docs A ${RUN}`);
+  orgB = await makeOrg(ownerB, `ITest Docs B ${RUN}`);
+  await addMember(orgA, clientA, 'client');
+  documentA = await seedDocument(orgA, 'a');
+  documentB = await seedDocument(orgB, 'b');
 });
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Docs%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Docs %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.documents.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  await deleteOrg(orgA);
+  await deleteOrg(orgB);
 });
 
 describe('case 4 — a signed URL for another organisation’s document', () => {
   it('is refused as NOT FOUND, and writes no audit row', async () => {
-    const before = auditRowsFor(orgA, documentB);
+    const before = await auditRowsFor(orgA, documentB);
 
     /*
      * The attack this models: owner A, who legitimately holds `documents.view` in A, asks for a
@@ -95,12 +79,9 @@ describe('case 4 — a signed URL for another organisation’s document', () => 
     )).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
     // No row means the signer has nothing to verify, so no URL can be minted (ADR-043.5).
-    expect(auditRowsFor(orgA, documentB), 'a refused download leaves no trace of having happened')
+    expect(await auditRowsFor(orgA, documentB), 'a refused download leaves no trace of having happened')
       .toBe(before);
-    expect(Number(one(`
-      select count(*) from public.audit_events
-       where action = 'document.downloaded' and target_id = '${documentB}'`)),
-    'and no row anywhere, under any organisation').toBe(0);
+    expect(await downloadsOf(documentB), 'and no row anywhere, under any organisation').toHaveLength(0);
   });
 
   it('is refused for a client, who has no documents.view at all (§10, CD-17)', async () => {
@@ -114,7 +95,7 @@ describe('case 4 — a signed URL for another organisation’s document', () => 
       },
     )).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
 
-    expect(auditRowsFor(orgA, documentA)).toBe(0);
+    expect(await auditRowsFor(orgA, documentA)).toBe(0);
   });
 
   it('and an invented document id is refused the same way as somebody else’s', async () => {
@@ -144,53 +125,56 @@ describe('a download that is allowed is recorded, and the owner can see it', () 
         metadata: { surface: 'evidence' },
       },
     );
-    expect(auditId).toBeGreaterThan(0);
-    expect(auditRowsFor(orgA, documentA)).toBe(1);
+    // The id is a uuid now (it was a bigint identity); the signer reads the event back by it.
+    expect(String(auditId)).toMatch(/^[0-9a-f-]{36}$/);
+    expect(await auditRowsFor(orgA, documentA)).toBe(1);
 
-    const row = one(`
-      select actor_user_id::text || '|' || actor_type::text || '|' || (metadata->>'surface')
-        from public.audit_events where id = ${auditId}`);
-    expect(row).toBe(`${ownerA}|user|evidence`);
+    const row = (await fs().collection('audit_events').doc(String(auditId)).get()).data()!;
+    expect(`${row.actor_user_id}|${row.actor_type}|${(row.metadata as Record<string, unknown>).surface}`).toBe(`${ownerA}|user|evidence`);
   });
 
   it('and the owner reads it in their own audit log', async () => {
-    const { data, error } = await clientFor(ownerA)
-      .from('audit_events')
-      .select('action, target_id')
-      .eq('organization_id', orgA)
-      .eq('action', 'document.downloaded');
+    const { data, error } = await rpc<Array<{ action: string; target_id: string }>>(clientFor(ownerA), 'org_audit_events', { p_org: orgA });
     expect(error).toBeNull();
-    expect((data ?? []).map((r) => (r as { target_id: string }).target_id)).toContain(documentA);
+    expect((data ?? []).filter((r) => r.action === 'document.downloaded').map((r) => r.target_id)).toContain(documentA);
   });
 });
 
-describe('case 5 — a signed URL does not outlive its window', () => {
+describe('case 5 — a download link does not outlive its window', () => {
   /*
-   * The signer mints for 60 seconds (asserted in `storage-signer.test.ts`). Waiting a minute in a
-   * test would buy nothing but a slow suite, so what is tested here is the property the 60 seconds
-   * RESTS on: that Storage itself refuses a URL whose window has passed. If it did not, the TTL
-   * would be a comment rather than a control.
+   * Downloads are served through the APX server now (`/api/storage/download`): `signDownloadUrl`
+   * mints a link carrying a grant signed by the server, good for 60 seconds, and redeeming it reads
+   * the object only after re-checking the audit event (ADR-043.5). The 60 seconds is therefore the
+   * server's own control rather than the bucket's, and what is tested is that a grant whose window
+   * has passed is refused — with the clock moved past it rather than a minute's wait.
    */
-  it('Storage refuses a URL whose window has closed', async () => {
-    const storage = serviceStorage();
-    const path = `${orgA}/expiry-${RUN}/probe.txt`;
-    const upload = await storage.storage
-      .from('source-documents')
-      .upload(path, new Blob(['probe'], { type: 'text/plain' }), { upsert: true });
-    expect(upload.error, 'the fixture object must exist for the expiry to mean anything').toBeNull();
+  it('a link inside its window serves the bytes; one past it is refused', async () => {
+    const key = `${orgA}/expiry-${RUN}/probe.txt`;
+    await putObject({ orgId: orgA, userId: ownerA }, 'source-documents', key, new TextEncoder().encode('probe'), 'text/plain');
+    try {
+      const auditId = await recordAccessEvent(
+        { userId: ownerA, requestId: `itest-${RUN}` },
+        { organizationId: orgA, action: 'document.downloaded', targetTable: 'source_documents', targetId: documentA },
+      );
+      const ctx = { orgId: orgA, userId: ownerA };
+      const req = { bucket: 'source-documents', key, auditEventId: auditId, targetTable: 'source_documents', targetId: documentA, downloadAs: 'probe.txt' };
 
-    const fresh = await storage.storage.from('source-documents').createSignedUrl(path, 60);
-    expect(fresh.error).toBeNull();
-    const live = await fetch(fresh.data!.signedUrl);
-    expect(live.status, 'a URL inside its window works').toBe(200);
+      const fresh = await signDownloadUrl(ctx, req);
+      const grant = decodeURIComponent(new URL(fresh.url, 'http://apx.local').searchParams.get('grant')!);
+      const live = await redeemDownloadGrant(grant, ownerA);
+      expect(new TextDecoder().decode(live.bytes), 'a link inside its window works').toBe('probe');
+      // Somebody else's session cannot redeem it.
+      await expect(redeemDownloadGrant(grant, ownerB)).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
-    const brief = await storage.storage.from('source-documents').createSignedUrl(path, 1);
-    expect(brief.error).toBeNull();
-    await new Promise((resolve) => { setTimeout(resolve, 2_000); });
-
-    const replayed = await fetch(brief.data!.signedUrl);
-    expect([400, 401, 403], `expired URL returned ${replayed.status}`).toContain(replayed.status);
-
-    await storage.storage.from('source-documents').remove([path]);
+      vi.useFakeTimers({ toFake: ['Date'] });
+      vi.setSystemTime(Date.now() + (fresh.expiresInSeconds + 2) * 1000);
+      try {
+        await expect(redeemDownloadGrant(grant, ownerA)).rejects.toMatchObject({ code: 'NOT_FOUND' });
+      } finally {
+        vi.useRealTimers();
+      }
+    } finally {
+      await removeObjectsForOrganization(orgA, 'source-documents', [key]);
+    }
   });
 });

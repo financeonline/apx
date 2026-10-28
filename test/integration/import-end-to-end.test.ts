@@ -5,7 +5,10 @@ import {
   isKnownHeader, parseCsv, runPipeline, suggestColumns, type TargetField,
 } from '@/modules/imports';
 import { validateFile } from '@/modules/documents';
-import { adminSql, clientFor, createAuthUser, resetFixtures } from './setup';
+import { orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, deleteOrg, fs, rpc as call } from './setup';
+import { makeOrg, seedBankAccount } from './f-fixtures';
+import { seedBatch, seedDocument, seedRows, where } from './i-fixtures';
 
 /**
  * The whole pipeline on a real file (IMPORT_ENGINE.md §4 → §5 → §6 → §8 → §9 → §11).
@@ -19,29 +22,26 @@ import { adminSql, clientFor, createAuthUser, resetFixtures } from './setup';
  * ever fails, MOTION has silently dropped something a customer uploaded.
  */
 
+const RUN = `ie${Date.now().toString(36)}`;
 let ownerId: string;
 let orgId: string;
 let bankAccountId: string;
 
-const rpc = (userId: string, fn: string, args: Record<string, unknown> = {}) =>
-  clientFor(userId).schema('api').rpc(fn, args);
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+const rpc = (userId: string, fn: string, args: Record<string, unknown> = {}) => call(clientFor(userId), fn, args);
 
 beforeAll(async () => {
-  resetFixtures();
-  ownerId = createAuthUser('e2e-owner@itest.motion');
-  const created = await rpc(ownerId, 'create_organization', { p_name: 'ITest End To End' });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
+  ownerId = await createAuthUser(`owner@${RUN}.e2e.itest.motion`);
+  orgId = await makeOrg(ownerId, `ITest End To End ${RUN}`);
+  bankAccountId = await seedBankAccount(orgId, {
+    name: 'Business Current', bankName: 'Barclays', sortCode: '12-34-56', accountNumber: '4321',
+  });
+}, 60_000);
 
-  bankAccountId = one(`
-    insert into public.bank_accounts
-           (organization_id, name, bank_name, sort_code_masked, account_number_masked, account_type)
-    values ('${orgId}', 'Business Current', 'Barclays', '12-34-56', '4321', 'current')
-    returning id`);
+afterAll(async () => {
+  const jobs = await fs().collection('jobs').where('organization_id', '==', orgId).get();
+  await Promise.all(jobs.docs.map((d) => d.ref.delete()));
+  await deleteOrg(orgId);
 });
-
-afterAll(() => resetFixtures());
 
 function loadFixture(name: string): Uint8Array {
   return new Uint8Array(readFileSync(`fixtures/imports/${name}`));
@@ -164,50 +164,33 @@ describe('a real bank statement, from bytes to ledger', () => {
       bankIdentity: { bankName: 'Barclays', sortCodeMasked: '12-34-56', accountNumberMasked: '4321' },
     });
 
-    const documentId = one(`
-      insert into public.source_documents
-             (organization_id, storage_path, original_filename, mime_type, byte_size, sha256,
-              status, document_kind)
-      values ('${orgId}', '${orgId}/e2e/stmt.csv', 'csv-with-preamble.csv', 'text/csv',
-              ${bytes.byteLength}, decode('e2e0', 'hex'), 'ready', 'bank_statement')
-      returning id`);
-
-    const batchId = one(`
-      insert into public.import_batches
-             (organization_id, source_document_id, import_type, target_table, bank_account_id,
-              status, extraction_method, required_confirmations, mapping_snapshot)
-      values ('${orgId}', '${documentId}', 'bank_statement', 'bank_transactions', '${bankAccountId}',
-              'awaiting_review', 'csv', array['IMP-RANGE-015']::text[],
-              '${JSON.stringify({ columnMap: COLUMN_MAP })}'::jsonb)
-      returning id`);
+    const documentId = await seedDocument(orgId, {
+      filename: 'csv-with-preamble.csv', byteSize: bytes.byteLength, kind: 'bank_statement',
+    });
+    const batchId = await seedBatch(orgId, {
+      importType: 'bank_statement', bankAccountId, documentId, required: ['IMP-RANGE-015'],
+      periodStart: null, periodEnd: null,
+    });
 
     // Rows go in exactly as the pipeline produced them, including the preamble.
-    for (const row of result.rows) {
+    await seedRows(orgId, batchId, result.rows.map((row) => {
       const amountIn = row.mapped.money_in ?? null;
       const amountOut = row.mapped.money_out ?? null;
       const signed = amountIn && amountIn.trim() !== '' ? amountIn
         : amountOut && amountOut.trim() !== '' ? `-${amountOut}` : null;
-
-      const mapped = signed
-        ? JSON.stringify({
-            transaction_date: row.mapped.transaction_date,
-            amount: signed,
-            description: row.mapped.description,
-            balance_after: row.mapped.balance_after,
-          })
-        : null;
-
-      adminSql(`
-        insert into public.import_rows
-               (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data,
-                status, issues, dedupe_hash)
-        values ('${orgId}', '${batchId}', ${row.rowNumber}, '${row.sourceRef}',
-                '${JSON.stringify(row.raw).replace(/'/g, "''")}'::jsonb,
-                ${mapped === null ? 'null' : `'${mapped.replace(/'/g, "''")}'::jsonb`},
-                '${row.status === 'valid' && signed ? 'valid' : 'skipped'}',
-                '${JSON.stringify(row.issues).replace(/'/g, "''")}'::jsonb,
-                ${row.dedupeHash ? `decode('${row.dedupeHash.slice(0, 32)}','hex')` : 'null'})`);
-    }
+      return {
+        rowNumber: row.rowNumber,
+        mapped: signed ? {
+          transaction_date: row.mapped.transaction_date ?? null, amount: signed,
+          description: row.mapped.description ?? null, balance_after: row.mapped.balance_after ?? null,
+        } : null,
+        status: row.status === 'valid' && signed ? 'valid' : 'skipped',
+        issues: JSON.parse(JSON.stringify(row.issues)) as unknown[],
+        hash: row.dedupeHash ? row.dedupeHash.slice(0, 32) : null,
+      };
+    }));
+    // seedRows names each row `csv:row:<n>`, which is what the pipeline produced.
+    for (const row of result.rows) expect(row.sourceRef).toBe(`csv:row:${row.rowNumber}`);
 
     await rpc(ownerId, 'record_batch_confirmation', {
       p_batch: batchId, p_code: 'IMP-RANGE-015',
@@ -219,38 +202,25 @@ describe('a real bank statement, from bytes to ledger', () => {
     expect((data as { status: string }).status).toBe('committed');
 
     // Six transactions in the file; the opening-balance line has no money column so it is not one.
-    const committed = adminSql(`
-      select count(*) from public.bank_transactions
-       where organization_id = '${orgId}' and record_status = 'accepted'`);
-    expect(Number(committed)).toBe(5);
+    const committed = await where(orgId, 'bank_transactions', { record_status: 'accepted' });
+    expect(committed).toHaveLength(5);
 
     // §13: every record names the document, the batch, the row and the line it came from.
-    const provenance = adminSql(`
-      select count(*) from public.bank_transactions t
-       where t.organization_id = '${orgId}'
-         and t.source_document_id = '${documentId}'
-         and t.import_batch_id = '${batchId}'
-         and t.import_row_id is not null
-         and t.source_ref like 'csv:row:%'`);
-    expect(Number(provenance)).toBe(5);
+    const provenance = committed.filter((t) => t.source_document_id === documentId && t.import_batch_id === batchId
+      && t.import_row_id && String(t.source_ref).startsWith('csv:row:'));
+    expect(provenance).toHaveLength(5);
 
     // The quoted field with an em dash and an internal comma survived intact.
-    const rent = adminSql(`
-      select description_raw from public.bank_transactions
-       where organization_id = '${orgId}' and description_raw like '%RENT%'`);
-    expect(rent).toBe('SMITH, JOHN — RENT');
+    const rent = committed.filter((t) => String(t.description_raw).includes('RENT')).map((t) => t.description_raw);
+    expect(rent).toEqual(['SMITH, JOHN — RENT']);
 
     // The period was derived from the transaction date, not supplied.
-    const period = adminSql(`
-      select distinct f.label from public.fiscal_periods f
-       join public.bank_transactions t on t.period_id = f.id
-      where t.organization_id = '${orgId}' and t.record_status = 'accepted'`);
-    expect(period).toBe('Aug 2026');
+    const periods = [...new Set(committed.map((t) => String(t.period_id)))];
+    const labels = await Promise.all(periods.map(async (p) => (await orgRow(fs(), orgId, 'fiscal_periods', p).get()).get('label')));
+    expect(labels).toEqual(['Aug 2026']);
 
     // And nothing was lost: every parsed line is still there with a status.
-    const recordedLines = adminSql(`
-      select count(*) from public.import_rows where organization_id = '${orgId}'`);
-    expect(Number(recordedLines)).toBe(result.rows.length);
+    expect(await where(orgId, 'import_rows', { batch_id: batchId })).toHaveLength(result.rows.length);
   });
 });
 

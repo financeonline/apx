@@ -9,14 +9,20 @@ import { getBundle } from '@/modules/evidence';
 import { runTool, snapshotAccess, resolvePeriodContext, type PeriodRow } from '@/modules/ai';
 import { ValidationError } from '@/core/errors';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
+import { periodId } from '@/db/app/shared';
+import { orgRows } from '@/db/rls';
+import { globalRow, orgCollection } from '@/db/schema';
+import { clientFor, createAuthUser, fs, rpc, serviceClientScoped, sqlstate } from './setup';
+import {
+  removeSeeded, seedAssignment, seedCurrentFigures, seedMember, seedOrg, seedPlatformUser,
+} from '../fixtures/seed';
 
 /**
  * What-if scenarios, end to end (REQ-SC-01…10; ADR-100).
  *
  * What is asserted is what a wrong answer would hide: that the baseline column IS the forecast to
  * the penny, that the identities hold in the stored rows and not only in the pure function, that
- * every stored figure is `estimated` and the database refuses anything else, that a saved scenario
+ * every stored figure is `estimated` whatever a payload claims, that a saved scenario
  * does not move when the forecast underneath it does, that the evidence is the HISTORY the forecast
  * rested on, and that none of it crosses an organisation.
  *
@@ -24,10 +30,10 @@ import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
  */
 
 const RUN = `s${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.scenario.itest`;
+const DOMAIN = `${RUN}.scenario.itest.motion`;
 
 let ownerA: string; let clientA: string; let ownerB: string;
-let empAssigned: string; let empOther: string; let superAdmin: string;
+let empAssigned: string; let empOther: string;
 let orgA: string; let orgB: string;
 /*
  * Remediation fixtures (`PHASE_12_REMEDIATION.md`): an organisation with no category breakdown
@@ -37,11 +43,23 @@ let orgA: string; let orgB: string;
  */
 let orgNoCat: string; let orgLimited: string; let orgWarn: string;
 let orgINR: string; let orgAED: string; let orgUSD: string;
-/** Each remediation organisation has its own owner: `create_organization` is throttled per actor. */
+/** Each remediation organisation has its own owner, as it did when `create_organization` was throttled per actor. */
 const ownerOf = new Map<string, string>();
 const ownerCtx = (org: string): AccessContext => contextFor(ownerOf.get(org)!, 'owner', org);
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+/** Fixture reads, as the server: what the old `adminSql` selects asserted against. */
+const rowsOf = async (org: string, table: Parameters<typeof orgCollection>[2], where: Array<[string, unknown]> = []) => {
+  let q: FirebaseFirestore.Query = orgCollection(fs(), org, table);
+  for (const [k, v] of where) q = q.where(k, '==', v);
+  return (await q.get()).docs.map((d) => d.data());
+};
+const firstScenarioId = async (org: string): Promise<string> => String((await rowsOf(org, 'scenario_runs'))[0]!.id);
+const firstForecastId = async (org: string): Promise<string> => String((await rowsOf(org, 'forecast_runs'))[0]!.id);
+const periodsOf = async (org: string): Promise<PeriodRow[]> =>
+  (await orgCollection(fs(), org, 'fiscal_periods').orderBy('period_start').get()).docs.map((d) => ({
+    id: d.id, label: String(d.get('label')), periodStart: String(d.get('period_start')),
+    isComplete: d.get('is_complete') === true, hasData: true,
+  })) as PeriodRow[];
 
 function contextFor(
   userId: string, role: 'owner' | 'client' | 'employee' | 'super_admin', org: string = orgA,
@@ -70,55 +88,27 @@ interface SeedOptions {
   readonly categories?: boolean;
 }
 
-/**
- * Complete months of a steady business, written the way the engine writes them.
- *
- * ONE database round trip per organisation. Each `adminSql` is a `docker exec psql`, ~150 ms on a
- * loaded machine; writing every cell as its own statement took ~620 round trips across this file's
- * eight organisations and pushed `beforeAll` past its budget for reasons that had nothing to do
- * with scenarios.
- */
-function seedHistory(
+/** Complete months of a steady business (the latest `months` up to August 2026), written the way the engine writes them. */
+async function seedHistory(
   org: string, monthly: Readonly<Record<string, string>>, months = 6, options: SeedOptions = {},
-): void {
+): Promise<void> {
   const currency = options.currency ?? 'GBP';
-  const warnings = JSON.stringify(options.warnings ?? []);
-  const categories = options.categories ?? true;
-  const starts = Array.from({ length: months }, (_, i) => `'2026-${String(8 - i).padStart(2, '0')}-01'`).join(', ');
-  const cells: Array<[string, string | null, string]> = [
-    ...Object.entries(monthly).map(([metricKey, value]): [string, string | null, string] => [metricKey, null, value]),
+  await fs().collection('organizations').doc(org).update({ base_currency: currency });
+  const starts = Array.from({ length: months }, (_, i) => `2026-${String(8 - i).padStart(2, '0')}-01`).reverse();
+  await seedCurrentFigures(org, {
+    periodStarts: starts, values: monthly, asOf: '2026-08-31', currency, warnings: options.warnings ?? [],
     // The engine's own breakdown of running costs, which a percentage assumption reads (§3).
-    ...(categories ? [['expense_by_category', 'payroll', '2000'], ['expense_by_category', 'marketing', '500']] as Array<[string, string, string]> : []),
-  ];
-  const values = cells.map(([metricKey, dimensionKey, value]) =>
-    `('${metricKey}', '${dimensionKey === null ? 'none' : 'standard_category'}', ${dimensionKey === null ? 'null' : `'${dimensionKey}'`}, '${value}')`).join(', ');
-  adminSql(`do $$ declare v_run uuid; begin
-    update public.organizations set base_currency = '${currency}' where id = '${org}';
-    insert into public.calculation_runs
-           (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-    select '${org}', 'recalc_manual', '1.0.0', p.id, p.id, '2026-08-31', 'succeeded'
-      from public.fiscal_periods p
-     where p.organization_id = '${org}' and p.period_start = '2026-08-01'
-    returning id into v_run;
-    update public.fiscal_periods set is_complete = true
-     where organization_id = '${org}' and period_start in (${starts});
-    insert into public.metric_snapshots
-           (organization_id, calculation_run_id, period_id, metric_key, dimension_type,
-            dimension_key, value, unit, currency, basis, assurance_level, data_quality)
-    select '${org}', v_run, p.id, v.metric_key, v.dimension_type::public.metric_dimension_enum,
-           v.dimension_key, v.value::numeric, 'money'::public.metric_unit_enum, '${currency}',
-           'ledger'::public.metric_basis_enum, 'verified'::public.assurance_level_enum,
-           '{"completeness": 1, "proxy": false, "warnings": ${warnings}, "missing": []}'::jsonb
-      from public.fiscal_periods p
-     cross join (values ${values}) as v(metric_key, dimension_type, dimension_key, value)
-     where p.organization_id = '${org}' and p.period_start in (${starts});
-    insert into public.metric_current
-           (organization_id, period_id, metric_key, dimension_type, dimension_key,
-            snapshot_id, calculation_run_id)
-    select organization_id, period_id, metric_key, dimension_type, dimension_key, id, calculation_run_id
-      from public.metric_snapshots
-     where organization_id = '${org}' and calculation_run_id = v_run;
-  end $$;`);
+    cells: (options.categories ?? true) ? [
+      { metricKey: 'expense_by_category', dimensionType: 'standard_category', dimensionKey: 'payroll', value: '2000' },
+      { metricKey: 'expense_by_category', dimensionType: 'standard_category', dimensionKey: 'marketing', value: '500' },
+    ] : [],
+  });
+}
+
+/** Archives a scenario as its organisation's owner (`api.archive_scenario`). */
+async function callArchive(id: string, org = orgA): Promise<void> {
+  const { error } = await rpc(clientFor(ownerOf.get(org) ?? ownerA), 'archive_scenario', { p_scenario: id, p_archived: true });
+  if (error) throw error;
 }
 
 const REVENUE_UP_10 = {
@@ -127,43 +117,28 @@ const REVENUE_UP_10 = {
 };
 
 beforeAll(async () => {
-  ownerA = createAuthUser(`ownerA@${DOMAIN}`);
-  clientA = createAuthUser(`clientA@${DOMAIN}`);
-  ownerB = createAuthUser(`ownerB@${DOMAIN}`);
-  empAssigned = createAuthUser(`emp1@${DOMAIN}`);
-  empOther = createAuthUser(`emp2@${DOMAIN}`);
-  superAdmin = createAuthUser(`sa@${DOMAIN}`);
+  ownerA = await createAuthUser(`ownera@${DOMAIN}`);
+  clientA = await createAuthUser(`clienta@${DOMAIN}`);
+  ownerB = await createAuthUser(`ownerb@${DOMAIN}`);
+  empAssigned = await createAuthUser(`emp1@${DOMAIN}`);
+  empOther = await createAuthUser(`emp2@${DOMAIN}`);
 
-  const a = await clientFor(ownerA).schema('api').rpc('create_organization', { p_name: `ITest Sc A ${RUN}` });
-  if (a.error) throw new Error(`fixture org A failed: ${a.error.message}`);
-  orgA = a.data as unknown as string;
-  const b = await clientFor(ownerB).schema('api').rpc('create_organization', { p_name: `ITest Sc B ${RUN}` });
-  if (b.error) throw new Error(`fixture org B failed: ${b.error.message}`);
-  orgB = b.data as unknown as string;
+  orgA = (await seedOrg({ name: `ITest Sc A ${RUN}`, ownerId: ownerA, around: '2026-09-15' })).orgId;
+  orgB = (await seedOrg({ name: `ITest Sc B ${RUN}`, ownerId: ownerB, around: '2026-09-15' })).orgId;
 
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status)
-    values ('${orgA}', '${clientA}', 'client', 'active');
-    insert into public.platform_users (user_id, platform_role, status)
-    values ('${empAssigned}', 'employee', 'active'), ('${empOther}', 'employee', 'active'),
-           ('${superAdmin}', 'super_admin', 'active');
-    insert into public.organization_assignments
-           (organization_id, employee_user_id, status, starts_at, ends_at, assigned_by)
-    values ('${orgA}', '${empAssigned}', 'active', now() - interval '1 day',
-            now() + interval '30 days', '${superAdmin}');`);
+  await seedMember(orgA, clientA, 'client');
+  await seedPlatformUser(empAssigned);
+  await seedPlatformUser(empOther);
+  await seedAssignment(orgA, empAssigned, ownerA);
 
-  seedHistory(orgA, STEADY);
-  seedHistory(orgB, { ...STEADY, revenue: '99999' });
+  await seedHistory(orgA, STEADY);
+  await seedHistory(orgB, { ...STEADY, revenue: '99999' });
 
-  // Remediation fixtures, all owned by A's owner so no extra users are needed. Three complete
-  // months is the forecast's minimum, and enough for every property asserted on them.
+  // Remediation fixtures. Three complete months is the forecast's minimum, and enough for every
+  // property asserted on them.
   const make = async (label: string): Promise<string> => {
-    // One owner per organisation: `api.create_organization` is throttled per actor (ADR-044.5),
-    // and a fixture that tripped that throttle would be testing the throttle, not scenarios.
-    const owner = createAuthUser(`rem-${label.toLowerCase()}@${DOMAIN}`);
-    const created = await clientFor(owner).schema('api').rpc('create_organization', { p_name: `ITest Sc ${label} ${RUN}` });
-    if (created.error) throw new Error(`fixture org ${label} failed: ${created.error.message}`);
-    const org = created.data as unknown as string;
+    const owner = await createAuthUser(`rem-${label.toLowerCase()}@${DOMAIN}`);
+    const org = (await seedOrg({ name: `ITest Sc ${label} ${RUN}`, ownerId: owner, around: '2026-09-15' })).orgId;
     ownerOf.set(org, owner);
     return org;
   };
@@ -174,12 +149,12 @@ beforeAll(async () => {
   orgINR = await make('INR');
   orgAED = await make('AED');
   orgUSD = await make('USD');
-  seedHistory(orgNoCat, STEADY, 3, { categories: false });
-  seedHistory(orgLimited, STEADY, 4);
-  seedHistory(orgWarn, STEADY, 3, { warnings: ['cash_basis_proxy', 'bank_coverage_partial'] });
-  seedHistory(orgINR, STEADY, 3, { currency: 'INR' });
-  seedHistory(orgAED, STEADY, 3, { currency: 'AED' });
-  seedHistory(orgUSD, STEADY, 3, { currency: 'USD' });
+  await seedHistory(orgNoCat, STEADY, 3, { categories: false });
+  await seedHistory(orgLimited, STEADY, 4);
+  await seedHistory(orgWarn, STEADY, 3, { warnings: ['cash_basis_proxy', 'bank_coverage_partial'] });
+  await seedHistory(orgINR, STEADY, 3, { currency: 'INR' });
+  await seedHistory(orgAED, STEADY, 3, { currency: 'AED' });
+  await seedHistory(orgUSD, STEADY, 3, { currency: 'USD' });
 
   // A scenario needs a forecast to move, so every organisation gets one.
   await generateForecast(contextFor(ownerA, 'owner'));
@@ -189,12 +164,9 @@ beforeAll(async () => {
   }
 }, 300_000);
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Sc%${RUN}';
-    delete from public.platform_users where user_id in
-      (select id from auth.users where email like '%@${DOMAIN}');
-    delete from auth.users where email like '%@${DOMAIN}';`);
+afterAll(async () => {
+  for (const uid of [empAssigned, empOther]) if (uid) await fs().collection('platform_users').doc(uid).delete();
+  await removeSeeded([orgA, orgB, orgNoCat, orgLimited, orgWarn, orgINR, orgAED, orgUSD], `@${DOMAIN}`);
 });
 
 describe('a scenario is the forecast with stated changes, and nothing else (REQ-SC-01, §6)', () => {
@@ -220,29 +192,34 @@ describe('a scenario is the forecast with stated changes, and nothing else (REQ-
      * for the same month and metric, read straight out of the other table. If these two ever
      * disagreed, the comparison would be between two different things.
      */
-    const mismatches = one(`
-      select count(*)
-        from public.scenario_values sv
-        join public.scenario_runs sr on sr.id = sv.scenario_run_id
-        join public.forecast_values fv
-          on fv.organization_id = sv.organization_id
-         and fv.forecast_run_id = sr.forecast_run_id
-         and fv.period_id = sv.period_id
-         and fv.metric_key = sv.metric_key
-       where sv.organization_id = '${orgA}' and sv.baseline_value <> fv.value`);
+    const runs = new Map((await rowsOf(orgA, 'scenario_runs')).map((r) => [String(r.id), String(r.forecast_run_id)]));
+    const forecast = new Map((await rowsOf(orgA, 'forecast_values'))
+      .map((v) => [`${v.forecast_run_id}|${v.period_id}|${v.metric_key}`, String(v.value)]));
+    const mismatches = String((await rowsOf(orgA, 'scenario_values')).filter((v) => {
+      const fv = forecast.get(`${runs.get(String(v.scenario_run_id))}|${v.period_id}|${v.metric_key}`);
+      return fv !== undefined && !new Decimal(fv).equals(new Decimal(String(v.baseline_value)));
+    }).length);
     expect(mismatches, 'every baseline figure is the forecast figure').toBe('0');
   });
 
-  it('refuses to store a scenario figure that claims to be anything but an estimate', () => {
-    const runId = one(`select id from public.scenario_runs where organization_id = '${orgA}' limit 1`);
-    const periodId = one(`
-      select period_id from public.scenario_values where scenario_run_id = '${runId}' limit 1`);
-    expect(() => adminSql(`
-      insert into public.scenario_values
-             (organization_id, scenario_run_id, period_id, metric_key,
-              baseline_value, scenario_value, assurance_level, derivation)
-      values ('${orgA}', '${runId}', '${periodId}', 'revenue', 1, 2, 'verified', 'baseline')`))
-      .toThrow(/scenario_values_estimated|violates check/);
+  it('stores a scenario figure as an estimate whatever the payload claims', async () => {
+    // `scenario_values_estimated`: the writer sets the assurance itself; a payload has no say.
+    const { data: runId, error } = await rpc(serviceClientScoped(orgA), 'finish_scenario', {
+      p_actor: ownerA, p_org: orgA,
+      p_input: {
+        name: 'Claims verified', forecast_run_id: await firstForecastId(orgA), method: 'scenario.v1',
+        config_version: 'scenario.config.v1', horizon_months: 1,
+      },
+      p_values: [{
+        period_id: periodId(orgA, '2026-09-01'), metric_key: 'revenue', baseline_value: '1', scenario_value: '2',
+        derivation: 'baseline', assurance_level: 'verified',
+      }],
+    }, { server: true });
+    expect(error).toBeNull();
+    const values = await rowsOf(orgA, 'scenario_values', [['scenario_run_id', runId]]);
+    expect(values.map((v) => v.assurance_level)).toEqual(['estimated']);
+    // Put it away so the rest of the file reads only the scenarios it worked out.
+    await callArchive(String(runId));
   });
 
   it('holds the identities in the stored rows, not only in the pure function', async () => {
@@ -291,7 +268,7 @@ describe('what a scenario will not do (§7, §10, §11)', () => {
      * (it used an organisation that HAD the category). This organisation has no
      * `expense_by_category` rows, so a percentage of wages has nothing to be a percentage of.
      */
-    const before = one(`select count(*) from public.scenario_runs where organization_id = '${orgNoCat}'`);
+    const before = (await rowsOf(orgNoCat, 'scenario_runs')).length;
     const state = await runScenario(ownerCtx(orgNoCat), {
       name: 'Wages pct',
       assumptions: [
@@ -306,8 +283,7 @@ describe('what a scenario will not do (§7, §10, §11)', () => {
     expect(state.unavailable).toEqual([
       { kind: 'payroll_change', reason: 'no_category_baseline', metricKey: 'expense_by_category' },
     ]);
-    expect(one(`select count(*) from public.scenario_runs where organization_id = '${orgNoCat}'`))
-      .toBe(before);
+    expect((await rowsOf(orgNoCat, 'scenario_runs')).length).toBe(before);
   });
 
   it('accepts an AMOUNT of wages for the same organisation, which needs no baseline', async () => {
@@ -383,33 +359,10 @@ describe('a saved scenario does not move when the forecast underneath it does (�
      * snapshot, and the pointer moved — which is exactly the situation a saved scenario has to
      * survive.
      */
-    const newRun = one(`
-      insert into public.calculation_runs
-             (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-      select '${orgA}', 'recalc_manual', '1.0.0', p.id, p.id, '2026-08-31', 'succeeded'
-        from public.fiscal_periods p
-       where p.organization_id = '${orgA}' and p.period_start = '2026-08-01'
-      returning id`);
-    for (const month of ['08', '07', '06', '05', '04', '03']) {
-      const periodId = one(`
-        select id from public.fiscal_periods
-         where organization_id = '${orgA}' and period_start = '2026-${month}-01'`);
-      const snapshotId = one(`
-        insert into public.metric_snapshots
-               (organization_id, calculation_run_id, period_id, metric_key, dimension_type,
-                value, unit, currency, basis, assurance_level, data_quality)
-        values ('${orgA}', '${newRun}', '${periodId}', 'revenue', 'none',
-                20000, 'money', 'GBP', 'ledger', 'verified',
-                '{"completeness": 1, "proxy": false, "warnings": [], "missing": []}'::jsonb)
-        returning id`);
-      adminSql(`
-        delete from public.metric_current
-         where organization_id = '${orgA}' and period_id = '${periodId}'
-           and metric_key = 'revenue' and dimension_type = 'none';
-        insert into public.metric_current
-               (organization_id, period_id, metric_key, dimension_type, snapshot_id, calculation_run_id)
-        values ('${orgA}', '${periodId}', 'revenue', 'none', '${snapshotId}', '${newRun}')`);
-    }
+    await seedCurrentFigures(orgA, {
+      periodStarts: ['2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01'],
+      values: { revenue: '20000' }, asOf: '2026-08-31',
+    });
     await generateForecast(ctx);
 
     const reopened = await loadScenario(ctx, saved.runId);
@@ -438,8 +391,7 @@ describe('a saved scenario does not move when the forecast underneath it does (�
 
     const reopened = await loadScenario(ctx, state.runId);
     expect(hasScenario(reopened) && reopened.archivedAt !== null).toBe(true);
-    expect(Number(one(`select count(*) from public.scenario_runs where id = '${state.runId}'`)))
-      .toBe(1);
+    expect((await rowsOf(orgA, 'scenario_runs', [['id', state.runId]])).length).toBe(1);
 
     await archiveScenario(ctx, state.runId, false);
   });
@@ -472,9 +424,7 @@ describe('the evidence for a scenario is the history its forecast rested on (§1
     if (!hasScenario(state)) throw new Error('expected a scenario');
     const bundle = await getBundle(ctx, state.evidenceBundleId!);
     expect(bundle.items.find((i) => i.itemType === 'metric_snapshot')?.assurance).toBe('verified');
-    expect(one(`
-      select distinct assurance_level::text from public.scenario_values
-       where organization_id = '${orgA}'`)).toBe('estimated');
+    expect([...new Set((await rowsOf(orgA, 'scenario_values')).map((v) => v.assurance_level))]).toEqual(['estimated']);
   });
 });
 
@@ -487,13 +437,7 @@ describe('the evidence for a scenario is the history its forecast rested on (§1
  */
 describe('the analyst reads a scenario rather than computing one (§18)', () => {
   const invoke = async (ctx: AccessContext, input: Record<string, unknown> = {}) => {
-    const periods = adminSql(`
-      select id || '|' || label || '|' || period_start || '|' || is_complete
-        from public.fiscal_periods where organization_id = '${ctx.orgId}' order by period_start`)
-      .split('\n').filter(Boolean).map((line) => {
-        const [id, label, periodStart, complete] = line.trim().split('|') as [string, string, string, string];
-        return { id, label, periodStart, isComplete: complete === 'true' || complete === 't', hasData: true };
-      }) as PeriodRow[];
+    const periods = await periodsOf(ctx.orgId!);
     const periodContext = resolvePeriodContext({
       question: 'what does my scenario say?', periods, fiscalYearStartMonth: 1,
     });
@@ -552,7 +496,7 @@ describe('the analyst reads a scenario rather than computing one (§18)', () => 
   });
 
   it('offers no way to ask for another organisation’s scenario', async () => {
-    const theirs = one(`select id from public.scenario_runs where organization_id = '${orgB}' limit 1`);
+    const theirs = (await rowsOf(orgB, 'scenario_runs'))[0]?.id;
     // B has no scenario of its own yet, so this proves the read is bounded even for a real id.
     const bScenario = await runScenario(contextFor(ownerB, 'owner', orgB), {
       name: 'B only', assumptions: [REVENUE_UP_10],
@@ -568,21 +512,19 @@ describe('the analyst reads a scenario rather than computing one (§18)', () => 
 
 describe('a scenario belongs to exactly one organisation (§20, §21)', () => {
   it('gives B’s owner nothing of A under RLS, whatever they ask for', async () => {
-    const asB = clientFor(ownerB, { email: `ownerB@${DOMAIN}` });
-    const { data: runs } = await asB.from('scenario_runs').select('id').eq('organization_id', orgA);
-    expect(runs ?? []).toHaveLength(0);
-    const { data: values } = await asB.from('scenario_values').select('id').eq('organization_id', orgA);
-    expect(values ?? []).toHaveLength(0);
+    const asB = clientFor(ownerB, { email: `ownerb@${DOMAIN}` });
+    expect(await orgRows(asB, orgA, 'scenario_runs')).toHaveLength(0);
+    expect(await orgRows(asB, orgA, 'scenario_values')).toHaveLength(0);
   });
 
   it('refuses A’s owner a direct read of B’s scenario by id', async () => {
-    const theirs = one(`select id from public.scenario_runs where organization_id = '${orgB}' limit 1`);
+    const theirs = await firstScenarioId(orgB);
     const state = await loadScenario(contextFor(ownerA, 'owner'), theirs);
     expect(hasScenario(state), 'an id from another organisation resolves to nothing').toBe(false);
   });
 
   it('refuses A’s owner an archive of B’s scenario', async () => {
-    const theirs = one(`select id from public.scenario_runs where organization_id = '${orgB}' limit 1`);
+    const theirs = await firstScenarioId(orgB);
     await expect(archiveScenario(contextFor(ownerA, 'owner'), theirs)).rejects.toThrow();
   });
 
@@ -592,56 +534,51 @@ describe('a scenario belongs to exactly one organisation (§20, §21)', () => {
    * id rather than on the organisation — and would pass every test that only ever pushed one way.
    */
   it('refuses B’s owner a direct read of A’s scenario by id', async () => {
-    const mine = one(`select id from public.scenario_runs where organization_id = '${orgA}' limit 1`);
+    const mine = await firstScenarioId(orgA);
     const state = await loadScenario(contextFor(ownerB, 'owner', orgB), mine);
     expect(hasScenario(state)).toBe(false);
   });
 
   it('refuses B’s owner an archive of A’s scenario', async () => {
-    const mine = one(`select id from public.scenario_runs where organization_id = '${orgA}' limit 1`);
+    const mine = await firstScenarioId(orgA);
     await expect(archiveScenario(contextFor(ownerB, 'owner', orgB), mine)).rejects.toThrow();
   });
 
   it('gives A’s owner nothing of B under RLS, whatever they ask for', async () => {
-    const asA = clientFor(ownerA, { email: `ownerA@${DOMAIN}` });
-    const { data: runs } = await asA.from('scenario_runs').select('id').eq('organization_id', orgB);
-    expect(runs ?? []).toHaveLength(0);
-    const { data: values } = await asA.from('scenario_values').select('id').eq('organization_id', orgB);
-    expect(values ?? []).toHaveLength(0);
+    const asA = clientFor(ownerA, { email: `ownera@${DOMAIN}` });
+    expect(await orgRows(asA, orgB, 'scenario_runs')).toHaveLength(0);
+    expect(await orgRows(asA, orgB, 'scenario_values')).toHaveLength(0);
   });
 
-  it('cannot attach B’s scenario to A’s forecast either, even as the service role', () => {
-    const myForecast = one(`select id from public.forecast_runs where organization_id = '${orgA}' limit 1`);
-    expect(() => adminSql(`
-      insert into public.scenario_runs
-             (organization_id, name, forecast_run_id, method, config_version, horizon_months)
-      values ('${orgB}', 'stolen the other way', '${myForecast}', 'scenario.v1', 'scenario.config.v1', 3)`))
-      .toThrow(/scenario_runs_forecast_fk|violates foreign key/);
+  /** `finish_scenario` as the server, naming a forecast run; the composite foreign key is its check. */
+  const attach = async (org: string, actor: string, forecastRunId: string) => rpc(serviceClientScoped(org), 'finish_scenario', {
+    p_actor: actor, p_org: org,
+    p_input: { name: 'stolen', forecast_run_id: forecastRunId, method: 'scenario.v1', config_version: 'scenario.config.v1', horizon_months: 3 },
+    p_values: [],
+  }, { server: true });
+
+  it('cannot attach B’s scenario to A’s forecast either, even as the service role', async () => {
+    const { error } = await attach(orgB, ownerB, await firstForecastId(orgA));
+    expect(error?.message).toMatch(/references a row that does not exist/);
+    expect(sqlstate(error)).toBe('22023');
   });
 
-  it('refuses a browser any write to either table (ADR-026)', async () => {
-    const asOwner = clientFor(ownerA, { email: `ownerA@${DOMAIN}` });
-    for (const table of ['scenario_runs', 'scenario_values']) {
-      const { error } = await asOwner.from(table).insert({ organization_id: orgA });
-      expect(sqlstate(error), table).toBe('42501');
-    }
+  it('offers a browser no function that writes either table (ADR-026)', async () => {
+    const { API_FUNCTIONS } = await import('@/db/api');
+    // `archive_scenario` stamps `archived_at` on the caller's own scenario; nothing writes figures.
+    expect(Object.keys(API_FUNCTIONS).filter((n) => /scenario/.test(n))).toEqual(['archive_scenario']);
   });
 
   it('refuses `api_server.finish_scenario` to a signed-in user', async () => {
-    const { error } = await clientFor(ownerA, { email: `ownerA@${DOMAIN}` })
-      .schema('api_server').rpc('finish_scenario', {
-        p_actor: ownerA, p_org: orgA, p_input: {}, p_values: [],
-      });
+    const { error } = await rpc(clientFor(ownerA, { email: `ownera@${DOMAIN}` }), 'finish_scenario', {
+      p_actor: ownerA, p_org: orgA, p_input: {}, p_values: [],
+    }, { server: true });
     expect(sqlstate(error)).toBe('42501');
   });
 
-  it('cannot attach a scenario to another organisation’s forecast, even as the service role', () => {
-    const theirForecast = one(`select id from public.forecast_runs where organization_id = '${orgB}' limit 1`);
-    expect(() => adminSql(`
-      insert into public.scenario_runs
-             (organization_id, name, forecast_run_id, method, config_version, horizon_months)
-      values ('${orgA}', 'stolen', '${theirForecast}', 'scenario.v1', 'scenario.config.v1', 3)`))
-      .toThrow(/scenario_runs_forecast_fk|violates foreign key/);
+  it('cannot attach a scenario to another organisation’s forecast, even as the service role', async () => {
+    const { error } = await attach(orgA, ownerA, await firstForecastId(orgB));
+    expect(sqlstate(error)).toBe('22023');
   });
 });
 
@@ -658,7 +595,7 @@ describe('the forecast’s quality survives into the scenario (§12)', () => {
     if (!hasScenario(state)) throw new Error(JSON.stringify(state));
     // Four complete months: enough to forecast, fewer than STRONG_MIN_PERIODS.
     expect(state.basis).toBe('limited');
-    expect(one(`select basis::text from public.scenario_runs where id = '${state.runId}'`)).toBe('limited');
+    expect((await rowsOf(orgLimited, 'scenario_runs', [['id', state.runId]]))[0]!.basis).toBe('limited');
   });
 
   it('carries a strong basis through when the history is long', async () => {
@@ -676,13 +613,10 @@ describe('the forecast’s quality survives into the scenario (§12)', () => {
     expect(state.dataQuality.warnings).toEqual(['bank_coverage_partial', 'cash_basis_proxy']);
 
     // And they are ON THE RUN, so a saved scenario keeps disclosing them after the forecast moves.
-    const stored = one(`
-      select jsonb_array_length(data_quality -> 'forecast_warnings')
-        from public.scenario_runs where id = '${state.runId}'`);
-    expect(Number(stored)).toBeGreaterThan(0);
-    expect(one(`
-      select data_quality -> 'forecast_warnings' -> 0 ->> 'warnings'
-        from public.scenario_runs where id = '${state.runId}'`)).toContain('cash_basis_proxy');
+    const run = (await rowsOf(orgWarn, 'scenario_runs', [['id', state.runId]]))[0]!;
+    const forecastWarnings = (run.data_quality as { forecast_warnings?: Array<{ warnings?: unknown }> }).forecast_warnings ?? [];
+    expect(forecastWarnings.length).toBeGreaterThan(0);
+    expect(JSON.stringify(forecastWarnings[0]!.warnings)).toContain('cash_basis_proxy');
   });
 
   it('reports no warnings for an organisation whose figures carry none', async () => {
@@ -694,13 +628,7 @@ describe('the forecast’s quality survives into the scenario (§12)', () => {
 
 describe('every money figure is in the organisation’s configured currency (MEDIUM-3)', () => {
   const toolFor = async (ctx: AccessContext) => {
-    const periods = adminSql(`
-      select id || '|' || label || '|' || period_start || '|' || is_complete
-        from public.fiscal_periods where organization_id = '${ctx.orgId}' order by period_start`)
-      .split('\n').filter(Boolean).map((line) => {
-        const [id, label, periodStart, complete] = line.trim().split('|') as [string, string, string, string];
-        return { id, label, periodStart, isComplete: complete === 'true' || complete === 't', hasData: true };
-      }) as PeriodRow[];
+    const periods = await periodsOf(ctx.orgId!);
     const periodContext = resolvePeriodContext({ question: 'my scenario?', periods, fiscalYearStartMonth: 1 });
     return runTool({
       seq: 1, name: 'get_scenario', rawInput: {},
@@ -728,8 +656,7 @@ describe('every money figure is in the organisation’s configured currency (MED
       // The view: what the page formats every amount with.
       expect(state.currency).toBe(code);
       // The stored cells: the currency travels with the figures, not with the request.
-      expect(one(`
-        select distinct currency from public.scenario_values where scenario_run_id = '${state.runId}'`)).toBe(code);
+      expect([...new Set((await rowsOf(org(), 'scenario_values', [['scenario_run_id', state.runId]])).map((v) => v.currency))]).toEqual([code]);
 
       // The analyst's tool: the assumption amount AND the figures, formatted by the product's own
       // formatter in the organisation's currency. The audit found £50,000 beside ₹10,000 here.
@@ -752,8 +679,8 @@ describe('every money figure is in the organisation’s configured currency (MED
     });
   }
 
-  it('never falls back to a default when the organisation has a setting', () => {
-    expect(one(`select base_currency from public.organizations where id = '${orgINR}'`).trim()).toBe('INR');
+  it('never falls back to a default when the organisation has a setting', async () => {
+    expect(String((await globalRow(fs(), 'organizations', orgINR).get()).get('base_currency')).trim()).toBe('INR');
   });
 });
 
@@ -770,7 +697,7 @@ describe('who may read a scenario, and who may work one out (§19, §20)', () =>
   });
 
   it('does not let a client put one away', async () => {
-    const mine = one(`select id from public.scenario_runs where organization_id = '${orgA}' limit 1`);
+    const mine = await firstScenarioId(orgA);
     await expect(archiveScenario(contextFor(clientA, 'client'), mine)).rejects.toThrow(/permission/i);
   });
 
@@ -781,16 +708,14 @@ describe('who may read a scenario, and who may work one out (§19, §20)', () =>
    * permission is not a property of the caller that happens to be asking.
    */
   it('refuses a client’s DIRECT call to api.archive_scenario, not only the service', async () => {
-    const mine = one(`select id from public.scenario_runs where organization_id = '${orgA}' limit 1`);
-    const { error } = await clientFor(clientA, { email: `clientA@${DOMAIN}` })
-      .schema('api').rpc('archive_scenario', { p_scenario: mine, p_archived: true });
+    const mine = await firstScenarioId(orgA);
+    const { error } = await rpc(clientFor(clientA, { email: `clienta@${DOMAIN}` }), 'archive_scenario', { p_scenario: mine, p_archived: true });
     expect(sqlstate(error)).toBe('42501');
   });
 
   it('refuses a stranger’s DIRECT call with NOT_FOUND, never confirming the row exists', async () => {
-    const mine = one(`select id from public.scenario_runs where organization_id = '${orgA}' limit 1`);
-    const { error } = await clientFor(ownerB, { email: `ownerB@${DOMAIN}` })
-      .schema('api').rpc('archive_scenario', { p_scenario: mine, p_archived: true });
+    const mine = await firstScenarioId(orgA);
+    const { error } = await rpc(clientFor(ownerB, { email: `ownerb@${DOMAIN}` }), 'archive_scenario', { p_scenario: mine, p_archived: true });
     expect(sqlstate(error)).toBe('P0002');
   });
 
@@ -812,16 +737,13 @@ describe('who may read a scenario, and who may work one out (§19, §20)', () =>
   });
 
   it('records who worked one out, and what they assumed', async () => {
-    const audited = one(`
-      select count(*) from public.audit_events
-       where organization_id = '${orgA}' and action = 'scenario.created'`);
-    expect(Number(audited)).toBeGreaterThan(0);
-    // `app.audit`'s sixth argument is `after`, which is where `finish_scenario` records what was
-    // assumed — the same place `finish_forecast` records what it worked out from.
-    expect(one(`
-      select after ->> 'assumption_kinds' from public.audit_events
-       where organization_id = '${orgA}' and action = 'scenario.created'
-       order by created_at desc limit 1`)).toContain('revenue_change');
+    const audited = (await fs().collection('audit_events').where('organization_id', '==', orgA).get()).docs
+      .map((d) => d.data()).filter((e) => e.action === 'scenario.created')
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+    expect(audited.length).toBeGreaterThan(0);
+    // The audit's `after` is where `finish_scenario` records what was assumed — the same place
+    // `finish_forecast` records what it worked out from.
+    expect(JSON.stringify(audited[0]!.after?.assumption_kinds)).toContain('revenue_change');
   });
 });
 
@@ -832,13 +754,7 @@ describe('who may read a scenario, and who may work one out (§19, §20)', () =>
  */
 describe('the analyst checks affordability through MOTION, for an amount the person wrote (ADR-146)', () => {
   const ask = async (ctx: AccessContext, question: string | undefined, input: Record<string, unknown>) => {
-    const periods = adminSql(`
-      select id || '|' || label || '|' || period_start || '|' || is_complete
-        from public.fiscal_periods where organization_id = '${ctx.orgId}' order by period_start`)
-      .split('\n').filter(Boolean).map((line) => {
-        const [id, label, periodStart, complete] = line.trim().split('|') as [string, string, string, string];
-        return { id, label, periodStart, isComplete: complete === 'true' || complete === 't', hasData: true };
-      }) as PeriodRow[];
+    const periods = await periodsOf(ctx.orgId!);
     const periodContext = resolvePeriodContext({ question: question ?? '', periods, fiscalYearStartMonth: 1 });
     return runTool({
       seq: 1, name: 'check_affordability', rawInput: input,

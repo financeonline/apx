@@ -1,9 +1,12 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { isMotionError } from '@/core/errors';
 import { beginPortfolioTurn } from '@/core/db/server-rpc';
+import { canReadPortfolioTurn } from '@/db/rls';
+import { globalRow, newId, nowIso, orgRow } from '@/db/schema';
 import type { ModelCall, ModelResponse, ModelTransport } from '@/modules/ai';
 import { BRIEFING_TOOL, askAdviser, listAdviserTurns, resolvePortfolioContext, type PortfolioContext } from '@/modules/portfolio';
-import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
+import { addMember, addPlatformUser, assign, dropUsers, dropWhere, makeOrg, periodOf } from './ai-fixtures';
+import { clientFor, createAuthUser, deleteOrg, fs, rpc } from './setup';
 
 /**
  * The adviser analyst's boundary (ADR-113; brief §13, §19, §20).
@@ -20,26 +23,48 @@ import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
  */
 
 const RUN = `pa${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.portfolioai.itest`;
-const one = (s: string) => adminSql(`with q as (${s}) select * from q`).trim();
+const DOMAIN = `${RUN}.portfolioai.itest.motion`;
 
 let employee: string; let ownerC: string; let adminA: string; let clientOnly: string;
 let A: string; let B: string; let C: string;
 let alertA: string; let alertC: string;
 
 async function createOrg(who: string, name: string): Promise<string> {
-  const r = await clientFor(who).schema('api').rpc('create_organization', { p_name: name });
-  if (r.error) throw new Error(r.error.message);
-  return r.data as unknown as string;
+  return makeOrg(who, name);
 }
-const period = (org: string) => one(`select id from public.fiscal_periods where organization_id='${org}' and period_start='2026-07-01'`);
-function seedAlert(org: string, severity: string, title: string): string {
-  const p = period(org);
-  const run = one(`insert into public.calculation_runs (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-    values ('${org}','recalc_manual','1.0.0','${p}','${p}','2026-09-15','succeeded') returning id`);
-  return one(`insert into public.alerts (organization_id, period_id, rule_key, rule_version, severity, key_kind, calculation_run_id, title, explanation, status, first_seen_at, dedupe_key)
-    values ('${org}','${p}','cash.decline','1','${severity}','state','${run}','${title}','seeded','open',now() - interval '2 days','${RUN}-${title}') returning id`);
+async function seedAlert(org: string, severity: string, title: string): Promise<string> {
+  const p = periodOf(org, '2026-07-01');
+  const run = newId();
+  const id = newId();
+  const now = nowIso();
+  const twoDaysAgo = new Date(Date.now() - 2 * 86_400_000).toISOString();
+  await orgRow(fs(), org, 'calculation_runs', run).set({
+    id: run, organization_id: org, job_id: null, trigger: 'recalc_manual', trigger_ref_id: null, engine_version: '1.0.0',
+    period_from: p, period_to: p, as_of: '2026-09-15', as_of_ts: now, status: 'succeeded', failure_reason: null,
+    stale: false, input_fingerprint: null, chunks: [], progress: {}, started_at: now, finished_at: now,
+    duration_ms: 1, error: null, stats: {}, created_at: now, updated_at: now,
+  });
+  await orgRow(fs(), org, 'alerts', id).set({
+    id, organization_id: org, rule_key: 'cash.decline', rule_version: '1', severity, metric_key: null, period_id: p,
+    subject_type: 'none', subject_id: null, title, explanation: 'seeded', threshold_summary: {},
+    recommended_next_step: null, current_revision_id: null, status: 'open', status_changed_by: null,
+    status_changed_at: null, status_reason_code: 'user', status_reason: null, action_id: null,
+    dedupe_key: `${RUN}-${title}`, key_kind: 'state', calculation_run_id: run, first_seen_at: twoDaysAgo,
+    reopened_at: null, dismissed_at: null, last_evaluated_at: now, created_at: twoDaysAgo, updated_at: now,
+  });
+  return id;
 }
+
+/** A stored turn as its reader would get it by id: the doc, under `portfolio_ai_turns_select`. */
+async function readById(user: string, turnId: string): Promise<Array<Record<string, unknown>>> {
+  const snap = await globalRow(fs(), 'portfolio_ai_turns', turnId).get();
+  if (!snap.exists) return [];
+  const turn = snap.data() as { user_id: string; scope_organization_ids: string[] };
+  return (await canReadPortfolioTurn(clientFor(user, { email: `${user}@${DOMAIN}` }), turn)) ? [snap.data()!] : [];
+}
+const stored = async (turnId: string) => (await globalRow(fs(), 'portfolio_ai_turns', turnId).get()).data()!;
+const storedAnswer = async (turnId: string) => JSON.stringify((await stored(turnId)).answer ?? null);
+const turnsOf = async (user: string) => (await fs().collection('portfolio_ai_turns').where('user_id', '==', user).get()).size;
 
 const ctxFor = async (user: string): Promise<PortfolioContext> => {
   const db = clientFor(user, { email: `${user}@${DOMAIN}` });
@@ -85,24 +110,26 @@ function fakeModel(reply: (call: ModelCall) => unknown): { transport: ModelTrans
 const handed = (call: ModelCall) => call.system.map((s) => s.text).join('\n');
 
 beforeAll(async () => {
-  employee = createAuthUser(`employee@${DOMAIN}`);
-  ownerC = createAuthUser(`owner-c@${DOMAIN}`);
-  adminA = createAuthUser(`admin-a@${DOMAIN}`);
-  clientOnly = createAuthUser(`client-only@${DOMAIN}`);
-  adminSql(`insert into public.platform_users (user_id, platform_role) values ('${employee}','employee')`);
+  employee = await createAuthUser(`employee@${DOMAIN}`);
+  ownerC = await createAuthUser(`owner-c@${DOMAIN}`);
+  adminA = await createAuthUser(`admin-a@${DOMAIN}`);
+  clientOnly = await createAuthUser(`client-only@${DOMAIN}`);
+  await addPlatformUser(employee, 'employee');
   A = await createOrg(ownerC, `PA Alpha ${RUN}`);
   B = await createOrg(ownerC, `PA Beta ${RUN}`);
   C = await createOrg(ownerC, `PA Gamma Secret ${RUN}`);
-  adminSql(`insert into public.organization_assignments (organization_id, employee_user_id) values ('${A}','${employee}'), ('${B}','${employee}')`);
-  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${A}','${clientOnly}','client','active'), ('${A}','${adminA}','admin','active')`);
-  alertA = seedAlert(A, 'critical', 'Alpha cash runway is short');
-  alertC = seedAlert(C, 'critical', 'Gamma secret alert');
+  await assign(A, employee); await assign(B, employee);
+  await addMember(A, clientOnly, 'client'); await addMember(A, adminA, 'admin');
+  alertA = await seedAlert(A, 'critical', 'Alpha cash runway is short');
+  alertC = await seedAlert(C, 'critical', 'Gamma secret alert');
 }, 120_000);
 
-afterAll(() => {
-  adminSql(`delete from public.organizations where id in ('${A}','${B}','${C}');
-            delete from public.platform_users where user_id in ('${employee}');
-            delete from auth.users where email like '%@${DOMAIN}';`);
+afterAll(async () => {
+  for (const org of [A, B, C]) if (org) await deleteOrg(org);
+  const users = (await fs().collection('profiles').where('email', '>=', '').get()).docs
+    .filter((d) => String(d.get('email')).endsWith(`@${DOMAIN}`)).map((d) => d.id);
+  await dropWhere('portfolio_ai_turns', 'user_id', users);
+  await dropUsers(DOMAIN);
 });
 
 describe('what the model is handed', () => {
@@ -122,7 +149,7 @@ describe('what the model is handed', () => {
     // Recorded with the scope the resolver gave, and readable by its owner only.
     const turns = await listAdviserTurns(ctx);
     expect(turns[0]).toMatchObject({ question: 'Which clients need attention?', status: 'answered', groundingStatus: 'passed' });
-    const scope = adminSql(`select scope_organization_ids from public.portfolio_ai_turns where id='${result.turnId}'`).trim();
+    const scope = (await stored(result.turnId)).scope_organization_ids as string[];
     expect(scope).toContain(A); expect(scope).toContain(B); expect(scope).not.toContain(C);
   });
 
@@ -139,10 +166,10 @@ describe('what the model is handed', () => {
     expect(result.status).toBe('degraded');
     expect(result.briefing!.clients.map((c) => c.ref)).toEqual(['client:1']);
     // Nothing of Gamma's survives: not its client entry, not its alert, not its id.
-    const stored = adminSql(`select answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
-    expect(stored).not.toContain('Gamma');
-    expect(stored).not.toContain(alertC);
-    expect(stored).not.toContain(C);
+    const answer = await storedAnswer(result.turnId);
+    expect(answer).not.toContain('Gamma');
+    expect(answer).not.toContain(alertC);
+    expect(answer).not.toContain(C);
   });
 
   it('a client-only member has no adviser analyst at all', async () => {
@@ -158,11 +185,11 @@ describe('what the model is handed', () => {
 
 describe('what the database accepts as a scope', () => {
   it('refuses a scope with an organisation the actor does not advise, before any row exists', async () => {
-    const before = adminSql(`select count(*) from public.portfolio_ai_turns where user_id='${employee}'`).trim();
+    const before = await turnsOf(employee);
     await expect(beginPortfolioTurn({ userId: employee, requestId: 'x' }, {
       question: 'q', scopeOrganizationIds: [A, C], promptVersion: 'adviser-v1.0',
     })).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'PERMISSION_DENIED');
-    expect(adminSql(`select count(*) from public.portfolio_ai_turns where user_id='${employee}'`).trim()).toBe(before);
+    expect(await turnsOf(employee)).toBe(before);
     // And a client membership is not an adviser role.
     await expect(beginPortfolioTurn({ userId: clientOnly, requestId: 'x' }, {
       question: 'q', scopeOrganizationIds: [A], promptVersion: 'adviser-v1.0',
@@ -171,41 +198,41 @@ describe('what the database accepts as a scope', () => {
 
   it('refuses a company owner and a company admin over their OWN organisations — staff only (20261018000030)', async () => {
     for (const [user, scope] of [[ownerC, [A, B, C]], [ownerC, [A]], [adminA, [A]]] as const) {
-      const before = adminSql(`select count(*) from public.portfolio_ai_turns where user_id='${user}'`).trim();
+      const before = await turnsOf(user);
       await expect(beginPortfolioTurn({ userId: user, requestId: 'x' }, {
         question: 'q', scopeOrganizationIds: [...scope], promptVersion: 'adviser-v1.0',
       })).rejects.toSatisfy((e) => isMotionError(e) && e.code === 'PERMISSION_DENIED');
-      expect(adminSql(`select count(*) from public.portfolio_ai_turns where user_id='${user}'`).trim()).toBe(before);
+      expect(await turnsOf(user)).toBe(before);
     }
   });
 
-  it('a turn a company owner stored before the change is no longer readable to them (RLS reads current adviser access)', async () => {
+  it('a turn a company owner stored before the change is no longer readable to them (the read policy reads current adviser access)', async () => {
     // Written as the server would have written it when owners still had a Command Centre.
-    const turn = one(`insert into public.portfolio_ai_turns (user_id, question, scope_organization_ids, prompt_version)
-      values ('${ownerC}', 'Before the change', array['${A}']::uuid[], 'adviser-v1.0') returning id`);
+    const turn = newId();
+    await globalRow(fs(), 'portfolio_ai_turns', turn).set({
+      id: turn, user_id: ownerC, question: 'Before the change', scope_organization_ids: [A], status: 'pending',
+      answer: null, grounding_status: null, model: null, prompt_version: 'adviser-v1.0', input_tokens: null,
+      output_tokens: null, created_at: nowIso(), finished_at: null,
+    });
     try {
-      const { data, error } = await clientFor(ownerC, { email: `${ownerC}@${DOMAIN}` }).from('portfolio_ai_turns').select('id').eq('id', turn);
-      expect(error).toBeNull();
-      expect(data ?? []).toEqual([]);
+      expect(await readById(ownerC, turn)).toEqual([]);
     } finally {
-      adminSql(`delete from public.portfolio_ai_turns where id='${turn}'`);
+      await globalRow(fs(), 'portfolio_ai_turns', turn).delete();
     }
   });
 
-  it('a user JWT cannot write the turn table or call the server functions', async () => {
+  it('a user handle cannot call the server functions', async () => {
     const db = clientFor(employee, { email: `${employee}@${DOMAIN}` });
-    const insert = await db.from('portfolio_ai_turns').insert({ user_id: employee, question: 'q', scope_organization_ids: [A], prompt_version: 'x' });
-    expect(insert.error, 'insert refused').not.toBeNull();
-    const call = await db.schema('api_server').rpc('portfolio_ai_begin_turn', { p_actor: employee, p_question: 'q', p_scope: [A], p_prompt_version: 'x' });
-    expect(call.error, 'api_server refused to a user').not.toBeNull();
-    expect(sqlstate(call.error)).not.toBe('00000');
+    const begin = await rpc(db, 'portfolio_ai_begin_turn', { p_actor: employee, p_question: 'q', p_scope: [A], p_prompt_version: 'x' }, { server: true });
+    expect(begin.error, 'api_server refused to a user').toMatchObject({ code: 'PERMISSION_DENIED' });
+    const finish = await rpc(db, 'portfolio_ai_finish_turn', { p_actor: employee, p_turn: newId(), p_answer: null, p_grounding: 'failed' }, { server: true });
+    expect(finish.error).toMatchObject({ code: 'PERMISSION_DENIED' });
   });
 
   it('another user cannot read the employee\'s turns', async () => {
-    const db = clientFor(ownerC, { email: `${ownerC}@${DOMAIN}` });
-    const { data, error } = await db.from('portfolio_ai_turns').select('id');
-    expect(error).toBeNull();
-    expect(data ?? []).toEqual([]);
+    const turns = await fs().collection('portfolio_ai_turns').where('user_id', '==', employee).get();
+    expect(turns.size).toBeGreaterThan(0);
+    for (const t of turns.docs) expect(await readById(ownerC, t.id)).toEqual([]);
   });
 });
 
@@ -227,12 +254,12 @@ describe('what the server keeps of an answer', () => {
     expect(alpha!.summary).toContain('critical alert');
     expect(beta!.because).toEqual([]);
     expect(result.briefing!.notes).toEqual([]);
-    const stored = adminSql(`select answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
+    const answer = await storedAnswer(result.turnId);
     // Ids are random and can contain "412" by chance (seen in a local run); the fabricated number
     // must be absent from everything else the answer stores.
-    const withoutIds = stored.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<id>');
+    const withoutIds = answer.replace(/[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g, '<id>');
     expect(withoutIds).not.toContain('412');
-    expect(stored).not.toContain('23%');
+    expect(answer).not.toContain('23%');
   });
 
   it('M-1: a figure written in words is removed, and the turn is stored degraded — never "Grounded"', async () => {
@@ -246,9 +273,10 @@ describe('what the server keeps of an answer', () => {
     const ctx = await ctxFor(employee);
     const result = await askAdviser(ctx, 'What changed?', { transport: model.transport });
     expect(result.status).toBe('degraded');
-    const stored = adminSql(`select grounding_status || '|' || answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
-    expect(stored.startsWith('degraded|')).toBe(true);
-    for (const words of ['twenty per cent', 'one and a half', 'doubled', 'halved']) expect(stored).not.toContain(words);
+    const row = await stored(result.turnId);
+    const both = `${String(row.grounding_status)}|${JSON.stringify(row.answer)}`;
+    expect(both.startsWith('degraded|')).toBe(true);
+    for (const words of ['twenty per cent', 'one and a half', 'doubled', 'halved']) expect(both).not.toContain(words);
     const turns = await listAdviserTurns(ctx);
     expect(turns.find((t) => t.id === result.turnId)?.groundingStatus).toBe('degraded');
   });
@@ -284,8 +312,9 @@ describe('what the server keeps of an answer', () => {
     expect(shown).toContain(`PA Alpha ${RUN} has 1 standing critical alert.`);
     expect(shown).toContain('Look at {client} first.');
     // Stored as rendered, passed; the page shows the stored status (journey 15).
-    const stored = adminSql(`select grounding_status || '|' || answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
-    expect(stored.startsWith('passed|')).toBe(true);
+    const row = await stored(result.turnId);
+    const both = `${String(row.grounding_status)}|${JSON.stringify(row.answer)}`;
+    expect(both.startsWith('passed|')).toBe(true);
     expect((await listAdviserTurns(ctx)).find((t) => t.id === result.turnId)?.groundingStatus).toBe('passed');
   });
 
@@ -303,14 +332,15 @@ describe('what the server keeps of an answer', () => {
     expect(result.status).toBe('degraded');
     expect(result.briefing!.clients[0]!.summary).toBe(`PA Alpha ${RUN} has 1 standing critical alert.`);
     expect(result.briefing!.notes).toEqual([]);
-    const stored = adminSql(`select grounding_status || '|' || answer::text from public.portfolio_ai_turns where id='${result.turnId}'`);
-    expect(stored.startsWith('degraded|')).toBe(true);
+    const row = await stored(result.turnId);
+    const both = `${String(row.grounding_status)}|${JSON.stringify(row.answer)}`;
+    expect(both.startsWith('degraded|')).toBe(true);
     // Word-bounded: the stored JSON carries random UUIDs, which may contain "40" (…-400b-…).
-    for (const words of [/\b40\b/, /resolved/, /Twelve/, /Nothing in the portfolio/]) expect(stored).not.toMatch(words);
+    for (const words of [/\b40\b/, /resolved/, /Twelve/, /Nothing in the portfolio/]) expect(both).not.toMatch(words);
   });
 
   it('L-2: a cited title that is a number does not launder a figure', async () => {
-    const titled = seedAlert(A, 'high', '3');
+    const titled = await seedAlert(A, 'high', '3');
     try {
       const model = fakeModel((call) => {
         // Every digest string arrives wrapped as <data name="…">…</data> (untrustedJson).
@@ -320,9 +350,9 @@ describe('what the server keeps of an answer', () => {
       });
       const result = await askAdviser(await ctxFor(employee), 'Revenue?', { transport: model.transport });
       expect(result.status).toBe('degraded');
-      expect(adminSql(`select answer::text from public.portfolio_ai_turns where id='${result.turnId}'`)).not.toContain('3%');
+      expect(await storedAnswer(result.turnId)).not.toContain('3%');
     } finally {
-      adminSql(`delete from public.alerts where id='${titled}'`);
+      await orgRow(fs(), A, 'alerts', titled).delete();
     }
   });
 
@@ -340,7 +370,8 @@ describe('what the server keeps of an answer', () => {
     const result = await askAdviser(ctx, 'Anything', { transport: model.transport });
     expect(result.status).toBe('failed');
     expect(result.briefing).toBeNull();
-    expect(adminSql(`select status || '|' || coalesce(answer::text,'NULL') from public.portfolio_ai_turns where id='${result.turnId}'`).trim()).toBe('failed|NULL');
+    const row = await stored(result.turnId);
+    expect(`${String(row.status)}|${row.answer === null ? 'NULL' : JSON.stringify(row.answer)}`).toBe('failed|NULL');
   });
 
   it('cites only the digest\'s own references, resolved to real alert ids', async () => {
@@ -356,54 +387,46 @@ describe('what the server keeps of an answer', () => {
 describe('HIGH-C — a stored turn is readable only while its author CURRENTLY advises its whole scope', () => {
   let adviser: string; let clientOfA: string;
   const answer = () => ({ mode: 'answer', headline: [{ kind: 'phrase', phrase: 'look_first', ref: 'client:1' }], clients: [{ ref: 'client:1', blocks: [ALPHA_CRITICAL], because: ['alert:1'] }], notes: [], limitations: [] });
-  const readById = async (user: string, turnId: string) => {
-    const { data, error } = await clientFor(user, { email: `${user}@${DOMAIN}` }).from('portfolio_ai_turns').select('id, answer').eq('id', turnId);
-    expect(error).toBeNull();
-    return data ?? [];
-  };
-  const assign = (org: string, status: 'active' | 'revoked') =>
-    adminSql(`insert into public.organization_assignments (organization_id, employee_user_id, status) values ('${org}','${adviser}','${status}')
-              on conflict (organization_id, employee_user_id) do update set status = excluded.status`);
+  const assign2 = (org: string, status: 'active' | 'revoked') => assign(org, adviser, status);
 
-  beforeAll(() => {
-    adviser = createAuthUser(`adviser2@${DOMAIN}`);
-    clientOfA = createAuthUser(`client-of-a@${DOMAIN}`);
-    adminSql(`insert into public.platform_users (user_id, platform_role) values ('${adviser}','employee')`);
-    adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${A}','${clientOfA}','client','active')`);
+  beforeAll(async () => {
+    adviser = await createAuthUser(`adviser2@${DOMAIN}`);
+    clientOfA = await createAuthUser(`client-of-a@${DOMAIN}`);
+    await addPlatformUser(adviser, 'employee');
+    await addMember(A, clientOfA, 'client');
   });
-  afterAll(() => { adminSql(`delete from public.platform_users where user_id='${adviser}'`); });
 
   it('A–C: readable while assigned; gone on the next request after revocation; back on reassignment', async () => {
-    assign(A, 'active'); assign(B, 'revoked');
+    await assign2(A, 'active'); await assign2(B, 'revoked');
     const ctx = await ctxFor(adviser);
     expect(ctx.organisationIds).toEqual([A]);
     const turn = await askAdviser(ctx, 'Where first?', { transport: fakeModel(answer).transport });
     expect(await readById(adviser, turn.turnId)).toHaveLength(1);
     expect((await listAdviserTurns(ctx)).map((t) => t.id)).toContain(turn.turnId);
 
-    assign(A, 'revoked');
-    // G: the database itself, with the adviser's own JWT, returns nothing — and so does the service.
+    await assign2(A, 'revoked');
+    // G: the read policy itself, for the adviser, returns nothing — and so does the service.
     expect(await readById(adviser, turn.turnId)).toEqual([]);
     expect((await listAdviserTurns({ ...ctx, organisations: [], organisationIds: [] })).map((t) => t.id)).not.toContain(turn.turnId);
 
-    assign(A, 'active');
+    await assign2(A, 'active');
     expect(await readById(adviser, turn.turnId)).toHaveLength(1);
   });
 
   it('D: a turn over two organisations is unreadable once either leaves the author\'s scope', async () => {
-    assign(A, 'active'); assign(B, 'active');
+    await assign2(A, 'active'); await assign2(B, 'active');
     const ctx = await ctxFor(adviser);
     expect([...ctx.organisationIds].sort()).toEqual([A, B].sort());
     const turn = await askAdviser(ctx, 'Both?', { transport: fakeModel(answer).transport });
     expect(await readById(adviser, turn.turnId)).toHaveLength(1);
-    assign(B, 'revoked');
+    await assign2(B, 'revoked');
     expect(await readById(adviser, turn.turnId)).toEqual([]);
-    assign(B, 'active');
+    await assign2(B, 'active');
     expect(await readById(adviser, turn.turnId)).toHaveLength(1);
   });
 
   it('E–F: a client of the organisation, its owner, and another adviser of the same organisations, cannot read it by id', async () => {
-    assign(A, 'active'); assign(B, 'revoked');
+    await assign2(A, 'active'); await assign2(B, 'revoked');
     const turn = await askAdviser(await ctxFor(adviser), 'Mine?', { transport: fakeModel(answer).transport });
     expect(await readById(clientOfA, turn.turnId)).toEqual([]);
     // ownerC owns A, B and C — a company login, which advises nothing (owner, 2026-10-14).

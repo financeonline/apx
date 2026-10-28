@@ -1,5 +1,5 @@
 import 'server-only';
-import { getApps, initializeApp, type App } from 'firebase-admin/app';
+import { cert, getApps, initializeApp, type App } from 'firebase-admin/app';
 import { getAuth, type Auth } from 'firebase-admin/auth';
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
 import { getStorage, type Storage } from 'firebase-admin/storage';
@@ -14,7 +14,11 @@ import { getStorage, type Storage } from 'firebase-admin/storage';
  * Locally the project is `demo-apx` and the SDK talks to the emulators named by
  * FIRESTORE_EMULATOR_HOST, FIREBASE_AUTH_EMULATOR_HOST and FIREBASE_STORAGE_EMULATOR_HOST. A `demo-`
  * project cannot reach Google's servers at all. Connecting the real project later means setting
- * FIREBASE_PROJECT_ID (and credentials) and unsetting the emulator hosts — no code change.
+ * FIREBASE_PROJECT_ID and FIREBASE_SERVICE_ACCOUNT (the service account's JSON key) — or
+ * GOOGLE_APPLICATION_CREDENTIALS — and unsetting the emulator hosts; no code change.
+ *
+ * Without an emulator host and without credentials there is nothing to connect to, and the SDK would
+ * wait on Google's metadata server instead of failing: so that case fails at once, loudly.
  */
 
 const APP_NAME = 'apx';
@@ -30,7 +34,15 @@ export function storageBucketName(): string {
 function app(): App {
   const existing = getApps().find((a) => a.name === APP_NAME);
   if (existing) return existing;
-  return initializeApp({ projectId: projectId(), storageBucket: storageBucketName() }, APP_NAME);
+  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (!usingEmulators() && !serviceAccount && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
+    throw new Error('Firebase is not configured: set the emulator hosts, or FIREBASE_SERVICE_ACCOUNT for a real project');
+  }
+  return initializeApp({
+    projectId: projectId(),
+    storageBucket: storageBucketName(),
+    ...(serviceAccount && !usingEmulators() ? { credential: cert(JSON.parse(serviceAccount)) } : {}),
+  }, APP_NAME);
 }
 
 let firestore: Firestore | null = null;

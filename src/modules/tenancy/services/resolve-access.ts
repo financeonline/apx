@@ -1,9 +1,10 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { cache } from 'react';
+import { callApi } from '@/core/db/api-rpc';
 import { createUserClient } from '@/core/db/user-client';
+import type { Db } from '@/db/types';
 import { permissionsFor, type EffectiveRole, type Permission } from '@/core/permissions';
-import { NotFound, toMotionError } from '@/core/errors';
+import { NotFound } from '@/core/errors';
 import { log, newRequestId } from '@/core/logging';
 import type { AccessContext } from '../context';
 import type { ActorType, OrgStatus } from '../domain/types';
@@ -15,8 +16,8 @@ import { agreedPermissions } from '../domain/permissions';
  * Builds the AccessContext for a request (SERVICE_ARCHITECTURE.md §3).
  *
  * The role comes from api.my_access() (api.my_context() plus the per-person switches, ADR-172), which
- * uses app.accessible_org_roles() — the same function RLS uses — so the application and the database
- * cannot disagree at runtime. The organization is
+ * uses `orgRoleOf` (`src/db/app/access.ts`) — the same resolution every read policy in `src/db/rls.ts`
+ * and every `api.*` function uses — so the application and the data layer cannot disagree at runtime. The organization is
  * addressed by the slug in the URL and is never taken from a request body (ADR-014).
  *
  * A caller with no access gets NotFound, never Forbidden: a 403 would confirm the organization
@@ -28,12 +29,16 @@ export interface SessionUser {
   readonly email: string | null;
 }
 
-async function loadSessionUser(): Promise<SessionUser | null> {
-  const db = await createUserClient();
-  const { data, error } = await db.auth.getUser();
-  if (error || !data.user) return null;
-  return { id: data.user.id, email: data.user.email ?? null };
+/** The signed-in person a database handle carries, or null (anon, service). */
+export function sessionUserOf(db: Db): SessionUser | null {
+  return db.actor.kind === 'user' ? { id: db.actor.userId, email: db.actor.email } : null;
 }
+
+/**
+ * The signed-in person of this request, from the verified `__session` cookie (revocation checked),
+ * or null. The replacement for `supabase.auth.getUser()` in pages and routes.
+ */
+export const getSessionUser = cache(async (): Promise<SessionUser | null> => sessionUserOf(await createUserClient()));
 
 interface MyAccessRow {
   organization_id: string;
@@ -90,20 +95,18 @@ function effectivePermissionsFrom(
  */
 export async function resolveAccessFresh(orgSlug: string): Promise<AccessContext> {
   const requestId = newRequestId();
-  const user = await loadSessionUser();
+  const db = await createUserClient();
+  const user = sessionUserOf(db);
   if (!user) throw new NotFound();
 
-  const db = await createUserClient();
   /*
    * ONE round trip (ADR-172): the role, as api.my_context resolves it through the same
    * app.accessible_org_roles() every policy uses; the organisation's systems (ADR-158); the caller's
    * per-person switches; and the effective permissions the database computes from them. Nothing is
    * looked up again per check — `can(ctx, …)` reads the set built here.
    */
-  const { data, error } = await db.schema('api').rpc('my_access', { p_slug: orgSlug });
-  if (error) throw toMotionError(error, requestId);
-
-  const row = (data as MyAccessRow[] | null)?.[0];
+  const rows = await callApi<MyAccessRow[] | null>(db, 'my_access', { p_slug: orgSlug }, requestId);
+  const row = rows?.[0];
   if (!row || !row.role) throw new NotFound();
 
   // ADR-158: the systems the super admin switched on for this organisation; ADR-173: narrowed to the
@@ -141,10 +144,9 @@ export const getAccessContext = cache(resolveAccessFresh);
  * account, else `none`. The same rule `getPlatformContext` applies, callable with any client
  * (the Command Centre's resolver and its tests pass their own).
  */
-export async function resolvePlatformRole(db: SupabaseClient, requestId?: string): Promise<EffectiveRole> {
-  const { data, error } = await db.schema('api').rpc('my_platform_role');
-  if (error) throw toMotionError(error, requestId);
-  const row = (data as Array<{ platform_role: string; status: string }> | null)?.[0];
+export async function resolvePlatformRole(db: Db, requestId?: string): Promise<EffectiveRole> {
+  const rows = await callApi<Array<{ platform_role: string; status: string }> | null>(db, 'my_platform_role', {}, requestId);
+  const row = rows?.[0];
   if (row?.platform_role === 'super_admin' && row.status === 'active') return 'super_admin';
   if (row?.platform_role === 'employee' && row.status === 'active') return 'employee';
   return 'none';
@@ -153,10 +155,10 @@ export async function resolvePlatformRole(db: SupabaseClient, requestId?: string
 /** Context with no organization, for /platform, /portfolio and /account. */
 export const getPlatformContext = cache(async (): Promise<AccessContext> => {
   const requestId = newRequestId();
-  const user = await loadSessionUser();
+  const db = await createUserClient();
+  const user = sessionUserOf(db);
   if (!user) throw new NotFound();
 
-  const db = await createUserClient();
   const effectiveRole = await resolvePlatformRole(db, requestId);
   const isActiveSuperAdmin = effectiveRole === 'super_admin';
   const isActiveEmployee = effectiveRole === 'employee';

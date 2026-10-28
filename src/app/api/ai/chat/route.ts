@@ -70,8 +70,9 @@ export async function POST(request: NextRequest) {
 
   try {
     // ROUTE_ARCHITECTURE.md §237: an API route answers 401, not a redirect, to a caller with no session.
-    const session = await (await createUserClient()).auth.getUser();
-    if (session.error || !session.data.user) {
+    // The handle's actor is `user` only for a verified, unrevoked Firebase session cookie.
+    const session = await createUserClient();
+    if (session.actor.kind !== 'user') {
       return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'Sign in to continue.', requestId } }, { status: 401, headers });
     }
 

@@ -1,6 +1,7 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import { Decimal } from '@/core/money';
+import type { Db } from '@/db/types';
+import { readOrganizationRow, readRows } from '@/db/app/financials-reads';
 import type {
   Account, Counterparty, FiscalPeriod, Invoice, LedgerEntry, PeriodBalance,
 } from '../domain/types';
@@ -8,35 +9,47 @@ import type {
 /**
  * Reads for the financial tables.
  *
- * Every query here runs on the CALLER's client, so Row Level Security decides what comes back
- * (ADR-013, ADR-026). The `organization_id` filter in each query is therefore a second fence and an
- * index hint, not the security boundary: if it were ever omitted, RLS would still return only the
- * caller's rows. The service client is never used on a request path.
+ * Every read here is made as the CALLER (`readRows`): for a person, `src/db/rls.ts` applies each
+ * table's policy, as Row Level Security did on their client (ADR-013, ADR-026); for a job, only the
+ * organisation the job is scoped to is readable. Each read names one organisation's collection, so
+ * a query cannot run across tenants by accident.
  *
  * Every list is bounded. An unbounded select on a tenant table is a denial-of-service waiting for
  * the first customer with three years of general ledger.
+ *
+ * Orders that PostgreSQL took from a collation or an enum (names, the standard category) are applied
+ * here, in TypeScript, over the organisation's rows: Firestore orders strings by code unit, which
+ * would put "Zeta" before "acme".
  */
+
+/** `ORDER BY name` under the database's en_US collation: case and accents second. */
+export const byName = new Intl.Collator('en-US', { sensitivity: 'variant' }).compare;
+
+const STANDARD_CATEGORY_ORDER = [
+  'revenue', 'other_income', 'cost_of_sales', 'operating_expense', 'payroll', 'marketing',
+  'interest_expense', 'tax_expense', 'depreciation', 'other_expense', 'cash', 'receivables',
+  'inventory', 'other_current_asset', 'fixed_asset', 'other_asset', 'payables', 'credit_card',
+  'loan', 'tax_liability', 'other_current_liability', 'long_term_liability', 'equity', 'drawings',
+  'transfer', 'uncategorised',
+];
+/** `ORDER BY standard_category` sorted by the enum's declared order, not its text. */
+export const byCategory = (a: string, b: string): number => STANDARD_CATEGORY_ORDER.indexOf(a) - STANDARD_CATEGORY_ORDER.indexOf(b);
+
+const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 interface Page {
   readonly limit: number;
   readonly offset: number;
 }
 
-function unwrap<T>(data: T[] | null, error: unknown, requestId?: string): T[] {
-  if (error) throw toMotionError(error, requestId);
-  return data ?? [];
-}
+type Row = Record<string, any>; // eslint-disable-line @typescript-eslint/no-explicit-any
 
 export async function listPeriods(
-  db: SupabaseClient, orgId: string, requestId?: string,
+  db: Db, orgId: string, requestId?: string,
 ): Promise<FiscalPeriod[]> {
-  const { data, error } = await db
-    .from('fiscal_periods')
-    .select('id, period_start, period_end, fiscal_year, fiscal_quarter, label, is_complete, is_locked')
-    .eq('organization_id', orgId)
-    .order('period_start', { ascending: false });
-
-  return unwrap(data, error, requestId).map((r) => ({
+  void requestId;
+  const rows = await readRows<Row>(db, orgId, 'fiscal_periods', (q) => q.orderBy('period_start', 'desc'));
+  return rows.map((r) => ({
     id: r.id,
     periodStart: r.period_start,
     periodEnd: r.period_end,
@@ -49,16 +62,12 @@ export async function listPeriods(
 }
 
 export async function listAccounts(
-  db: SupabaseClient, orgId: string, requestId?: string,
+  db: Db, orgId: string, requestId?: string,
 ): Promise<Account[]> {
-  const { data, error } = await db
-    .from('accounts')
-    .select('id, code, name, account_type, standard_category, is_system, is_active, source, mapping_confidence, loan_security')
-    .eq('organization_id', orgId)
-    .order('standard_category')
-    .order('name');
-
-  return unwrap(data, error, requestId).map((r) => ({
+  void requestId;
+  const rows = await readRows<Row>(db, orgId, 'accounts');
+  rows.sort((a, b) => byCategory(a.standard_category, b.standard_category) || byName(a.name, b.name));
+  return rows.map((r) => ({
     id: r.id,
     code: r.code,
     name: r.name,
@@ -73,18 +82,13 @@ export async function listAccounts(
 }
 
 export async function listCounterparties(
-  db: SupabaseClient, orgId: string, page: Page, requestId?: string,
+  db: Db, orgId: string, page: Page, requestId?: string,
 ): Promise<Counterparty[]> {
-  const { data, error } = await db
-    .from('counterparties')
-    .select('id, name, kind, default_expense_category, is_active, merged_into_id')
-    .eq('organization_id', orgId)
-    // A merged counterparty is history, not a choice: it must not appear in a picker.
-    .is('merged_into_id', null)
-    .order('name')
-    .range(page.offset, page.offset + page.limit - 1);
-
-  return unwrap(data, error, requestId).map((r) => ({
+  void requestId;
+  // A merged counterparty is history, not a choice: it must not appear in a picker.
+  const rows = await readRows<Row>(db, orgId, 'counterparties', (q) => q.where('merged_into_id', '==', null));
+  rows.sort((a, b) => byName(a.name, b.name) || byText(a.id, b.id));
+  return rows.slice(page.offset, page.offset + page.limit).map((r) => ({
     id: r.id,
     name: r.name,
     kind: r.kind,
@@ -100,22 +104,19 @@ export async function listCounterparties(
  * resolver with an `as_of`, which reconstructs it from `record_status_events`.
  */
 export async function listLedgerEntries(
-  db: SupabaseClient, orgId: string, periodId: string, page: Page, requestId?: string,
+  db: Db, orgId: string, periodId: string, page: Page, requestId?: string,
 ): Promise<LedgerEntry[]> {
-  const { data, error } = await db
-    .from('ledger_entries')
-    .select(`id, entry_date, period_id, account_id, direction, amount, currency, description,
-             reference, counterparty_id, journal_ref, record_status, assurance_level,
-             is_opening_balance, superseded_by`)
-    .eq('organization_id', orgId)
-    .eq('period_id', periodId)
-    .eq('record_status', 'accepted')
-    .is('superseded_by', null)
-    .order('entry_date')
-    .order('id')
-    .range(page.offset, page.offset + page.limit - 1);
-
-  return unwrap(data, error, requestId).map((r) => ({
+  void requestId;
+  // Composite index: ledger_entries (period_id, record_status, superseded_by, entry_date, id).
+  const rows = await readRows<Row>(db, orgId, 'ledger_entries', (q) => q
+    .where('period_id', '==', periodId)
+    .where('record_status', '==', 'accepted')
+    .where('superseded_by', '==', null)
+    .orderBy('entry_date')
+    .orderBy('id')
+    .offset(page.offset)
+    .limit(page.limit));
+  return rows.map((r) => ({
     id: r.id,
     entryDate: r.entry_date,
     periodId: r.period_id,
@@ -135,19 +136,15 @@ export async function listLedgerEntries(
 }
 
 export async function listPeriodBalances(
-  db: SupabaseClient, orgId: string, periodId: string, requestId?: string,
+  db: Db, orgId: string, periodId: string, requestId?: string,
 ): Promise<PeriodBalance[]> {
-  const { data, error } = await db
-    .from('period_balances')
-    .select(`id, period_start, period_id, account_id, opening_balance, closing_balance, currency,
-             balance_kind, balance_basis, record_status, assurance_level, superseded_by`)
-    .eq('organization_id', orgId)
-    .eq('period_id', periodId)
-    .eq('record_status', 'accepted')
-    .is('superseded_by', null)
-    .order('account_id');
-
-  return unwrap(data, error, requestId).map((r) => ({
+  void requestId;
+  const rows = await readRows<Row>(db, orgId, 'period_balances', (q) => q
+    .where('period_id', '==', periodId)
+    .where('record_status', '==', 'accepted')
+    .where('superseded_by', '==', null));
+  rows.sort((a, b) => byText(a.account_id, b.account_id));
+  return rows.map((r) => ({
     id: r.id,
     periodStart: r.period_start,
     periodId: r.period_id,
@@ -164,30 +161,29 @@ export async function listPeriodBalances(
 }
 
 export async function listInvoices(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   filter: { readonly invoiceType?: Invoice['invoiceType']; readonly openOnly?: boolean },
   page: Page,
   requestId?: string,
 ): Promise<Invoice[]> {
-  let query = db
-    .from('invoices')
-    .select(`id, invoice_type, counterparty_id, invoice_number, issue_date, due_date, period_id,
-             total_amount, amount_paid, balance_due, currency, status, paid_date,
-             record_status, assurance_level, superseded_by`)
-    .eq('organization_id', orgId)
-    .eq('record_status', 'accepted')
-    .is('superseded_by', null);
-
-  if (filter.invoiceType) query = query.eq('invoice_type', filter.invoiceType);
-  if (filter.openOnly) query = query.in('status', ['open', 'partially_paid']);
-
-  const { data, error } = await query
-    .order('due_date', { ascending: true, nullsFirst: false })
-    .order('id')
-    .range(page.offset, page.offset + page.limit - 1);
-
-  return unwrap(data, error, requestId).map((r) => ({
+  void requestId;
+  const rows = await readRows<Row>(db, orgId, 'invoices', (q) => {
+    let query = q.where('record_status', '==', 'accepted').where('superseded_by', '==', null);
+    if (filter.invoiceType) query = query.where('invoice_type', '==', filter.invoiceType);
+    if (filter.openOnly) query = query.where('status', 'in', ['open', 'partially_paid']);
+    return query;
+  });
+  // `ORDER BY due_date ASC NULLS LAST, id`: Firestore sorts null first, so the order is applied here.
+  rows.sort((a, b) => {
+    if (a.due_date !== b.due_date) {
+      if (a.due_date === null || a.due_date === undefined) return 1;
+      if (b.due_date === null || b.due_date === undefined) return -1;
+      return byText(a.due_date, b.due_date);
+    }
+    return byText(a.id, b.id);
+  });
+  return rows.slice(page.offset, page.offset + page.limit).map((r) => ({
     id: r.id,
     invoiceType: r.invoice_type,
     counterpartyId: r.counterparty_id,
@@ -197,7 +193,8 @@ export async function listInvoices(
     periodId: r.period_id,
     totalAmount: r.total_amount,
     amountPaid: r.amount_paid,
-    balanceDue: r.balance_due,
+    // `balance_due` was a generated column (total − paid); a row stores it, or it is derived.
+    balanceDue: r.balance_due ?? new Decimal(String(r.total_amount)).minus(String(r.amount_paid ?? 0)).toFixed(2),
     currency: r.currency,
     status: r.status,
     paidDate: r.paid_date,
@@ -205,4 +202,33 @@ export async function listInvoices(
     assuranceLevel: r.assurance_level,
     supersededBy: r.superseded_by,
   }));
+}
+
+/**
+ * The organisation's base currency, for a form's label — never assumed (core/money). Null when the
+ * caller cannot reach the organisation.
+ */
+export async function loadBaseCurrency(db: Db, orgId: string): Promise<string | null> {
+  const org = await readOrganizationRow(db, orgId);
+  return org ? String(org.base_currency ?? 'GBP').trim() : null;
+}
+
+export interface HeldCounterparty {
+  readonly id: string;
+  readonly name: string;
+  readonly normalizedName: string;
+  readonly kind: string;
+}
+
+/**
+ * The counterparties whose name is held awaiting an identity decision (ADR-136):
+ * `normalized_name LIKE '% [held %]'`, not merged away, by name — filtered and ordered here over the
+ * organisation's unmerged counterparties.
+ */
+export async function listHeldCounterparties(db: Db, orgId: string): Promise<HeldCounterparty[]> {
+  const rows = await readRows<Row>(db, orgId, 'counterparties', (q) => q.where('merged_into_id', '==', null));
+  return rows
+    .filter((r) => /^.+ \[held .*\]$/s.test(String(r.normalized_name)))
+    .sort((a, b) => byName(a.name, b.name))
+    .map((r) => ({ id: r.id, name: r.name, normalizedName: r.normalized_name, kind: r.kind }));
 }

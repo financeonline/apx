@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { log } from '@/core/logging';
 import { ALERT_RULE_VERSION } from '@/modules/financial-engine';
 import { descriptorHash, parseQueryDescriptor } from '@/modules/evidence';
@@ -45,7 +45,7 @@ export interface AlertEvaluationRequest {
 }
 
 export interface AlertEvaluationDeps {
-  readonly scoped: SupabaseClient;
+  readonly scoped: Db;
   /** `api_server.persist_alerts`, injected so the lint boundary holds and the loop stays testable. */
   readonly persistAlerts: (input: Record<string, unknown>) => Promise<Record<string, number>>;
   /*

@@ -5,8 +5,14 @@ export {
 export { moduleOn, requireModule } from './services/modules';
 export type { ActorType, OrgStatus, MembershipRole } from './domain/types';
 export { resolveEffectiveRole, type ResolutionInput } from './domain/resolve';
-export { getAccessContext, getPlatformContext, resolveAccessFresh, resolvePlatformRole, narrowToDepartments } from './services/resolve-access';
+export {
+  getAccessContext, getPlatformContext, resolveAccessFresh, resolvePlatformRole, narrowToDepartments,
+  getSessionUser, sessionUserOf, type SessionUser,
+} from './services/resolve-access';
 export { confirmPassword } from './services/confirm-password';
+export {
+  openSession, passwordSignIn, applyEmailVerification, sessionCookieOptions, SESSION_MAX_SECONDS, type OpenedSession,
+} from './services/session';
 export {
   createOrganization,
   updateOrganization,
@@ -28,6 +34,9 @@ export {
   setLastActiveOrg,
   CreateOrganizationInput,
   type OrganizationSummary,
+  organizationOf,
+  organizationDoc,
+  type OrganizationRecord,
 } from './services/organizations';
 export {
   listMembers,

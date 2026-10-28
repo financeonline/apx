@@ -2,8 +2,9 @@ import { writeFileSync } from 'node:fs';
 import { expect, test as setup } from '@playwright/test';
 import {
   ADVISER_STATE, AUTH_STATE, GL_CSV, SEEDED_ORG, STATEMENT_MAY_CSV, addBankAccount, drainQueue, importLedger, importStatement,
-  onboard, seedUser, signIn, sql, sweepOldFixtures, uniqueName,
+  onboard, seedUser, signIn, sweepOldFixtures, uniqueName,
 } from './fixtures';
+import { addAssignment, addPlatformUser, orgIdBySlug } from './firestore';
 
 /**
  * Signs in once and seeds an organisation with real figures (TEST_STRATEGY.md §11).
@@ -15,9 +16,9 @@ import {
  */
 setup('sign in and seed an organisation with figures', async ({ page }) => {
   // Once, before anything else runs: fixtures a killed run left behind, and nothing live.
-  sweepOldFixtures();
+  await sweepOldFixtures();
 
-  const owner = seedUser('a11y-owner');
+  const owner = await seedUser('a11y-owner');
   await signIn(page, owner);
 
   const slug = await onboard(page, uniqueName('Accessible Ltd'));
@@ -36,10 +37,9 @@ setup('sign in and seed an organisation with figures', async ({ page }) => {
 
   // A Financial Analyst assigned to the same organisation, for the Command Centre's sweep: it is
   // APX staff only (owner, 2026-10-14; ADR-112 addendum), and the owner above has none.
-  const adviser = seedUser('a11y-adviser');
-  sql(`insert into public.platform_users (user_id, platform_role) values ('${adviser.userId}', 'employee')`);
-  sql(`insert into public.organization_assignments (organization_id, employee_user_id)
-       select id, '${adviser.userId}' from public.organizations where slug = '${slug}'`);
+  const adviser = await seedUser('a11y-adviser');
+  await addPlatformUser(adviser.userId, 'employee');
+  await addAssignment(await orgIdBySlug(slug), adviser.userId);
   await page.context().clearCookies();
   await signIn(page, adviser);
   const portfolio = await page.goto('/portfolio');

@@ -1,6 +1,8 @@
 import 'server-only';
-import { NotFound, toMotionError } from '@/core/errors';
+import { NotFound } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
+import { callApi } from '@/core/db/api-rpc';
+import { orgRowById, orgRows } from '@/db/rls';
 import type { AccessContext } from '@/modules/tenancy';
 import type { SubmitAnswer } from '../domain/contract';
 
@@ -13,7 +15,7 @@ import type { SubmitAnswer } from '../domain/contract';
  * conversations through the UI (disclosed in Settings), never by continuing them, which is why
  * `findConversation` (continue) and `listConversations` (review) have different scopes.
  *
- * Reads run on the caller's own client under RLS; the policy already admits an `ai_conversations`
+ * Reads go through the table's read policy (`src/db/rls.ts`), which admits an `ai_conversations`
  * row to its owner or to the organisation's owner/admin. Writes go through `api.*` /
  * `api_server.*` — nothing here inserts.
  */
@@ -59,76 +61,54 @@ function requireOrg(ctx: AccessContext): string {
 export async function findConversation(ctx: AccessContext, conversationId: string): Promise<ConversationRef> {
   assertCan(ctx, 'ai.use');
   const orgId = requireOrg(ctx);
-  const { data, error } = await ctx.db
-    .from('ai_conversations')
-    .select('id, title, last_message_at, created_at')
-    .eq('organization_id', orgId)
-    .eq('id', conversationId)
-    .eq('user_id', ctx.userId)
-    .eq('status', 'active')
-    .maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
-  if (!data) throw new NotFound();
+  const row = await orgRowById(ctx.db, orgId, 'ai_conversations', conversationId);
+  if (!row || row.user_id !== ctx.userId || row.status !== 'active') throw new NotFound();
+  return toRef(row);
+}
+
+function toRef(row: Record<string, unknown>): ConversationRef {
   return {
-    id: data.id as string,
-    title: (data.title as string | null) ?? null,
-    lastMessageAt: (data.last_message_at as string | null) ?? null,
-    createdAt: data.created_at as string,
+    id: row.id as string,
+    title: (row.title as string | null) ?? null,
+    lastMessageAt: (row.last_message_at as string | null) ?? null,
+    createdAt: row.created_at as string,
   };
 }
 
 export async function createConversation(ctx: AccessContext): Promise<string> {
   assertCan(ctx, 'ai.use');
   const orgId = requireOrg(ctx);
-  const { data, error } = await ctx.db.schema('api').rpc('create_conversation', { p_org: orgId });
-  if (error) throw toMotionError(error, ctx.requestId);
-  return data as string;
+  return callApi<string>(ctx.db, 'create_conversation', { p_org: orgId }, ctx.requestId);
 }
 
 /** The caller's own conversations, newest first — the list on `/analyst`. */
 export async function listConversations(ctx: AccessContext): Promise<ConversationRef[]> {
   assertCan(ctx, 'ai.use');
   const orgId = requireOrg(ctx);
-  const { data, error } = await ctx.db
-    .from('ai_conversations')
-    .select('id, title, last_message_at, created_at')
-    .eq('organization_id', orgId)
-    .eq('user_id', ctx.userId)
-    .eq('status', 'active')
-    .order('last_message_at', { ascending: false, nullsFirst: false })
-    .limit(50);
-  if (error) throw toMotionError(error, ctx.requestId);
-  return ((data ?? []) as Array<Record<string, unknown>>).map((row) => ({
-    id: row.id as string,
-    title: (row.title as string | null) ?? null,
-    lastMessageAt: (row.last_message_at as string | null) ?? null,
-    createdAt: row.created_at as string,
-  }));
+  // Firestore orders nulls first ascending, so a descending order puts never-used conversations last.
+  const rows = await orgRows(ctx.db, orgId, 'ai_conversations', (q) => q
+    .where('user_id', '==', ctx.userId)
+    .where('status', '==', 'active')
+    .orderBy('last_message_at', 'desc')
+    .limit(50));
+  return rows.map(toRef);
 }
 
 /**
  * The messages of a conversation the caller may READ: their own, or — for an owner/admin — a
- * colleague's. RLS decides; the composite filter is the backstop. Used by the conversation page.
+ * colleague’s. The read policy decides (`src/db/rls.ts`). Used by the conversation page.
  */
 export async function loadMessages(ctx: AccessContext, conversationId: string): Promise<StoredMessage[]> {
   assertCan(ctx, 'ai.use');
   const orgId = requireOrg(ctx);
-  const { data, error } = await ctx.db
-    .from('ai_messages')
-    .select('id, role, content, structured_response, grounding_status, evidence_bundle_id, flagged, created_at')
-    .eq('organization_id', orgId)
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: true })
-    .limit(200);
-  if (error) throw toMotionError(error, ctx.requestId);
-  const rows = (data ?? []) as Array<Record<string, unknown>>;
+  const rows = await orgRows(ctx.db, orgId, 'ai_messages', (q) => q
+    .where('conversation_id', '==', conversationId)
+    .orderBy('created_at', 'asc')
+    .limit(200));
   if (rows.length === 0) {
     // Either an empty conversation the caller owns, or one they may not see. Tell the two apart the
     // way the rest of the product does: a foreign id is NotFound.
-    const { data: own, error: ownError } = await ctx.db
-      .from('ai_conversations').select('id').eq('organization_id', orgId).eq('id', conversationId).maybeSingle();
-    if (ownError) throw toMotionError(ownError, ctx.requestId);
-    if (!own) throw new NotFound();
+    if (!(await orgRowById(ctx.db, orgId, 'ai_conversations', conversationId))) throw new NotFound();
   }
   return rows.map((row) => ({
     id: row.id as string,
@@ -151,15 +131,10 @@ export async function loadMessages(ctx: AccessContext, conversationId: string): 
 export async function loadHistory(ctx: AccessContext, conversationId: string): Promise<HistoryTurn[]> {
   await findConversation(ctx, conversationId);
   const orgId = requireOrg(ctx);
-  const { data, error } = await ctx.db
-    .from('ai_messages')
-    .select('role, content, structured_response, grounding_status, created_at')
-    .eq('organization_id', orgId)
-    .eq('conversation_id', conversationId)
-    .order('created_at', { ascending: false })
-    .limit(HISTORY_TURNS * 2);
-  if (error) throw toMotionError(error, ctx.requestId);
-  const rows = ((data ?? []) as Array<Record<string, unknown>>).reverse();
+  const rows = (await orgRows(ctx.db, orgId, 'ai_messages', (q) => q
+    .where('conversation_id', '==', conversationId)
+    .orderBy('created_at', 'desc')
+    .limit(HISTORY_TURNS * 2))).reverse();
   return rows.map((row) => ({
     role: row.role as 'user' | 'assistant',
     content: (row.content as string | null) ?? null,

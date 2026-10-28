@@ -1,5 +1,5 @@
 import { Briefcase, UserPlus } from 'lucide-react';
-import { toMotionError } from '@/core/errors';
+import { readActiveAssignments } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody } from '@/components/ui/table';
@@ -17,17 +17,9 @@ interface AssignmentRecord {
 
 export default async function PlatformAssignmentsPage() {
   const ctx = await getPlatformContext();
-  const { data, error } = await ctx.db
-    .from('organization_assignments')
-    .select('id, organization_id, employee_user_id, status, ends_at')
-    .eq('status', 'active')
-    .order('created_at', { ascending: false })
-    .limit(100);
-
-  // Never `data ?? []` on its own: a failing query rendered as an empty list is the one thing a
-  // platform page must not show (PRODUCTION_AUDIT.md M2; ADR-070).
-  if (error) throw toMotionError(error, ctx.requestId);
-  const assignments = (data ?? []) as AssignmentRecord[];
+  // A failing read throws rather than rendering as an empty list — the one thing a platform page
+  // must not show (PRODUCTION_AUDIT.md M2; ADR-070).
+  const assignments = (await readActiveAssignments(ctx.db, 100)) as AssignmentRecord[];
 
   return (
     <>

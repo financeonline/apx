@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { cleanUpOwn, drainQueue, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, drainQueue, onboard, seedUser, signIn, uniqueName } from './fixtures';
+import { addMembership, backend, firstPeriod, orgIdBySlug, periodOf } from './firestore';
 
 /**
  * Journey 14 — Commercial Intelligence (Phase 14, ADR-102; REQ-CI).
@@ -18,29 +19,35 @@ test.afterAll(() => cleanUpOwn([ORG], ['journey14-owner', 'journey14-client']));
 async function mainText(page: Page): Promise<string> {
   return (await page.locator('main').innerText()).replace(/\s+/g, ' ');
 }
-const first = (s: string): string => s.split('\n')[0]!.trim();
 
 test('an owner records products, lines, a campaign and a won deal; marketing credits revenue by rule; a client reads it all with no controls', async ({ page }) => {
-  const owner = seedUser('journey14-owner');
-  const client = seedUser('journey14-client');
+  const owner = await seedUser('journey14-owner');
+  const client = await seedUser('journey14-client');
   await signIn(page, owner);
   const slug = await onboard(page, ORG);
-  const orgId = sql(`select id from public.organizations where slug = '${slug}'`).trim();
-  sql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${orgId}', '${client.userId}', 'client', 'active')`);
+  const orgId = await orgIdBySlug(slug);
+  await addMembership(orgId, client.userId, 'client');
 
   // ---- 0. What the engine already knows: one customer, one August invoice, a covering batch. ----
-  const acme = first(sql(`insert into public.counterparties (organization_id, name, kind) values ('${orgId}', 'Acme Ltd', 'customer') returning id`));
-  sql(`insert into public.invoices (organization_id, invoice_type, counterparty_id, invoice_number, issue_date, due_date, period_id, subtotal, tax_amount, total_amount, amount_paid, status, record_status, assurance_level)
-       values ('${orgId}', 'sales', '${acme}', 'A-100', '2026-08-10', '2026-09-09', '00000000-0000-0000-0000-000000000000', 6000, 1200, 7200, 0, 'open', 'accepted', 'verified')`);
-  const doc = first(sql(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-       values ('${orgId}', '${orgId}/j14/sales.csv', 'sales.csv', 'text/csv', 10, decode('14','hex'), 'ready', 'invoice') returning id`));
-  sql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind, confirmations)
-       values ('${orgId}', '${doc}', 'sales_invoices', 'invoices', 'committed', 'csv', '2026-06-01', '2026-08-31', now(), 'full',
-               '{"IMP-INV-013": {"by": null, "at": "2026-09-01T00:00:00Z", "value": {"opening": "complete"}}}'::jsonb)`);
-  const firstPeriod = sql(`select id from public.fiscal_periods where organization_id = '${orgId}' order by period_start limit 1`).trim();
-  sql(`insert into public.jobs (organization_id, job_type, payload, max_attempts) values ('${orgId}', 'calculation.run', '{"trigger":"banking_edit","period_ids":["${firstPeriod}"],"as_of":"2026-09-15"}'::jsonb, 3)`);
+  // Written with the integration suite's seeders, which store the whole document an import commit
+  // would (the invoice's period and balance due included — no trigger fills them in now).
+  const { seed } = await backend();
+  const acme = await seed.seedCounterparty(orgId, { name: 'Acme Ltd', kind: 'customer' });
+  await seed.seedInvoice(orgId, {
+    type: 'sales', counterpartyId: acme, number: 'A-100', issue: '2026-08-10', due: '2026-09-09',
+    subtotal: 6000, tax: 1200, total: 7200, paid: 0, status: 'open', recordStatus: 'accepted', assurance: 'verified',
+  });
+  const doc = await seed.seedDocument(orgId, 'sales.csv', 'invoice');
+  await seed.seedBatch(orgId, {
+    importType: 'sales_invoices', target: 'invoices', start: '2026-06-01', end: '2026-08-31', documentId: doc,
+    listKind: 'full', extractionMethod: 'csv',
+    confirmations: { 'IMP-INV-013': { by: null, at: '2026-09-01T00:00:00Z', value: { opening: 'complete' } } },
+  });
+  await seed.seedJob(orgId, 'calculation.run', {
+    trigger: 'banking_edit', period_ids: [await firstPeriod(orgId)], as_of: '2026-09-15',
+  }, 3);
   await drainQueue(page, slug);
-  const aug = sql(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-08-01'`).trim();
+  const aug = await periodOf(orgId, '2026-08-01');
 
   // ---- 1. A service, on the Products tab. ------------------------------------------------------
   await page.goto(`/app/${slug}/customers/products?period=${aug}`);

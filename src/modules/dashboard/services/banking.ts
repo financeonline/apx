@@ -1,5 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { orgRows } from '@/db/rls';
+import type { Db } from '@/db/types';
 import { callApi } from '@/core/db';
 import type { AssuranceLevel } from '@/core/assurance';
 import { Decimal, formatMoney, formatPercent } from '@/core/money';
@@ -77,7 +78,7 @@ interface PeriodSummary {
 }
 
 export async function loadPeriodSummary(
-  db: SupabaseClient, orgId: string, periodId: string, requestId?: string,
+  db: Db, orgId: string, periodId: string, requestId?: string,
 ): Promise<PeriodSummary> {
   return callApi<PeriodSummary>(db, 'bank_period_summary', { p_org: orgId, p_period: periodId }, requestId);
 }
@@ -376,7 +377,7 @@ function describeGroup(
 
 /** The groups as read, and their views; the Banking page also needs each group's key and direction. */
 async function recurringGroupsAndViews(
-  db: SupabaseClient, orgId: string, orgSlug: string, currency: string, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, currency: string, requestId?: string,
 ): Promise<{ groups: RecurringGroupRow[]; views: RecurringPaymentView[] }> {
   const [groups, accounts] = await Promise.all([
     listRecurringGroups(db, orgId, requestId),
@@ -393,7 +394,7 @@ async function recurringGroupsAndViews(
 
 /** The detected recurring payments, largest first; stopped ones last. */
 export async function loadRecurringPayments(
-  db: SupabaseClient, orgId: string, orgSlug: string, currency: string, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, currency: string, requestId?: string,
 ): Promise<RecurringPaymentView[]> {
   return (await recurringGroupsAndViews(db, orgId, orgSlug, currency, requestId)).views;
 }
@@ -552,14 +553,13 @@ function orgReconciliation(closing: SnapshotRow | undefined, currency: string): 
   };
 }
 
-async function baseCurrency(db: SupabaseClient, orgId: string): Promise<string> {
-  const { data } = await db.from('organizations').select('base_currency').eq('id', orgId).maybeSingle();
-  return ((data as { base_currency?: string } | null)?.base_currency) ?? 'GBP';
+async function baseCurrency(db: Db, orgId: string): Promise<string> {
+  return (await repo.loadOrganizationFacts(db, orgId))?.baseCurrency ?? 'GBP';
 }
 
 /** The Banking page, one month. */
 export async function loadBankingOverview(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   scope: PeriodScope,
@@ -679,7 +679,7 @@ function toRow(
 }
 
 export async function loadBankTransactionsPage(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   scope: PeriodScope,
@@ -800,7 +800,7 @@ function pairMeaning(a: BankAccount['accountType'], b: BankAccount['accountType'
 }
 
 export async function loadBankTransactionDetail(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   orgSlug: string,
   transactionId: string,
@@ -828,22 +828,28 @@ export async function loadBankTransactionDetail(
   // derives it when the pair is confirmed (ADR-028).
   let candidates: TransferCandidateView[] = [];
   if (!row.isTransfer && row.recordStatus === 'accepted') {
-    const magnitude = new Decimal(row.amount).abs().toFixed(2);
     const from = new Date(`${row.transactionDate}T00:00:00Z`); from.setUTCDate(from.getUTCDate() - 3);
     const to = new Date(`${row.transactionDate}T00:00:00Z`); to.setUTCDate(to.getUTCDate() + 3);
-    const { data } = await db
-      .from('bank_transactions')
-      .select('id, bank_account_id, transaction_date, amount, description_normalized, is_transfer, category_source')
-      .eq('organization_id', orgId)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null)
-      .eq('is_transfer', false)
-      .neq('bank_account_id', row.bankAccountId)
-      .eq('amount', new Decimal(row.amount).isNegative() ? magnitude : `-${magnitude}`)
-      .gte('transaction_date', from.toISOString().slice(0, 10))
-      .lte('transaction_date', to.toISOString().slice(0, 10))
-      .limit(10);
-    candidates = ((data ?? []) as Array<{ id: string; bank_account_id: string; transaction_date: string; amount: string; description_normalized: string | null; category_source: string }>)
+    /*
+     * One range filter only (the ±3 days), so the read needs no composite index; the other
+     * conditions — accepted, not superseded, not a transfer, another account, the opposite amount —
+     * are applied here, with the amount compared as a decimal (a stored string's scale must not
+     * decide a match, as NUMERIC equality never did).
+     */
+    const opposite = new Decimal(row.amount).negated();
+    const window = await orgRows<{
+      id: string; bank_account_id: string; transaction_date: string; amount: string;
+      description_normalized: string | null; is_transfer: boolean; category_source: string;
+      record_status: string; superseded_by: string | null;
+    }>(db, orgId, 'bank_transactions', (q) => q
+      .where('transaction_date', '>=', from.toISOString().slice(0, 10))
+      .where('transaction_date', '<=', to.toISOString().slice(0, 10)));
+    const data = window
+      .filter((c) => c.record_status === 'accepted' && (c.superseded_by ?? null) === null && c.is_transfer === false
+        && c.bank_account_id !== row.bankAccountId && new Decimal(c.amount).equals(opposite))
+      .sort((a, b) => (a.transaction_date < b.transaction_date ? -1 : a.transaction_date > b.transaction_date ? 1 : a.id < b.id ? -1 : 1))
+      .slice(0, 10);
+    candidates = data
       .filter((c) => c.category_source !== 'user')
       .map((c) => {
         const other = bankAccounts.find((a) => a.id === c.bank_account_id);

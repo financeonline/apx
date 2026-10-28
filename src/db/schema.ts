@@ -1,7 +1,7 @@
 import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
-import type {
-  CollectionReference, DocumentReference, Firestore, Query, Transaction,
+import {
+  FieldPath, type CollectionReference, type DocumentReference, type Firestore, type Query, type Transaction,
 } from 'firebase-admin/firestore';
 import { ConflictError } from '@/core/errors';
 
@@ -100,6 +100,9 @@ export function globalRow(fs: Firestore, table: GlobalTable, id: string): Docume
 export function acrossOrgs(fs: Firestore, table: OrgTable): Query {
   return fs.collectionGroup(table);
 }
+
+/** The document id as a field to order or page by (a stable tie-breaker after any other order). */
+export const documentIdField = (): FieldPath => FieldPath.documentId();
 
 export const newId = (): string => randomUUID();
 export const nowIso = (at: Date = new Date()): string => at.toISOString();

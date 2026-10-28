@@ -1,13 +1,17 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '@/core/permissions';
-import { recordAccessEvent } from '@/core/db';
+import { callApi, recordAccessEvent } from '@/core/db';
+import { getObject } from '@/core/storage/signer';
 import { loadHome } from '@/modules/dashboard';
 import { drainJobs } from '@/modules/jobs';
 import { getMonthlyReport, getReportFile, listAvailable, requestPdf } from '@/modules/reporting';
 import type { AccessContext } from '@/modules/tenancy';
-import {
-  adminSql, clientFor, createAuthUser, drainUntilFinished, serviceStorage, sqlstate,
-} from './setup';
+import { auth } from '@/db/firestore';
+import { newId, nowIso, orgCollection, orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, deleteOrg, drainUntilFinished, fs, rpc } from './setup';
+import { addMember, auditEvents, createOrgFixture } from './r-fixtures';
+import { ensureMonths, monthId, systemAccountId, writeJob } from './r-metrics';
+import { writeImportBatch, writeLedgerEntry, writeSourceDocument } from './r-records';
 
 /**
  * The Monthly Management Report (ADR-024; IMPLEMENTATION_PLAN.md Phase 13;
@@ -19,11 +23,12 @@ import {
  * because it is the artefact somebody prints and takes to a meeting. A report that disagreed with
  * the screen would not be caught by anyone until it had already been believed.
  *
- * Run-unique fixtures (ADR-052.12).
+ * Run-unique fixtures (ADR-052.12), written into Firestore as an import would leave them; the
+ * figures come from the real calculation job.
  */
 
 const RUN = `r${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.reporting.itest`;
+const DOMAIN = `${RUN}.reporting.itest.motion`;
 
 let ownerId: string;
 let clientId: string;
@@ -33,8 +38,7 @@ let orgSlug: string;
 let otherOrgId: string;
 let mayPeriodId: string;
 let junePeriodId: string;
-
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+const users: string[] = [];
 
 function contextFor(userId: string, role: 'owner' | 'client', org = orgId): AccessContext {
   return {
@@ -46,84 +50,56 @@ function contextFor(userId: string, role: 'owner' | 'client', org = orgId): Acce
 }
 const ownerCtx = () => contextFor(ownerId, 'owner');
 
-function accountId(category: string): string {
-  return one(`
-    select id from public.accounts
-     where organization_id = '${orgId}' and standard_category = '${category}' and is_system`);
+async function user(label: string): Promise<string> {
+  const id = await createAuthUser(`${label}@${DOMAIN}`);
+  users.push(id);
+  return id;
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  clientId = createAuthUser(`client@${DOMAIN}`);
-  strangerId = createAuthUser(`stranger@${DOMAIN}`);
+  ownerId = await user('owner');
+  clientId = await user('client');
+  strangerId = await user('stranger');
 
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', {
-    p_name: `ITest Reporting ${RUN}`,
+  const org = await createOrgFixture({ name: `ITest Reporting ${RUN}`, ownerId });
+  orgId = org.id;
+  orgSlug = org.slug;
+  otherOrgId = (await createOrgFixture({ name: `ITest Reporting Other ${RUN}`, ownerId: strangerId })).id;
+  await ensureMonths(orgId, '2026-01-01', '2026-12-31');
+  await ensureMonths(otherOrgId, '2026-01-01', '2026-12-31');
+
+  await addMember(orgId, clientId, 'client');
+
+  mayPeriodId = monthId(orgId, '2026-05');
+  junePeriodId = monthId(orgId, '2026-06');
+
+  const post = async (category: string, direction: 'debit' | 'credit', amount: string, day: string) =>
+    writeLedgerEntry(orgId, { accountId: await systemAccountId(orgId, category), date: `2026-05-${day}`, direction, amount });
+
+  await post('revenue', 'credit', '40000.00', '10');
+  await post('cost_of_sales', 'debit', '9000.00', '12');
+  await post('payroll', 'debit', '12000.00', '25');
+
+  const doc = await writeSourceDocument(orgId, { path: `${orgId}/report/gl.csv`, filename: 'gl.csv', kind: 'general_ledger' });
+  await writeImportBatch(orgId, {
+    documentId: doc, importType: 'general_ledger', targetTable: 'ledger_entries', status: 'committed',
+    periodStart: '2026-05-01', periodEnd: '2026-05-31',
   });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-  orgSlug = one(`select slug from public.organizations where id = '${orgId}'`);
 
-  const other = await clientFor(strangerId).schema('api').rpc('create_organization', {
-    p_name: `ITest Reporting Other ${RUN}`,
-  });
-  otherOrgId = other.data as unknown as string;
-
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status)
-    values ('${orgId}', '${clientId}', 'client', 'active')`);
-
-  mayPeriodId = one(`
-    select id from public.fiscal_periods
-     where organization_id = '${orgId}' and period_start = '2026-05-01'`);
-  junePeriodId = one(`
-    select id from public.fiscal_periods
-     where organization_id = '${orgId}' and period_start = '2026-06-01'`);
-
-  const post = (category: string, direction: string, amount: string, day: string) => {
-    const id = one(`
-      insert into public.ledger_entries
-             (organization_id, entry_date, account_id, direction, amount, period_id, record_status)
-      values ('${orgId}', '2026-05-${day}', '${accountId(category)}', '${direction}', ${amount},
-              '00000000-0000-0000-0000-000000000000', 'accepted')
-      returning id`);
-    adminSql(`
-      insert into public.record_status_events (organization_id, record_table, record_id, event)
-      values ('${orgId}', 'ledger_entries', '${id}', 'accepted')`);
-  };
-
-  post('revenue', 'credit', '40000.00', '10');
-  post('cost_of_sales', 'debit', '9000.00', '12');
-  post('payroll', 'debit', '12000.00', '25');
-
-  const doc = one(`
-    insert into public.source_documents
-           (organization_id, storage_path, original_filename, mime_type, byte_size, sha256,
-            status, document_kind)
-    values ('${orgId}', '${orgId}/report/gl.csv', 'gl.csv', 'text/csv', 10, decode('e5','hex'),
-            'ready', 'general_ledger')
-    returning id`);
-  adminSql(`
-    insert into public.import_batches
-           (organization_id, source_document_id, import_type, target_table, status,
-            extraction_method, period_start, period_end, committed_at)
-    values ('${orgId}', '${doc}', 'general_ledger', 'ledger_entries', 'committed',
-            'csv', '2026-05-01', '2026-05-31', now())`);
-
-  const jobId = adminSql(`
-    insert into public.jobs (organization_id, job_type, payload, max_attempts)
-    values ('${orgId}', 'calculation.run',
-            '{"trigger":"recalc_manual","as_of":"2026-06-15"}'::jsonb, 3)
-    returning id`).split('\n')[0]!.trim();
+  const jobId = await writeJob(orgId, { jobType: 'calculation.run', payload: { trigger: 'recalc_manual', as_of: '2026-06-15' } });
   expect(await drainUntilFinished(drainJobs, jobId), 'the figures must exist').toBe('succeeded');
-});
+}, 180_000);
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Reporting%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Reporting %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.reporting.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  for (const org of [orgId, otherOrgId]) {
+    if (!org) continue;
+    for (const j of (await fs().collection('jobs').where('organization_id', '==', org).get()).docs) await j.ref.delete();
+    await deleteOrg(org);
+  }
+  for (const id of users) {
+    await fs().collection('profiles').doc(id).delete();
+    await auth().deleteUser(id).catch(() => undefined);
+  }
 });
 
 describe('the report says exactly what Home says (§15, ARCHITECTURE risk 7)', () => {
@@ -183,9 +159,7 @@ describe('a report exists only for a month that has finished (ADR-030.4)', () =>
   });
 
   it('returns nothing for another organisation’s period', async () => {
-    const foreignPeriod = one(`
-      select id from public.fiscal_periods
-       where organization_id = '${otherOrgId}' and period_start = '2026-05-01'`);
+    const foreignPeriod = monthId(otherOrgId, '2026-05');
     expect(await getMonthlyReport(ownerCtx(), foreignPeriod)).toBeNull();
   });
 });
@@ -197,39 +171,33 @@ describe('the PDF job renders, stores and records (Phase 13 slice 2)', () => {
     const jobId = await requestPdf(ownerCtx(), mayPeriodId);
     expect(await drainUntilFinished(drainJobs, jobId)).toBe('succeeded');
 
-    reportFileId = one(`
-      select id::text from public.report_files
-       where organization_id = '${orgId}' and period_id = '${mayPeriodId}'`);
+    const files = (await orgCollection(fs(), orgId, 'report_files').where('period_id', '==', mayPeriodId).get()).docs.map((d) => d.data());
+    expect(files).toHaveLength(1);
+    reportFileId = String(files[0]!.id);
     expect(reportFileId).toMatch(/^[0-9a-f-]{36}$/);
 
-    const row = one(`
-      select report_kind::text || '|' || storage_bucket || '|' || storage_path
-             || '|' || byte_size::text
-        from public.report_files where id = '${reportFileId}'`);
+    const row = files[0]!;
     // The path is derived by the function, never supplied: `{org}/{period}/{id}.pdf` (R2-A-09).
-    expect(row).toBe(
-      `monthly_management|reports|${orgId}/${mayPeriodId}/${reportFileId}.pdf`
-      + `|${one(`select byte_size::text from public.report_files where id = '${reportFileId}'`)}`,
-    );
+    expect(`${row.report_kind}|${row.storage_bucket}|${row.storage_path}`)
+      .toBe(`monthly_management|reports|${orgId}/${mayPeriodId}/${reportFileId}.pdf`);
+    expect(row.byte_size).toBeGreaterThan(1000);
+    // bytea is stored as lowercase hex without the `\x` prefix.
+    expect(row.sha256).toMatch(/^[0-9a-f]{64}$/);
   });
 
   it('the object is really in the bucket, and is a PDF', async () => {
-    const path = one(`select storage_path from public.report_files where id = '${reportFileId}'`);
-    const { data, error } = await serviceStorage().storage.from('reports').download(path);
-    expect(error).toBeNull();
-
-    const bytes = new Uint8Array(await data!.arrayBuffer());
+    const path = String((await orgRow(fs(), orgId, 'report_files', reportFileId).get()).get('storage_path'));
+    const bytes = await getObject({ orgId, userId: ownerId }, 'reports', path);
     // A row that names an object Storage cannot serve is the failure mode ADR-043.4's ordering
     // exists to prevent; this is the assertion that the ordering held.
     expect(new TextDecoder().decode(bytes.slice(0, 5))).toBe('%PDF-');
     expect(bytes.byteLength).toBeGreaterThan(1000);
   });
 
-  it('and the audit says who produced it', () => {
-    expect(Number(one(`
-      select count(*) from public.audit_events
-       where organization_id = '${orgId}' and action = 'report.generated'
-         and target_id = '${reportFileId}'`))).toBe(1);
+  it('and the audit says who produced it', async () => {
+    const events = (await auditEvents(orgId, 'report.generated')).filter((e) => e.target_id === reportFileId);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.actor_user_id).toBe(ownerId);
   });
 
   it('shows up in the list against its month', async () => {
@@ -243,16 +211,14 @@ describe('the PDF job renders, stores and records (Phase 13 slice 2)', () => {
 describe('isolation case 23 — another organisation’s report id (§4)', () => {
   let foreignReportId: string;
 
-  beforeAll(() => {
-    const foreignPeriod = one(`
-      select id from public.fiscal_periods
-       where organization_id = '${otherOrgId}' and period_start = '2026-05-01'`);
-    foreignReportId = one(`
-      insert into public.report_files
-             (organization_id, period_id, report_kind, storage_bucket, storage_path)
-      values ('${otherOrgId}', '${foreignPeriod}', 'monthly_management', 'reports',
-              '${otherOrgId}/${foreignPeriod}/theirs.pdf')
-      returning id`);
+  beforeAll(async () => {
+    const foreignPeriod = monthId(otherOrgId, '2026-05');
+    foreignReportId = newId();
+    await orgRow(fs(), otherOrgId, 'report_files', foreignReportId).set({
+      id: foreignReportId, organization_id: otherOrgId, period_id: foreignPeriod, report_kind: 'monthly_management',
+      job_id: null, storage_bucket: 'reports', storage_path: `${otherOrgId}/${foreignPeriod}/theirs.pdf`, sha256: null,
+      byte_size: null, generated_by: null, evidence_bundle_id: null, deleted_at: null, created_at: nowIso(), report_id: null,
+    });
   });
 
   it('does not resolve, so no URL can be minted', async () => {
@@ -275,28 +241,23 @@ describe('isolation case 23 — another organisation’s report id (§4)', () =>
       },
     )).rejects.toMatchObject({ code: 'NOT_FOUND' });
 
-    expect(Number(one(`
-      select count(*) from public.audit_events
-       where action = 'report.downloaded' and target_id = '${foreignReportId}'`))).toBe(0);
+    const downloads = await fs().collection('audit_events').where('target_id', '==', foreignReportId).get();
+    expect(downloads.docs.filter((d) => d.get('action') === 'report.downloaded')).toHaveLength(0);
   });
 });
 
 describe('a browser cannot write a report row (ADR-043)', () => {
-  it('api_server.record_report_file is not executable with a user JWT', async () => {
-    const { error } = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-      .schema('api_server').rpc('record_report_file', {
-        p_actor: ownerId, p_org: orgId, p_period: mayPeriodId, p_job: null,
-        p_file: null, p_sha256: null, p_bytes: 1,
-      });
-    expect(error).not.toBeNull();
+  it('api_server.record_report_file refuses a signed-in user', async () => {
+    const { error } = await rpc(clientFor(ownerId, { email: `owner@${DOMAIN}` }), 'record_report_file', {
+      p_actor: ownerId, p_org: orgId, p_period: mayPeriodId, p_job: null, p_file: null, p_sha256: null, p_bytes: 1,
+    }, { server: true });
+    expect(error).toMatchObject({ code: 'PERMISSION_DENIED' });
   });
 
-  it('and no authenticated role can insert into report_files directly (ADR-026)', async () => {
-    const { error } = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-      .from('report_files').insert({
-        organization_id: orgId, period_id: mayPeriodId, storage_path: 'x',
-      });
-    expect(sqlstate(error)).toBe('42501');
+  it('and there is no api.* function that writes report_files (ADR-026)', async () => {
+    // The browser never reaches Firestore (firebase/firestore.rules deny all); a user's only writes
+    // are api.* functions, and none of them is named for this.
+    await expect(callApi(clientFor(ownerId), 'record_report_file', {})).rejects.toMatchObject({ code: 'INTERNAL' });
   });
 });
 

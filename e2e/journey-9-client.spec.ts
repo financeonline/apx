@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import {
-  GL_CSV, cleanUpOwn, drainQueue, importLedger, onboard, seedUser, signIn, sql, uniqueName,
+  GL_CSV, cleanUpOwn, drainQueue, importLedger, onboard, seedUser, signIn, uniqueName,
 } from './fixtures';
+import { addMembership, orgIdBySlug, orgRowById, seedAction } from './firestore';
 
 /**
  * Journey 9 — the client experience (TEST_STRATEGY.md §12 journey 9; EVIDENCE_MODEL.md §10, CD-17).
@@ -17,8 +18,8 @@ const ORG_NAME = uniqueName('Client View Ltd');
 test.afterAll(() => cleanUpOwn([ORG_NAME], ['journey9-owner', 'journey9-client']));
 
 test('a client reaches the records behind a figure, and stops at the document', async ({ page }) => {
-  const owner = seedUser('journey9-owner');
-  const client = seedUser('journey9-client');
+  const owner = await seedUser('journey9-owner');
+  const client = await seedUser('journey9-client');
 
   // ---- An organisation with real figures in it ------------------------------------------------
   await signIn(page, owner);
@@ -30,11 +31,10 @@ test('a client reaches the records behind a figure, and stops at the document', 
   
   await expect(page.getByText('£40,000').first()).toBeVisible({ timeout: 30_000 });
 
-  // The owner adds the client. Done in SQL because inviting and accepting is journey 4's subject,
-  // and this journey is about what the client can then see.
-  const orgId = sql(`select id from public.organizations where slug = '${slug}'`);
-  sql(`insert into public.organization_memberships (organization_id, user_id, role, status)
-       values ('${orgId}', '${client.userId}', 'client', 'active')`);
+  // The owner adds the client. Written directly because inviting and accepting is journey 4's
+  // subject, and this journey is about what the client can then see.
+  const orgId = await orgIdBySlug(slug);
+  await addMembership(orgId, client.userId, 'client');
 
   // ---- The client's own session ---------------------------------------------------------------
   await page.context().clearCookies();
@@ -75,19 +75,10 @@ test('a client reaches the records behind a figure, and stops at the document', 
    * Action Centre is the one place in the product where a client WRITES, so this is the step that
    * proves the read-only story has a deliberate exception rather than a hole.
    */
-  /*
-   * Wrapped in a CTE: `sql()` returns psql's whole stdout, and a bare `INSERT … RETURNING` prints
-   * the row AND the "INSERT 0 1" command tag, so the id comes back with the tag glued to it. The
-   * integration harness's `one()` wraps for the same reason.
-   */
-  const actionId = sql(`
-    with q as (
-    insert into public.actions
-           (organization_id, title, issue, priority, owner_user_id, status, source_type, created_by)
-    values ('${orgId}', 'Send the signed engagement letter back',
-            'We cannot start the year-end until it is in.', 'high',
-            '${client.userId}', 'open', 'user', '${owner.userId}')
-    returning id) select * from q`);
+  const actionId = await seedAction(orgId, {
+    title: 'Send the signed engagement letter back', issue: 'We cannot start the year-end until it is in.',
+    priority: 'high', owner: client.userId, status: 'open', due: null, createdBy: owner.userId,
+  });
 
   await page.goto(`/app/${slug}/actions`);
   await expect(page.getByRole('heading', { name: /what we have decided to do/i })).toBeVisible();
@@ -100,7 +91,7 @@ test('a client reaches the records behind a figure, and stops at the document', 
   await page.getByRole('button', { name: /^start$/i }).click();
   await expect(page.getByText(/marked as in progress/i)).toBeVisible({ timeout: 30_000 });
   expect(
-    sql(`select status from public.actions where id = '${actionId}'`),
+    (await orgRowById(orgId, 'actions', actionId))?.status,
     'the status moved in the database, not just on the screen',
   ).toBe('in_progress');
 

@@ -1,13 +1,14 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import { orgRowById, orgRows, readCtx } from '@/db/rls';
+import { orgCollection, type OrgTable } from '@/db/schema';
+import type { Db } from '@/db/types';
 import type { Row } from './rows';
 
 /**
  * Reads for the evidence tables themselves (EVIDENCE_MODEL.md §2).
  *
- * All of these run under the caller's session. That matters most for `evidence_bundles`: the RLS
- * policy on that table already implements §8.9 — an `ai_response` bundle is readable only by the
+ * All of these run for the caller, through the ported row policies (`src/db/rls.ts`). That matters
+ * most for `evidence_bundles`: the policy on that table already implements §8.9 — an `ai_response` bundle is readable only by the
  * origin message's owner or by an organization owner/admin — so this module must never reach for a
  * service client to "make the read work".
  */
@@ -42,24 +43,27 @@ export function isPinnedItemType(value: string): value is PinnedItemType {
   return value in ITEM_TYPE_TABLE;
 }
 
+/** One row by id with only `columns`, or null when it does not exist or the caller may not see it. */
 async function one(
-  db: SupabaseClient,
-  table: string,
+  db: Db,
+  table: OrgTable,
   columns: string,
   orgId: string,
   id: string,
 ): Promise<Row | null> {
-  const { data, error } = await db
-    .from(table)
-    .select(columns)
-    .eq('organization_id', orgId)
-    .eq('id', id)
-    .maybeSingle();
-  if (error) throw toMotionError(error);
-  return (data ?? null) as Row | null;
+  const row = await orgRowById<Row>(db, orgId, table, id);
+  if (row === null) return null;
+  return project(row, columns);
 }
 
-export function fetchBundle(db: SupabaseClient, orgId: string, bundleId: string): Promise<Row | null> {
+function project(row: Row, columns: string): Row {
+  return Object.fromEntries(columns.split(',').map((c) => [c, row[c] ?? null]));
+}
+
+const ITEM_COLUMNS =
+  'id,organization_id,bundle_id,sort_order,item_type,ref_id,ref_revision_no,query_descriptor,descriptor_hash,label,claim,assurance_level';
+
+export function fetchBundle(db: Db, orgId: string, bundleId: string): Promise<Row | null> {
   return one(
     db,
     'evidence_bundles',
@@ -70,41 +74,28 @@ export function fetchBundle(db: SupabaseClient, orgId: string, bundleId: string)
 }
 
 export async function fetchBundleItems(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   bundleId: string,
 ): Promise<Row[]> {
-  const { data, error } = await db
-    .from('evidence_items')
-    .select(
-      'id,organization_id,bundle_id,sort_order,item_type,ref_id,ref_revision_no,query_descriptor,descriptor_hash,label,claim,assurance_level',
-    )
-    .eq('organization_id', orgId)
-    .eq('bundle_id', bundleId)
-    // sort_order then id: §2.2 calls items "ordered members", and id is the tiebreak that keeps two
-    // items sharing a sort_order in a stable order between requests.
-    .order('sort_order', { ascending: true })
-    .order('id', { ascending: true });
-  if (error) throw toMotionError(error);
-  return (data ?? []) as Row[];
+  const rows = await orgRows<Row>(db, orgId, 'evidence_items', (q) => q.where('bundle_id', '==', bundleId));
+  // sort_order then id: §2.2 calls items "ordered members", and id is the tiebreak that keeps two
+  // items sharing a sort_order in a stable order between requests.
+  rows.sort((a, b) => (Number(a.sort_order) - Number(b.sort_order))
+    || (String(a.id) < String(b.id) ? -1 : String(a.id) > String(b.id) ? 1 : 0));
+  return rows.map((row) => project(row, ITEM_COLUMNS));
 }
 
 export function fetchEvidenceItem(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   itemId: string,
 ): Promise<Row | null> {
-  return one(
-    db,
-    'evidence_items',
-    'id,organization_id,bundle_id,sort_order,item_type,ref_id,ref_revision_no,query_descriptor,descriptor_hash,label,claim,assurance_level',
-    orgId,
-    itemId,
-  );
+  return one(db, 'evidence_items', ITEM_COLUMNS, orgId, itemId);
 }
 
 export function fetchCalculationRun(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   runId: string,
 ): Promise<Row | null> {
@@ -118,35 +109,61 @@ export function fetchCalculationRun(
 }
 
 /**
+ * `app.redact_metric_components`: the components a reader without the detail permission is shown —
+ * no `*_id` / `*_ids` key, and only numbers, booleans, nulls, decimal strings and dates.
+ */
+export function redactMetricComponents(components: unknown): Record<string, unknown> {
+  if (!components || typeof components !== 'object' || Array.isArray(components)) return {};
+  const out: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(components as Record<string, unknown>)) {
+    if (/(^|_)ids?$/.test(key)) continue;
+    if (value === null || typeof value === 'number' || typeof value === 'boolean'
+      || (typeof value === 'string' && (/^-?[0-9]+(\.[0-9]+)?$/.test(value) || /^[0-9]{4}-[0-9]{2}-[0-9]{2}$/.test(value)))) {
+      out[key] = value;
+    }
+  }
+  return out;
+}
+
+/**
  * One snapshot with its `components` and `evidence_query`.
  *
- * The two payload columns are not selectable on `metric_snapshots` since the ADR-172 hardening
- * (migration 20261018000033) — they carry account and counterparty ids, bank account names and the
- * record descriptors behind a figure. They come from the definer view `metric_snapshot_payloads`,
- * whole for the evidence's own readers (`financials.view`, which every caller here has asserted). A
- * snapshot the caller cannot read is NULL from the table read, so the view is not asked.
+ * The two payload fields carry account and counterparty ids, bank account names and the record
+ * descriptors behind a figure, so they are returned whole only to a reader the old definer view
+ * `metric_snapshot_payloads` gave the detail to (ADR-172 hardening): `financials.view`, a
+ * counterparty figure with `customers.view`, or — on a suspended organisation — the current figure
+ * by the underlying role. Anyone else the snapshot policy admits gets the components redacted and no
+ * `evidence_query`, exactly as the view returned them.
  */
 export async function fetchMetricSnapshot(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   snapshotId: string,
 ): Promise<Row | null> {
-  const [row, payload] = await Promise.all([
-    one(
-      db,
-      'metric_snapshots',
-      'id,organization_id,calculation_run_id,period_id,metric_key,dimension_type,dimension_id,value,unit,currency,basis,assurance_level,data_quality',
-      orgId,
-      snapshotId,
-    ),
-    one(db, 'metric_snapshot_payloads', 'id,components,evidence_query', orgId, snapshotId),
-  ]);
-  if (row === null) return null;
+  const full = await orgRowById<Row>(db, orgId, 'metric_snapshots', snapshotId);
+  if (full === null) return null;
+  const row = project(
+    full,
+    'id,organization_id,calculation_run_id,period_id,metric_key,dimension_type,dimension_id,value,unit,currency,basis,assurance_level,data_quality',
+  );
+  const detail = await snapshotDetail(db, orgId, full);
   return {
     ...row,
-    components: payload?.components ?? {},
-    evidence_query: payload?.evidence_query ?? null,
+    components: detail ? (full.components ?? {}) : redactMetricComponents(full.components),
+    evidence_query: detail ? (full.evidence_query ?? null) : null,
   };
+}
+
+async function snapshotDetail(db: Db, orgId: string, snapshot: Row): Promise<boolean> {
+  const c = await readCtx(db, orgId);
+  if (!c) return false;
+  const counterparty = snapshot.dimension_type === 'counterparty';
+  if (await c.has('financials.view')) return true;
+  if (counterparty && await c.has('customers.view')) return true;
+  if (!(await c.frozenAny('financials.view')) && !(counterparty && await c.frozenAny('customers.view'))) return false;
+  const current = await orgCollection(db.fs, orgId, 'metric_current')
+    .where('snapshot_id', '==', String(snapshot.id)).limit(1).get();
+  return !current.empty;
 }
 
 /**
@@ -156,7 +173,7 @@ export async function fetchMetricSnapshot(
  * filter pinned items by status — and the drawer shows the badge and the replacement link.
  */
 export async function fetchPinnedLifecycle(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   table: string,
   id: string,
@@ -166,7 +183,7 @@ export async function fetchPinnedLifecycle(
     // "this object cannot be superseded", which is not the same as "it is current".
     return { recordStatus: null, superseded: null };
   }
-  const row = await one(db, table, 'id,organization_id,record_status,superseded_by', orgId, id);
+  const row = await one(db, table as OrgTable, 'id,organization_id,record_status,superseded_by', orgId, id);
   if (row === null) return { recordStatus: null, superseded: null };
   return {
     recordStatus: row.record_status === null || row.record_status === undefined ? null : String(row.record_status),

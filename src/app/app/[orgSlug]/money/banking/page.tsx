@@ -17,6 +17,7 @@ import { PeriodHeading } from '../_components/period-heading';
 import { WhyLink } from '../_components/figures';
 import { AddAccountForm } from './add-account-form';
 import { requirePermission } from '@/app/_lib/authz';
+import { loadBaseCurrency } from '@/modules/financials';
 
 export const dynamic = 'force-dynamic';
 
@@ -327,6 +328,5 @@ function AccountCard({ account }: { account: BankAccountCardView }) {
 }
 
 async function baseCurrency(ctx: Awaited<ReturnType<typeof getAccessContext>>): Promise<string> {
-  const { data } = await ctx.db.from('organizations').select('base_currency').eq('id', ctx.orgId!).maybeSingle();
-  return ((data as { base_currency?: string } | null)?.base_currency) ?? 'GBP';
+  return (await loadBaseCurrency(ctx.db, ctx.orgId!)) ?? 'GBP';
 }

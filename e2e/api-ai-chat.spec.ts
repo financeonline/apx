@@ -1,5 +1,6 @@
 import { expect, test, type APIResponse, type Page } from '@playwright/test';
-import { seededOrgSlug, sql } from './fixtures';
+import { seededOrgSlug } from './fixtures';
+import { orgIdBySlug, orgRowById } from './firestore';
 
 /**
  * `POST /api/ai/chat` (AI_ARCHITECTURE.md §2 step 13; ROUTE_ARCHITECTURE.md §165, §237).
@@ -84,7 +85,8 @@ test.describe('POST /api/ai/chat', () => {
     else expect(answer.answer).not.toBeNull();
 
     // The turn is the server's record, not the browser's: the assistant row exists with that verdict.
-    expect(sql(`select grounding_status from public.ai_messages where id = '${answer.messageId}'`)).toBe(answer.groundingStatus);
+    const message = await orgRowById(await orgIdBySlug(seededOrgSlug()), 'ai_messages', answer.messageId);
+    expect(message?.grounding_status).toBe(answer.groundingStatus);
     // And a second question in the same conversation is accepted as the caller's own.
     const again = await ask(page, { message: 'And costs?', conversationId: answer.conversationId });
     expect(again.status()).toBe(200);

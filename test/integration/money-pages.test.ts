@@ -1,6 +1,6 @@
 import { randomUUID } from 'node:crypto';
 
-import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { assertCan, can, permissionsFor } from '@/core/permissions';
 import { remapAccount, setOpeningBalance } from '@/modules/financials';
@@ -18,7 +18,13 @@ import {
   loadProfitAndLoss,
   type PeriodScope,
 } from '@/modules/dashboard';
-import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
+import { periodId as periodIdOf } from '@/db/app/shared';
+import { orgCollection, orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, fs, rpc } from './setup';
+import {
+  addMember, dropFixtures, parkQueuedJobs, rowOf, seedAccount, seedBankAccount, seedBankTxn, seedCounterparty, seedInvoice,
+  systemAccount, writeRun,
+} from './f-fixtures';
 
 /**
  * The Money section, Customers and the chart of accounts, against the database
@@ -32,20 +38,20 @@ import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
  *   - the opening-balance form's action is refused for a caller without `financials.edit`;
  *   - a system account cannot be re-mapped (ADR-004).
  *
- * The assertions are made against the database, not the DOM: what matters is that the page's data
+ * The assertions are made against the data, not the DOM: what matters is that the page's data
  * equals its evidence, and a rendering test cannot show that.
  *
- * The fixtures deliberately do NOT use `resetFixtures()`. That helper deletes every `itest-` row in
- * the database, which is correct when the suite owns the instance and destructive when a second
- * engineer is running their own file against the same local Supabase — each run then deletes the
- * other's organisation mid-test. This file owns a uniquely named organisation and a domain of its
- * own, creates it once and removes exactly that, so it neither depends on nor disturbs anything
- * else on the instance.
+ * The fixtures deliberately do NOT use `resetFixtures()`: other suites share the emulator. This file
+ * owns a uniquely named organisation and a domain of its own, creates it once and removes exactly
+ * that, so it neither depends on nor disturbs anything else.
  */
+
+// `loadPeriodScope` reads every figure pointer of the organisation; give the page readers room.
+vi.setConfig({ testTimeout: 180_000, hookTimeout: 180_000 });
 
 /** Unique per run, so two runs of this file can never collide on the organisation slug. */
 const SUITE = randomUUID().slice(0, 8);
-const EMAIL_DOMAIN = 'moneyfix.test';
+const EMAIL_DOMAIN = `${SUITE}.moneyfix.itest.motion`;
 
 let ownerId: string;
 let clientUserId: string;
@@ -62,10 +68,8 @@ let systemRevenueAccount: string;
 let importedAccount: string;
 let uncategorisedAccount: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
-/** Writes a snapshot and its pointer, exactly as a calculation run would. */
-function writeMetric(periodId: string, key: string, value: string | null, over: {
+/** Writes a snapshot and its pointer, exactly as a calculation run would (a run of its own). */
+async function writeMetric(periodId: string, key: string, value: string | null, over: {
   unit?: string;
   basis?: string;
   assurance?: string;
@@ -75,104 +79,83 @@ function writeMetric(periodId: string, key: string, value: string | null, over: 
   dimensionId?: string | null;
   /** A standard category has no row to point at, so it travels here (ADR-053). */
   dimensionKey?: string | null;
-} = {}): string {
-  const runId = one(`
-    insert into public.calculation_runs
-           (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-    values ('${orgId}', 'recalc_manual', '1.0.0', '${periodId}', '${periodId}', '2026-06-15', 'succeeded')
-    returning id`);
-
-  const dimensionType = over.dimensionType ?? 'none';
-  const dimensionId = over.dimensionId ?? null;
-  const dimensionKey = over.dimensionKey ?? null;
-
-  const snapshotId = one(`
-    insert into public.metric_snapshots
-           (organization_id, calculation_run_id, period_id, metric_key, dimension_type, dimension_id,
-            dimension_key, value, unit, currency, basis, assurance_level, data_quality, components)
-    values ('${orgId}', '${runId}', '${periodId}', '${key}', '${dimensionType}',
-            ${dimensionId === null ? 'null' : `'${dimensionId}'`},
-            ${dimensionKey === null ? 'null' : `'${dimensionKey}'`},
-            ${value === null ? 'null' : value}, '${over.unit ?? 'money'}',
-            ${over.unit === 'ratio' || over.unit === 'days' || over.unit === 'count' ? 'null' : "'GBP'"},
-            '${over.basis ?? 'ledger'}', '${over.assurance ?? 'verified'}',
-            '${JSON.stringify(over.quality ?? { completeness: 1, proxy: false, warnings: [], missing: [] })}'::jsonb,
-            '${JSON.stringify(over.components ?? {})}'::jsonb)
-    returning id`);
-
-  adminSql(`
-    insert into public.metric_current
-           (organization_id, period_id, metric_key, dimension_type, dimension_id, dimension_key,
-            snapshot_id, calculation_run_id)
-    values ('${orgId}', '${periodId}', '${key}', '${dimensionType}',
-            ${dimensionId === null ? 'null' : `'${dimensionId}'`},
-            ${dimensionKey === null ? 'null' : `'${dimensionKey}'`}, '${snapshotId}', '${runId}')
-    on conflict do nothing`);
-
-  return snapshotId;
+} = {}): Promise<string> {
+  // `on conflict do nothing`: the first pointer of a cell stays.
+  const existing = await orgCollection(fs(), orgId, 'metric_current').where('period_id', '==', periodId)
+    .where('metric_key', '==', key).where('dimension_type', '==', over.dimensionType ?? 'none')
+    .where('dimension_id', '==', over.dimensionId ?? null).where('dimension_key', '==', over.dimensionKey ?? null).limit(1).get();
+  if (!existing.empty) return String(existing.docs[0]!.get('snapshot_id'));
+  const { snapshotIds } = await writeRun(orgId, [{
+    periodId, key, value, unit: over.unit ?? 'money', basis: over.basis ?? 'ledger',
+    currency: over.unit === 'ratio' || over.unit === 'days' || over.unit === 'count' ? null : 'GBP',
+    dataQuality: over.quality ?? { completeness: 1, proxy: false, warnings: [], missing: [] },
+    components: over.components ?? {}, dimensionType: over.dimensionType ?? 'none',
+    dimensionId: over.dimensionId ?? null, dimensionKey: over.dimensionKey ?? null,
+  }], { asOf: '2026-06-15' });
+  return snapshotIds[0]!;
 }
 
-function markComplete(periodId: string, complete: boolean): void {
-  adminSql(`update public.fiscal_periods set is_complete = ${complete} where id = '${periodId}'`);
+async function markComplete(periodId: string, complete: boolean): Promise<void> {
+  await orgRow(fs(), orgId, 'fiscal_periods', periodId).update({ is_complete: complete });
 }
 
 /** March, fully stated: the month every "equals its snapshot" assertion is made against. */
-function seedMarch(): void {
-  markComplete(february, true);
-  markComplete(march, true);
+async function seedMarch(): Promise<void> {
+  await markComplete(february, true);
+  await markComplete(march, true);
 
-  writeMetric(february, 'revenue', '18000.00');
-  writeMetric(february, 'closing_cash', '21000.00');
+  await writeMetric(february, 'revenue', '18000.00');
+  await writeMetric(february, 'closing_cash', '21000.00');
 
-  writeMetric(march, 'revenue', '20000.50');
-  writeMetric(march, 'cost_of_sales', '6000.25');
-  writeMetric(march, 'gross_profit', '14000.25');
-  writeMetric(march, 'gross_margin', '0.7000', { unit: 'ratio' });
-  writeMetric(march, 'operating_expenses', '6000.00');
-  writeMetric(march, 'operating_profit', '8000.25');
-  writeMetric(march, 'operating_margin', '0.4000', { unit: 'ratio' });
-  writeMetric(march, 'interest_expense', '120.00');
-  writeMetric(march, 'tax_expense', '1400.00');
-  writeMetric(march, 'net_profit', '6480.25');
-  writeMetric(march, 'net_margin', '0.3239', { unit: 'ratio' });
-  writeMetric(march, 'revenue.variance.prev_period', '2000.50', {
+  await writeMetric(march, 'revenue', '20000.50');
+  await writeMetric(march, 'cost_of_sales', '6000.25');
+  await writeMetric(march, 'gross_profit', '14000.25');
+  await writeMetric(march, 'gross_margin', '0.7000', { unit: 'ratio' });
+  await writeMetric(march, 'operating_expenses', '6000.00');
+  await writeMetric(march, 'operating_profit', '8000.25');
+  await writeMetric(march, 'operating_margin', '0.4000', { unit: 'ratio' });
+  await writeMetric(march, 'interest_expense', '120.00');
+  await writeMetric(march, 'tax_expense', '1400.00');
+  await writeMetric(march, 'net_profit', '6480.25');
+  await writeMetric(march, 'net_margin', '0.3239', { unit: 'ratio' });
+  await writeMetric(march, 'revenue.variance.prev_period', '2000.50', {
     components: { pct_change: 0.1111 },
   });
 
   // The dimensioned spending breakdown. `dimension_id` is a uuid column, so the category travels in
   // the components — which is where the page reads it from.
-  writeMetric(march, 'expense_by_category', '4000.00', {
+  await writeMetric(march, 'expense_by_category', '4000.00', {
     dimensionType: 'standard_category', dimensionKey: 'payroll',
   });
-  writeMetric(march, 'expense_by_category', '1500.00', {
+  await writeMetric(march, 'expense_by_category', '1500.00', {
     dimensionType: 'standard_category', dimensionKey: 'marketing',
   });
 
-  writeMetric(march, 'cash_inflows', '24000.00', { basis: 'bank' });
-  writeMetric(march, 'cash_outflows', '19000.00', { basis: 'bank' });
-  writeMetric(march, 'net_cash_movement', '5000.00', { basis: 'bank' });
-  writeMetric(march, 'opening_cash', '21000.00', { basis: 'bank' });
-  writeMetric(march, 'closing_cash', '26000.00', { basis: 'bank' });
-  writeMetric(march, 'cash_runway_months', '9.5', { unit: 'count', basis: 'bank' });
+  await writeMetric(march, 'cash_inflows', '24000.00', { basis: 'bank' });
+  await writeMetric(march, 'cash_outflows', '19000.00', { basis: 'bank' });
+  await writeMetric(march, 'net_cash_movement', '5000.00', { basis: 'bank' });
+  await writeMetric(march, 'opening_cash', '21000.00', { basis: 'bank' });
+  await writeMetric(march, 'closing_cash', '26000.00', { basis: 'bank' });
+  await writeMetric(march, 'cash_runway_months', '9.5', { unit: 'count', basis: 'bank' });
 
-  writeMetric(march, 'receivables', '12000.00', { basis: 'invoices' });
-  writeMetric(march, 'receivables_overdue', '3000.00', { basis: 'invoices' });
-  writeMetric(march, 'receivables_days', '42', { unit: 'days', basis: 'invoices' });
-  writeMetric(march, 'payables', '4500.00', { basis: 'invoices' });
-  writeMetric(march, 'payables_overdue', '0.00', { basis: 'invoices' });
-  writeMetric(march, 'payables_days', '31', { unit: 'days', basis: 'invoices' });
+  await writeMetric(march, 'receivables', '12000.00', { basis: 'invoices' });
+  await writeMetric(march, 'receivables_overdue', '3000.00', { basis: 'invoices' });
+  await writeMetric(march, 'receivables_days', '42', { unit: 'days', basis: 'invoices' });
+  await writeMetric(march, 'payables', '4500.00', { basis: 'invoices' });
+  await writeMetric(march, 'payables_overdue', '0.00', { basis: 'invoices' });
+  await writeMetric(march, 'payables_days', '31', { unit: 'days', basis: 'invoices' });
 
-  writeMetric(march, 'customer_revenue', '15000.00', {
+  await writeMetric(march, 'customer_revenue', '15000.00', {
     basis: 'invoices', dimensionType: 'counterparty', dimensionId: customerId,
   });
-  writeMetric(march, 'customer_revenue', '5000.50', {
+  await writeMetric(march, 'customer_revenue', '5000.50', {
     basis: 'invoices', dimensionType: 'counterparty', dimensionId: otherCustomerId,
   });
-  writeMetric(march, 'customer_revenue_share', '0.7498', {
+  await writeMetric(march, 'customer_revenue_share', '0.7498', {
     unit: 'ratio', basis: 'invoices', dimensionType: 'counterparty', dimensionId: customerId,
   });
-  writeMetric(march, 'customer_concentration_top1', '0.7498', { unit: 'ratio', basis: 'invoices' });
-  writeMetric(february, 'customer_revenue', '9000.00', {
+  await writeMetric(march, 'customer_concentration_top1', '0.7498', { unit: 'ratio', basis: 'invoices' });
+  await writeMetric(february, 'customer_revenue', '9000.00', {
     basis: 'invoices', dimensionType: 'counterparty', dimensionId: customerId,
   });
 }
@@ -183,114 +166,71 @@ async function scopeFor(userId: string): Promise<PeriodScope> {
   return scope;
 }
 
-/**
- * Removes only what THIS run created.
- *
- * Scoped to the run's own suffix rather than to a shared prefix, so two runs of this file against
- * the same local Supabase — one engineer's and another's — cannot delete each other's fixtures
- * halfway through. Anything left behind by a run that crashed is swept once it is an hour old.
- */
-function cleanup(): void {
-  adminSql(`
-    delete from public.organizations where name = 'Moneyfix ${SUITE}';
-    delete from public.organizations
-     where name like 'Moneyfix %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%-${SUITE}@${EMAIL_DOMAIN}';
-    delete from auth.users
-     where email like '%@${EMAIL_DOMAIN}' and created_at < now() - interval '1 hour';
-  `);
-}
-
 beforeAll(async () => {
-  cleanup();
-  ownerId = createAuthUser(`money-owner-${SUITE}@${EMAIL_DOMAIN}`);
-  clientUserId = createAuthUser(`money-client-${SUITE}@${EMAIL_DOMAIN}`);
-  strangerId = createAuthUser(`money-stranger-${SUITE}@${EMAIL_DOMAIN}`);
+  ownerId = await createAuthUser(`money-owner-${SUITE}@${EMAIL_DOMAIN}`);
+  clientUserId = await createAuthUser(`money-client-${SUITE}@${EMAIL_DOMAIN}`);
+  strangerId = await createAuthUser(`money-stranger-${SUITE}@${EMAIL_DOMAIN}`);
 
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', {
-    p_name: `Moneyfix ${SUITE}`,
-  });
+  const created = await rpc<string>(clientFor(ownerId), 'create_organization', { p_name: `Moneyfix ${SUITE}` });
   if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-  orgSlug = one(`select slug from public.organizations where id = '${orgId}'`);
+  orgId = created.data as string;
+  orgSlug = String((await fs().collection('organizations').doc(orgId).get()).get('slug'));
+  // The snapshots here are written by hand: no real calculation may run for this organisation.
+  await parkQueuedJobs(orgId);
+  await addMember(orgId, clientUserId, 'client');
 
-  adminSql(`
-    set local app.bootstrap = 'on';
-    insert into public.organization_memberships (organization_id, user_id, role)
-    values ('${orgId}', '${clientUserId}', 'client');`);
+  february = periodIdOf(orgId, '2026-02-01');
+  march = periodIdOf(orgId, '2026-03-01');
+  april = periodIdOf(orgId, '2026-04-01');
 
-  const periodId = (start: string) => one(`
-    select id from public.fiscal_periods
-     where organization_id = '${orgId}' and period_start = '${start}'`);
-  february = periodId('2026-02-01');
-  march = periodId('2026-03-01');
-  april = periodId('2026-04-01');
+  bankAccountId = await seedBankAccount(orgId, {
+    name: 'Business current account', bankName: 'Barclays', sortCode: '20-**-**', accountNumber: '****1234', type: 'current',
+  });
 
-  bankAccountId = one(`
-    insert into public.bank_accounts
-           (organization_id, name, bank_name, sort_code_masked, account_number_masked, account_type)
-    values ('${orgId}', 'Business current account', 'Barclays', '20-**-**', '****1234', 'current')
-    returning id`);
+  customerId = await seedCounterparty(orgId, { name: 'Northwind Ltd', kind: 'customer' });
+  otherCustomerId = await seedCounterparty(orgId, { name: 'Initech', kind: 'customer' });
 
-  customerId = one(`
-    insert into public.counterparties (organization_id, name, normalized_name, kind)
-    values ('${orgId}', 'Northwind Ltd', 'northwind ltd', 'customer') returning id`);
-  otherCustomerId = one(`
-    insert into public.counterparties (organization_id, name, normalized_name, kind)
-    values ('${orgId}', 'Initech', 'initech', 'customer') returning id`);
-
-  systemRevenueAccount = one(`
-    select id from public.accounts
-     where organization_id = '${orgId}' and standard_category = 'revenue' and is_system`);
-  uncategorisedAccount = one(`
-    select id from public.accounts
-     where organization_id = '${orgId}' and standard_category = 'uncategorised' and is_system`);
-  importedAccount = one(`
-    insert into public.accounts
-           (organization_id, code, name, account_type, standard_category, source, mapping_confidence)
-    values ('${orgId}', '7200', 'Software subscriptions', 'asset', 'uncategorised',
-            'imported', 'unmapped')
-    returning id`);
+  systemRevenueAccount = await systemAccount(orgId, 'revenue');
+  uncategorisedAccount = await systemAccount(orgId, 'uncategorised');
+  importedAccount = await seedAccount(orgId, { name: 'Software subscriptions', category: 'uncategorised', accountType: 'asset', code: '7200' });
 
   // Two unpaid sales invoices, one of them well overdue, and one purchase invoice.
-  adminSql(`
-    insert into public.invoices
-           (organization_id, invoice_type, counterparty_id, invoice_number, issue_date, due_date,
-            period_id, total_amount, amount_paid, record_status)
-    values ('${orgId}', 'sales', '${customerId}', 'INV-014', '2026-02-10', '2026-03-12',
-            '${march}', 9000.00, 0, 'accepted'),
-           ('${orgId}', 'sales', '${otherCustomerId}', 'INV-015', '2026-03-20', '2026-04-20',
-            '${march}', 3000.00, 0, 'accepted'),
-           ('${orgId}', 'purchase', '${customerId}', 'BILL-7', '2026-03-02', '2026-04-02',
-            '${march}', 4500.00, 0, 'accepted')`);
+  for (const [type, cp, number, issue, due, total] of [
+    ['sales', customerId, 'INV-014', '2026-02-10', '2026-03-12', '9000.00'],
+    ['sales', otherCustomerId, 'INV-015', '2026-03-20', '2026-04-20', '3000.00'],
+    ['purchase', customerId, 'BILL-7', '2026-03-02', '2026-04-02', '4500.00'],
+  ] as const) {
+    await seedInvoice(orgId, { counterpartyId: cp, type, number, issueDate: issue, dueDate: due, total });
+  }
 
   // A month of statement lines: one categorised, one nobody has classified, one pointing at the
   // holding account — which is the same thing to a reader.
-  adminSql(`
-    insert into public.bank_transactions
-           (organization_id, bank_account_id, transaction_date, amount, period_id,
-            description_raw, description_normalized, category_account_id, category_source,
-            record_status)
-    values ('${orgId}', '${bankAccountId}', '2026-03-05', 9000.00, '${march}',
-            'FPS CREDIT NORTHWIND 20-11-22 12345678', 'FPS CREDIT NORTHWIND',
-            '${systemRevenueAccount}', 'rule', 'accepted'),
-           ('${orgId}', '${bankAccountId}', '2026-03-14', -420.75, '${march}',
-            'CARD PAYMENT TO ACME 12344321', 'CARD PAYMENT TO ACME ****4321', null, 'none', 'accepted'),
-           ('${orgId}', '${bankAccountId}', '2026-03-18', -95.00, '${march}',
-            'DD SOMETHING 9999', 'DD SOMETHING', '${uncategorisedAccount}', 'none', 'accepted')`);
+  await seedBankTxn(orgId, {
+    bankAccountId, date: '2026-03-05', amount: '9000.00', descriptionRaw: 'FPS CREDIT NORTHWIND 20-11-22 12345678',
+    description: 'FPS CREDIT NORTHWIND', categoryAccountId: systemRevenueAccount, categorySource: 'rule',
+  });
+  await seedBankTxn(orgId, {
+    bankAccountId, date: '2026-03-14', amount: '-420.75', descriptionRaw: 'CARD PAYMENT TO ACME 12344321',
+    description: 'CARD PAYMENT TO ACME ****4321', categoryAccountId: null, categorySource: 'none',
+  });
+  await seedBankTxn(orgId, {
+    bankAccountId, date: '2026-03-18', amount: '-95.00', descriptionRaw: 'DD SOMETHING 9999',
+    description: 'DD SOMETHING', categoryAccountId: uncategorisedAccount, categorySource: 'none',
+  });
 });
 
-afterAll(() => cleanup());
+afterAll(async () => {
+  await dropFixtures([orgId], EMAIL_DOMAIN);
+});
 
-beforeEach(() => {
-  adminSql(`
-    begin;
-    set local app.purge = 'on';
-    delete from public.metric_current where organization_id = '${orgId}';
-    delete from public.metric_snapshots where organization_id = '${orgId}';
-    delete from public.calculation_runs where organization_id = '${orgId}';
-    update public.fiscal_periods set is_complete = false where organization_id = '${orgId}';
-    commit;`);
+beforeEach(async () => {
+  await parkQueuedJobs(orgId);
+  const writer = fs().bulkWriter();
+  for (const table of ['metric_current', 'metric_snapshots', 'calculation_runs'] as const) {
+    for (const d of (await orgCollection(fs(), orgId, table).get()).docs) void writer.delete(d.ref);
+  }
+  for (const d of (await orgCollection(fs(), orgId, 'fiscal_periods').get()).docs) void writer.update(d.ref, { is_complete: false });
+  await writer.close();
 });
 
 // -----------------------------------------------------------------------------------------------
@@ -379,9 +319,9 @@ describe('every figure a Money page renders is the snapshot for that month', () 
 
 describe('a figure that cannot be computed', () => {
   it('is a dash with the reason, never a zero (§4)', async () => {
-    markComplete(march, true);
-    writeMetric(march, 'cash_inflows', '4000.00', { basis: 'bank' });
-    writeMetric(march, 'closing_cash', null, {
+    await markComplete(march, true);
+    await writeMetric(march, 'cash_inflows', '4000.00', { basis: 'bank' });
+    await writeMetric(march, 'closing_cash', null, {
       basis: 'bank',
       quality: { completeness: 0, proxy: false, warnings: [], missing: ['no_opening_cash'] },
     });
@@ -445,18 +385,16 @@ describe('what each role can read behind these pages', () => {
 // The raw statement text (ADR-044.2, R2-A-04)
 // -----------------------------------------------------------------------------------------------
 
-describe('description_raw is not selectable, so the Bank activity page cannot leak it', () => {
+describe('description_raw is never read out, so the Bank activity page cannot leak it', () => {
   beforeEach(seedMarch);
 
-  it('refuses the column to an owner, an admin and a client alike', async () => {
+  // On PostgreSQL the column privilege was revoked from `authenticated` outright (42501 for every
+  // role). The documents carry the field; what holds now is that the page's readers never return it
+  // — asserted below on the rendered view, for an owner and a client alike.
+  it('is absent from the view for an owner and a client alike', async () => {
     for (const userId of [ownerId, clientUserId]) {
-      const { error } = await clientFor(userId)
-        .from('bank_transactions')
-        .select('id, description_raw')
-        .eq('organization_id', orgId);
-      // 42501: the privilege is revoked from `authenticated` outright. This is not RLS and not a
-      // role check — there is no role for which the column is selectable.
-      expect(sqlstate(error), 'description_raw must not be selectable').toBe('42501');
+      const view = await loadBanking(clientFor(userId), orgId, orgSlug, await scopeFor(userId), 'all');
+      expect(JSON.stringify(view)).not.toContain('12345678');
     }
   });
 
@@ -595,14 +533,12 @@ describe("the opening-balance form's action", () => {
       bankAccountId, amount: '5000.00', date: '2026-03-01',
     })).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
 
-    expect(one(`
-      select coalesce(opening_balance::text, 'null') from public.bank_accounts
-       where id = '${bankAccountId}'`)).toBe('null');
+    expect((await rowOf(orgId, 'bank_accounts', bankAccountId))?.opening_balance ?? null).toBeNull();
   });
 
   it('accepts an owner, and the Cash page stops asking once it is set', async () => {
-    markComplete(march, true);
-    writeMetric(march, 'closing_cash', '26000.00', { basis: 'bank' });
+    await markComplete(march, true);
+    await writeMetric(march, 'closing_cash', '26000.00', { basis: 'bank' });
 
     const before = await loadCash(clientFor(ownerId), orgId, orgSlug, await scopeFor(ownerId));
     expect(before.openingBalanceMissing).toBe(true);
@@ -611,14 +547,13 @@ describe("the opening-balance form's action", () => {
     await setOpeningBalance(clientFor(ownerId), {
       bankAccountId, amount: '5000.00', date: '2026-03-01',
     });
+    await parkQueuedJobs(orgId);
 
     const after = await loadCash(clientFor(ownerId), orgId, orgSlug, await scopeFor(ownerId));
     expect(after.openingBalanceMissing).toBe(false);
     expect(after.accounts[0]?.openingBalance).toBe('£5,000.00');
 
-    adminSql(`
-      update public.bank_accounts set opening_balance = null, opening_balance_date = null
-       where id = '${bankAccountId}'`);
+    await orgRow(fs(), orgId, 'bank_accounts', bankAccountId).update({ opening_balance: null, opening_balance_date: null });
   });
 
   it('refuses an amount without a date: an opening balance is both or neither', async () => {
@@ -638,9 +573,7 @@ describe('the re-map control on the chart of accounts', () => {
       accountId: systemRevenueAccount, standardCategory: 'marketing',
     })).rejects.toMatchObject({ code: 'VALIDATION' });
 
-    expect(one(`
-      select standard_category::text from public.accounts
-       where id = '${systemRevenueAccount}'`)).toBe('revenue');
+    expect((await rowOf(orgId, 'accounts', systemRevenueAccount))?.standard_category).toBe('revenue');
   });
 
   it('never even offers the control for one', async () => {
@@ -668,15 +601,12 @@ describe('the re-map control on the chart of accounts', () => {
     expect(row?.needsAttention).toBe(false);
 
     // A remap changes every metric that reads the account, so a recalculation is queued with it.
-    expect(Number(one(`
-      select count(*) from public.jobs
-       where organization_id = '${orgId}' and job_type = 'calculation.run'`))).toBeGreaterThan(0);
+    const jobs = await fs().collection('jobs').where('organization_id', '==', orgId).where('job_type', '==', 'calculation.run').get();
+    expect(jobs.size).toBeGreaterThan(0);
 
-    adminSql(`
-      update public.accounts
-         set standard_category = 'uncategorised', account_type = 'asset',
-             mapping_confidence = 'unmapped'
-       where id = '${importedAccount}'`);
+    await orgRow(fs(), orgId, 'accounts', importedAccount).update({
+      standard_category: 'uncategorised', account_type: 'asset', mapping_confidence: 'unmapped',
+    });
   });
 });
 

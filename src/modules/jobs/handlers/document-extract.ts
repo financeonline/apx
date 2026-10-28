@@ -1,5 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
+import { orgRow } from '@/db/schema';
 import {
   beginExtraction, beginReceiptExtraction, chargeExtractionPage, failImportBatch, recordExtractionPage,
 } from '@/core/db';
@@ -68,17 +69,16 @@ export async function runDocumentExtractJob(job: ClaimedJob, scope: { db: unknow
   const batchId = typeof job.payload.batch_id === 'string' ? job.payload.batch_id : null;
   if (!documentId || !batchId) return { status: 'failed', error: 'document.extract needs a document_id and a batch_id' };
 
-  const db = scope.db as SupabaseClient;
+  const db = scope.db as Db;
   const actor = { userId: job.requestedBy, requestId: job.jobId };
 
-  const [{ data: batch, error: batchError }, { data: document, error: documentError }] = await Promise.all([
-    db.from('import_batches').select('id, organization_id, source_document_id, import_type, status, extraction_method, period_start, period_end, bank_account_id')
-      .eq('organization_id', orgId).eq('id', batchId).maybeSingle(),
-    db.from('source_documents').select('id, storage_bucket, storage_path, has_text_layer, page_count, deleted_at, mime_type, original_filename')
-      .eq('organization_id', orgId).eq('id', documentId).maybeSingle(),
+  // The job's scoped server handle: direct reads, named by the job row's organisation.
+  const [batchSnap, documentSnap] = await Promise.all([
+    orgRow(db.fs, orgId, 'import_batches', batchId).get(),
+    orgRow(db.fs, orgId, 'source_documents', documentId).get(),
   ]);
-  if (batchError) return { status: 'failed', error: batchError.message };
-  if (documentError) return { status: 'failed', error: documentError.message };
+  const batch = batchSnap.exists ? batchSnap.data() : null;
+  const document = documentSnap.exists ? documentSnap.data() : null;
   const b = batch as BatchRow | null;
   const d = document as {
     id: string; storage_bucket: string | null; storage_path: string; has_text_layer: boolean | null; deleted_at: string | null;
@@ -255,7 +255,7 @@ function receiptMediaType(mime: string | null, filename: string | null): 'image/
 }
 
 async function runReceiptExtraction(input: {
-  db: SupabaseClient; orgId: string; actor: { userId: string; requestId: string }; batch: BatchRow;
+  db: Db; orgId: string; actor: { userId: string; requestId: string }; batch: BatchRow;
   document: { id: string; storage_bucket: string | null; storage_path: string; page_count: number | null; mime_type: string | null; original_filename: string | null };
   accountId: string; requestedBy: string;
 }): Promise<JobOutcome> {
@@ -275,9 +275,9 @@ async function runReceiptExtraction(input: {
   } catch (cause) {
     return { status: 'failed', error: isMotionError(cause) ? cause.message : String(cause) };
   }
-  const { data: account, error: accountError } = await db.from('accounts').select('id, code, name')
-    .eq('organization_id', orgId).eq('id', accountId).maybeSingle();
-  if (accountError || !account) return { status: 'failed', error: 'the chosen account could not be read' };
+  const accountSnap = await orgRow(db.fs, orgId, 'accounts', accountId).get();
+  const account = accountSnap.exists ? accountSnap.data() : null;
+  if (!account) return { status: 'failed', error: 'the chosen account could not be read' };
   const accountRef = (account as { code: string | null; name: string }).code ?? (account as { name: string }).name;
 
   const bytes = await getObject({ orgId, userId: input.requestedBy }, d.storage_bucket ?? SOURCE_DOCUMENTS_BUCKET, d.storage_path);

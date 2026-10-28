@@ -2,7 +2,12 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { permissionsFor } from '@/core/permissions';
 import { getDocumentEvidence, getRecordProvenance } from '@/modules/evidence';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, deleteOrg, fs } from './setup';
+import { createOrgFixture } from './r-fixtures';
+import {
+  anyAccount, deleteAuthUsers, periodFor, seedBatch, seedDocument, seedImportRow, seedLedgerEntry,
+} from './evidence-fixtures';
 
 /**
  * The two ends of the evidence chain (EVIDENCE_MODEL.md §1, §5.1; ADR-096).
@@ -16,11 +21,12 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  *   * a rolled-back import stops counting towards the file it came from;
  *   * neither service reaches across an organisation, and neither hands a client a filename.
  *
- * Run-unique fixtures (ADR-052.12); the suite removes exactly what it created.
+ * Run-unique fixtures (ADR-052.12), written straight into Firestore (`evidence-fixtures.ts`); the
+ * suite removes exactly what it created.
  */
 
 const RUN = `p${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.provenance.itest`;
+const DOMAIN = `${RUN}.provenance.itest.motion`;
 
 let ownerA: string;
 let clientA: string;
@@ -40,8 +46,6 @@ let entryRejected: string;
 let entryNoDocument: string;
 let entryB: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
 function contextFor(userId: string, role: 'owner' | 'client', org: string = orgA): AccessContext {
   return {
     userId,
@@ -57,10 +61,9 @@ function contextFor(userId: string, role: 'owner' | 'client', org: string = orgA
   };
 }
 
-/** A ledger line, with whatever provenance columns the case needs. */
+/** A May ledger line, with whatever provenance the case needs. */
 function seedEntry(org: string, opts: {
   description: string;
-  period: string;
   account: string;
   document?: string | null;
   batch?: string | null;
@@ -68,92 +71,64 @@ function seedEntry(org: string, opts: {
   status?: string;
   rejectedReason?: string | null;
   sourceRef?: string | null;
-}): string {
-  const col = (value: string | null | undefined) => (value ? `'${value}'` : 'null');
-  return one(`
-    insert into public.ledger_entries
-           (organization_id, entry_date, period_id, account_id, direction, amount, currency,
-            description, source_document_id, import_batch_id, import_row_id, source_ref,
-            record_status, assurance_level, rejected_reason)
-    values ('${org}', '2026-05-12', '${opts.period}', '${opts.account}', 'credit', 1000, 'GBP',
-            '${opts.description}', ${col(opts.document)}, ${col(opts.batch)}, ${col(opts.importRow)},
-            ${col(opts.sourceRef)}, '${opts.status ?? 'accepted'}', 'verified',
-            ${opts.rejectedReason ? `'${opts.rejectedReason}'` : 'null'})
-    returning id`);
+}): Promise<string> {
+  return seedLedgerEntry(org, {
+    date: '2026-05-12', accountId: opts.account, direction: 'credit', amount: '1000', description: opts.description,
+    documentId: opts.document ?? null, batchId: opts.batch ?? null, importRowId: opts.importRow ?? null,
+    sourceRef: opts.sourceRef ?? null, status: opts.status ?? 'accepted', rejectedReason: opts.rejectedReason ?? null,
+  });
 }
 
-function seedDocument(org: string, name: string): string {
-  return one(`
-    insert into public.source_documents
-           (organization_id, storage_bucket, storage_path, original_filename, mime_type, byte_size,
-            sha256, status, document_kind)
-    values ('${org}', 'source-documents', '${org}/${name}/f.csv', '${name}.csv', 'text/csv', 42,
-            decode(md5('${org}${name}${RUN}'), 'hex'), 'ready', 'general_ledger')
-    returning id`);
-}
+const seedFile = (org: string, name: string) => seedDocument(org, { name: `${name}.csv` });
 
-function seedBatch(org: string, document: string, opts: {
+function seedLedgerBatch(org: string, document: string, opts: {
   status: string;
   committed?: number;
   rolledBack?: boolean;
   from?: string;
   to?: string;
-}): string {
-  return one(`
-    insert into public.import_batches
-           (organization_id, source_document_id, import_type, target_table, status, row_counts,
-            period_start, period_end, committed_at, rolled_back_at, created_by)
-    values ('${org}', '${document}', 'general_ledger', 'ledger_entries', '${opts.status}',
-            '{"committed": ${opts.committed ?? 0}, "superseded": 0, "total": ${opts.committed ?? 0}}'::jsonb,
-            '${opts.from ?? '2026-05-01'}', '${opts.to ?? '2026-05-31'}',
-            ${opts.status === 'committed' ? 'now()' : 'null'},
-            ${opts.rolledBack ? 'now()' : 'null'}, '${ownerA}')
-    returning id`);
+}): Promise<string> {
+  return seedBatch(org, {
+    documentId: document, importType: 'general_ledger', targetTable: 'ledger_entries', status: opts.status,
+    rowCounts: { committed: opts.committed ?? 0, superseded: 0, total: opts.committed ?? 0 },
+    periodStart: opts.from ?? '2026-05-01', periodEnd: opts.to ?? '2026-05-31',
+    committedAt: opts.status === 'committed' ? new Date().toISOString() : null,
+    rolledBackAt: opts.rolledBack ? new Date().toISOString() : null, createdBy: ownerA,
+  });
 }
 
 beforeAll(async () => {
-  ownerA = createAuthUser(`owner-a@${DOMAIN}`);
-  clientA = createAuthUser(`client-a@${DOMAIN}`);
-  ownerB = createAuthUser(`owner-b@${DOMAIN}`);
+  ownerA = await createAuthUser(`owner-a@${DOMAIN}`);
+  clientA = await createAuthUser(`client-a@${DOMAIN}`);
+  ownerB = await createAuthUser(`owner-b@${DOMAIN}`);
 
-  const a = await clientFor(ownerA).schema('api').rpc('create_organization', { p_name: `ITest Prov A ${RUN}` });
-  if (a.error) throw new Error(`fixture org A failed: ${a.error.message}`);
-  orgA = a.data as unknown as string;
-  const b = await clientFor(ownerB).schema('api').rpc('create_organization', { p_name: `ITest Prov B ${RUN}` });
-  if (b.error) throw new Error(`fixture org B failed: ${b.error.message}`);
-  orgB = b.data as unknown as string;
+  orgA = (await createOrgFixture({ name: `ITest Prov A ${RUN}`, ownerId: ownerA, members: [{ userId: clientA, role: 'client' }] })).id;
+  orgB = (await createOrgFixture({ name: `ITest Prov B ${RUN}`, ownerId: ownerB })).id;
 
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status)
-    values ('${orgA}', '${clientA}', 'client', 'active')`);
+  periodA = await periodFor(orgA, '2026-05-01');
+  accountA = await anyAccount(orgA);
+  const accountB = await anyAccount(orgB);
 
-  periodA = one(`select id from public.fiscal_periods where organization_id = '${orgA}' and period_start = '2026-05-01'`);
-  accountA = one(`select id from public.accounts where organization_id = '${orgA}' limit 1`);
-  const periodB = one(`select id from public.fiscal_periods where organization_id = '${orgB}' and period_start = '2026-05-01'`);
-  const accountB = one(`select id from public.accounts where organization_id = '${orgB}' limit 1`);
+  documentA = await seedFile(orgA, 'a');
+  documentB = await seedFile(orgB, 'b');
+  batchA = await seedLedgerBatch(orgA, documentA, { status: 'committed', committed: 3 });
+  rolledBackBatch = await seedLedgerBatch(orgA, documentA, { status: 'rolled_back', committed: 9, rolledBack: true, from: '2026-04-01', to: '2026-04-30' });
 
-  documentA = seedDocument(orgA, 'a');
-  documentB = seedDocument(orgB, 'b');
-  batchA = seedBatch(orgA, documentA, { status: 'committed', committed: 3 });
-  rolledBackBatch = seedBatch(orgA, documentA, { status: 'rolled_back', committed: 9, rolledBack: true, from: '2026-04-01', to: '2026-04-30' });
+  const importRow = await seedImportRow(orgA, { batchId: batchA, rowNumber: 7, sourceRef: 'csv:row:7' });
 
-  const importRow = one(`
-    insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, status)
-    values ('${orgA}', '${batchA}', 7, 'csv:row:7', '{}'::jsonb, 'committed') returning id`);
-
-  entryCounted = seedEntry(orgA, { description: 'May sales', period: periodA, account: accountA, document: documentA, batch: batchA, importRow, sourceRef: 'csv:row:7' });
-  entryReplacement = seedEntry(orgA, { description: 'May sales, corrected', period: periodA, account: accountA, document: documentA, batch: batchA });
-  entrySuperseded = seedEntry(orgA, { description: 'May sales, first try', period: periodA, account: accountA, document: documentA, batch: batchA });
-  adminSql(`update public.ledger_entries set superseded_by = '${entryReplacement}', superseded_at = now() where id = '${entrySuperseded}'`);
-  entryRejected = seedEntry(orgA, { description: 'A duplicate', period: periodA, account: accountA, document: documentA, batch: batchA, status: 'rejected', rejectedReason: 'Already in the ledger' });
-  entryNoDocument = seedEntry(orgA, { description: 'Typed in by hand', period: periodA, account: accountA });
-  entryB = seedEntry(orgB, { description: 'B sales', period: periodB, account: accountB, document: documentB });
+  entryCounted = await seedEntry(orgA, { description: 'May sales', account: accountA, document: documentA, batch: batchA, importRow, sourceRef: 'csv:row:7' });
+  entryReplacement = await seedEntry(orgA, { description: 'May sales, corrected', account: accountA, document: documentA, batch: batchA });
+  entrySuperseded = await seedEntry(orgA, { description: 'May sales, first try', account: accountA, document: documentA, batch: batchA });
+  await orgRow(fs(), orgA, 'ledger_entries', entrySuperseded).update({ superseded_by: entryReplacement, superseded_at: new Date().toISOString() });
+  entryRejected = await seedEntry(orgA, { description: 'A duplicate', account: accountA, document: documentA, batch: batchA, status: 'rejected', rejectedReason: 'Already in the ledger' });
+  entryNoDocument = await seedEntry(orgA, { description: 'Typed in by hand', account: accountA });
+  entryB = await seedEntry(orgB, { description: 'B sales', account: accountB, document: documentB });
 });
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Prov%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';`);
+afterAll(async () => {
+  await deleteOrg(orgA);
+  await deleteOrg(orgB);
+  await deleteAuthUsers(DOMAIN);
 });
 
 // -----------------------------------------------------------------------------------------------
@@ -277,7 +252,7 @@ describe('a file says what rests on it (§1)', () => {
   });
 
   it('says a file nothing rests on yet has nothing resting on it', async () => {
-    const fresh = seedDocument(orgA, `fresh${RUN}`);
+    const fresh = await seedFile(orgA, `fresh${RUN}`);
     const view = await getDocumentEvidence(contextFor(ownerA, 'owner'), fresh);
     expect(view.recordsCommitted).toBe(0);
     expect(view.imports).toHaveLength(0);

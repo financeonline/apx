@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 import { Decimal } from '@/core/money';
 import { permissionsFor } from '@/core/permissions';
 import { resolvePeriodContext, TOOLS } from '@/modules/ai';
@@ -6,7 +6,13 @@ import { loadPeriods, loadPeriodsWithData } from '@/modules/dashboard';
 import { resolveDescriptor } from '@/modules/evidence';
 import { drainJobs } from '@/modules/jobs';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { writeRecordStatusEvent } from '@/db/app/shared';
+import { orgCollection } from '@/db/schema';
+import { clientFor, createAuthUser, drainUntilFinished, fs } from './setup';
+import {
+  dropFixtures, makeOrg, periodFor, queueCalculation, rowOf, rowsOf, seedBatch, seedCounterparty, seedDocument,
+  seedImportRow, seedLedgerEntry, systemAccount,
+} from './f-fixtures';
 
 /**
  * HIGH-5 and HIGH-6: on the ledger basis, a counterparty's figure and its evidence are one population,
@@ -21,12 +27,13 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  * `revenue` 19,400.00 over 21,400.00.
  *
  * The test drives rows → `calculation.run` → snapshot → descriptor → the evidence service under the
- * owner's RLS → an independent reporting-sign sum of the rows, and checks the rows themselves.
+ * owner's read policies → an independent reporting-sign sum of the rows, and checks the rows themselves.
  */
 
+vi.setConfig({ testTimeout: 180_000 });
+
 const RUN = `lc${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.ledgercommercial.itest`;
-const one = (s: string) => adminSql(`with q as (${s}) select * from q`).trim();
+const DOMAIN = `${RUN}.ledgercommercial.itest.motion`;
 
 let owner: string;
 let org: string;
@@ -40,122 +47,127 @@ const ctxFor = (orgId: string): AccessContext => ({
   now: () => new Date('2026-09-15T00:00:00Z'), organizationStatus: 'active',
 });
 
-async function createOrg(name: string): Promise<string> {
-  const r = await clientFor(owner).schema('api').rpc('create_organization', { p_name: name });
-  if (r.error) throw new Error(r.error.message);
-  return r.data as unknown as string;
-}
+const createOrg = (name: string): Promise<string> => makeOrg(owner, name);
 
 async function calc(orgId: string) {
-  const j = adminSql(`insert into public.jobs (organization_id, job_type, payload, max_attempts) values ('${orgId}','calculation.run','{"trigger":"recalc_manual","as_of":"2026-09-15"}'::jsonb,3) returning id`).split('\n')[0]!.trim();
-  expect(await drainUntilFinished(drainJobs, j)).toBe('succeeded');
+  const j = await queueCalculation(orgId, { trigger: 'recalc_manual', as_of: '2026-09-15' });
+  expect(await drainUntilFinished(drainJobs, j, 60)).toBe('succeeded');
 }
 
 /** A ledger organisation with a general-ledger batch; returns a line writer. */
-function ledgerOrg(orgId: string) {
-  const acct = (cat: string) => one(`select id from public.accounts where organization_id='${orgId}' and standard_category='${cat}' and is_system limit 1`);
-  const doc = one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind) values ('${orgId}','${orgId}/g.csv','g.csv','text/csv',10,digest('${orgId}g','sha256'),'ready','general_ledger') returning id`);
-  const batch = one(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at) values ('${orgId}','${doc}','general_ledger','ledger_entries','committed','csv','2026-08-01','2026-08-31',now()) returning id`);
+async function ledgerOrg(orgId: string) {
+  const accounts = new Map<string, string>();
+  const acct = async (cat: string) => {
+    if (!accounts.has(cat)) accounts.set(cat, await systemAccount(orgId, cat));
+    return accounts.get(cat)!;
+  };
+  const doc = await seedDocument(orgId, { filename: 'g.csv', kind: 'general_ledger' });
+  const batch = await seedBatch(orgId, {
+    documentId: doc, importType: 'general_ledger', targetTable: 'ledger_entries', status: 'committed',
+    periodStart: '2026-08-01', periodEnd: '2026-08-31',
+  });
   let n = 0;
-  return (key: string, cat: string, dir: 'debit' | 'credit', amount: string, who: string | null) => {
+  return async (key: string, cat: string, dir: 'debit' | 'credit', amount: string, who: string | null) => {
     n += 1;
-    const row = one(`insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status) values ('${orgId}','${batch}',${n},'r${n}','{}'::jsonb,'{}'::jsonb,'committed') returning id`);
-    const id = one(`insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status, source_document_id, import_batch_id, import_row_id, source_ref, counterparty_id, description) values ('${orgId}','2026-08-${String(10 + (n % 15)).padStart(2, '0')}','${acct(cat)}','${dir}',${amount},'00000000-0000-0000-0000-000000000000','accepted','${doc}','${batch}','${row}','r${n}',${who === null ? 'null' : `'${who}'`},'${key}') returning id`);
-    adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id) values ('${orgId}','ledger_entries','${id}','accepted','${batch}')`);
+    const row = await seedImportRow(orgId, { batchId: batch, rowNumber: n, status: 'committed', sourceRef: `r${n}` });
+    const id = await seedLedgerEntry(orgId, {
+      accountId: await acct(cat), date: `2026-08-${String(10 + (n % 15)).padStart(2, '0')}`, direction: dir, amount,
+      sourceDocumentId: doc, importBatchId: batch, importRowId: row, sourceRef: `r${n}`, counterpartyId: who, description: key,
+    });
+    await fs().runTransaction(async (t) => {
+      writeRecordStatusEvent(t, fs(), { orgId, table: 'ledger_entries', recordId: id, event: 'accepted', actorId: null, batchId: batch });
+    });
     line.set(key, id);
     return id;
   };
 }
 
-const cp = (orgId: string, name: string, kind: string) => {
-  const id = one(`insert into public.counterparties (organization_id, name, kind) values ('${orgId}','${name}','${kind}') returning id`);
+const cp = async (orgId: string, name: string, kind: string) => {
+  const id = await seedCounterparty(orgId, { name, kind });
   party.set(name, id);
   return id;
 };
 
 beforeAll(async () => {
-  owner = createAuthUser(`owner@${DOMAIN}`);
+  owner = await createAuthUser(`owner@${DOMAIN}`);
   org = await createOrg(`LC ${RUN}`);
-  const e = ledgerOrg(org);
-  const C1 = cp(org, 'Customer One', 'customer');
-  const C2 = cp(org, 'Customer Two', 'customer');
-  const S1 = cp(org, 'Supplier One', 'supplier');
-  const S2 = cp(org, 'Supplier Two', 'supplier');
+  const e = await ledgerOrg(org);
+  const C1 = await cp(org, 'Customer One', 'customer');
+  const C2 = await cp(org, 'Customer Two', 'customer');
+  const S1 = await cp(org, 'Supplier One', 'supplier');
+  const S2 = await cp(org, 'Supplier Two', 'supplier');
 
   // ---- Customers: sales, a refund, other income, and the contact on the receivable and bank lines ----
-  e('C1 SALE', 'revenue', 'credit', '18000.00', C1);
-  e('C1 SALE RECEIVABLE', 'receivables', 'debit', '18000.00', C1);
-  e('C1 REFUND', 'revenue', 'debit', '1000.00', C1);
-  e('C1 RECEIPT BANK', 'cash', 'debit', '17000.00', C1);
-  e('C1 RECEIPT RECEIVABLE', 'receivables', 'credit', '17000.00', C1);
-  e('C1 OTHER INCOME', 'other_income', 'credit', '700.00', C1);
-  e('C2 SALE', 'revenue', 'credit', '6000.00', C2);
-  e('UNNAMED SALE', 'revenue', 'credit', '2400.00', null);
+  await e('C1 SALE', 'revenue', 'credit', '18000.00', C1);
+  await e('C1 SALE RECEIVABLE', 'receivables', 'debit', '18000.00', C1);
+  await e('C1 REFUND', 'revenue', 'debit', '1000.00', C1);
+  await e('C1 RECEIPT BANK', 'cash', 'debit', '17000.00', C1);
+  await e('C1 RECEIPT RECEIVABLE', 'receivables', 'credit', '17000.00', C1);
+  await e('C1 OTHER INCOME', 'other_income', 'credit', '700.00', C1);
+  await e('C2 SALE', 'revenue', 'credit', '6000.00', C2);
+  await e('UNNAMED SALE', 'revenue', 'credit', '2400.00', null);
 
   // ---- Suppliers: expenses, a supplier credit, and the contact on the payables and bank lines ----
-  e('S1 STOCK', 'cost_of_sales', 'debit', '5200.00', S1);
-  e('S1 STOCK PAYABLE', 'payables', 'credit', '5200.00', S1);
-  e('S1 PAYMENT PAYABLE', 'payables', 'debit', '5200.00', S1);
-  e('S1 PAYMENT BANK', 'cash', 'credit', '5200.00', S1);
-  e('S1 ADS', 'marketing', 'debit', '900.00', S1);
-  e('S1 CREDIT NOTE', 'cost_of_sales', 'credit', '300.00', S1);
-  e('S1 LOAN REPAYMENT', 'loan', 'debit', '1500.00', S1);
-  e('S2 RENT', 'operating_expense', 'debit', '1250.00', S2);
-  e('S2 DRAWINGS', 'drawings', 'debit', '400.00', S2);
-  e('UNNAMED PAYROLL', 'payroll', 'debit', '4300.00', null);
+  await e('S1 STOCK', 'cost_of_sales', 'debit', '5200.00', S1);
+  await e('S1 STOCK PAYABLE', 'payables', 'credit', '5200.00', S1);
+  await e('S1 PAYMENT PAYABLE', 'payables', 'debit', '5200.00', S1);
+  await e('S1 PAYMENT BANK', 'cash', 'credit', '5200.00', S1);
+  await e('S1 ADS', 'marketing', 'debit', '900.00', S1);
+  await e('S1 CREDIT NOTE', 'cost_of_sales', 'credit', '300.00', S1);
+  await e('S1 LOAN REPAYMENT', 'loan', 'debit', '1500.00', S1);
+  await e('S2 RENT', 'operating_expense', 'debit', '1250.00', S2);
+  await e('S2 DRAWINGS', 'drawings', 'debit', '400.00', S2);
+  await e('UNNAMED PAYROLL', 'payroll', 'debit', '4300.00', null);
   await calc(org);
 
   // ---- An organisation whose ledger names parties only on balance-sheet lines ----
   emptyOrg = await createOrg(`LC empty ${RUN}`);
-  const z = ledgerOrg(emptyOrg);
-  const zS = cp(emptyOrg, 'Only Payables', 'supplier');
-  z('Z SALE', 'revenue', 'credit', '800.00', null);
-  z('Z PAYABLE', 'payables', 'credit', '650.00', zS);
-  z('Z BANK', 'cash', 'credit', '650.00', zS);
+  const z = await ledgerOrg(emptyOrg);
+  const zS = await cp(emptyOrg, 'Only Payables', 'supplier');
+  await z('Z SALE', 'revenue', 'credit', '800.00', null);
+  await z('Z PAYABLE', 'payables', 'credit', '650.00', zS);
+  await z('Z BANK', 'cash', 'credit', '650.00', zS);
   await calc(emptyOrg);
 }, 900_000);
 
-afterAll(() => {
-  adminSql(`delete from public.organizations where id in ('${org}','${emptyOrg}'); delete from auth.users where email like '%@${DOMAIN}';`);
-});
+afterAll(async () => {
+  await dropFixtures([org, emptyOrg], DOMAIN);
+}, 60_000);
 
 interface Snap { snapshotId: string; value: string | null; basis: string; descriptor: unknown }
 
-function snapshot(orgId: string, key: string, dimension: { id?: string | null; key?: string }): Snap | null {
-  const where = dimension.key !== undefined
-    ? `c.dimension_key = '${dimension.key}'`
+async function snapshot(orgId: string, key: string, dimension: { id?: string | null; key?: string }): Promise<Snap | null> {
+  let q: FirebaseFirestore.Query = orgCollection(fs(), orgId, 'metric_current')
+    .where('metric_key', '==', key).where('period_id', '==', await periodFor(orgId, '2026-08-01'));
+  q = dimension.key !== undefined
+    ? q.where('dimension_key', '==', dimension.key)
     : dimension.id === null || dimension.id === undefined
-      ? `c.dimension_id is null and c.dimension_type = ${key === 'customer_revenue' || key === 'supplier_spend' ? `'counterparty'` : `'none'`}`
-      : `c.dimension_id = '${dimension.id}'`;
-  const found = adminSql(`select s.id || '|' || coalesce(s.value::text,'NULL') || '|' || s.basis || '|' || coalesce(s.evidence_query::text,'NULL')
-      from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-      join public.fiscal_periods p on p.id = c.period_id
-     where c.organization_id = '${orgId}' and c.metric_key = '${key}' and p.period_start = '2026-08-01' and ${where}`).trim();
-  if (found === '') return null;
-  const [snapshotId, value, basis, ...rest] = found.split('|');
-  const query = rest.join('|');
+      ? q.where('dimension_id', '==', null).where('dimension_type', '==', key === 'customer_revenue' || key === 'supplier_spend' ? 'counterparty' : 'none')
+      : q.where('dimension_id', '==', dimension.id);
+  const cell = (await q.limit(1).get()).docs[0];
+  if (!cell) return null;
+  const s = (await rowOf(orgId, 'metric_snapshots', String(cell.get('snapshot_id'))))!;
+  // LOW-13: "no descriptor" is stored as a null query.
+  const query = (s.evidence_query ?? null) as { descriptor?: unknown } | null;
   return {
-    snapshotId: snapshotId!, value: value === 'NULL' ? null : value!, basis: basis!,
-    // LOW-13: "no descriptor" is stored as JSON `null`, which `coalesce` does not catch.
-    descriptor: query === 'NULL' ? null : (JSON.parse(query) as { descriptor?: unknown } | null)?.descriptor ?? null,
+    snapshotId: String(s.id), value: s.value === null || s.value === undefined ? null : String(s.value), basis: String(s.basis),
+    descriptor: query?.descriptor ?? null,
   };
 }
 
 /** Figure, evidence total, an independent reporting-sign Σ of the returned rows, and their keys. */
 async function reconcile(orgId: string, key: string, dimension: { id?: string | null; key?: string }, sign: 'income' | 'expense') {
-  const snap = snapshot(orgId, key, dimension);
+  const snap = await snapshot(orgId, key, dimension);
   expect(snap, `${key} snapshot`).not.toBeNull();
   expect(snap!.basis).toBe('ledger');
   expect(snap!.descriptor, `${key} must carry a descriptor`).not.toBeNull();
   const selection = await resolveDescriptor(ctxFor(orgId), snap!.descriptor);
   expect(selection.count).toBe(selection.rows.length);
   // Independently of the evidence service's amounts: re-read each line's stored side and amount.
-  const raw = selection.rows.length === 0 ? [] : adminSql(`select direction || '|' || amount from public.ledger_entries where id in (${selection.rows.map((r) => `'${r.id}'`).join(',')})`)
-    .split('\n').map((l) => l.trim()).filter(Boolean);
+  const raw = await Promise.all(selection.rows.map(async (r) => (await rowOf(orgId, 'ledger_entries', r.id))!));
   const independent = raw.reduce((total, l) => {
-    const [dir, amt] = l.split('|');
-    const credit = dir === 'credit';
-    return total.plus(new Decimal(amt!).times((sign === 'income') === credit ? 1 : -1));
+    const credit = l.direction === 'credit';
+    return total.plus(new Decimal(String(l.amount)).times((sign === 'income') === credit ? 1 : -1));
   }, new Decimal(0));
   const byId = new Map([...line.entries()].map(([k, id]) => [id, k]));
   return {
@@ -184,12 +196,12 @@ describe('HIGH-5 — ledger supplier spend is the party\'s expense lines, net of
     expect(r.evidenceTotal).toBe(r.figure);
   });
 
-  it('a party named only on balance-sheet lines has no spend at all', () => {
+  it('a party named only on balance-sheet lines has no spend at all', async () => {
     // Old figure: |payables 650| + |bank 650| = 1,300.00 of "spend" over an empty drill-down.
-    expect(snapshot(emptyOrg, 'supplier_spend', { id: party.get('Only Payables')! })).toBeNull();
-    const attributed = adminSql(`select count(*) from public.metric_current c where c.organization_id = '${emptyOrg}'
-       and c.metric_key in ('customer_revenue','supplier_spend') and c.dimension_id is not null`).trim();
-    expect(attributed).toBe('0');
+    expect(await snapshot(emptyOrg, 'supplier_spend', { id: party.get('Only Payables')! })).toBeNull();
+    const attributed = (await rowsOf(emptyOrg, 'metric_current'))
+      .filter((c) => (c.metric_key === 'customer_revenue' || c.metric_key === 'supplier_spend') && c.dimension_id !== null);
+    expect(attributed).toHaveLength(0);
   });
 });
 
@@ -205,10 +217,10 @@ describe('HIGH-5 — ledger customer revenue is the party\'s revenue lines, net 
   it('Σ customers + Unattributed = revenue, and Unattributed is the unnamed sale', async () => {
     const c2 = await reconcile(org, 'customer_revenue', { id: party.get('Customer Two')! }, 'income');
     expect(c2.figure).toBe('6000.00');
-    const unattributed = snapshot(org, 'customer_revenue', { id: null })!;
+    const unattributed = (await snapshot(org, 'customer_revenue', { id: null }))!;
     expect(new Decimal(unattributed.value!).toFixed(2)).toBe('2400.00');
     expect(unattributed.descriptor).toBeNull();
-    const revenue = snapshot(org, 'revenue', { id: null })!;
+    const revenue = (await snapshot(org, 'revenue', { id: null }))!;
     expect(new Decimal(revenue.value!).toFixed(2)).toBe('25400.00');
   });
 });
@@ -231,16 +243,17 @@ describe('HIGH-6 — a ledger drill-down is totalled in reporting sign', () => {
   });
 
   it('every leaf descriptor on the organisation reconciles', async () => {
-    const rows = adminSql(`select c.metric_key || '|' || coalesce(s.value::text,'NULL') || '|' || s.evidence_query::text
-        from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-       where c.organization_id = '${org}' and s.evidence_query is not null and s.evidence_query->>'kind' = 'leaf'`)
-      .split('\n').map((l) => l.trim()).filter(Boolean);
+    const rows: Array<{ key: string; value: string | null; descriptor: unknown }> = [];
+    for (const c of await rowsOf(org, 'metric_current')) {
+      const s = await rowOf(org, 'metric_snapshots', String(c.snapshot_id));
+      const q = (s?.evidence_query ?? null) as { kind?: string; descriptor?: unknown } | null;
+      if (s && q && q.kind === 'leaf') rows.push({ key: String(c.metric_key), value: s.value === null ? null : String(s.value), descriptor: q.descriptor });
+    }
     expect(rows.length).toBeGreaterThan(10);
     const mismatches: string[] = [];
-    for (const row of rows) {
-      const [key, value, ...rest] = row.split('|');
-      const selection = await resolveDescriptor(ctxFor(org), (JSON.parse(rest.join('|')) as { descriptor: unknown }).descriptor);
-      const fig = value === 'NULL' ? 'NULL' : new Decimal(value!).toFixed(2);
+    for (const { key, value, descriptor } of rows) {
+      const selection = await resolveDescriptor(ctxFor(org), descriptor);
+      const fig = value === null ? 'NULL' : new Decimal(value).toFixed(2);
       const tot = selection.total === null ? 'NULL' : new Decimal(selection.total).toFixed(2);
       if (fig !== tot) mismatches.push(`${key} figure=${fig} evidence=${tot}`);
     }
@@ -278,7 +291,7 @@ describe('the analyst reads the same population', () => {
       ['supplier_spend', 'Supplier One', ['S1 ADS', 'S1 CREDIT NOTE', 'S1 STOCK'], '5800.00'],
       ['customer_revenue', 'Customer One', ['C1 REFUND', 'C1 SALE'], '17000.00'],
     ] as const) {
-      const snap = snapshot(org, key, { id: party.get(name)! })!;
+      const snap = (await snapshot(org, key, { id: party.get(name)! }))!;
       const out = await tool('get_transactions_for_evidence').run({ metric_snapshot_id: snap.snapshotId }, await callContext(org)) as {
         ok: boolean; data: { records: Array<{ id: string; amount: { value: string } }>; sum: { value: string } | null };
       };

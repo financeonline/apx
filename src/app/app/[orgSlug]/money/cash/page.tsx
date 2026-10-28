@@ -7,6 +7,7 @@ import { PeriodHeading } from '../_components/period-heading';
 import { FigureTable } from '../_components/figures';
 import { OpeningBalanceForm } from './opening-balance-form';
 import { requirePermission } from '@/app/_lib/authz';
+import { loadBaseCurrency } from '@/modules/financials';
 
 export const dynamic = 'force-dynamic';
 
@@ -161,6 +162,5 @@ export default async function CashPage({
 async function baseCurrency(
   db: Awaited<ReturnType<typeof getAccessContext>>['db'], orgId: string,
 ): Promise<string> {
-  const { data } = await db.from('organizations').select('base_currency').eq('id', orgId).single();
-  return (data?.base_currency as string | undefined) ?? 'GBP';
+  return (await loadBaseCurrency(db, orgId)) ?? 'GBP';
 }

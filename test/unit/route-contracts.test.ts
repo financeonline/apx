@@ -65,10 +65,10 @@ describe('every consumer of a `next` target judges it with the one rule (ROUTE_A
       .filter((path) => /\.(ts|tsx)$/.test(path))
       .filter((path) => /\.get\('next'\)|searchParams\.next\b/.test(readFileSync(path, 'utf8')));
 
-    // Two READ a next target (the callback and the sign-in form); the middleware only PRODUCES one,
+    // Two READ a next target (the callback and the sign-in form); the proxy (src/proxy.ts) only PRODUCES one,
     // and it builds that from the request path through the same function.
     expect(readers.length, 'the callback and the sign-in form read next').toBeGreaterThanOrEqual(2);
-    expect(readFileSync('src/middleware.ts', 'utf8')).toMatch(/safeNextPath\(/);
+    expect(readFileSync('src/proxy.ts', 'utf8')).toMatch(/safeNextPath\(/);
     for (const path of readers) {
       expect(readFileSync(path, 'utf8'), `${path} reads a next target without safeNextPath`)
         .toMatch(/from '@\/core\/routing'/);

@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { runFundingAssessment, type FundingTrigger } from '@/modules/funding';
 import type { ClaimedJob, JobOutcome } from '../domain/types';
 
@@ -15,6 +15,6 @@ export async function runFundingAssessJob(job: ClaimedJob, scope: { db: unknown 
   if (orgId === null) return { status: 'failed', error: 'funding.assess has no organization to scope to' };
   const raw = job.payload.trigger;
   const trigger = typeof raw === 'string' && (TRIGGERS as readonly string[]).includes(raw) ? raw as FundingTrigger : 'nightly_backstop';
-  const result = await runFundingAssessment(scope.db as SupabaseClient, orgId, trigger);
+  const result = await runFundingAssessment(scope.db as Db, orgId, trigger);
   return { status: 'succeeded', result };
 }

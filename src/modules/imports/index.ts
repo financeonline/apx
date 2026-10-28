@@ -139,3 +139,7 @@ export {
   type CompletenessAnswer, type CompletenessAttestationView, type CompletenessMonth, type ReportCompletenessView, type ReportScope,
 } from './services/completeness';
 export { setStatementBalancesAndRevalidate, type BalanceComparison, type RevalidationResult } from './services/statement-balances';
+export {
+  documentHasTextLayer, listActiveBankAccounts, listExpenseAccounts, loadPageConfirmationFacts, organizationFacts,
+  type PageConfirmationFacts,
+} from './services/page-facts';

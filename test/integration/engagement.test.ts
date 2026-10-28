@@ -5,7 +5,12 @@ import {
   markNotificationsRead, unreadCount, updateEngagementStatus,
 } from '@/modules/engagement';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { prepareDataAdded } from '@/db/app/imports-commit';
+import { orgRows } from '@/db/rls';
+import { newId, nowIso, orgRow } from '@/db/schema';
+import { runTx } from '@/db/tx';
+import { clientFor, createAuthUser, fs, rpc, serviceClientScoped } from './setup';
+import { addMember, dropFixtures, makeOrg, rowOf, rowsOf, seedBatch, seedDocument } from './f-fixtures';
 
 /**
  * Team/Client Management, in-app (ADR-144): requests, deliverables, comments and the inbox — who
@@ -14,7 +19,7 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  */
 
 const RUN = `e${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.engagement.itest`;
+const DOMAIN = `${RUN}.engagement.itest.motion`;
 let ownerId: string;
 let adminId: string;
 let clientId: string;
@@ -22,7 +27,6 @@ let strangerId: string;
 let orgId: string;
 let otherOrgId: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 const ctxFor = (userId: string, role: EffectiveRole, org = orgId): AccessContext => ({
   userId, orgId: org, orgSlug: 'eng', effectiveRole: role, permissions: permissionsFor(role), actorType: 'user',
   db: clientFor(userId, { email: `${role}-${userId.slice(0, 4)}@${DOMAIN}` }), requestId: `itest-${RUN}`, now: () => new Date(), organizationStatus: 'active',
@@ -33,29 +37,19 @@ const client = () => ctxFor(clientId, 'client');
 const inbox = async (ctx: AccessContext) => (await listNotifications(ctx)).map((n) => n.kind + ':' + n.title);
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  adminId = createAuthUser(`admin@${DOMAIN}`);
-  clientId = createAuthUser(`client@${DOMAIN}`);
-  strangerId = createAuthUser(`stranger@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest Engagement ${RUN}` });
-  if (created.error) throw new Error(created.error.message);
-  orgId = created.data as unknown as string;
-  const other = await clientFor(strangerId).schema('api').rpc('create_organization', { p_name: `ITest Engagement Other ${RUN}` });
-  otherOrgId = other.data as unknown as string;
-  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status)
-            values ('${orgId}', '${adminId}', 'admin', 'active'), ('${orgId}', '${clientId}', 'client', 'active')`);
-});
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  adminId = await createAuthUser(`admin@${DOMAIN}`);
+  clientId = await createAuthUser(`client@${DOMAIN}`);
+  strangerId = await createAuthUser(`stranger@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest Engagement ${RUN}`);
+  otherOrgId = await makeOrg(strangerId, `ITest Engagement Other ${RUN}`);
+  await addMember(orgId, adminId, 'admin');
+  await addMember(orgId, clientId, 'client');
+}, 60_000);
 
-afterAll(() => {
-  adminSql(`
-    select set_config('app.purge', 'on', false);
-    delete from public.notifications where organization_id in (select id from public.organizations where name like 'ITest Engagement%${RUN}');
-    delete from public.engagement_events where organization_id in (select id from public.organizations where name like 'ITest Engagement%${RUN}');
-    delete from public.engagement_items where organization_id in (select id from public.organizations where name like 'ITest Engagement%${RUN}');
-    delete from public.action_comments where organization_id in (select id from public.organizations where name like 'ITest Engagement%${RUN}');
-    delete from public.organizations where name like 'ITest Engagement%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';`);
-});
+afterAll(async () => {
+  await dropFixtures([orgId, otherOrgId], DOMAIN);
+}, 60_000);
 
 describe('a client\'s request', () => {
   let requestId: string;
@@ -78,12 +72,13 @@ describe('a client\'s request', () => {
   it('cannot be moved along by the client — only withdrawn', async () => {
     await expect(updateEngagementStatus(client(), requestId, 'delivered', null)).rejects.toMatchObject({ code: 'PERMISSION_DENIED' });
     await updateEngagementStatus(client(), requestId, 'closed', 'Answered on a call');
-    expect(one(`select status || '|' || (closed_at is not null) from public.engagement_items where id = '${requestId}'`)).toBe('closed|true');
+    const item = await rowOf(orgId, 'engagement_items', requestId);
+    expect(`${item!.status}|${item!.closed_at !== null}`).toBe('closed|true');
   });
 
-  it('keeps its history: events cannot be edited or deleted', () => {
-    expect(() => adminSql(`update public.engagement_events set note = 'x' where item_id = '${requestId}'`)).toThrow(/IMMUTABLE/);
-  });
+  // The PostgreSQL `append_only_guard` on engagement_events has no Firestore counterpart to test:
+  // no function offers to change or delete an event (FIRESTORE_DATA_MODEL.md §4), and the browser
+  // cannot reach Firestore at all.
 });
 
 describe('a deliverable', () => {
@@ -99,23 +94,33 @@ describe('a deliverable', () => {
 
 describe('comments on an action', () => {
   it('reach the action\'s owner and earlier commenters, never the author', async () => {
-    const actionId = one(`insert into public.actions (organization_id, title, source_type, owner_user_id, created_by)
-                          values ('${orgId}', 'Chase late payers', 'user', '${adminId}', '${ownerId}') returning id`);
+    const actionId = newId();
+    const now = nowIso();
+    await orgRow(fs(), orgId, 'actions', actionId).set({
+      id: actionId, organization_id: orgId, title: 'Chase late payers', description: null, source_type: 'user',
+      source_id: null, priority: 'medium', status: 'open', owner_user_id: adminId, created_by: ownerId, due_date: null,
+      completed_at: null, evidence_bundle_id: null, created_at: now, updated_at: now,
+    });
     await addActionComment(client(), actionId, 'Two have now paid.');
     expect(await inbox(admin())).toContain('action_comment:New comment on "Chase late payers"');
     expect(await inbox(owner())).toContain('action_comment:New comment on "Chase late payers"');
     expect((await inbox(client())).filter((t) => t.startsWith('action_comment'))).toEqual([]);
-    expect(() => adminSql(`delete from public.action_comments where action_id = '${actionId}'`)).toThrow(/IMMUTABLE/);
   });
 });
 
 describe('notifications about the client\'s data and reports', () => {
   it('tell the client new data was added, linking to Home; the importer is not told', async () => {
-    const doc = one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-                     values ('${orgId}', '${orgId}/e/gl.csv', 'gl.csv', 'text/csv', 10, decode('e5','hex'), 'ready', 'general_ledger') returning id`);
-    const batch = one(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end)
-                       values ('${orgId}', '${doc}', 'general_ledger', 'ledger_entries', 'committing', 'csv', '2026-09-01', '2026-09-30') returning id`);
-    adminSql(`update public.import_batches set status = 'committed', committed_at = now(), reviewed_by = '${ownerId}' where id = '${batch}'`);
+    const doc = await seedDocument(orgId, { filename: 'gl.csv', kind: 'general_ledger' });
+    const batch = await seedBatch(orgId, {
+      documentId: doc, importType: 'general_ledger', targetTable: 'ledger_entries', status: 'committed',
+      periodStart: '2026-09-01', periodEnd: '2026-09-30', reviewedBy: ownerId,
+    });
+    // The commit's `notify_data_added` (Team I's commit writes it in the commit transaction).
+    const server = serviceClientScoped(orgId);
+    await runTx(server, async (tx) => {
+      const notices = await prepareDataAdded(server, tx, (await rowOf(orgId, 'import_batches', batch))!);
+      notices.write(tx);
+    });
     const clientNote = (await listNotifications(client())).find((n) => n.kind === 'data_added')!;
     expect(clientNote).toMatchObject({ title: 'New data added: general ledger' });
     expect(clientNote.href).toMatch(/\/home$/);
@@ -125,8 +130,11 @@ describe('notifications about the client\'s data and reports', () => {
   });
 
   it('tell everyone who may read reports that a weekly report is ready', async () => {
-    adminSql(`insert into public.reports (organization_id, report_kind, window_start, window_end, origin, content, content_version)
-              values ('${orgId}', 'weekly_intelligence', '2026-09-07', '2026-09-13', 'scheduled', '{}'::jsonb, 'brief.v1')`);
+    const recorded = await rpc(serviceClientScoped(orgId), 'record_report', {
+      p_org: orgId, p_actor: null, p_kind: 'weekly_intelligence', p_origin: 'scheduled', p_period: null, p_job: null,
+      p_content: {}, p_content_version: 'brief.v1', p_window_start: '2026-09-07', p_window_end: '2026-09-13',
+    }, { server: true });
+    expect(recorded.error).toBeNull();
     for (const ctx of [owner(), admin(), client()]) expect(await inbox(ctx)).toContain('report_ready:Your weekly report is ready');
   });
 });
@@ -139,10 +147,10 @@ describe('the inbox', () => {
   });
 
   it('is each person\'s own: nobody reads another\'s, and a stranger sees nothing of this organisation', async () => {
-    const theirs = one(`select count(*) from public.notifications where organization_id = '${orgId}' and user_id <> '${clientId}'`);
-    expect(Number(theirs)).toBeGreaterThan(0);
-    const { data } = await client().db.from('notifications').select('id').eq('organization_id', orgId).neq('user_id', clientId);
-    expect(data ?? []).toEqual([]);
+    const theirs = (await rowsOf(orgId, 'notifications')).filter((n) => n.user_id !== clientId);
+    expect(theirs.length).toBeGreaterThan(0);
+    const data = await orgRows(client().db, orgId, 'notifications', (q) => q.where('user_id', '!=', clientId));
+    expect(data).toEqual([]);
     expect(await listNotifications(ctxFor(strangerId, 'owner', otherOrgId))).toEqual([]);
   });
 });

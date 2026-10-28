@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { callApi } from '@/core/db';
 
 /**
@@ -9,7 +9,7 @@ import { callApi } from '@/core/db';
 
 /** Set the standard-category account a transaction belongs to. Appends `category_history`. */
 export async function overrideBankCategory(
-  db: SupabaseClient, transactionId: string, accountId: string | null, requestId?: string,
+  db: Db, transactionId: string, accountId: string | null, requestId?: string,
 ): Promise<string> {
   return callApi<string>(db, 'override_bank_category', {
     p_txn: transactionId,
@@ -24,7 +24,7 @@ export async function overrideBankCategory(
  * (ADR-028). Use `transferKindFor` to show the user what will happen; do not send it.
  */
 export async function markTransfer(
-  db: SupabaseClient, transactionId: string, pairId: string | null, requestId?: string,
+  db: Db, transactionId: string, pairId: string | null, requestId?: string,
 ): Promise<string> {
   return callApi<string>(db, 'mark_transfer', {
     p_txn: transactionId,

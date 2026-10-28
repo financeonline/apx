@@ -1,7 +1,8 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { orgRowById } from '@/db/rls';
+import type { Db } from '@/db/types';
 import { setBatchValidation } from '@/core/db';
-import { ConflictError, NotFound, ValidationError, toMotionError } from '@/core/errors';
+import { ConflictError, NotFound, ValidationError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
 import { parseMoney } from '@/core/money';
@@ -41,7 +42,7 @@ export async function setStatementBalancesAndRevalidate(
 ): Promise<RevalidationResult> {
   assertCan(ctx, 'imports.review');
   if (!ctx.orgId) throw new NotFound();
-  const db: SupabaseClient = ctx.db;
+  const db: Db = ctx.db;
 
   const batch = (await listBatches(db, ctx.orgId, { limit: 200, offset: 0 }, ctx.requestId)).find((b) => b.id === input.batchId);
   if (!batch) throw new NotFound();
@@ -100,22 +101,16 @@ function sameMoney(a: string, b: string): boolean {
   return parseMoney(a).equals(parseMoney(b));
 }
 
-async function liabilityAccount(db: SupabaseClient, orgId: string, bankAccountId: string | null): Promise<boolean> {
+async function liabilityAccount(db: Db, orgId: string, bankAccountId: string | null): Promise<boolean> {
   if (!bankAccountId) return false;
-  const { data, error } = await db.from('bank_accounts').select('account_type').eq('organization_id', orgId).eq('id', bankAccountId).maybeSingle();
-  if (error) throw toMotionError(error);
-  const type = (data as { account_type?: string } | null)?.account_type;
+  const type = (await orgRowById<{ account_type?: string }>(db, orgId, 'bank_accounts', bankAccountId))?.account_type;
   return type === 'credit_card' || type === 'loan';
 }
 
-async function currentBatchIssues(db: SupabaseClient, orgId: string, batchId: string, requestId?: string): Promise<BatchIssue[]> {
-  const { data, error } = await db.from('import_batches').select('batch_issues').eq('organization_id', orgId).eq('id', batchId).maybeSingle();
-  if (error) throw toMotionError(error, requestId);
-  return ((data as { batch_issues?: BatchIssue[] } | null)?.batch_issues ?? []);
+async function currentBatchIssues(db: Db, orgId: string, batchId: string, _requestId?: string): Promise<BatchIssue[]> {
+  return (await orgRowById<{ batch_issues?: BatchIssue[] }>(db, orgId, 'import_batches', batchId))?.batch_issues ?? [];
 }
 
-async function requiredConfirmations(db: SupabaseClient, orgId: string, batchId: string, requestId?: string): Promise<string[]> {
-  const { data, error } = await db.from('import_batches').select('required_confirmations').eq('organization_id', orgId).eq('id', batchId).maybeSingle();
-  if (error) throw toMotionError(error, requestId);
-  return ((data as { required_confirmations?: string[] } | null)?.required_confirmations ?? []);
+async function requiredConfirmations(db: Db, orgId: string, batchId: string, _requestId?: string): Promise<string[]> {
+  return (await orgRowById<{ required_confirmations?: string[] }>(db, orgId, 'import_batches', batchId))?.required_confirmations ?? [];
 }

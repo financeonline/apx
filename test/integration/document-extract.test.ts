@@ -6,7 +6,9 @@ import { SUBMIT_PAGE_TOOL, type ModelCall, type ModelResponse, type ModelTranspo
 import { loadBatchReview, setStatementBalancesAndRevalidate, startImport } from '@/modules/imports';
 import { permissionsFor } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { globalRow } from '@/db/schema';
+import { clientFor, createAuthUser, deleteOrg, drainUntilFinished, fs, rpc } from './setup';
+import { auditsOf, makeOrg, rowOf, seedBankAccount } from './f-fixtures';
 
 /**
  * Claude-assisted extraction, end to end (IMPORT_ENGINE.md §5.4; ADR-033; ADR-084; CD-11): a
@@ -17,13 +19,13 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  */
 
 const RUN = `dx${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.extract.itest`;
+const DOMAIN = `${RUN}.extract.itest.motion`;
 
 let ownerId: string;
 let orgId: string;
 let bankAccountId: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+const jobOf = async (id: string) => (await globalRow(fs(), 'jobs', id).get()).data() ?? {};
 const userDb = () => clientFor(ownerId, { email: `owner@${DOMAIN}` });
 
 /** A two-page statement in a layout no §5.3 grammar knows: "When | What | How much | Left". */
@@ -62,21 +64,25 @@ function scriptedReader(): ModelTransport {
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest Extract ${RUN}` });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-  bankAccountId = one(`
-    insert into public.bank_accounts (organization_id, name, account_type, bank_name, account_number_masked, is_active)
-    values ('${orgId}', 'Current', 'current', 'Test Bank', '****1234', true) returning id`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest Docs Extract ${RUN}`);
+  bankAccountId = await seedBankAccount(orgId, { name: 'Current', accountNumber: '****1234' });
 });
 
-afterAll(() => {
+afterAll(async () => {
   extractDeps.transport = undefined;
-  adminSql(`
-    delete from public.organizations where name like 'ITest Extract%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';`);
+  // A refused read goes back to the queue: leave nothing for another suite's worker to pick up.
+  const left = await fs().collection('jobs').where('organization_id', '==', orgId).where('status', '==', 'queued').get();
+  for (const d of left.docs) await d.ref.update({ status: 'cancelled', updated_at: new Date().toISOString() });
+  await deleteOrg(orgId);
 });
+
+/** The organisation's charges on the daily AI page counter (`app.throttle(org, 'ai_extraction_page', …)`). */
+async function pagesCharged(): Promise<number> {
+  const snap = await fs().collection('api_rate_limits').where('actor_user_id', '==', orgId)
+    .where('bucket', '==', 'ai_extraction_page').get();
+  return snap.docs.reduce((total, d) => total + Number(d.get('count') ?? 0), 0);
+}
 
 describe('a PDF the deterministic parser could not read', () => {
   let batchId: string;
@@ -92,7 +98,7 @@ describe('a PDF the deterministic parser could not read', () => {
     batchId = result.batchId;
     documentId = result.documentId;
     expect(result.parseFailure).toMatch(/could not find a transaction table/);
-    expect(one(`select has_text_layer::text from public.source_documents where id = '${documentId}'`)).toBe('true');
+    expect((await rowOf(orgId, 'source_documents', documentId))?.has_text_layer).toBe(true);
   });
 
   it('refuses AI reading while the organisation has not enabled it (CD-35)', async () => {
@@ -101,27 +107,31 @@ describe('a PDF the deterministic parser could not read', () => {
       organizationId: orgId, jobType: 'document.extract', payload: { document_id: documentId, batch_id: batchId },
     });
     expect(await drainUntilFinished(drainJobs, jobId)).not.toBe('succeeded');
-    expect(adminSql(`select last_error from public.jobs where id = '${jobId}'`)).toMatch(/not enabled/);
-    expect(adminSql(`select count(*) from public.audit_events where organization_id = '${orgId}' and action = 'document.sent_to_ai'`)).toBe('0');
-    adminSql(`update public.jobs set status = 'cancelled' where id = '${jobId}'`);
+    expect(String((await jobOf(jobId)).last_error ?? '')).toMatch(/not enabled/);
+    expect(await auditsOf(orgId, 'document.sent_to_ai')).toHaveLength(0);
+    await globalRow(fs(), 'jobs', jobId).update({ status: 'cancelled' });
   });
 
   it('reads every page as the reviewer, charges each page, and leaves rows that need a human', async () => {
-    adminSql(`update public.organizations set features = features || '{"ai_pdf_extraction": true}'::jsonb where id = '${orgId}'`);
+    const org = (await globalRow(fs(), 'organizations', orgId).get()).data()!;
+    await globalRow(fs(), 'organizations', orgId).update({ features: { ...(org.features ?? {}), ai_pdf_extraction: true } });
     extractDeps.transport = scriptedReader();
     const jobId = await enqueueServerJob({ userId: ownerId, requestId: `itest-${RUN}` }, {
       organizationId: orgId, jobType: 'document.extract', payload: { document_id: documentId, batch_id: batchId },
     });
-    expect(await drainUntilFinished(drainJobs, jobId), adminSql(`select coalesce(last_error, '-') from public.jobs where id = '${jobId}'`)).toBe('succeeded');
+    const status = await drainUntilFinished(drainJobs, jobId);
+    expect(status, String((await jobOf(jobId)).last_error ?? '-')).toBe('succeeded');
 
-    const batch = one(`
-      select b.extraction_method::text || '|' || b.status::text || '|' || b.pages_extracted || '|' || (b.extraction_stats ->> 'tokens_in') || '|' || (b.extraction_stats -> 'balances_read' ->> 'closing') || '|' || coalesce(b.statement_closing_balance::text, 'null')
-        from public.import_batches b where b.id = '${batchId}'`);
+    const b = (await rowOf(orgId, 'import_batches', batchId))!;
+    const stats = b.extraction_stats as Record<string, unknown>;
     // Two pages read, 1,000 input tokens, the closing balance the model READ kept aside, the gate's column untouched.
-    expect(batch).toBe('pdf_claude|awaiting_review|2|1000|1500.99|null');
-    expect(adminSql(`select count(*) from public.audit_events where organization_id = '${orgId}' and action = 'document.sent_to_ai' and actor_user_id = '${ownerId}'`)).toBe('1');
+    expect([b.extraction_method, b.status, b.pages_extracted, Number(stats.tokens_in),
+      (stats.balances_read as Record<string, unknown> | undefined)?.closing, b.statement_closing_balance])
+      .toEqual(['pdf_claude', 'awaiting_review', 2, 1000, '1500.99', null]);
+    const sent = await auditsOf(orgId, 'document.sent_to_ai');
+    expect(sent.filter((a) => a.actor_user_id === ownerId)).toHaveLength(1);
     // ADR-033: every page attempt is charged on the organisation's daily counter.
-    expect(Number(adminSql(`select coalesce(sum(count), 0) from public.api_rate_limits where actor_user_id = '${orgId}' and bucket = 'ai_extraction_page'`))).toBe(2);
+    expect(await pagesCharged()).toBe(2);
 
     const review = (await loadBatchReview(userDb(), orgId, batchId))!;
     const rows = review.rows.filter((r) => r.status !== 'skipped');
@@ -136,7 +146,7 @@ describe('a PDF the deterministic parser could not read', () => {
   });
 
   it('will not commit while a page read by AI is unconfirmed, whatever the browser says', async () => {
-    const { error } = await userDb().schema('api').rpc('commit_import_batch', { p_batch: batchId });
+    const { error } = await rpc(userDb(), 'commit_import_batch', { p_batch: batchId });
     // The gate refuses on its own terms: a batch-level error (the balances) or an unconfirmed page.
     expect(error?.message ?? '').toMatch(/page|confirm|balance|problem/i);
   });

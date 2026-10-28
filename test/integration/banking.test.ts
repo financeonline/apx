@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 import { isMotionError } from '@/core/errors';
 import { Decimal } from '@/core/money';
 import { permissionsFor } from '@/core/permissions';
@@ -7,13 +7,19 @@ import { getRecordProvenance } from '@/modules/evidence';
 import { exportCsv } from '@/modules/exports';
 import { drainJobs } from '@/modules/jobs';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished, sqlstate } from './setup';
+import { orgRows } from '@/db/rls';
+import { orgCollection, orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, fs, rpc, sqlstate } from './setup';
+import {
+  addMember, addPlatformUser, assign, auditsOf, calculate, dropFixtures, makeOrg, periodFor, rowOf, rowsOf,
+  seedBankAccount, seedBankTxn, seedBatch, seedDocument, systemAccount,
+} from './f-fixtures';
 
 /**
  * Phase 13 — Banking Intelligence (ADR-101).
  *
  * The banking pass ran for the first time in Phase 13: the rules existed since Phase 6, nothing
- * applied them. This suite proves, against the real database and the real calculation job:
+ * applied them. This suite proves, against the real functions and the real calculation job:
  *
  *   * the pass categorises, pairs and groups what the rules say it should — and writes ONLY that;
  *   * it is idempotent: a second run over unchanged rows is `no_change` and writes no history;
@@ -23,10 +29,11 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished, sqlstate } fro
  *   * currency is the organisation's, never a literal.
  */
 
+// Every calculation here drains the queue the other suites share, so a run can wait behind theirs.
+vi.setConfig({ testTimeout: 300_000 });
+
 const RUN = `b${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.banking.itest`;
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-const rows = (sql: string): string[] => adminSql(sql).split('\n').map((l) => l.trim()).filter(Boolean);
+const DOMAIN = `${RUN}.banking.itest.motion`;
 
 let ownerA: string; let ownerB: string; let clientA: string; let empAssigned: string; let empOther: string;
 let orgA: string; let orgB: string;
@@ -36,26 +43,20 @@ const wageIds: string[] = [];
 let userDecided: string;
 let transferOut: string; let transferIn: string; let cardOut: string; let cardIn: string;
 
-function account(org: string, category: string): string {
-  return one(`select id from public.accounts where organization_id = '${org}' and standard_category = '${category}' and is_system`);
+const account = (org: string, category: string): Promise<string> => systemAccount(org, category);
+const api = (u: string) => ({ rpc: (fn: string, args: Record<string, unknown>) => rpc(clientFor(u), fn, args) });
+const txn = async (id: string) => (await rowOf(orgA, 'bank_transactions', id))!;
+
+function bankAccount(org: string, name: string, type: string, last4: string): Promise<string> {
+  return seedBankAccount(org, {
+    name, bankName: 'Test Bank', sortCode: '**-**-01', accountNumber: `****${last4}`, type,
+    openingBalance: '10000.00', openingBalanceDate: '2026-02-01',
+  });
 }
 
-function bankAccount(org: string, name: string, type: string, last4: string): string {
-  return one(`
-    insert into public.bank_accounts (organization_id, name, bank_name, sort_code_masked, account_number_masked, account_type, currency, opening_balance, opening_balance_date)
-    values ('${org}', '${name}', 'Test Bank', '**-**-01', '****${last4}', '${type}', (select base_currency from public.organizations where id = '${org}'), 10000, '2026-02-01')
-    returning id`);
-}
-
-function post(org: string, acct: string, date: string, amount: string, description: string, extra = ''): string {
-  return one(`
-    insert into public.bank_transactions
-           (organization_id, bank_account_id, transaction_date, amount, period_id, currency,
-            description_raw, description_normalized, record_status, assurance_level ${extra ? ', ' + extra.split('=')[0] : ''})
-    values ('${org}', '${acct}', '${date}', ${amount}, '00000000-0000-0000-0000-000000000000',
-            (select base_currency from public.organizations where id = '${org}'),
-            '${description}', '${description}', 'accepted', 'verified' ${extra ? ', ' + extra.split('=')[1] : ''})
-    returning id`);
+function post(org: string, acct: string, date: string, amount: string, description: string,
+  extra: { categoryAccountId?: string; categorySource?: string } = {}): Promise<string> {
+  return seedBankTxn(org, { bankAccountId: acct, date, amount, description, ...extra });
 }
 
 /**
@@ -64,203 +65,192 @@ function post(org: string, acct: string, date: string, amount: string, descripti
  * trigger a real categorisation would raise — which lets the idempotence test see `no_change`.
  */
 async function runCalculation(org: string, asOf = '2026-09-15'): Promise<string> {
-  const earliest = one(`select id from public.fiscal_periods where organization_id = '${org}' order by period_start limit 1`);
-  const jobId = adminSql(`
-    insert into public.jobs (organization_id, job_type, payload, max_attempts)
-    values ('${org}', 'calculation.run', '{"trigger":"banking_edit","period_ids":["${earliest}"],"as_of":"${asOf}"}'::jsonb, 3)
-    returning id`).split('\n')[0]!.trim();
-  const status = await drainUntilFinished(drainJobs, jobId);
-  expect(status, 'the calculation job must succeed').toBe('succeeded');
-  return jobId;
+  return calculate(org, drainJobs, asOf);
 }
 
-function latestRun(org: string): { status: string; noChange: boolean } {
-  const line = one(`
-    select r.status::text || '|' || coalesce(r.stats ->> 'no_change', 'false')
-      from public.calculation_runs r where r.organization_id = '${org}'
-     order by r.started_at desc, r.created_at desc limit 1`);
-  const [status, noChange] = line.split('|');
-  return { status: status!, noChange: noChange === 'true' };
+async function latestRun(org: string): Promise<{ status: string; noChange: boolean }> {
+  const runs = (await rowsOf(org, 'calculation_runs'))
+    .sort((a, b) => String(b.started_at ?? '').localeCompare(String(a.started_at ?? '')) || String(b.created_at).localeCompare(String(a.created_at)));
+  const r = runs[0]!;
+  return { status: String(r.status), noChange: (r.stats as Record<string, unknown> | null)?.no_change === true };
 }
 
-function historyCount(org: string): number {
-  return Number(one(`select count(*) from public.category_history where organization_id = '${org}'`));
+async function historyCount(org: string): Promise<number> {
+  return (await orgCollection(fs(), org, 'category_history').count().get()).data().count;
+}
+
+/** The engine's current value of a headline figure. */
+async function engine(org: string, period: string, key: string): Promise<Decimal> {
+  const cells = await orgCollection(fs(), org, 'metric_current').where('period_id', '==', period)
+    .where('metric_key', '==', key).where('dimension_type', '==', 'none').get();
+  const snap = await orgRow(fs(), org, 'metric_snapshots', String(cells.docs[0]!.get('snapshot_id'))).get();
+  return new Decimal(String(snap.get('value')));
 }
 
 beforeAll(async () => {
-  ownerA = createAuthUser(`owner-a@${DOMAIN}`);
-  ownerB = createAuthUser(`owner-b@${DOMAIN}`);
-  clientA = createAuthUser(`client-a@${DOMAIN}`);
-  empAssigned = createAuthUser(`emp-assigned@${DOMAIN}`);
-  empOther = createAuthUser(`emp-other@${DOMAIN}`);
-  adminSql(`
-    insert into public.platform_users (user_id, platform_role, status)
-    values ('${empAssigned}', 'employee', 'active'), ('${empOther}', 'employee', 'active')`);
+  ownerA = await createAuthUser(`owner-a@${DOMAIN}`);
+  ownerB = await createAuthUser(`owner-b@${DOMAIN}`);
+  clientA = await createAuthUser(`client-a@${DOMAIN}`);
+  empAssigned = await createAuthUser(`emp-assigned@${DOMAIN}`);
+  empOther = await createAuthUser(`emp-other@${DOMAIN}`);
+  await addPlatformUser(empAssigned, 'employee');
+  await addPlatformUser(empOther, 'employee');
 
   // Organisation A reports in rupees: nothing about banking may assume pounds.
-  const a = await clientFor(ownerA).schema('api').rpc('create_organization', { p_name: `ITest Bank A ${RUN}`, p_base_currency: 'INR', p_country_code: 'IN', p_timezone: 'Asia/Kolkata' });
-  if (a.error) throw new Error(`org A: ${a.error.message}`);
-  orgA = a.data as unknown as string;
-  const b = await clientFor(ownerB).schema('api').rpc('create_organization', { p_name: `ITest Bank B ${RUN}` });
-  if (b.error) throw new Error(`org B: ${b.error.message}`);
-  orgB = b.data as unknown as string;
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status)
-    values ('${orgA}', '${clientA}', 'client', 'active');
-    insert into public.organization_assignments (organization_id, employee_user_id, status)
-    values ('${orgA}', '${empAssigned}', 'active');`);
+  orgA = await makeOrg(ownerA, `ITest Bank A ${RUN}`, { baseCurrency: 'INR', countryCode: 'IN', timezone: 'Asia/Kolkata' });
+  orgB = await makeOrg(ownerB, `ITest Bank B ${RUN}`);
+  await addMember(orgA, clientA, 'client');
+  await assign(orgA, empAssigned);
 
-  current = bankAccount(orgA, 'Main current', 'current', '1111');
-  savings = bankAccount(orgA, 'Savings pot', 'savings', '2222');
-  card = bankAccount(orgA, 'Company card', 'credit_card', '3333');
-  currentB = bankAccount(orgB, 'B current', 'current', '4444');
+  current = await bankAccount(orgA, 'Main current', 'current', '1111');
+  savings = await bankAccount(orgA, 'Savings pot', 'savings', '2222');
+  card = await bankAccount(orgA, 'Company card', 'credit_card', '3333');
+  currentB = await bankAccount(orgB, 'B current', 'current', '4444');
 
   // Seven months of the same wage run and the same customer receipt (Feb–Aug 2026).
   for (const month of ['02', '03', '04', '05', '06', '07', '08']) {
-    wageIds.push(post(orgA, current, `2026-${month}-28`, '-2500.00', 'PAYROLL ACME LTD'));
-    post(orgA, current, `2026-${month}-05`, '9000.00', 'FPS CREDIT NORTHWIND');
+    wageIds.push(await post(orgA, current, `2026-${month}-28`, '-2500.00', 'PAYROLL ACME LTD'));
+    await post(orgA, current, `2026-${month}-05`, '9000.00', 'FPS CREDIT NORTHWIND');
   }
   // A wage run somebody has already decided about: it goes to operating expenses, and stays there.
-  userDecided = post(orgA, current, '2026-08-29', '-2500.00', 'PAYROLL ACME LTD BONUS',
-    `category_account_id, category_source='${account(orgA, 'operating_expense')}', 'user'`);
+  userDecided = await post(orgA, current, '2026-08-29', '-2500.00', 'PAYROLL ACME LTD BONUS',
+    { categoryAccountId: await account(orgA, 'operating_expense'), categorySource: 'user' });
   // A sweep to savings with transfer wording on both legs, and a card repayment.
-  transferOut = post(orgA, current, '2026-08-10', '-1000.00', 'TRANSFER TO SAVINGS');
-  transferIn = post(orgA, savings, '2026-08-10', '1000.00', 'TRANSFER FROM CURRENT');
-  cardOut = post(orgA, current, '2026-08-15', '-420.00', 'CARD PAYMENT TO COMPANY CARD');
-  cardIn = post(orgA, card, '2026-08-16', '420.00', 'PAYMENT RECEIVED THANK YOU TRANSFER');
+  transferOut = await post(orgA, current, '2026-08-10', '-1000.00', 'TRANSFER TO SAVINGS');
+  transferIn = await post(orgA, savings, '2026-08-10', '1000.00', 'TRANSFER FROM CURRENT');
+  cardOut = await post(orgA, current, '2026-08-15', '-420.00', 'CARD PAYMENT TO COMPANY CARD');
+  cardIn = await post(orgA, card, '2026-08-16', '420.00', 'PAYMENT RECEIVED THANK YOU TRANSFER');
   // Card purchases (the expenses), a one-off, and a same-amount pair with NO transfer wording.
-  post(orgA, card, '2026-08-03', '-120.00', 'AMAZON MARKETPLACE');
-  post(orgA, current, '2026-08-20', '-89.99', 'SOME SHOP 1234');
-  post(orgA, current, '2026-08-11', '4800.00', 'ACME INVOICE 1001');
-  post(orgA, savings, '2026-08-12', '-4800.00', 'BETA SUPPLIES');
+  await post(orgA, card, '2026-08-03', '-120.00', 'AMAZON MARKETPLACE');
+  await post(orgA, current, '2026-08-20', '-89.99', 'SOME SHOP 1234');
+  await post(orgA, current, '2026-08-11', '4800.00', 'ACME INVOICE 1001');
+  await post(orgA, savings, '2026-08-12', '-4800.00', 'BETA SUPPLIES');
   // Organisation B: one month, one row, so it has figures of its own to NOT leak.
-  post(orgB, currentB, '2026-08-07', '-300.00', 'PAYROLL B LTD');
+  await post(orgB, currentB, '2026-08-07', '-300.00', 'PAYROLL B LTD');
 
-  august = one(`select id from public.fiscal_periods where organization_id = '${orgA}' and period_start = '2026-08-01'`);
+  august = await periodFor(orgA, '2026-08-01');
 
   // Statements covering August: the current account's reconciled, the savings one without balances.
-  const doc = one(`
-    insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-    values ('${orgA}', '${orgA}/bank/aug.csv', 'aug-statement.csv', 'text/csv', 10, decode('a1','hex'), 'ready', 'bank_statement') returning id`);
-  adminSql(`
-    insert into public.import_batches (organization_id, source_document_id, import_type, target_table, bank_account_id, status, extraction_method, period_start, period_end, committed_at, statement_opening_balance, statement_closing_balance, batch_issues)
-    values ('${orgA}', '${doc}', 'bank_statement', 'bank_transactions', '${current}', 'committed', 'csv', '2026-08-01', '2026-08-31', now() - interval '2 days', 10000.00, 8000.00, '[]'::jsonb),
-           ('${orgA}', '${doc}', 'bank_statement', 'bank_transactions', '${savings}', 'committed', 'csv', '2026-08-01', '2026-08-31', now() - interval '1 day', null, null,
-            '[{"code":"IMP-BAL-007","severity":"warning","message":"Statement balances could not be captured"}]'::jsonb)`);
+  const doc = await seedDocument(orgA, { filename: 'aug-statement.csv', kind: 'bank_statement' });
+  await seedBatch(orgA, {
+    documentId: doc, importType: 'bank_statement', targetTable: 'bank_transactions', bankAccountId: current,
+    status: 'committed', periodStart: '2026-08-01', periodEnd: '2026-08-31',
+    committedAt: new Date(Date.now() - 2 * 86_400_000).toISOString(), openingBalance: '10000.00', closingBalance: '8000.00', issues: [],
+  });
+  await seedBatch(orgA, {
+    documentId: doc, importType: 'bank_statement', targetTable: 'bank_transactions', bankAccountId: savings,
+    status: 'committed', periodStart: '2026-08-01', periodEnd: '2026-08-31',
+    committedAt: new Date(Date.now() - 86_400_000).toISOString(), openingBalance: null, closingBalance: null,
+    issues: [{ code: 'IMP-BAL-007', severity: 'warning', message: 'Statement balances could not be captured' }],
+  });
 
   await runCalculation(orgA);
   await runCalculation(orgB);
 }, 240_000);
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where id in ('${orgA}', '${orgB}');
-    delete from public.platform_users where user_id in (select id from auth.users where email like '%@${DOMAIN}');
-    delete from auth.users where email like '%@${DOMAIN}';`);
-});
+afterAll(async () => {
+  await dropFixtures([orgA, orgB], DOMAIN);
+}, 120_000);
 
 describe('the banking pass runs inside the calculation and writes what the rules say', () => {
-  it('categorises every keyword match by rule, and nothing else', () => {
-    const payroll = account(orgA, 'payroll');
-    const got = rows(`
-      select category_account_id::text || '|' || category_source::text
-        from public.bank_transactions where organization_id = '${orgA}' and id in (${wageIds.map((id) => `'${id}'`).join(',')})`);
+  it('categorises every keyword match by rule, and nothing else', async () => {
+    const payroll = await account(orgA, 'payroll');
+    const got = await Promise.all(wageIds.map(async (id) => { const t = await txn(id); return `${t.category_account_id}|${t.category_source}`; }));
     expect(got).toHaveLength(7);
     expect(new Set(got)).toEqual(new Set([`${payroll}|rule`]));
     // The customer receipt matches no keyword and stays uncategorised — never guessed as revenue.
-    const northwind = rows(`
-      select coalesce(category_account_id::text, 'null') || '|' || category_source::text
-        from public.bank_transactions where organization_id = '${orgA}' and description_normalized = 'FPS CREDIT NORTHWIND'`);
+    const northwind = (await rowsOf(orgA, 'bank_transactions', { description_normalized: 'FPS CREDIT NORTHWIND' }))
+      .map((t) => `${t.category_account_id ?? 'null'}|${t.category_source}`);
     expect(new Set(northwind)).toEqual(new Set(['null|none']));
   });
 
-  it('pairs the sweep as a cash transfer and the card payment as a repayment, deriving the kind in SQL', () => {
-    const leg = (id: string) => one(`
-      select is_transfer::text || '|' || transfer_kind::text || '|' || coalesce(transfer_pair_id::text, '') || '|' || coalesce(category_account_id::text, '') || '|' || category_source::text
-        from public.bank_transactions where id = '${id}'`);
-    expect(leg(transferOut)).toBe(`true|cash_transfer|${transferIn}|${account(orgA, 'transfer')}|rule`);
-    expect(leg(transferIn)).toBe(`true|cash_transfer|${transferOut}|${account(orgA, 'transfer')}|rule`);
-    expect(leg(cardOut)).toBe(`true|card_repayment|${cardIn}|${account(orgA, 'credit_card')}|rule`);
-    expect(leg(cardIn)).toBe(`true|card_repayment|${cardOut}|${account(orgA, 'credit_card')}|rule`);
+  it('pairs the sweep as a cash transfer and the card payment as a repayment, deriving the kind in the writer', async () => {
+    const leg = async (id: string) => {
+      const t = await txn(id);
+      return `${t.is_transfer}|${t.transfer_kind}|${t.transfer_pair_id ?? ''}|${t.category_account_id ?? ''}|${t.category_source}`;
+    };
+    const transfer = await account(orgA, 'transfer');
+    const creditCard = await account(orgA, 'credit_card');
+    expect(await leg(transferOut)).toBe(`true|cash_transfer|${transferIn}|${transfer}|rule`);
+    expect(await leg(transferIn)).toBe(`true|cash_transfer|${transferOut}|${transfer}|rule`);
+    expect(await leg(cardOut)).toBe(`true|card_repayment|${cardIn}|${creditCard}|rule`);
+    expect(await leg(cardIn)).toBe(`true|card_repayment|${cardOut}|${creditCard}|rule`);
   });
 
-  it('does not pair a same-amount receipt and payment that carry no transfer wording', () => {
-    const got = rows(`
-      select is_transfer::text from public.bank_transactions
-       where organization_id = '${orgA}' and description_normalized in ('ACME INVOICE 1001', 'BETA SUPPLIES')`);
-    expect(got).toEqual(['false', 'false']);
+  it('does not pair a same-amount receipt and payment that carry no transfer wording', async () => {
+    const got = (await rowsOf(orgA, 'bank_transactions')).filter((t) => ['ACME INVOICE 1001', 'BETA SUPPLIES'].includes(String(t.description_normalized)))
+      .map((t) => t.is_transfer);
+    expect(got).toEqual([false, false]);
   });
 
-  it('writes the recurring groups and points their members at them', () => {
-    const groups = rows(`
-      select direction::text || '|' || cadence::text || '|' || occurrence_count || '|' || status::text || '|' || expected_amount
-        from public.recurring_payment_groups where organization_id = '${orgA}' order by direction`);
+  it('writes the recurring groups and points their members at them', async () => {
+    const all = await rowsOf(orgA, 'recurring_payment_groups');
+    const groups = all.sort((a, b) => String(a.direction).localeCompare(String(b.direction)))
+      .map((g) => `${g.direction}|${g.cadence}|${g.occurrence_count}|${g.status}|${new Decimal(String(g.expected_amount)).toFixed(2)}`);
     expect(groups).toEqual(['inflow|monthly|7|active|9000.00', 'outflow|monthly|7|active|2500.00']);
-    const members = Number(one(`
-      select count(*) from public.bank_transactions t
-        join public.recurring_payment_groups g on g.organization_id = t.organization_id and g.id = t.recurring_group_id
-       where t.organization_id = '${orgA}'`));
-    expect(members).toBe(14);
+    const ids = new Set(all.map((g) => String(g.id)));
+    const members = (await rowsOf(orgA, 'bank_transactions')).filter((t) => t.recurring_group_id && ids.has(String(t.recurring_group_id)));
+    expect(members).toHaveLength(14);
     // Transfer legs are never recurring "payments".
-    expect(one(`select coalesce(recurring_group_id::text, 'none') from public.bank_transactions where id = '${transferOut}'`)).toBe('none');
+    expect((await txn(transferOut)).recurring_group_id ?? 'none').toBe('none');
   });
 
-  it('appends one history row per change, from a rule, and none for rows it left alone', () => {
-    const heads = rows(`
-      select source::text || '|' || count(*) from public.category_history
-       where organization_id = '${orgA}' and valid_to is null group by source order by source::text`);
+  it('appends one history row per change, from a rule, and none for rows it left alone', async () => {
+    const open = await rowsOf(orgA, 'category_history', { valid_to: null });
+    const bySource = new Map<string, number>();
+    for (const h of open) bySource.set(String(h.source), (bySource.get(String(h.source)) ?? 0) + 1);
+    const heads = [...bySource.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, n]) => `${k}|${n}`);
     // History opens at creation (ADR-034): every row has one head. The pass moved 12 of the 22 to
     // `rule` — 7 wage runs, 4 transfer legs, and `ACME INVOICE 1001`, which the `invoice` inflow
     // keyword sends to revenue — and left the seeded decision (`user`) and the other 10 alone.
     expect(heads).toEqual(['none|10', 'rule|12', 'user|1']);
     // Never two open heads for one row.
-    expect(one(`
-      select count(*) from (select bank_transaction_id from public.category_history
-        where organization_id = '${orgA}' and valid_to is null group by 1 having count(*) > 1) d`)).toBe('0');
-    expect(Number(one(`select count(*) from public.audit_events where organization_id = '${orgA}' and action = 'banking.pass_applied'`))).toBeGreaterThanOrEqual(1);
+    const perRow = new Map<string, number>();
+    for (const h of open) perRow.set(String(h.bank_transaction_id), (perRow.get(String(h.bank_transaction_id)) ?? 0) + 1);
+    expect([...perRow.values()].filter((n) => n > 1)).toHaveLength(0);
+    expect((await auditsOf(orgA, 'banking.pass_applied')).length).toBeGreaterThanOrEqual(1);
   });
 
   it('is idempotent: a second run is no_change and writes no history', async () => {
-    const before = historyCount(orgA);
+    const before = await historyCount(orgA);
     await runCalculation(orgA);
-    expect(latestRun(orgA)).toEqual({ status: 'succeeded', noChange: true });
-    expect(historyCount(orgA)).toBe(before);
+    expect(await latestRun(orgA)).toEqual({ status: 'succeeded', noChange: true });
+    expect(await historyCount(orgA)).toBe(before);
   });
 
   it('never overrides a person, before or after they decide', async () => {
-    const opex = account(orgA, 'operating_expense');
-    expect(one(`select category_account_id::text || '|' || category_source::text from public.bank_transactions where id = '${userDecided}'`)).toBe(`${opex}|user`);
+    const opex = await account(orgA, 'operating_expense');
+    const decided = await txn(userDecided);
+    expect(`${decided.category_account_id}|${decided.category_source}`).toBe(`${opex}|user`);
     // The owner moves a wage run to marketing by hand; the next run must leave it there.
-    const marketing = account(orgA, 'marketing');
-    const moved = await clientFor(ownerA).schema('api').rpc('override_bank_category', { p_txn: wageIds[0], p_account: marketing });
+    const marketing = await account(orgA, 'marketing');
+    const moved = await api(ownerA).rpc('override_bank_category', { p_txn: wageIds[0], p_account: marketing });
     expect(moved.error).toBeNull();
     await runCalculation(orgA);
-    expect(one(`select category_account_id::text || '|' || category_source::text from public.bank_transactions where id = '${wageIds[0]}'`)).toBe(`${marketing}|user`);
-    expect(one(`select source::text from public.category_history where bank_transaction_id = '${wageIds[0]}' and valid_to is null`)).toBe('user');
+    const after = await txn(wageIds[0]!);
+    expect(`${after.category_account_id}|${after.category_source}`).toBe(`${marketing}|user`);
+    expect((await rowsOf(orgA, 'category_history', { bank_transaction_id: wageIds[0], valid_to: null })).map((h) => h.source)).toEqual(['user']);
   });
 });
 
 describe('api.bank_period_summary agrees with the engine and is fenced like everything else', () => {
   it('per-account money in and out sum to the engine’s cash_inflows and cash_outflows, to the penny', async () => {
-    const { data, error } = await clientFor(ownerA).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
+    const { data, error } = await api(ownerA).rpc('bank_period_summary', { p_org: orgA, p_period: august });
     expect(error).toBeNull();
     const summary = data as { accounts: Array<{ bank_account_id: string; inflow: string; outflow: string; transfers_in: string; transfers_out: string }>; source: string };
     expect(summary.source).toBe('imported_statements');
     const cashLike = summary.accounts.filter((a) => a.bank_account_id === current || a.bank_account_id === savings);
     const sumIn = cashLike.reduce((acc, a) => acc.plus(a.inflow), new Decimal(0));
     const sumOut = cashLike.reduce((acc, a) => acc.plus(a.outflow), new Decimal(0));
-    const engine = (key: string) => one(`
-      select s.value::text from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-       where c.organization_id = '${orgA}' and c.period_id = '${august}' and c.metric_key = '${key}' and c.dimension_type = 'none'`);
-    expect(sumIn.toFixed(2)).toBe(new Decimal(engine('cash_inflows')).toFixed(2));
-    expect(sumOut.toFixed(2)).toBe(new Decimal(engine('cash_outflows')).toFixed(2));
+    expect(sumIn.toFixed(2)).toBe((await engine(orgA, august, 'cash_inflows')).toFixed(2));
+    expect(sumOut.toFixed(2)).toBe((await engine(orgA, august, 'cash_outflows')).toFixed(2));
     // The sweep is reported as a transfer between own accounts, not as money in or out.
     const sav = summary.accounts.find((a) => a.bank_account_id === savings)!;
     expect(sav.transfers_in).toBe('1000.00');
   });
 
   it('reports where money went by category, third parties only, and the statements behind the month', async () => {
-    const { data } = await clientFor(ownerA).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
+    const { data } = await api(ownerA).rpc('bank_period_summary', { p_org: orgA, p_period: august });
     const summary = data as { categories: Array<{ standard_category: string; outflow: string }>; statements: Array<{ bank_account_id: string; unreconciled: boolean; statement_closing_balance: string | null }>; latest_statement: { bank_account_id: string } };
     const byCat = Object.fromEntries(summary.categories.map((c) => [c.standard_category, c.outflow]));
     expect(byCat.payroll).toBe('2500.00');
@@ -273,34 +263,34 @@ describe('api.bank_period_summary agrees with the engine and is fenced like ever
   });
 
   it('a client may read it; another organisation’s owner and an unassigned employee are told not found', async () => {
-    const asClient = await clientFor(clientA).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
+    const asClient = await api(clientA).rpc('bank_period_summary', { p_org: orgA, p_period: august });
     expect(asClient.error).toBeNull();
-    const asAssigned = await clientFor(empAssigned).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
+    const asAssigned = await api(empAssigned).rpc('bank_period_summary', { p_org: orgA, p_period: august });
     expect(asAssigned.error).toBeNull();
-    const asB = await clientFor(ownerB).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
+    const asB = await api(ownerB).rpc('bank_period_summary', { p_org: orgA, p_period: august });
     expect(sqlstate(asB.error)).toBe('P0002');
-    const asOther = await clientFor(empOther).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: august });
+    const asOther = await api(empOther).rpc('bank_period_summary', { p_org: orgA, p_period: august });
     expect(sqlstate(asOther.error)).toBe('P0002');
     // A period id from organisation B, with organisation A: not found, never B's month.
-    const augustB = one(`select id from public.fiscal_periods where organization_id = '${orgB}' and period_start = '2026-08-01'`);
-    const crossed = await clientFor(ownerA).schema('api').rpc('bank_period_summary', { p_org: orgA, p_period: augustB });
+    const augustB = await periodFor(orgB, '2026-08-01');
+    const crossed = await api(ownerA).rpc('bank_period_summary', { p_org: orgA, p_period: augustB });
     expect(sqlstate(crossed.error)).toBe('P0002');
   });
 
   it('the pass writer cannot be reached by a user session', async () => {
-    const attempt = await clientFor(ownerA).schema('api_server').rpc('apply_banking_pass', { p_org: orgA, p_run: null, p_plan: {} });
+    const attempt = await rpc(clientFor(ownerA), 'apply_banking_pass', { p_org: orgA, p_run: null, p_plan: {} }, { server: true });
     expect(attempt.error).not.toBeNull();
   });
 });
 
 describe('currency is the organisation’s, never a literal', () => {
   it('every seeded row and account in the rupee organisation carries INR, and a new account inherits it', async () => {
-    expect(rows(`select distinct currency from public.bank_transactions where organization_id = '${orgA}'`)).toEqual(['INR']);
-    const created = await clientFor(ownerA).schema('api').rpc('create_bank_account', {
+    expect([...new Set((await rowsOf(orgA, 'bank_transactions')).map((t) => t.currency))]).toEqual(['INR']);
+    const created = await api(ownerA).rpc('create_bank_account', {
       p_org: orgA, p_input: { name: 'Second current', bank_name: 'Other Bank', account_number_masked: '****9999', sort_code_masked: '**-**-02' },
     });
     expect(created.error).toBeNull();
-    expect(one(`select currency from public.bank_accounts where id = '${created.data as string}'`)).toBe('INR');
+    expect((await rowOf(orgA, 'bank_accounts', created.data as string))?.currency).toBe('INR');
   });
 });
 
@@ -321,13 +311,9 @@ function contextFor(
 }
 
 async function invoke(ctx: AccessContext, name: string, rawInput: unknown) {
-  const periods = adminSql(`
-    select id || '|' || label || '|' || period_start || '|' || is_complete
-      from public.fiscal_periods where organization_id = '${ctx.orgId}' order by period_start`)
-    .split('\n').filter(Boolean).map((line) => {
-      const [id, label, periodStart, complete] = line.trim().split('|') as [string, string, string, string];
-      return { id, label, periodStart, isComplete: complete === 'true' || complete === 't', hasData: true };
-    }) as PeriodRow[];
+  const periods = (await rowsOf(ctx.orgId!, 'fiscal_periods'))
+    .sort((a, b) => String(a.period_start).localeCompare(String(b.period_start)))
+    .map((p) => ({ id: String(p.id), label: String(p.label), periodStart: String(p.period_start), isComplete: p.is_complete === true, hasData: true })) as PeriodRow[];
   const periodContext = resolvePeriodContext({ question: 'how is our banking?', periods, fiscalYearStartMonth: 1 });
   return runTool({
     seq: 1, name, rawInput,
@@ -402,34 +388,34 @@ describe('the banking tools read only through the services, only for the caller�
 
 describe('cross-organisation ids fail safely on every banking write', () => {
   it('B’s owner cannot categorise, pair or un-pair A’s transactions', async () => {
-    const b = clientFor(ownerB);
-    const cat = await b.schema('api').rpc('override_bank_category', { p_txn: wageIds[2], p_account: account(orgA, 'marketing') });
+    const b = api(ownerB);
+    const cat = await b.rpc('override_bank_category', { p_txn: wageIds[2], p_account: await account(orgA, 'marketing') });
     expect(sqlstate(cat.error)).toBe('P0002');
-    const pair = await b.schema('api').rpc('mark_transfer', { p_txn: wageIds[2], p_pair: wageIds[3] });
+    const pair = await b.rpc('mark_transfer', { p_txn: wageIds[2], p_pair: wageIds[3] });
     expect(sqlstate(pair.error)).toBe('P0002');
-    const unpair = await b.schema('api').rpc('mark_transfer', { p_txn: transferOut, p_pair: null });
+    const unpair = await b.rpc('mark_transfer', { p_txn: transferOut, p_pair: null });
     expect(sqlstate(unpair.error)).toBe('P0002');
-    expect(one(`select is_transfer::text from public.bank_transactions where id = '${transferOut}'`)).toBe('true');
+    expect((await txn(transferOut)).is_transfer).toBe(true);
   });
 
   it('A’s owner cannot pair one of their rows with a row from B, and an unassigned employee can touch neither', async () => {
-    const bRow = one(`select id from public.bank_transactions where organization_id = '${orgB}' limit 1`);
-    const crossPair = await clientFor(ownerA).schema('api').rpc('mark_transfer', { p_txn: wageIds[2], p_pair: bRow });
+    const bRow = String((await rowsOf(orgB, 'bank_transactions'))[0]!.id);
+    const crossPair = await api(ownerA).rpc('mark_transfer', { p_txn: wageIds[2], p_pair: bRow });
     expect(sqlstate(crossPair.error)).toBe('P0002');
-    const other = clientFor(empOther);
-    expect(sqlstate((await other.schema('api').rpc('override_bank_category', { p_txn: wageIds[2], p_account: account(orgA, 'marketing') })).error)).toBe('P0002');
-    expect(sqlstate((await other.schema('api').rpc('create_bank_account', { p_org: orgA, p_input: { name: 'X', bank_name: 'Y' } })).error)).toBeDefined();
+    const other = api(empOther);
+    expect(sqlstate((await other.rpc('override_bank_category', { p_txn: wageIds[2], p_account: await account(orgA, 'marketing') })).error)).toBe('P0002');
+    expect(sqlstate((await other.rpc('create_bank_account', { p_org: orgA, p_input: { name: 'X', bank_name: 'Y' } })).error)).toBeDefined();
   });
 
   it('a client may look but not touch: no categorising, no pairing, no new accounts, no export, no file', async () => {
-    const c = clientFor(clientA);
-    const cat = await c.schema('api').rpc('override_bank_category', { p_txn: wageIds[2], p_account: account(orgA, 'marketing') });
+    const c = api(clientA);
+    const cat = await c.rpc('override_bank_category', { p_txn: wageIds[2], p_account: await account(orgA, 'marketing') });
     expect(cat.error).not.toBeNull();
-    const pair = await c.schema('api').rpc('mark_transfer', { p_txn: wageIds[2], p_pair: wageIds[3] });
+    const pair = await c.rpc('mark_transfer', { p_txn: wageIds[2], p_pair: wageIds[3] });
     expect(pair.error).not.toBeNull();
-    const created = await c.schema('api').rpc('create_bank_account', { p_org: orgA, p_input: { name: 'Sneaky', bank_name: 'Bank' } });
+    const created = await c.rpc('create_bank_account', { p_org: orgA, p_input: { name: 'Sneaky', bank_name: 'Bank' } });
     expect(created.error).not.toBeNull();
-    expect(one(`select category_source::text from public.bank_transactions where id = '${wageIds[2]}'`)).toBe('rule');
+    expect((await txn(wageIds[2]!)).category_source).toBe('rule');
 
     const ctx = contextFor(clientA, 'client', orgA);
     let denied: unknown = null;
@@ -443,8 +429,7 @@ describe('cross-organisation ids fail safely on every banking write', () => {
 
   it('a transaction id from A is not found for B’s owner, in provenance and in the transaction page’s loader', async () => {
     await expect(getRecordProvenance(contextFor(ownerB, 'owner', orgB), 'bank', wageIds[2]!)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    const { data } = await clientFor(ownerB).from('bank_transactions').select('id').eq('id', wageIds[2]);
-    expect(data).toEqual([]);
+    expect(await orgRows(clientFor(ownerB), orgA, 'bank_transactions', (q) => q.where('id', '==', wageIds[2]))).toEqual([]);
   });
 
   it('an owner’s export carries masked descriptions only, in the organisation’s currency', async () => {

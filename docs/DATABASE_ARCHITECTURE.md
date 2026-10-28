@@ -1,5 +1,11 @@
 # MOTION — Database Architecture (PostgreSQL / Supabase)
 
+> **Superseded (2026-10-28, ADR-178).** APX no longer runs on PostgreSQL / Supabase: the data lives in
+> Firestore, sign-in is Firebase Authentication and files are in Firebase Storage. The current
+> description is `FIRESTORE_DATA_MODEL.md`. This document is kept as the record of the schema the
+> Firestore model was ported from — table and column names still match (collection = table,
+> field = column), but RLS, SQL functions, triggers and migrations described here no longer exist.
+
 Depends on: `ARCHITECTURAL_DECISIONS.md` (ADR-001..020, ADR-026..038), `TENANCY_MODEL.md`, `RBAC_MATRIX.md`
 Consumed by: every other document. Table and column names here are canonical; other documents must use them verbatim.
 

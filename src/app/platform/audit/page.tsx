@@ -1,7 +1,6 @@
 import Link from 'next/link';
 import { assertCan } from '@/core/permissions';
-import { toMotionError } from '@/core/errors';
-import { searchAudit } from '@/modules/platform';
+import { readableOrganizations, searchAudit } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { Card, CardBody, EmptyState, PageHeader } from '@/components/ui/surfaces';
 import { THead, TBody, TR, TD } from '@/components/ui/table';
@@ -48,8 +47,10 @@ export default async function PlatformAuditPage({
   const since = from && /^\d{4}-\d{2}-\d{2}$/.test(from) ? from : null;
   const pageNumber = Math.max(1, Number.parseInt(page ?? '1', 10) || 1);
 
-  const { data: organizations, error } = await ctx.db.from('organizations').select('id, name').order('name').limit(200);
-  if (error) throw toMotionError(error, ctx.requestId);
+  const organizations = (await readableOrganizations(ctx.db))
+    .map((o) => ({ id: String(o.id), name: String(o.name) }))
+    .sort((a, b) => a.name.localeCompare(b.name))
+    .slice(0, 200);
 
   const events = await searchAudit(ctx, {
     organizationId, action: prefix, from: since,

@@ -1,6 +1,6 @@
 import 'server-only';
 import { z } from 'zod';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { callApi } from '@/core/db';
 import { ValidationError } from '@/core/errors';
 import {
@@ -34,7 +34,7 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
  * previous `account_category_history` row and queues a recalculation (ADR-034).
  */
 export async function remapAccount(
-  db: SupabaseClient, input: unknown, requestId?: string,
+  db: Db, input: unknown, requestId?: string,
 ): Promise<string> {
   const parsed = parse(RemapAccountInput, input);
   return callApi<string>(db, 'remap_account', {
@@ -49,7 +49,7 @@ export async function remapAccount(
  * loans-by-security figures, so the SQL function queues a recalculation, as a re-mapping does.
  */
 export async function setLoanSecurity(
-  db: SupabaseClient, input: unknown, requestId?: string,
+  db: Db, input: unknown, requestId?: string,
 ): Promise<string> {
   const parsed = parse(SetLoanSecurityInput, input);
   return callApi<string>(db, 'set_account_loan_security', {
@@ -59,7 +59,7 @@ export async function setLoanSecurity(
 }
 
 export async function updateCounterparty(
-  db: SupabaseClient, input: unknown, requestId?: string,
+  db: Db, input: unknown, requestId?: string,
 ): Promise<string> {
   const { counterpartyId, ...patch } = parse(UpdateCounterpartyInput, input);
   // Only the keys the caller actually supplied are sent: the SQL side treats a present key as an
@@ -86,7 +86,7 @@ export async function updateCounterparty(
  * for past periods stays intact.
  */
 export async function mergeCounterparties(
-  db: SupabaseClient, input: unknown, requestId?: string,
+  db: Db, input: unknown, requestId?: string,
 ): Promise<string> {
   const parsed = parse(MergeCounterpartiesInput, input);
   return callApi<string>(db, 'merge_counterparties', {
@@ -96,7 +96,7 @@ export async function mergeCounterparties(
 }
 
 export async function createBankAccount(
-  db: SupabaseClient, orgId: string, input: unknown, requestId?: string,
+  db: Db, orgId: string, input: unknown, requestId?: string,
 ): Promise<string> {
   const parsed = parse(CreateBankAccountInput, input);
   return callApi<string>(db, 'create_bank_account', {
@@ -114,7 +114,7 @@ export async function createBankAccount(
 }
 
 export async function setOpeningBalance(
-  db: SupabaseClient, input: unknown, requestId?: string,
+  db: Db, input: unknown, requestId?: string,
 ): Promise<string> {
   const parsed = parse(SetOpeningBalanceInput, input);
   return callApi<string>(db, 'set_opening_balance', {
@@ -130,7 +130,7 @@ export async function setOpeningBalance(
  * a figure published last month can still be explained by the data that produced it.
  */
 export async function supersedeRecord(
-  db: SupabaseClient, input: unknown, requestId?: string,
+  db: Db, input: unknown, requestId?: string,
 ): Promise<string> {
   const parsed = parse(SupersedeRecordInput, input);
   return callApi<string>(db, 'supersede_record', {
@@ -146,7 +146,7 @@ export async function supersedeRecord(
  * journal, because a journal is one economic event however many lines express it.
  */
 export async function setOpeningBalanceFlag(
-  db: SupabaseClient, entryId: string, flag: boolean, requestId?: string,
+  db: Db, entryId: string, flag: boolean, requestId?: string,
 ): Promise<number> {
   return callApi<number>(db, 'set_opening_balance_flag', {
     p_entry: entryId,

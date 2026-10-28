@@ -1,7 +1,9 @@
 import 'server-only';
-import { NotFound, toMotionError } from '@/core/errors';
+import { InternalError, NotFound } from '@/core/errors';
 import { formatMoney, parseDecimalOrNull } from '@/core/money';
 import { assertCan } from '@/core/permissions';
+import { orgRowById, orgRows } from '@/db/rls';
+import type { Db } from '@/db/types';
 import type { AccessContext } from '@/modules/tenancy';
 import { metricDefinition, isMetricKey, type MetricUnit } from '@/modules/financial-engine';
 import { labelFor } from '@/modules/financials';
@@ -235,18 +237,25 @@ export interface RestsOnStatement {
 async function restsOnStatements(ctx: AccessContext, orgId: string, snapshot: Row): Promise<RestsOnStatement[]> {
   const ids = ((snapshot.components ?? {}) as { rests_on_statements?: unknown }).rests_on_statements;
   if (!Array.isArray(ids) || ids.length === 0) return [];
-  const { data, error } = await ctx.db
-    .from('import_batches')
-    .select('id, period_start, period_end, extraction_method, source_documents(original_filename)')
-    .eq('organization_id', orgId)
-    .in('id', ids.map(String));
-  if (error) throw toMotionError(error);
-  return ((data ?? []) as Array<Record<string, unknown>>).map((b) => ({
+  const unique = [...new Set(ids.map(String))];
+  const batches: Row[] = [];
+  for (let i = 0; i < unique.length; i += 30) {
+    const chunk = unique.slice(i, i + 30);
+    batches.push(...await orgRows<Row>(ctx.db, orgId, 'import_batches', (q) => q.where('id', 'in', chunk)));
+  }
+  // The embedded `source_documents(original_filename)`: a second read, null where the caller may
+  // not see the document (as the embed was under RLS).
+  const fileNames = new Map<string, string>();
+  for (const documentId of new Set(batches.map((b) => b.source_document_id).filter((d): d is string => typeof d === 'string'))) {
+    const doc = await orgRowById<{ original_filename?: string }>(ctx.db, orgId, 'source_documents', documentId);
+    if (doc?.original_filename) fileNames.set(documentId, doc.original_filename);
+  }
+  return batches.map((b) => ({
     batchId: String(b.id),
-    fileName: ((b.source_documents ?? null) as { original_filename?: string } | null)?.original_filename ?? null,
-    periodStart: b.period_start === null ? null : String(b.period_start),
-    periodEnd: b.period_end === null ? null : String(b.period_end),
-    extractionMethod: b.extraction_method === null ? null : String(b.extraction_method),
+    fileName: typeof b.source_document_id === 'string' ? fileNames.get(b.source_document_id) ?? null : null,
+    periodStart: b.period_start === null || b.period_start === undefined ? null : String(b.period_start),
+    periodEnd: b.period_end === null || b.period_end === undefined ? null : String(b.period_end),
+    extractionMethod: b.extraction_method === null || b.extraction_method === undefined ? null : String(b.extraction_method),
   })).sort((a, b) => (a.periodStart ?? '').localeCompare(b.periodStart ?? ''));
 }
 
@@ -309,10 +318,7 @@ function metricLabelOf(metricKey: string): { label: string; description: string 
 }
 
 async function periodLabelOf(ctx: AccessContext, orgId: string, periodId: string): Promise<string | null> {
-  const { data, error } = await ctx.db
-    .from('fiscal_periods').select('label').eq('organization_id', orgId).eq('id', periodId).maybeSingle();
-  if (error) throw toMotionError(error);
-  return (data as { label?: string } | null)?.label ?? null;
+  return (await orgRowById<{ label?: string }>(ctx.db, orgId, 'fiscal_periods', periodId))?.label ?? null;
 }
 
 /**
@@ -325,21 +331,12 @@ async function periodLabelOf(ctx: AccessContext, orgId: string, periodId: string
 async function currency(
   ctx: AccessContext, orgId: string, snapshot: Row,
 ): Promise<{ isCurrent: boolean; currentValue: string | null }> {
-  let q = ctx.db
-    .from('metric_current')
-    .select('snapshot_id')
-    .eq('organization_id', orgId)
-    .eq('period_id', String(snapshot.period_id))
-    .eq('metric_key', String(snapshot.metric_key))
-    .eq('dimension_type', String(snapshot.dimension_type));
-
-  const dimensionId = str(snapshot, 'dimension_id');
-  q = dimensionId === null ? q.is('dimension_id', null) : q.eq('dimension_id', dimensionId);
-
-  const { data, error } = await q.maybeSingle();
-  if (error) throw toMotionError(error);
-
-  const currentId = (data as { snapshot_id?: string } | null)?.snapshot_id ?? null;
+  const currentId = await currentCellSnapshot(ctx.db, orgId, {
+    periodId: String(snapshot.period_id),
+    metricKey: String(snapshot.metric_key),
+    dimensionType: String(snapshot.dimension_type),
+    dimensionId: str(snapshot, 'dimension_id'),
+  });
   if (currentId === null || currentId === String(snapshot.id)) {
     return { isCurrent: true, currentValue: null };
   }
@@ -647,16 +644,28 @@ export async function currentSnapshotId(
   },
 ): Promise<string | null> {
   const orgId = requireOrgId(ctx);
-  let q = ctx.db
-    .from('metric_current')
-    .select('snapshot_id')
-    .eq('organization_id', orgId)
-    .eq('period_id', input.periodId)
-    .eq('metric_key', input.metricKey)
-    .eq('dimension_type', input.dimensionType ?? 'none');
-  q = input.dimensionId ? q.eq('dimension_id', input.dimensionId) : q.is('dimension_id', null);
+  return currentCellSnapshot(ctx.db, orgId, {
+    periodId: input.periodId,
+    metricKey: input.metricKey,
+    dimensionType: input.dimensionType ?? 'none',
+    dimensionId: input.dimensionId ? input.dimensionId : null,
+  });
+}
 
-  const { data, error } = await q.maybeSingle();
-  if (error) throw toMotionError(error);
-  return (data as { snapshot_id?: string } | null)?.snapshot_id ?? null;
+/**
+ * The `metric_current` cell's snapshot, or null. Equality filters only (single-field indexes merge).
+ * More than one matching cell — two `dimension_key`s under one dimension — is the error the old
+ * `maybeSingle()` raised, not a row to pick.
+ */
+async function currentCellSnapshot(
+  db: Db, orgId: string,
+  cell: { periodId: string; metricKey: string; dimensionType: string; dimensionId: string | null },
+): Promise<string | null> {
+  const rows = await orgRows<{ snapshot_id?: string }>(db, orgId, 'metric_current', (q) => q
+    .where('period_id', '==', cell.periodId)
+    .where('metric_key', '==', cell.metricKey)
+    .where('dimension_type', '==', cell.dimensionType)
+    .where('dimension_id', '==', cell.dimensionId));
+  if (rows.length > 1) throw new InternalError();
+  return rows[0]?.snapshot_id ?? null;
 }

@@ -6,7 +6,7 @@
  * the per-run cap arrive in Phase 9; nothing here reads or writes an `alerts` row, and nothing here
  * can see a status, which is what keeps a dismissal out of the health score (R2-B-11).
  *
- * `domain/` is pure: no Supabase, no Next.js, no clock.
+ * `domain/` is pure: no database, no Next.js, no clock.
  */
 
 export {

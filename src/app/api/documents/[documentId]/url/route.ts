@@ -5,6 +5,7 @@ import { log, newRequestId } from '@/core/logging';
 import { can } from '@/core/permissions';
 import { signDownloadUrl, SOURCE_DOCUMENTS_BUCKET } from '@/core/storage/signer';
 import { getAccessContext } from '@/modules/tenancy';
+import { getDocumentObject } from '@/modules/documents';
 
 /**
  * `GET /api/documents/[documentId]/url` (ROUTE_ARCHITECTURE.md §164; EVIDENCE_MODEL.md §6 level 4,
@@ -21,7 +22,9 @@ import { getAccessContext } from '@/modules/tenancy';
  *   4. write `document.downloaded` through `api_server.record_access_event`, which re-checks the
  *      permission and the organization in SQL and returns the audit id;
  *   5. hand that id to the signer, which re-reads the row and refuses unless it is this actor, this
- *      target and less than 30 seconds old, before it signs anything.
+ *      target and less than 30 seconds old, before it mints anything. The link it returns leads to
+ *      `/api/storage/download`, which checks the session and the audit row again and then serves the
+ *      bytes itself, as an attachment (files never leave through a bucket URL; FIRESTORE_DATA_MODEL.md §1).
  *
  * A download that was not recorded therefore cannot happen — not because the code remembers to
  * audit, but because the audit row is the input the signer needs.
@@ -53,19 +56,10 @@ export async function GET(
     // ROUTE_ARCHITECTURE.md §164: 60/min, on the counter every api.* function already shares.
     await throttle({ userId: ctx.userId, requestId }, 'document.url', 60, '1 minute');
 
-    const { data, error } = await ctx.db
-      .from('source_documents')
-      .select('id, storage_bucket, storage_path, original_filename, deleted_at')
-      .eq('organization_id', ctx.orgId)
-      .eq('id', documentId)
-      .maybeSingle();
-    if (error) throw toMotionError(error, requestId);
-
-    const document = data as {
-      id: string; storage_bucket: string; storage_path: string;
-      original_filename: string; deleted_at: string | null;
-    } | null;
-    if (document === null || document.deleted_at !== null) throw new NotFound();
+    // Read under the caller's own policy (`source_documents_select`), scoped to the organisation in
+    // the URL: another organisation's id is simply not there.
+    const document = await getDocumentObject(ctx, documentId);
+    if (document === null) throw new NotFound();
 
     const auditEventId = await recordAccessEvent(
       { userId: ctx.userId, requestId },
@@ -81,17 +75,17 @@ export async function GET(
     const signed = await signDownloadUrl(
       { orgId: ctx.orgId, userId: ctx.userId },
       {
-        bucket: document.storage_bucket || SOURCE_DOCUMENTS_BUCKET,
-        key: document.storage_path,
+        bucket: document.storageBucket || SOURCE_DOCUMENTS_BUCKET,
+        key: document.storagePath,
         auditEventId,
         targetTable: 'source_documents',
         targetId: document.id,
-        downloadAs: document.original_filename,
+        downloadAs: document.originalFilename,
       },
     );
 
     return NextResponse.json(signed, {
-      // Never cached, anywhere: the URL is valid for 60 seconds and is personal to this request.
+      // Never cached, anywhere: the link is valid for 60 seconds and is personal to this request.
       headers: { 'x-request-id': requestId, 'cache-control': 'no-store' },
     });
   } catch (cause) {

@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { cleanUpOwn, drainQueue, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, drainQueue, onboard, seedUser, signIn, uniqueName } from './fixtures';
+import { backend, orgIdBySlug, orgRowById, orgRows, periodOf } from './firestore';
 
 /**
  * Journey 17 — a year-to-date trial balance, through the upload form, to the evidence page (Step 0F).
@@ -49,16 +50,16 @@ async function importTrialBalance(page: Page, slug: string, ym: string): Promise
   await expect(page.getByText(/this file has already been imported/i)).toBeVisible({ timeout: 30_000 });
 }
 
-function snapshot(slug: string, key: string): string {
-  return sql(`
-    select c.snapshot_id from public.metric_current c
-      join public.organizations o on o.id = c.organization_id
-      join public.fiscal_periods p on p.id = c.period_id and p.organization_id = c.organization_id
-     where o.slug = '${slug}' and c.metric_key = '${key}' and c.dimension_type = 'none' and p.period_start = '2026-08-01'`);
+async function snapshot(slug: string, key: string): Promise<string> {
+  const orgId = await orgIdBySlug(slug);
+  const august = await periodOf(orgId, '2026-08-01');
+  const current = await orgRows(orgId, 'metric_current',
+    (c) => c.metric_key === key && c.dimension_type === 'none' && c.period_id === august);
+  return String(current[0]?.snapshot_id ?? '');
 }
 
 async function twoMonths(page: Page, key: keyof typeof ORGS): Promise<string> {
-  await signIn(page, seedUser(OWNERS[key]));
+  await signIn(page, await seedUser(OWNERS[key]));
   const slug = await onboard(page, ORGS[key]);
   await importTrialBalance(page, slug, '2026-07');
   await importTrialBalance(page, slug, '2026-08');
@@ -67,7 +68,7 @@ async function twoMonths(page: Page, key: keyof typeof ORGS): Promise<string> {
 }
 
 test('N-1: the completeness question is asked with nothing pre-selected, and the answer is stored', async ({ page }) => {
-  await signIn(page, seedUser(OWNERS.ask));
+  await signIn(page, await seedUser(OWNERS.ask));
   const slug = await onboard(page, ORGS.ask);
   await page.goto(`/app/${slug}/data/imports/new`);
   await page.getByLabel(/what kind of file/i).selectOption('trial_balance');
@@ -85,14 +86,16 @@ test('N-1: the completeness question is asked with nothing pre-selected, and the
   await form.getByRole('button', { name: /save this answer/i }).click();
   await expect(completeness).toHaveCount(0, { timeout: 15_000 });
   const batch = page.url().match(/imports\/([0-9a-f-]{36})/)![1]!;
-  expect(sql(`select confirmations -> 'IMP-TB-016' -> 'value' ->> 'report_complete' from public.import_batches where id = '${batch}'`)).toBe('complete');
+  const stored = await orgRowById(await orgIdBySlug(slug), 'import_batches', batch);
+  const confirmations = (stored?.confirmations ?? {}) as Record<string, { value?: { report_complete?: unknown } } | undefined>;
+  expect(confirmations['IMP-TB-016']?.value?.report_complete).toBe('complete');
 });
 
 test('N-2: a cumulative month shows year to date less the prior year to date, each side reconciled and linked', async ({ page }) => {
   const slug = await twoMonths(page, 'show');
 
   // ---- Revenue, August ----
-  await page.goto(`/app/${slug}/evidence?snapshot=${snapshot(slug, 'revenue')}`);
+  await page.goto(`/app/${slug}/evidence?snapshot=${await snapshot(slug, 'revenue')}`);
   await page.waitForURL(/\/evidence\/[0-9a-f-]{36}/, { timeout: 30_000 });
   const panel = page.getByTestId('difference-panel').first();
   await expect(panel).toContainText(/Year to date to .*: £3,310\.00 from 1 row — matches the £3,310\.00 the calculation used/);
@@ -115,7 +118,7 @@ test('N-2: a cumulative month shows year to date less the prior year to date, ea
   await expect(page.getByText(/does not match/)).toHaveCount(0);
 
   // ---- Net profit, August: every subtraction it rests on ----
-  await page.goto(`/app/${slug}/evidence?snapshot=${snapshot(slug, 'net_profit')}`);
+  await page.goto(`/app/${slug}/evidence?snapshot=${await snapshot(slug, 'net_profit')}`);
   await page.waitForURL(/\/evidence\/[0-9a-f-]{36}/, { timeout: 30_000 });
   await expect(page.getByRole('heading', { name: /worked out from year-to-date reports/i })).toBeVisible();
   const formulas = page.getByTestId('difference-formula');
@@ -127,11 +130,18 @@ test('N-2: a cumulative month shows year to date less the prior year to date, ea
 
 test('N-2: a July row changed behind the engine\'s back is stated on that side and in the formula', async ({ page }) => {
   const slug = await twoMonths(page, 'fault');
-  sql(`set session_replication_role = replica;
-    update public.period_balances b set closing_balance = -2000 from public.accounts a, public.organizations o
-     where a.id = b.account_id and a.organization_id = b.organization_id and o.id = b.organization_id
-       and o.slug = '${slug}' and a.name = 'Revenue' and b.period_start = '2026-07-01'`);
-  await page.goto(`/app/${slug}/evidence?snapshot=${snapshot(slug, 'revenue')}`);
+  // Behind the engine's back: written straight to July's Revenue balance, so nothing the product
+  // does on a change (a recalculation, a history row) happens — there are no triggers to bypass now.
+  {
+    const orgId = await orgIdBySlug(slug);
+    const { schema, setup } = await backend();
+    const revenue = new Set((await orgRows(orgId, 'accounts', (a) => a.name === 'Revenue')).map((a) => a.id));
+    for (const b of await orgRows(orgId, 'period_balances', (r) => revenue.has(r.account_id) && r.period_start === '2026-07-01')) {
+      // numeric(18,2), stored as a two-place decimal string as the import commit writes it.
+      await schema.orgRow(setup.fs(), orgId, 'period_balances', String(b.id)).update({ closing_balance: '-2000.00' });
+    }
+  }
+  await page.goto(`/app/${slug}/evidence?snapshot=${await snapshot(slug, 'revenue')}`);
   await page.waitForURL(/\/evidence\/[0-9a-f-]{36}/, { timeout: 30_000 });
   const broken = page.getByTestId('difference-panel').first();
   await expect(broken).toContainText(/£2,000\.00 from 1 row — does not match the £2,100\.00 the calculation used/);
@@ -140,7 +150,7 @@ test('N-2: a July row changed behind the engine\'s back is stated on that side a
 });
 
 test('an owner confirms what an imported report covers later, from the stored file, and can correct it', async ({ page }) => {
-  await signIn(page, seedUser(OWNERS.later));
+  await signIn(page, await seedUser(OWNERS.later));
   const slug = await onboard(page, ORGS.later);
   // Imported as "only part of it"…
   await page.goto(`/app/${slug}/data/imports/new`);

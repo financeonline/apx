@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { runInvestmentReport } from '@/modules/investment';
 import type { ClaimedJob, JobOutcome } from '../domain/types';
 
@@ -18,7 +18,7 @@ export async function runInvestmentGenerateJob(job: ClaimedJob, scope: { db: unk
   if (orgId === null) return { status: 'failed', error: 'investment.generate has no organization to scope to' };
   const reportId = typeof job.payload.reportId === 'string' ? job.payload.reportId : undefined;
 
-  const outcome = await runInvestmentReport(scope.db as SupabaseClient, orgId, reportId);
+  const outcome = await runInvestmentReport(scope.db as Db, orgId, reportId);
   switch (outcome.status) {
     case 'ready':
       return {

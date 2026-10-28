@@ -1,8 +1,14 @@
 import 'server-only';
-import { anthropicApiKeyFromVault, createServiceClient, openAiApiKeyFromVault, revokeUserSessions } from '@/core/db';
+import { anthropicApiKeyFromVault, openAiApiKeyFromVault, revokeUserSessions } from '@/core/db';
+import {
+  createConfirmedLogin, inviteLogin, isEmailTaken, loginIdByEmail, removeLogin, updateLogin,
+} from '@/db/app/platform-auth';
+import { countOrgRows, readableOrganization, readGlobal } from '@/db/app/platform-reads';
+import { orgRowById, orgRows } from '@/db/rls';
+import { ORG_SINGLETON_ID } from '@/db/schema';
 import { DEFAULT_ANALYST_MODEL, OPENAI_EFFORTS, isOpenAiChatModel, isOpenAiReasoningModel } from '@/modules/ai';
 import { callApi } from '@/core/db/api-rpc';
-import { ConflictError, NotFound, ValidationError, isMotionError, toMotionError } from '@/core/errors';
+import { ConflictError, NotFound, ValidationError, isMotionError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import { MODULES, type AccessContext } from '@/modules/tenancy';
 import {
@@ -12,11 +18,13 @@ import {
 /**
  * The platform's own reads and writes (ROUTE_ARCHITECTURE.md §150, §155, §156; ADR-088).
  *
- * Every read runs under the platform user's own client: `organizations`, `jobs`, `platform_*` and
- * the audit trail are all gated on `app.is_super_admin()` or an accessible-org role, so these pages
- * hold no service role and cannot show what RLS would hide. The two name-resolving reads go through
- * definer functions because `profiles` is own-row-only.
+ * Every read is made for the platform user and filtered by the policy the table had: tenant tables
+ * through `src/db/rls.ts`, the top-level `organizations`, `jobs` and `platform_*` collections through
+ * `src/db/app/platform-reads.ts` — gated on the super admin or an accessible-org role — so these pages cannot show what
+ * RLS would have hidden. The two name-resolving reads go through `api.*` functions because
+ * `profiles` is own-row-only.
  */
+
 
 export interface PlatformOrganization {
   readonly id: string;
@@ -69,27 +77,19 @@ export interface OrganizationDetail {
 
 export async function loadOrganizationDetail(ctx: AccessContext, orgId: string): Promise<OrganizationDetail> {
   assertCan(ctx, 'platform.orgs.manage');
-  const { data, error } = await ctx.db
-    .from('organizations')
-    .select('id, slug, name, legal_name, status, plan, kind, country_code, industry, base_currency, fiscal_year_start_month, timezone, features, created_at, deletion_requested_at')
-    .eq('id', orgId)
-    .maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
-  if (!data) throw new NotFound();
-  const row = data as Record<string, unknown>;
+  const row = await readableOrganization(ctx.db, orgId);
+  if (!row) throw new NotFound();
 
   const [settings, members, assignments, documents, batches, conversations] = await Promise.all([
-    ctx.db.from('platform_org_settings').select('ai_quota_daily, ai_token_ceiling_monthly, ai_extraction_pages_per_day, notes').eq('organization_id', orgId).maybeSingle(),
+    orgRowById<Record<string, unknown>>(ctx.db, orgId, 'platform_org_settings', ORG_SINGLETON_ID),
     callApi<Array<Record<string, string>>>(ctx.db, 'org_members', { p_org: orgId }, ctx.requestId),
-    ctx.db.from('organization_assignments').select('id, employee_user_id, status, ends_at').eq('organization_id', orgId),
-    ctx.db.from('source_documents').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).is('deleted_at', null),
-    ctx.db.from('import_batches').select('id', { count: 'exact', head: true }).eq('organization_id', orgId),
-    ctx.db.from('ai_conversations').select('id', { count: 'exact', head: true }).eq('organization_id', orgId),
+    orgRows<Record<string, unknown>>(ctx.db, orgId, 'organization_assignments'),
+    countOrgRows(ctx.db, orgId, 'source_documents', (q) => q.where('deleted_at', '==', null)),
+    countOrgRows(ctx.db, orgId, 'import_batches'),
+    countOrgRows(ctx.db, orgId, 'ai_conversations'),
   ]);
-  if (settings.error) throw toMotionError(settings.error, ctx.requestId);
-  if (assignments.error) throw toMotionError(assignments.error, ctx.requestId);
 
-  const s = settings.data as Record<string, unknown> | null;
+  const s = settings;
   return {
     organization: {
       id: row.id as string, slug: row.slug as string, name: row.name as string,
@@ -115,11 +115,11 @@ export async function loadOrganizationDetail(ctx: AccessContext, orgId: string):
       userId: m.user_id!, fullName: m.full_name ?? null, email: m.email!,
       role: m.role!, status: m.status!, joinedAt: m.joined_at!,
     })),
-    assignments: ((assignments.data ?? []) as Array<Record<string, unknown>>).map((a) => ({
+    assignments: assignments.map((a) => ({
       id: a.id as string, employeeUserId: a.employee_user_id as string,
       status: a.status as string, endsAt: (a.ends_at as string | null) ?? null,
     })),
-    counts: { documents: documents.count ?? 0, batches: batches.count ?? 0, conversations: conversations.count ?? 0 },
+    counts: { documents, batches, conversations },
   };
 }
 
@@ -134,7 +134,7 @@ export interface AuditFilters {
 }
 
 export interface PlatformAuditEvent {
-  readonly id: number;
+  readonly id: string;
   readonly organizationId: string | null;
   readonly organizationName: string | null;
   readonly action: string;
@@ -159,7 +159,7 @@ export async function searchAudit(ctx: AccessContext, filters: AuditFilters = {}
     p_offset: filters.offset ?? 0,
   }, ctx.requestId);
   return (rows ?? []).map((r) => ({
-    id: Number(r.id),
+    id: String(r.id),
     organizationId: (r.organization_id as string | null) ?? null,
     organizationName: (r.organization_name as string | null) ?? null,
     action: r.action as string,
@@ -180,9 +180,8 @@ export interface PlatformSetting {
 
 export async function loadPlatformSettings(ctx: AccessContext): Promise<PlatformSetting[]> {
   assertCan(ctx, 'system.manage');
-  const { data, error } = await ctx.db.from('platform_settings').select('key, value, updated_at').order('key');
-  if (error) throw toMotionError(error, ctx.requestId);
-  return ((data ?? []) as Array<Record<string, unknown>>).map((r) => ({
+  const rows = await readGlobal(ctx.db, 'platform_settings', (q) => q.orderBy('key'));
+  return rows.map((r) => ({
     key: r.key as string, value: r.value, updatedAt: r.updated_at as string,
   }));
 }
@@ -193,7 +192,7 @@ export async function updatePlatformSetting(ctx: AccessContext, key: string, val
 }
 
 /**
- * The AI provider key (ADR-157): set by the app's owner, stored encrypted in Vault, shown only as
+ * The AI provider key (ADR-157): set by the app's owner, stored encrypted (`platform_secrets`, once Vault), shown only as
  * its last four characters. A new key is tried against the provider before it is stored, so a
  * mistyped key is refused here rather than discovered when every analyst question fails.
  */
@@ -293,17 +292,17 @@ export async function createCompanyAsPlatform(ctx: AccessContext, input: unknown
   let ownerId: string | null = null;
   if (value.ownerPassword) {
     // Creating the login is also the check that the email is new: an existing account is refused by
-    // Auth (`email_exists`), so its password is never touched.
-    const { data, error } = await createServiceClient().auth.admin.createUser({
-      email: value.ownerEmail, password: value.ownerPassword, email_confirm: true,
-    });
-    if (error?.code === 'email_exists' || /already (been )?registered/i.test(error?.message ?? '')) {
-      throw new ConflictError('That email already has an APX login. Leave the password empty and send them the invitation link instead.');
+    // Auth (`auth/email-already-exists`), so its password is never touched.
+    try {
+      // With its `profiles` document, as signing up makes one (TENANCY_MODEL.md §2).
+      ownerId = await createConfirmedLogin(value.ownerEmail, value.ownerPassword);
+    } catch (error) {
+      if (isEmailTaken(error)) {
+        throw new ConflictError('That email already has an APX login. Leave the password empty and send them the invitation link instead.');
+      }
+      const message = (error as { message?: string } | null)?.message;
+      throw new ValidationError(message ? `The login was not created: ${message}` : 'The login was not created.');
     }
-    if (error || !data.user) {
-      throw new ValidationError(error?.message ? `The login was not created: ${error.message}` : 'The login was not created.');
-    }
-    ownerId = data.user.id;
   }
 
   let row: { organization_id: string; slug: string; invitation_token: string } | undefined;
@@ -321,7 +320,7 @@ export async function createCompanyAsPlatform(ctx: AccessContext, input: unknown
     row = (rows ?? [])[0];
     if (!row) throw new Error('The company was not created.');
   } catch (error) {
-    if (ownerId) await createServiceClient().auth.admin.deleteUser(ownerId);
+    if (ownerId) await removeLogin(ownerId);
     throw error;
   }
 
@@ -354,20 +353,6 @@ export async function listPlatformUsers(ctx: AccessContext): Promise<PlatformUse
   }));
 }
 
-/** An existing account's id, or null. GoTrue's admin API has no lookup by email, so it is paged. */
-async function findAuthUserIdByEmail(email: string): Promise<string | null> {
-  const admin = createServiceClient().auth.admin;
-  const perPage = 1000;
-  for (let page = 1; page <= 50; page++) {
-    const { data, error } = await admin.listUsers({ page, perPage });
-    if (error) throw toMotionError(error);
-    const found = data.users.find((u) => (u.email ?? '').toLowerCase() === email);
-    if (found) return found.id;
-    if (data.users.length < perPage) return null;
-  }
-  return null;
-}
-
 export interface AddedPlatformUser {
   readonly userId: string;
   readonly invited: boolean;
@@ -387,12 +372,14 @@ export async function addPlatformUser(
   assertCan(ctx, 'platform.users.manage');
   const { email, role } = parseInput(AddPlatformUserInput, input);
 
-  let userId = await findAuthUserIdByEmail(email);
+  let userId = await loginIdByEmail(email);
   let invited = false;
   if (!userId) {
-    const { data, error } = await createServiceClient().auth.admin.inviteUserByEmail(email, { redirectTo: options.redirectTo });
-    if (error || !data.user) throw toMotionError(error ?? new Error('The invitation was not sent.'), ctx.requestId);
-    userId = data.user.id;
+    try {
+      userId = await inviteLogin(email, options.redirectTo);
+    } catch {
+      throw new ValidationError('The invitation email was not sent. Try again.');
+    }
     invited = true;
   }
 
@@ -485,8 +472,7 @@ async function openAiModels(key: string): Promise<AiModelOption[]> {
 
 export async function loadAiModelSettings(ctx: AccessContext): Promise<AiModelSettings> {
   assertCan(ctx, 'system.manage');
-  const { data, error } = await ctx.db.from('platform_settings').select('value').eq('key', 'ai_model').maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
+  const [data] = await readGlobal(ctx.db, 'platform_settings', (q) => q.where('key', '==', 'ai_model'));
   const value = (data?.value ?? null) as { active?: unknown; anthropic?: unknown; openai?: unknown } | null;
   const slot = (raw: unknown): AiProviderChoice | null => {
     const v = raw as { model?: unknown; effort?: unknown } | null | undefined;
@@ -642,9 +628,7 @@ export async function setActiveAiProvider(ctx: AccessContext, provider: string):
 export async function editCompanyAsPlatform(ctx: AccessContext, orgId: string, input: unknown): Promise<void> {
   assertCan(ctx, 'platform.orgs.manage');
   const value = parseInput(EditCompanyInput, input);
-  const { data, error } = await ctx.db.from('organizations')
-    .select('name, legal_name, country_code, base_currency, fiscal_year_start_month, plan').eq('id', orgId).maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
+  const data = await readableOrganization(ctx.db, orgId);
   if (!data) throw new NotFound();
   const before = data as { name: string; legal_name: string | null; country_code: string | null; base_currency: string; fiscal_year_start_month: number; plan: string };
 
@@ -710,10 +694,11 @@ export async function changeOwnerLoginAsPlatform(
   );
   const owner = (rows ?? [])[0];
   if (!owner) throw new NotFound();
-  const { error } = await createServiceClient().auth.admin.updateUserById(owner.user_id, {
-    email: owner.email, email_confirm: true, ...(password ? { password } : {}),
-  });
-  if (error) throw new ValidationError(`The owner's login was not changed: ${error.message}`);
+  try {
+    await updateLogin(owner.user_id, { email: owner.email, password: password || null });
+  } catch (error) {
+    throw new ValidationError(`The owner's login was not changed: ${(error as { message?: string } | null)?.message ?? 'unknown error'}`);
+  }
   await revokeUserSessions(owner.user_id);
   return owner.email;
 }

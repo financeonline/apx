@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { cleanUpOwn, drainQueue, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, drainQueue, seedUser, signIn, uniqueName } from './fixtures';
+import { jobsOf, orgIdByName, orgRows, periodOf } from './firestore';
 
 /**
  * Journey 1 — onboarding → first import → dashboard (TEST_STRATEGY.md §12).
@@ -16,7 +17,7 @@ const ORG_NAME = uniqueName('Acme Trading');
 test.afterAll(() => cleanUpOwn([ORG_NAME], ['journey1-owner']));
 
 test('a new owner uploads a ledger and sees their own figures', async ({ page }) => {
-  const owner = seedUser('journey1-owner');
+  const owner = await seedUser('journey1-owner');
   const orgName = ORG_NAME;
 
   await signIn(page, owner);
@@ -101,13 +102,12 @@ test('a new owner uploads a ledger and sees their own figures', async ({ page })
 
   await page.goto(`/app/${slug}/home`);
 
-  console.log('JOBS:', sql(`
-    select coalesce(string_agg(j.job_type || '=' || j.status || '/' || coalesce(left(j.last_error,80),'-'), ' ; '), 'none')
-      from public.jobs j join public.organizations o on o.id = j.organization_id
-     where o.name = '${orgName}'`));
-  console.log('SNAPSHOTS:', sql(`
-    select count(*)::text from public.metric_snapshots s
-      join public.organizations o on o.id = s.organization_id where o.name = '${orgName}'`));
+  const orgId = await orgIdByName(orgName);
+  const jobs = await jobsOf(orgId);
+  console.log('JOBS:', jobs.length === 0 ? 'none' : jobs
+    .map((j) => `${String(j.job_type)}=${String(j.status)}/${j.last_error == null ? '-' : String(j.last_error).slice(0, 80)}`)
+    .join(' ; '));
+  console.log('SNAPSHOTS:', String((await orgRows(orgId, 'metric_snapshots')).length));
   await expect(
     page.getByText(/business health/i),
     'the health score appears once a complete month exists',
@@ -119,17 +119,17 @@ test('a new owner uploads a ledger and sees their own figures', async ({ page })
    * Asserted against the database as well as the screen, because "the number is on the page" and
    * "the number is right" are different claims, and only the second one matters.
    */
-  const may = sql(`
-    select coalesce(string_agg(c.metric_key || '=' || s.value::text, ',' order by c.metric_key), 'none')
-      from public.metric_current c
-      join public.metric_snapshots s
-        on s.organization_id = c.organization_id and s.id = c.snapshot_id
-      join public.fiscal_periods f
-        on f.organization_id = c.organization_id and f.id = c.period_id
-      join public.organizations o on o.id = c.organization_id
-     where o.name = '${orgName}' and f.period_start = '2026-05-01'
-       and c.dimension_type = 'none' and s.value is not null
-       and c.metric_key in ('revenue', 'gross_profit', 'operating_expenses', 'net_profit')`);
+  // metric_current points at the snapshot that holds each current figure; values are decimal
+  // strings at the column's scale (6), so they compare as text.
+  const mayPeriod = await periodOf(orgId, '2026-05-01');
+  const snapshots = new Map((await orgRows(orgId, 'metric_snapshots')).map((s) => [s.id, s]));
+  const pairs = (await orgRows(orgId, 'metric_current', (c) => c.period_id === mayPeriod && c.dimension_type === 'none'
+    && ['revenue', 'gross_profit', 'operating_expenses', 'net_profit'].includes(String(c.metric_key))))
+    .map((c) => [String(c.metric_key), snapshots.get(c.snapshot_id)?.value] as const)
+    .filter(([, value]) => value !== null && value !== undefined)
+    .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+    .map(([key, value]) => `${key}=${String(value)}`);
+  const may = pairs.length === 0 ? 'none' : pairs.join(',');
 
   expect(may).toBe(
     'gross_profit=31000.000000,net_profit=16000.000000,'

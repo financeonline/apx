@@ -1,9 +1,11 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { enqueueServerJob } from '@/core/db';
 import { drainJobs, extractDeps } from '@/modules/jobs';
 import { SUBMIT_RECEIPTS_TOOL, type ModelCall, type ModelResponse, type ModelTransport } from '@/modules/ai';
 import { loadBatchReview, startImport } from '@/modules/imports';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { globalRow } from '@/db/schema';
+import { clientFor, createAuthUser, deleteOrg, fs, rpc } from './setup';
+import { auditsOf, makeOrg, rowOf, rowsOf, systemAccount } from './f-fixtures';
 
 /**
  * Reading receipts with AI, end to end (SOW §8; ADR-150): a receipt photo goes in through the
@@ -12,13 +14,21 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  * human — then commit as `inferred` ledger entries, and only once the page is confirmed.
  */
 
+// Each read drains the shared queue, which may hold other suites' jobs too.
+vi.setConfig({ testTimeout: 180_000 });
+
 const RUN = `rc${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.receipts.itest`;
+const DOMAIN = `${RUN}.receipts.itest.motion`;
 let ownerId: string;
 let orgId: string;
 let expenseAccount: string;
 let incomeAccount: string;
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`).split('\n')[0]?.trim() ?? '';
+const jobOf = async (id: string) => (await globalRow(fs(), 'jobs', id).get()).data() ?? {};
+/** Cancels this organisation's queued jobs, as the suite's earlier refusals leave one behind. */
+async function cancelQueued(): Promise<void> {
+  const snap = await fs().collection('jobs').where('organization_id', '==', orgId).where('status', '==', 'queued').get();
+  for (const d of snap.docs) await d.ref.update({ status: 'cancelled' });
+}
 const userDb = () => clientFor(ownerId, { email: `owner@${DOMAIN}` });
 
 /** Enough of a JPEG for the magic-byte check; the scripted model never decodes it. */
@@ -54,23 +64,34 @@ async function read(batchId: string, documentId: string, accountId: string) {
   const jobId = await enqueueServerJob({ userId: ownerId, requestId: `itest-${RUN}` }, {
     organizationId: orgId, jobType: 'document.extract', payload: { document_id: documentId, batch_id: batchId, account_id: accountId },
   });
-  const status = await drainUntilFinished(drainJobs, jobId);
-  return { status, error: adminSql(`select coalesce(last_error, '') from public.jobs where id = '${jobId}'`).trim() };
+  // A refused attempt goes back to the queue with a backoff, so the first recorded error is the
+  // answer; waiting for a terminal state would only drain other suites' jobs off the shared queue.
+  // (An enqueue while a job for the same file is queued merges into it, so "answered" is an attempt
+  // made after this call, not any recorded error.)
+  const attemptsBefore = Number((await jobOf(jobId)).attempts ?? 0);
+  for (let round = 0; round < 12; round += 1) {
+    const job = await jobOf(jobId);
+    if (job.status !== 'running' && Number(job.attempts ?? 0) > attemptsBefore) break;
+    if (['succeeded', 'failed', 'dead', 'deferred_upstream', 'cancelled'].includes(String(job.status))) break;
+    await drainJobs(3);
+  }
+  const job = await jobOf(jobId);
+  return { status: String(job.status ?? ''), error: String(job.last_error ?? '') };
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest Receipts ${RUN}` });
-  if (created.error) throw new Error(created.error.message);
-  orgId = created.data as unknown as string;
-  expenseAccount = one(`select id from public.accounts where organization_id = '${orgId}' and standard_category = 'operating_expense' and is_system limit 1`);
-  incomeAccount = one(`select id from public.accounts where organization_id = '${orgId}' and standard_category = 'revenue' and is_system limit 1`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest Docs Receipts ${RUN}`);
+  expenseAccount = await systemAccount(orgId, 'operating_expense');
+  incomeAccount = await systemAccount(orgId, 'revenue');
 });
 
-afterAll(() => {
+afterAll(async () => {
   extractDeps.transport = undefined;
-  adminSql(`delete from public.organizations where name like 'ITest Receipts%${RUN}';
-            delete from auth.users where email like '%@${DOMAIN}';`);
+  // A refused read goes back to the queue: leave nothing for another suite's worker to pick up.
+  const left = await fs().collection('jobs').where('organization_id', '==', orgId).where('status', '==', 'queued').get();
+  for (const d of left.docs) await d.ref.update({ status: 'cancelled', updated_at: new Date().toISOString() });
+  await deleteOrg(orgId);
 });
 
 describe('a receipt photo', () => {
@@ -78,8 +99,8 @@ describe('a receipt photo', () => {
   let documentId: string;
 
   it('is refused for any import but Receipts, before anything is stored', async () => {
-    await expect(upload('till.jpg', 'general_ledger')).rejects.toThrow(/Photos can be imported as receipts only/);
-    expect(one(`select count(*) from public.source_documents where organization_id = '${orgId}'`)).toBe('0');
+    await expect(upload('till.jpg', 'general_ledger')).rejects.toThrow(/Photos can be imported as receipts or single invoices only/);
+    expect(await rowsOf(orgId, 'source_documents')).toHaveLength(0);
   });
 
   it('is stored as a receipt and waits to be read — nothing is sent anywhere yet', async () => {
@@ -87,18 +108,21 @@ describe('a receipt photo', () => {
     batchId = result.batchId;
     documentId = result.documentId;
     expect(result.parseFailure).toMatch(/Read receipts with AI/);
-    expect(one(`select status::text || '|' || document_kind::text || '|' || mime_type from public.source_documents where id = '${documentId}'`)).toBe('ready|receipt|image/jpeg');
-    expect(one(`select status::text || '|' || extraction_method::text from public.import_batches where id = '${batchId}'`)).toBe('failed|pdf_text');
-    expect(one(`select count(*) from public.audit_events where organization_id = '${orgId}' and action = 'document.sent_to_ai'`)).toBe('0');
+    const doc = (await rowOf(orgId, 'source_documents', documentId))!;
+    expect(`${doc.status}|${doc.document_kind}|${doc.mime_type}`).toBe('ready|receipt|image/jpeg');
+    const b = (await rowOf(orgId, 'import_batches', batchId))!;
+    expect(`${b.status}|${b.extraction_method}`).toBe('failed|pdf_text');
+    expect(await auditsOf(orgId, 'document.sent_to_ai')).toHaveLength(0);
   });
 
   it('is not read while AI reading is off, nor into an account that is not an expense', async () => {
     extractDeps.transport = scriptedReceipts(TWO);
     expect((await read(batchId, documentId, expenseAccount)).error).toMatch(/not enabled/);
-    adminSql(`update public.jobs set status = 'cancelled' where organization_id = '${orgId}' and status = 'queued'`);
-    adminSql(`update public.organizations set features = features || '{"ai_pdf_extraction": true}'::jsonb where id = '${orgId}'`);
+    await cancelQueued();
+    const org = (await globalRow(fs(), 'organizations', orgId).get()).data()!;
+    await globalRow(fs(), 'organizations', orgId).update({ features: { ...(org.features ?? {}), ai_pdf_extraction: true } });
     expect((await read(batchId, documentId, incomeAccount)).error).toMatch(/expense accounts/);
-    adminSql(`update public.jobs set status = 'cancelled' where organization_id = '${orgId}' and status = 'queued'`);
+    await cancelQueued();
     expect(seen).toHaveLength(0);
   });
 
@@ -109,9 +133,13 @@ describe('a receipt photo', () => {
     // The model was handed the image itself, as the consent line says.
     const content = seen.at(-1)!.messages[0]!.content as Array<{ type: string; source?: { media_type?: string } }>;
     expect(content[0]).toMatchObject({ type: 'image', source: { media_type: 'image/jpeg' } });
-    expect(one(`select metadata ->> 'file_sent' from public.audit_events where organization_id = '${orgId}' and action = 'document.sent_to_ai'`)).toBe('true');
-    expect(Number(adminSql(`select coalesce(sum(count), 0) from public.api_rate_limits where actor_user_id = '${orgId}' and bucket = 'ai_extraction_page'`))).toBe(1);
-    expect(one(`select extraction_method::text || '|' || status::text from public.import_batches where id = '${batchId}'`)).toBe('pdf_claude|awaiting_review');
+    const [sent] = await auditsOf(orgId, 'document.sent_to_ai');
+    expect((sent?.metadata as Record<string, unknown> | undefined)?.file_sent).toBe(true);
+    const charged = await fs().collection('api_rate_limits').where('actor_user_id', '==', orgId)
+      .where('bucket', '==', 'ai_extraction_page').get();
+    expect(charged.docs.reduce((t, d) => t + Number(d.get('count') ?? 0), 0)).toBe(1);
+    const b = (await rowOf(orgId, 'import_batches', batchId))!;
+    expect(`${b.extraction_method}|${b.status}`).toBe('pdf_claude|awaiting_review');
 
     const review = (await loadBatchReview(userDb(), orgId, batchId))!;
     const rows = review.rows.filter((r) => r.status !== 'skipped');
@@ -126,23 +154,24 @@ describe('a receipt photo', () => {
   });
 
   it('commits as AI-read ledger entries on that account — only after the page is confirmed', async () => {
-    const before = await userDb().schema('api').rpc('commit_import_batch', { p_batch: batchId });
+    const before = await rpc(userDb(), 'commit_import_batch', { p_batch: batchId });
     expect(before.error?.message ?? '').toMatch(/page|confirm/i);
-    const confirmed = await userDb().schema('api').rpc('confirm_pdf_page', { p_batch: batchId, p_page: 1 });
+    const confirmed = await rpc(userDb(), 'confirm_pdf_page', { p_batch: batchId, p_page: 1 });
     expect(confirmed.error).toBeNull();
     // The ordinary import confirmation every batch has: the period the file covers (ADR-047.6).
     expect((await loadBatchReview(userDb(), orgId, batchId))!.requiredConfirmations).toEqual(['IMP-RANGE-015']);
-    const range = await userDb().schema('api').rpc('record_batch_confirmation', {
+    const range = await rpc(userDb(), 'record_batch_confirmation', {
       p_batch: batchId, p_code: 'IMP-RANGE-015', p_value: { period_start: '2026-03-01', period_end: '2026-03-31' },
     });
     expect(range.error).toBeNull();
-    const commit = await userDb().schema('api').rpc('commit_import_batch', { p_batch: batchId });
+    const commit = await rpc(userDb(), 'commit_import_batch', { p_batch: batchId });
     expect(commit.error, commit.error?.message).toBeNull();
-    expect(adminSql(`select string_agg(amount::text || '|' || direction::text || '|' || account_id::text || '|' || record_status::text, ',' order by entry_date)
-      from public.ledger_entries where organization_id = '${orgId}'`).trim())
+    const entries = (await rowsOf(orgId, 'ledger_entries')).sort((a, b) => String(a.entry_date).localeCompare(String(b.entry_date)));
+    expect(entries.map((e) => `${e.amount}|${e.direction}|${e.account_id}|${e.record_status}`).join(','))
       .toBe(`24.99|debit|${expenseAccount}|accepted,8.40|debit|${expenseAccount}|accepted`);
     // Read by AI, so never more than `inferred` (CD-11), however carefully it was confirmed.
-    expect(adminSql(`select string_agg(distinct assurance_level::text, ',') from public.ledger_entries where import_batch_id = '${batchId}'`).trim()).toBe('inferred');
+    const mine = await rowsOf(orgId, 'ledger_entries', { import_batch_id: batchId });
+    expect([...new Set(mine.map((e) => e.assurance_level))].join(',')).toBe('inferred');
   });
 });
 

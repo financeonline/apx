@@ -5,7 +5,13 @@ import { getBudgetView } from '@/modules/budgets';
 import { startImport } from '@/modules/imports';
 import { drainJobs } from '@/modules/jobs';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { ensurePeriods, writeRecordStatusEvent } from '@/db/app/shared';
+import { orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, drainUntilFinished, fs, rpc } from './setup';
+import {
+  addMember, dropFixtures, makeOrg, periodFor, queueCalculation, rowOf, rowsOf, seedBatch, seedDocument, seedLedgerEntry,
+  systemAccount,
+} from './f-fixtures';
 
 /**
  * Budgets (ADR-142): a budget through the real import wizard and commit, set beside the engine's
@@ -14,7 +20,7 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  */
 
 const RUN = `b${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.budgets.itest`;
+const DOMAIN = `${RUN}.budgets.itest.motion`;
 
 let ownerId: string;
 let clientId: string;
@@ -24,7 +30,6 @@ let otherOrgId: string;
 let september: string;
 let october: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 const ownerDb = () => clientFor(ownerId, { email: `owner@${DOMAIN}` });
 
 function contextFor(userId: string, role: 'owner' | 'client', org = orgId): AccessContext {
@@ -45,57 +50,50 @@ async function importBudget(csv: string, from: string, to: string): Promise<stri
 }
 
 async function commit(batchId: string): Promise<{ status: string; committed: number; superseded: number }> {
-  const required = adminSql(`
-    select coalesce(string_agg(c, ','), '') from public.import_batches b, unnest(b.required_confirmations) c
-     where b.organization_id = '${orgId}' and b.id = '${batchId}'`).split(',').filter(Boolean);
+  const batch = (await rowOf(orgId, 'import_batches', batchId))!;
+  const required = ((batch.required_confirmations as string[] | null | undefined) ?? []).filter(Boolean);
   for (const code of required) {
-    const range = one(`select period_start || '|' || period_end from public.import_batches where id = '${batchId}'`).split('|');
-    const value = code === 'IMP-RANGE-015' ? { period_start: range[0], period_end: range[1] } : { answer: 'yes' };
-    const { error } = await ownerDb().schema('api').rpc('record_batch_confirmation', { p_batch: batchId, p_code: code, p_value: value });
+    const value = code === 'IMP-RANGE-015' ? { period_start: batch.period_start, period_end: batch.period_end } : { answer: 'yes' };
+    const { error } = await rpc(ownerDb(), 'record_batch_confirmation', { p_batch: batchId, p_code: code, p_value: value });
     expect(error, `${code}: ${error?.message}`).toBeNull();
   }
-  const { data, error } = await ownerDb().schema('api').rpc('commit_import_batch', { p_batch: batchId });
+  const { data, error } = await rpc(ownerDb(), 'commit_import_batch', { p_batch: batchId });
   expect(error, error?.message).toBeNull();
   return data as { status: string; committed: number; superseded: number };
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  clientId = createAuthUser(`client@${DOMAIN}`);
-  strangerId = createAuthUser(`stranger@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest Budgets ${RUN}` });
-  if (created.error) throw new Error(created.error.message);
-  orgId = created.data as unknown as string;
-  const other = await clientFor(strangerId).schema('api').rpc('create_organization', { p_name: `ITest Budgets Other ${RUN}` });
-  otherOrgId = other.data as unknown as string;
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status) values ('${orgId}', '${clientId}', 'client', 'active');
-    select app.ensure_periods('${orgId}', '2026-09-01', '2026-10-31');`);
-  september = one(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-09-01'`);
-  october = one(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-10-01'`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  clientId = await createAuthUser(`client@${DOMAIN}`);
+  strangerId = await createAuthUser(`stranger@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest Budgets ${RUN}`);
+  otherOrgId = await makeOrg(strangerId, `ITest Budgets Other ${RUN}`);
+  await addMember(orgId, clientId, 'client');
+  september = await periodFor(orgId, '2026-09-01');
+  october = await periodFor(orgId, '2026-10-01');
 
   // September's actuals: revenue 13,200, payroll 2,900 — a ledger declared for the month, calculated.
-  const account = (category: string) => one(`select id from public.accounts where organization_id = '${orgId}' and standard_category = '${category}' and is_system`);
+  const doc = await seedDocument(orgId, { filename: 'gl.csv', kind: 'general_ledger' });
+  const batch = await seedBatch(orgId, {
+    documentId: doc, importType: 'general_ledger', targetTable: 'ledger_entries', status: 'committed',
+    periodStart: '2026-09-01', periodEnd: '2026-09-30',
+  });
   for (const [category, direction, amount] of [['revenue', 'credit', '13200.00'], ['payroll', 'debit', '2900.00']] as const) {
-    const id = one(`insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status)
-                    values ('${orgId}', '2026-09-15', '${account(category)}', '${direction}', ${amount}, '00000000-0000-0000-0000-000000000000', 'accepted') returning id`);
-    adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event) values ('${orgId}', 'ledger_entries', '${id}', 'accepted')`);
+    const id = await seedLedgerEntry(orgId, {
+      accountId: await systemAccount(orgId, category), date: '2026-09-15', direction, amount, importBatchId: batch,
+      sourceDocumentId: doc,
+    });
+    await fs().runTransaction(async (tx) => {
+      writeRecordStatusEvent(tx, fs(), { orgId, table: 'ledger_entries', recordId: id, event: 'accepted', actorId: null });
+    });
   }
-  const doc = one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-                   values ('${orgId}', '${orgId}/b/gl.csv', 'gl.csv', 'text/csv', 10, decode('e5','hex'), 'ready', 'general_ledger') returning id`);
-  adminSql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at)
-            values ('${orgId}', '${doc}', 'general_ledger', 'ledger_entries', 'committed', 'csv', '2026-09-01', '2026-09-30', now())`);
-  const job = adminSql(`insert into public.jobs (organization_id, job_type, payload, max_attempts)
-                        values ('${orgId}', 'calculation.run', '{"trigger":"recalc_manual"}'::jsonb, 3) returning id`).split('\n')[0]!.trim();
+  const job = await queueCalculation(orgId, { trigger: 'recalc_manual' });
   expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
-});
+}, 180_000);
 
-afterAll(() => {
-  adminSql(`
-    select set_config('app.purge', 'on', false);
-    delete from public.organizations where name like 'ITest Budgets%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';`);
-});
+afterAll(async () => {
+  await dropFixtures([orgId, otherOrgId], DOMAIN);
+}, 60_000);
 
 describe('a budget through the import wizard', () => {
   let firstBatch: string;
@@ -104,27 +102,30 @@ describe('a budget through the import wizard', () => {
     firstBatch = await importBudget(
       'Month,Account,Budget\n2026-09,Sales,12000.00\n2026-09,Salaries,3000.00\n2026-10,Sales,12500.00\n',
       '2026-09-01', '2026-10-31');
-    expect(one(`select import_type || ':' || target_table || ':' || status from public.import_batches where id = '${firstBatch}'`))
-      .toBe('budget:budget_lines:awaiting_review');
-    expect(one(`select document_kind::text from public.source_documents d join public.import_batches b on b.source_document_id = d.id where b.id = '${firstBatch}'`)).toBe('budget');
+    const batch = (await rowOf(orgId, 'import_batches', firstBatch))!;
+    expect(`${batch.import_type}:${batch.target_table}:${batch.status}`).toBe('budget:budget_lines:awaiting_review');
+    expect((await rowOf(orgId, 'source_documents', String(batch.source_document_id)))?.document_kind).toBe('budget');
     // The months were read as the first of each month.
-    expect(one(`select string_agg(distinct mapped_data ->> 'period_start', ',' order by mapped_data ->> 'period_start') from public.import_rows where batch_id = '${firstBatch}' and status in ('valid','warning')`))
-      .toBe('2026-09-01,2026-10-01');
+    const months = new Set((await rowsOf(orgId, 'import_rows', { batch_id: firstBatch }))
+      .filter((r) => r.status === 'valid' || r.status === 'warning').map((r) => String(r.mapped_data?.period_start)));
+    expect([...months].sort().join(',')).toBe('2026-09-01,2026-10-01');
   });
 
   it('commits one line per account and month, each assigned to its fiscal month', async () => {
     const result = await commit(firstBatch);
     expect(result).toMatchObject({ status: 'committed', committed: 3, superseded: 0 });
-    expect(one(`select count(*) from public.budget_lines where organization_id = '${orgId}' and record_status = 'accepted' and period_id = '${september}'`)).toBe('2');
-    expect(one(`select count(*) from public.record_status_events where organization_id = '${orgId}' and record_table = 'budget_lines'`)).toBe('3');
+    expect(await rowsOf(orgId, 'budget_lines', { record_status: 'accepted', period_id: september })).toHaveLength(2);
+    expect(await rowsOf(orgId, 'record_status_events', { record_table: 'budget_lines' })).toHaveLength(3);
   });
 
   it('sets the budget beside the month\'s actual figures', async () => {
     // The accounts were created from their names; their categories decide the lines. Make them
     // explicit so the expectation does not rest on the keyword guess.
-    adminSql(`
-      update public.accounts set standard_category = 'revenue' where organization_id = '${orgId}' and name = 'Sales';
-      update public.accounts set standard_category = 'payroll' where organization_id = '${orgId}' and name = 'Salaries';`);
+    for (const [name, category, type] of [['Sales', 'revenue', 'income'], ['Salaries', 'payroll', 'expense']] as const) {
+      for (const a of await rowsOf(orgId, 'accounts', { name })) {
+        await orgRow(fs(), orgId, 'accounts', String(a.id)).update({ standard_category: category, account_type: type });
+      }
+    }
     const view = await getBudgetView(contextFor(ownerId, 'owner'), september);
     const row = (key: string) => view.variance?.rows.find((r) => r.key === key);
     // Revenue: actual 13,200 − budget 12,000 = +1,200, favourable.
@@ -136,10 +137,11 @@ describe('a budget through the import wizard', () => {
 
   it('refuses two lines for one account and month in a file, rather than adding them up', async () => {
     const batch = await importBudget('Month,Account,Budget\n2026-10,Sales,100.00\n2026-10,Sales,200.00\n', '2026-10-01', '2026-10-31');
-    expect(one(`select string_agg(status::text, ',' order by row_number) from public.import_rows where batch_id = '${batch}' and row_number > 1`))
-      .toBe('valid,error');
-    expect(one(`select issues::text from public.import_rows where batch_id = '${batch}' and status = 'error'`)).toContain('IMP-BUD-001');
-    await ownerDb().schema('api').rpc('reject_import_batch', { p_batch: batch, p_reason: 'test' });
+    const rows = (await rowsOf(orgId, 'import_rows', { batch_id: batch })).filter((r) => Number(r.row_number) > 1)
+      .sort((a, b) => Number(a.row_number) - Number(b.row_number));
+    expect(rows.map((r) => r.status).join(',')).toBe('valid,error');
+    expect(JSON.stringify(rows.find((r) => r.status === 'error')?.issues)).toContain('IMP-BUD-001');
+    await rpc(ownerDb(), 'reject_import_batch', { p_batch: batch, p_reason: 'test' });
   });
 
   describe('a revised budget for October', () => {
@@ -149,14 +151,16 @@ describe('a budget through the import wizard', () => {
       revision = await importBudget('Month,Account,Budget\n2026-10,Sales,14000.00\n', '2026-10-01', '2026-10-31');
       const result = await commit(revision);
       expect(result).toMatchObject({ committed: 1, superseded: 1 });
-      expect(one(`select amount::text from public.budget_lines where organization_id = '${orgId}' and period_id = '${october}' and record_status = 'accepted' and superseded_by is null`)).toBe('14000.00');
-      expect(one(`select count(*) from public.budget_lines where organization_id = '${orgId}' and period_id = '${september}' and superseded_by is null and record_status = 'accepted'`)).toBe('2');
+      expect((await rowsOf(orgId, 'budget_lines', { period_id: october, record_status: 'accepted', superseded_by: null })).map((r) => r.amount))
+        .toEqual(['14000.00']);
+      expect(await rowsOf(orgId, 'budget_lines', { period_id: september, record_status: 'accepted', superseded_by: null })).toHaveLength(2);
     });
 
     it('and rolling the revision back restores the earlier October budget', async () => {
-      const { error } = await ownerDb().schema('api').rpc('rollback_import_batch', { p_batch: revision, p_reason: 'wrong file' });
+      const { error } = await rpc(ownerDb(), 'rollback_import_batch', { p_batch: revision, p_reason: 'wrong file' });
       expect(error, error?.message).toBeNull();
-      expect(one(`select amount::text from public.budget_lines where organization_id = '${orgId}' and period_id = '${october}' and record_status = 'accepted' and superseded_by is null`)).toBe('12500.00');
+      expect((await rowsOf(orgId, 'budget_lines', { period_id: october, record_status: 'accepted', superseded_by: null })).map((r) => r.amount))
+        .toEqual(['12500.00']);
     });
   });
 });
@@ -171,10 +175,9 @@ describe('who may see a budget', () => {
     await expect(getBudgetView(contextFor(strangerId, 'owner', otherOrgId), september)).rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 
-  it('no authenticated role can write a budget line directly', async () => {
-    const { error } = await ownerDb().from('budget_lines').insert({ organization_id: orgId, period_start: '2026-09-01', account_id: orgId, amount: 1 });
-    expect(error).not.toBeNull();
-  });
+  // "No authenticated role can write a budget line directly" was a statement about SQL grants; the
+  // browser cannot reach Firestore at all, and no `api.*` function writes a budget line outside an
+  // import commit.
 });
 
 describe('the analyst reads budget against actual (tool 27)', () => {
@@ -185,7 +188,7 @@ describe('the analyst reads budget against actual (tool 27)', () => {
   });
 
   it('returns each line with its actual snapshot, and the difference the service computed', async () => {
-    const label = one(`select label from public.fiscal_periods where id = '${september}'`);
+    const label = String((await rowOf(orgId, 'fiscal_periods', september))!.label);
     const outcome = await getBudgetVariance.run({}, call(contextFor(ownerId, 'owner'), label)) as { ok: true; data: { lines: Array<{ line: string; snapshot_id: string | null; difference: { value: string } | null }> } };
     expect(outcome.ok).toBe(true);
     const revenue = outcome.data.lines.find((l) => l.line === 'revenue')!;
@@ -194,8 +197,8 @@ describe('the analyst reads budget against actual (tool 27)', () => {
   });
 
   it('says plainly when no budget was imported for the month', async () => {
-    adminSql(`select app.ensure_periods('${orgId}', '2026-11-01', '2026-11-30')`);
-    const november = one(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-11-01'`);
+    await ensurePeriods(fs(), orgId, '2026-11-01', '2026-11-30');
+    const november = await periodFor(orgId, '2026-11-01');
     const outcome = await getBudgetVariance.run({}, {
       ...call(contextFor(ownerId, 'owner'), 'Nov 2026'),
       periodContext: { default: { id: november, label: 'Nov 2026' }, mentioned: [], resolved: [], fiscalYearStartMonth: 1, latestComplete: null, notes: [] } as never,

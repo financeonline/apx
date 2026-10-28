@@ -1,18 +1,16 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { recordAccessEvent } from '@/core/db/server-rpc';
 import { withOrgScope } from '@/core/db';
-import {
-  adminSql, clientFor, createAuthUser, serviceClientScoped, sqlstate,
-} from './setup';
+import { clientFor, createAuthUser, fs, rpc, serviceClientScoped, sqlstate } from './setup';
+import { addMember, dropAuditOf, dropOrg, dropUsers, makeOrg } from './tenancy-fixtures';
 
 /**
  * The organization scope on the server path (ADR-090; PHASE_1_7_INTEGRATION_AUDIT.md H1).
  *
  * `withOrgScope` is the only thing standing between a job draining organisation A and a write that
- * names organisation B, and until this suite existed it stood there without being tested — the
- * mechanism it used (`set_config('app.current_org', …)`) had never once executed, because
- * `set_config` is not in an exposed schema and because the scope was asserted on a different client
- * from the one making every `api_server.*` call.
+ * names organisation B. On Firestore the scope is the service actor's `scope`
+ * (`src/core/db/service-client.ts`), carried ambiently to every `api_server.*` call made underneath,
+ * and checked by `requireScope` and `prepareAudit` (`src/db/app/scope.ts`, `audit.ts`).
  *
  * What is asserted here is the property rather than the plumbing: a scoped server function acts
  * only when it has been told which organisation it is acting for, and only when that is the one it
@@ -20,39 +18,36 @@ import {
  */
 
 const RUN = `s${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.scope.itest`;
+const DOMAIN = `${RUN}.scope.itest.motion`;
 const NOT_AN_ORG = '00000000-0000-4000-8000-0000000000ff';
 
 let orgA: string;
 let orgB: string;
 let ownerA: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
-beforeAll(() => {
-  ownerA = createAuthUser(`owner@${DOMAIN}`);
-  orgA = one(`
-    insert into public.organizations (name, slug, country_code, base_currency, fiscal_year_start_month, timezone)
-    values ('Scope A ${RUN}', 'scope-a-${RUN}', 'GB', 'GBP', 1, 'Europe/London') returning id::text`);
-  orgB = one(`
-    insert into public.organizations (name, slug, country_code, base_currency, fiscal_year_start_month, timezone)
-    values ('Scope B ${RUN}', 'scope-b-${RUN}', 'GB', 'GBP', 1, 'Europe/London') returning id::text`);
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status)
-    values ('${orgA}', '${ownerA}', 'owner', 'active')`);
+beforeAll(async () => {
+  ownerA = await createAuthUser(`owner@${DOMAIN}`);
+  orgA = await makeOrg({ name: `ITest Scope A ${RUN}`, slug: `itest-${RUN}-scope-a` });
+  orgB = await makeOrg({ name: `ITest Scope B ${RUN}`, slug: `itest-${RUN}-scope-b` });
+  await addMember(orgA, ownerA, 'owner');
 });
 
-afterAll(() => {
-  adminSql(`delete from public.organizations where id in ('${orgA}', '${orgB}')`);
-  adminSql(`delete from auth.users where email like '%@${DOMAIN}'`);
+afterAll(async () => {
+  for (const org of [orgA, orgB]) {
+    if (!org) continue;
+    await dropAuditOf(org);
+    await dropOrg(org);
+  }
+  await dropUsers([ownerA].filter(Boolean));
 });
 
 /** `set_period_completeness` with empty arrays writes nothing, so it isolates the guard itself. */
 async function completeness(client: ReturnType<typeof serviceClientScoped>, org: string) {
-  return client.schema('api_server').rpc('set_period_completeness', {
-    p_org: org, p_periods: [], p_complete: [],
-  });
+  return rpc(client, 'set_period_completeness', { p_org: org, p_periods: [], p_complete: [] }, { server: true });
 }
+
+const auditCount = async (field: string, value: string) =>
+  (await fs().collection('audit_events').where(field, '==', value).count().get()).data().count;
 
 describe('a scoped server function acts only on the organisation it was scoped to', () => {
   it('does the work when the scope is the organisation being written', async () => {
@@ -63,22 +58,22 @@ describe('a scoped server function acts only on the organisation it was scoped t
 
   it('refuses when no scope was established at all', async () => {
     const { error } = await completeness(serviceClientScoped(), orgA);
-    expect(error).not.toBeNull();
     expect(sqlstate(error)).toBe('42501');
     expect(error?.message).toMatch(/no organization scope/i);
   });
 
   it('refuses when the scope names a different organisation', async () => {
     const { error } = await completeness(serviceClientScoped(orgB), orgA);
-    expect(error).not.toBeNull();
     expect(sqlstate(error)).toBe('42501');
     expect(error?.message).toMatch(/does not match/i);
   });
 
-  it('refuses a scope that is not a uuid rather than reading it as "no scope"', async () => {
+  // PostgreSQL read the scope from a header and had to refuse one that was not a uuid; here it is a
+  // typed field, and anything but the organisation being written is simply a mismatch.
+  it('refuses a scope that is not an organisation id rather than reading it as "no scope"', async () => {
     const { error } = await completeness(serviceClientScoped('not-a-uuid'), orgA);
-    expect(error).not.toBeNull();
-    expect(error?.message).toMatch(/scope header is not a uuid/i);
+    expect(sqlstate(error)).toBe('42501');
+    expect(error?.message).toMatch(/does not match/i);
   });
 
   it('refuses a scope naming an organisation that does not exist', async () => {
@@ -89,28 +84,24 @@ describe('a scoped server function acts only on the organisation it was scoped t
 
 describe('the audit trail cannot cross the scope (ADR-043)', () => {
   const event = (client: ReturnType<typeof serviceClientScoped>, org: string | null) =>
-    client.schema('api_server').rpc('record_access_event', {
+    rpc(client, 'record_access_event', {
       p_actor: ownerA, p_org: org, p_action: 'document.quarantined',
       p_target_table: null, p_target_id: null, p_metadata: {}, p_request_id: null,
-    });
+    }, { server: true });
 
   it('writes the event when the organisation is the scoped one', async () => {
-    const before = Number(one(
-      `select count(*) from public.audit_events where organization_id = '${orgA}'`));
+    const before = await auditCount('organization_id', orgA);
     const { error } = await event(serviceClientScoped(orgA), orgA);
     expect(error).toBeNull();
-    expect(Number(one(
-      `select count(*) from public.audit_events where organization_id = '${orgA}'`))).toBe(before + 1);
+    expect(await auditCount('organization_id', orgA)).toBe(before + 1);
   });
 
   it('refuses an event for another organisation, however the caller reached it', async () => {
-    const before = Number(one(
-      `select count(*) from public.audit_events where organization_id = '${orgB}'`));
+    const before = await auditCount('organization_id', orgB);
     const { error } = await event(serviceClientScoped(orgA), orgB);
     expect(error).not.toBeNull();
     expect(error?.message).toMatch(/does not match the scoped organization/i);
-    expect(Number(one(
-      `select count(*) from public.audit_events where organization_id = '${orgB}'`))).toBe(before);
+    expect(await auditCount('organization_id', orgB)).toBe(before);
   });
 
   it('refuses a platform-level event from inside a scope', async () => {
@@ -121,30 +112,22 @@ describe('the audit trail cannot cross the scope (ADR-043)', () => {
 });
 
 describe('the scope is a server fact, never a browser one', () => {
-  it('does not let a signed-in user reach a scoped server function, header or no header', async () => {
+  it('does not let a signed-in user reach a scoped server function', async () => {
     const asUser = clientFor(ownerA, { email: `owner@${DOMAIN}` });
-    const { error } = await asUser.schema('api_server').rpc('set_period_completeness', {
+    const { error } = await rpc(asUser, 'set_period_completeness', {
       p_org: orgA, p_periods: [], p_complete: [],
-    });
+    }, { server: true });
     expect(error).not.toBeNull();
-    // The grant stops it before any scope is consulted: `authenticated` holds no EXECUTE here.
+    // `requireServer` stops it before any scope is consulted.
     expect(sqlstate(error)).toBe('42501');
-  });
-
-  it('gives `authenticated` no way to read or assert a scope', () => {
-    expect(one(`
-      select has_function_privilege('authenticated', 'app.scope_org()', 'execute')::text
-             || '|' ||
-             has_function_privilege('authenticated', 'app.require_scope(uuid)', 'execute')::text`))
-      .toBe('false|false');
+    expect(error?.message).toMatch(/only by the server/i);
   });
 });
 
 describe('the server paths agree with each other', () => {
   /**
-   * The fix that matters. `core/db/server-rpc.ts` keeps its own client, so before ADR-090 an
-   * `api_server.*` call made from inside a job carried no scope at all — even though `scope.db` had
-   * one. These two assert that entering `withOrgScope` now scopes BOTH.
+   * Entering `withOrgScope` scopes BOTH the handle it passes and every `api_server.*` call made
+   * through `core/db/server-rpc.ts` underneath (the ambient scope, ADR-090).
    */
   it('carries the scope into an api_server call made through serverRpc', async () => {
     await expect(withOrgScope(orgA, async () => {
@@ -153,10 +136,7 @@ describe('the server paths agree with each other', () => {
         { organizationId: orgA, action: 'document.quarantined' },
       );
     })).resolves.toBeUndefined();
-
-    expect(one(`
-      select count(*) from public.audit_events
-       where organization_id = '${orgA}' and request_id = '${RUN}-ok'`)).toBe('1');
+    expect(await auditCount('request_id', `${RUN}-ok`)).toBe(1);
   });
 
   it('refuses a serverRpc call that names an organisation the job is not scoped to', async () => {
@@ -166,15 +146,14 @@ describe('the server paths agree with each other', () => {
         { organizationId: orgB, action: 'document.quarantined' },
       );
     })).rejects.toThrow(/does not match the scoped organization/i);
-
-    expect(one(`
-      select count(*) from public.audit_events where request_id = '${RUN}-bad'`)).toBe('0');
+    expect(await auditCount('request_id', `${RUN}-bad`)).toBe(0);
   });
 
   it('leaves an unscoped server path unscoped: a page write still names its own organisation', async () => {
+    // The audit id is a uuid string now (it was a bigint identity).
     await expect(recordAccessEvent(
       { userId: ownerA, requestId: `${RUN}-page` },
       { organizationId: orgA, action: 'document.quarantined' },
-    )).resolves.toBeTypeOf('number');
+    )).resolves.toBeTypeOf('string');
   });
 });

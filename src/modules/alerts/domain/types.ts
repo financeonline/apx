@@ -14,7 +14,7 @@
  * the other eleven rules, persistence, revisions, dedupe keys, the per-run cap and `userSuppressed`
  * — none of which health may touch, because a dismissed alert must never move a score (R2-B-11).
  *
- * Pure: no Supabase, no clock, no randomness.
+ * Pure: no database, no clock, no randomness.
  */
 
 import type {

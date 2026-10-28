@@ -1,5 +1,5 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import { callApi } from '@/core/db/api-rpc';
+import type { Db } from '@/db/types';
 import type { ActionPriority, ActionStatus } from '@/modules/actions';
 import type { AlertSeverity } from '@/modules/alerts';
 import { bandFor } from '@/modules/health';
@@ -18,33 +18,25 @@ import type { ClientBreakdown } from '../domain/opportunities';
  *  - DETAIL LISTS — alerts and actions to show, each explicitly ordered and capped. A cap limits what
  *    is SHOWN; the list travels with the authoritative total so the page can say so.
  *
- * Transport (ADR-117, audit F-5). Every read is an RPC — a POST — and none carries the portfolio's
- * ids in a URL, where 201 organisations overflowed the gateway (414). `orgIds === null` means "every
- * organisation the caller advises": the database derives that scope itself (`app.portfolio_scope`,
- * from `app.adviser_org_ids()`), so the overview sends no list at all. A list narrows the scope and
- * is intersected with it; it can never widen it. Like every `api.*` function the reads are
- * definers, and they read only rows of that scope — derived from `app.accessible_org_roles()`, the
- * resolver every RLS policy reads. None loops per organisation.
+ * Transport (ADR-117, audit F-5). Every read is an `api.*` function (`callApi`, in process — no
+ * portfolio ids ever travel in a URL, where 201 organisations once overflowed the gateway). `orgIds
+ * === null` means "every organisation the caller advises": the function derives that scope itself
+ * (`adviserOrgIds`, the port of `app.portfolio_scope`), so the overview sends no list at all. A list
+ * narrows the scope and is intersected with it; it can never widen it. The functions read only rows
+ * of that scope — derived from `accessibleOrgRoles`, the resolver every read policy uses.
  *
- * PostgREST's `max_rows` (1,000 locally) is never relied on: every detail read is capped at or
- * below it in the statement, and the aggregate — one row per organisation — is read in pages of
- * 1,000 in organisation order until a short page, so a portfolio of any size is read whole.
+ * No row cap is relied on: every detail read is capped in the function, and the aggregate — one
+ * row per organisation — comes back whole, so a portfolio of any size is read whole
+ * (`src/db/api/portfolio.ts`).
  */
 
 export const ALERT_DETAIL_CAP = 500;
 export const ACTION_DETAIL_CAP = 500;
 export const RECENT_CAP = 50;
-/** PostgREST's row cap; a paged read asks for exactly this many rows at a time. */
-export const PAGE_ROWS = 1_000;
 
 /** `null`: the whole adviser scope, derived in the database. A list narrows it (one client's page). */
 export type Scope = readonly string[] | null;
 const scopeArg = (orgIds: Scope) => (orgIds === null ? null : [...orgIds]);
-
-function unwrap<T>(data: T[] | null, error: unknown, requestId?: string): T[] {
-  if (error) throw toMotionError(error, requestId);
-  return data ?? [];
-}
 
 // ---------------------------------------------------------------------------------------------
 // Aggregates
@@ -68,19 +60,13 @@ export interface OrganisationSummary {
 }
 
 export async function loadPortfolioSummary(
-  db: SupabaseClient, orgIds: Scope, today: string, dueSoonUntil: string, requestId?: string,
+  db: Db, orgIds: Scope, today: string, dueSoonUntil: string, requestId?: string,
 ): Promise<Map<string, OrganisationSummary>> {
   if (orgIds !== null && orgIds.length === 0) return new Map();
-  const rows: SummaryRow[] = [];
-  for (let from = 0; ; from += PAGE_ROWS) {
-    const { data, error } = await db.schema('api').rpc('portfolio_summary', {
-      p_orgs: scopeArg(orgIds), p_today: today, p_due_soon_until: dueSoonUntil,
-    }).order('organization_id').range(from, from + PAGE_ROWS - 1);
-    const page = unwrap(data as SummaryRow[] | null, error, requestId);
-    rows.push(...page);
-    if (page.length < PAGE_ROWS) break;
-  }
-  return summaries(rows);
+  const rows = await callApi<SummaryRow[]>(db, 'portfolio_summary', {
+    p_orgs: scopeArg(orgIds), p_today: today, p_due_soon_until: dueSoonUntil,
+  }, requestId);
+  return summaries(rows ?? []);
 }
 
 function summaries(rows: readonly SummaryRow[]): Map<string, OrganisationSummary> {
@@ -145,20 +131,20 @@ function toAlert(row: AlertRow): PortfolioAlert {
 
 /** Standing alerts to SHOW: severity (the enum orders critical first), then oldest, then id. */
 export async function loadStandingAlerts(
-  db: SupabaseClient, orgIds: Scope, limit = ALERT_DETAIL_CAP, requestId?: string,
+  db: Db, orgIds: Scope, limit = ALERT_DETAIL_CAP, requestId?: string,
 ): Promise<PortfolioAlert[]> {
   if (orgIds !== null && orgIds.length === 0) return [];
-  const { data, error } = await db.schema('api').rpc('portfolio_standing_alerts', { p_orgs: scopeArg(orgIds), p_limit: limit });
-  return unwrap(data as AlertRow[] | null, error, requestId).map(toAlert);
+  const rows = await callApi<AlertRow[]>(db, 'portfolio_standing_alerts', { p_orgs: scopeArg(orgIds), p_limit: limit }, requestId);
+  return (rows ?? []).map(toAlert);
 }
 
 /** Alerts first seen since `sinceIso`, newest first — the "recent changes" feed only. */
 export async function loadRecentAlerts(
-  db: SupabaseClient, orgIds: Scope, sinceIso: string, requestId?: string,
+  db: Db, orgIds: Scope, sinceIso: string, requestId?: string,
 ): Promise<PortfolioAlert[]> {
   if (orgIds !== null && orgIds.length === 0) return [];
-  const { data, error } = await db.schema('api').rpc('portfolio_recent_alerts', { p_orgs: scopeArg(orgIds), p_since: sinceIso, p_limit: RECENT_CAP });
-  return unwrap(data as AlertRow[] | null, error, requestId).map(toAlert);
+  const rows = await callApi<AlertRow[]>(db, 'portfolio_recent_alerts', { p_orgs: scopeArg(orgIds), p_since: sinceIso, p_limit: RECENT_CAP }, requestId);
+  return (rows ?? []).map(toAlert);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -197,7 +183,7 @@ export type OpenLens = 'attention' | 'overdue' | 'due_soon' | 'high' | 'mine';
  * Order is `byUrgency`: priority (the enum orders critical first), due date with undated last, oldest.
  */
 export async function loadOpenActions(
-  db: SupabaseClient,
+  db: Db,
   orgIds: Scope,
   lens: OpenLens,
   context: { today: string; dueSoonUntil: string },
@@ -205,19 +191,19 @@ export async function loadOpenActions(
   requestId?: string,
 ): Promise<PortfolioAction[]> {
   if (orgIds !== null && orgIds.length === 0) return [];
-  const { data, error } = await db.schema('api').rpc('portfolio_open_actions', {
+  const rows = await callApi<ActionRow[]>(db, 'portfolio_open_actions', {
     p_orgs: scopeArg(orgIds), p_lens: lens, p_today: context.today, p_due_soon_until: context.dueSoonUntil, p_limit: limit,
-  });
-  return unwrap(data as ActionRow[] | null, error, requestId).map(toAction);
+  }, requestId);
+  return (rows ?? []).map(toAction);
 }
 
 /** Work finished since `sinceIso`, newest first, for "recent changes". */
 export async function loadRecentlyFinishedActions(
-  db: SupabaseClient, orgIds: Scope, sinceIso: string, requestId?: string,
+  db: Db, orgIds: Scope, sinceIso: string, requestId?: string,
 ): Promise<PortfolioAction[]> {
   if (orgIds !== null && orgIds.length === 0) return [];
-  const { data, error } = await db.schema('api').rpc('portfolio_finished_actions', { p_orgs: scopeArg(orgIds), p_since: sinceIso, p_limit: RECENT_CAP });
-  return unwrap(data as ActionRow[] | null, error, requestId).map(toAction);
+  const rows = await callApi<ActionRow[]>(db, 'portfolio_finished_actions', { p_orgs: scopeArg(orgIds), p_since: sinceIso, p_limit: RECENT_CAP }, requestId);
+  return (rows ?? []).map(toAction);
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -233,11 +219,11 @@ interface BreakdownRow {
 }
 
 export async function loadHealthBreakdowns(
-  db: SupabaseClient, orgIds: Scope, requestId?: string,
+  db: Db, orgIds: Scope, requestId?: string,
 ): Promise<ClientBreakdown[]> {
   if (orgIds !== null && orgIds.length === 0) return [];
-  const { data, error } = await db.schema('api').rpc('portfolio_health_breakdowns', { p_orgs: scopeArg(orgIds) });
-  return unwrap(data as BreakdownRow[] | null, error, requestId).map((r) => ({
+  const rows = await callApi<BreakdownRow[]>(db, 'portfolio_health_breakdowns', { p_orgs: scopeArg(orgIds) }, requestId);
+  return (rows ?? []).map((r) => ({
     organizationId: r.organization_id, healthScoreId: r.health_score_id, periodLabel: r.period_label,
     configVersion: r.config_version, evidenceBundleId: r.evidence_bundle_id,
     dimensions: (r.dimensions ?? []).map((d) => ({

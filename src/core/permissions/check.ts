@@ -4,7 +4,7 @@ import { PermissionDenied } from '@/core/errors';
 
 /**
  * The minimum a caller must carry to be authorised. The full AccessContext satisfies it.
- * Kept structural so core/permissions stays free of Supabase and Next.
+ * Kept structural so core/permissions stays free of the database and Next.
  */
 export interface AuthzContext {
   readonly effectiveRole: EffectiveRole;

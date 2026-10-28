@@ -2,7 +2,9 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { enqueueServerJob } from '@/core/db';
 import { drainJobs, evalDeps } from '@/modules/jobs';
 import { LIVE_QUESTIONS, REFUSAL_TEMPLATES, SUBMIT_ANSWER_TOOL, type ModelCall, type ModelResponse, type ModelTransport } from '@/modules/ai';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { globalRow, orgCollection } from '@/db/schema';
+import { addCommittedBatch, dropUsers, dropWhere, enqueue, makeOrg, postLedger } from './ai-fixtures';
+import { createAuthUser, deleteOrg, drainUntilFinished, fs } from './setup';
 
 /**
  * The `ai.eval` job (AI_ARCHITECTURE.md §12; ADR-081): the live run, driven end to end through the
@@ -12,12 +14,12 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  */
 
 const RUN = `ej${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.evaljob.itest`;
+const DOMAIN = `${RUN}.evaljob.itest.motion`;
 
 let ownerId: string;
 let orgId: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+const job = async (id: string) => (await globalRow(fs(), 'jobs', id).get()).data() ?? {};
 
 /** A model that reads the conversation and behaves: refuses what it must, grounds what it can. */
 function scriptedModel(): ModelTransport {
@@ -71,38 +73,23 @@ function scriptedModel(): ModelTransport {
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest EvalJob ${RUN}` });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest EvalJob ${RUN}`);
 
-  const revenueAccount = one(`select id from public.accounts where organization_id = '${orgId}' and standard_category = 'revenue' and is_system`);
-  const documentId = one(`
-    insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-    values ('${orgId}', '${orgId}/evaljob/gl.csv', 'gl.csv', 'text/csv', 10, decode('ea','hex'), 'ready', 'general_ledger') returning id`);
-  const batchId = one(`
-    insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at)
-    values ('${orgId}', '${documentId}', 'general_ledger', 'ledger_entries', 'committed', 'csv', '2026-05-01', '2026-05-31', now()) returning id`);
-  const rowId = one(`
-    insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
-    values ('${orgId}', '${batchId}', 2, 'csv:row:2', '{}'::jsonb, '{}'::jsonb, 'committed') returning id`);
-  const entryId = one(`
-    insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status, source_document_id, import_batch_id, import_row_id, source_ref)
-    values ('${orgId}', '2026-05-31', '${revenueAccount}', 'credit', 20000.00, '00000000-0000-0000-0000-000000000000', 'accepted', '${documentId}', '${batchId}', '${rowId}', 'csv:row:2') returning id`);
-  adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id) values ('${orgId}', 'ledger_entries', '${entryId}', 'accepted', '${batchId}')`);
-  const jobId = adminSql(`
-    insert into public.jobs (organization_id, job_type, payload, max_attempts)
-    values ('${orgId}', 'calculation.run', '{"trigger":"recalc_manual","as_of":"2026-06-15"}'::jsonb, 3) returning id`).split('\n')[0]!.trim();
+  const batch = await addCommittedBatch(orgId, {
+    importType: 'general_ledger', targetTable: 'ledger_entries', periodStart: '2026-05-01', periodEnd: '2026-05-31',
+    filename: 'gl.csv', documentKind: 'general_ledger',
+  });
+  await postLedger(orgId, batch, { category: 'revenue', direction: 'credit', amount: '20000.00', date: '2026-05-31', line: 2 });
+  const jobId = await enqueue(orgId, 'calculation.run', { trigger: 'recalc_manual', as_of: '2026-06-15' });
   expect(await drainUntilFinished(drainJobs, jobId)).toBe('succeeded');
-});
+}, 120_000);
 
-afterAll(() => {
+afterAll(async () => {
   evalDeps.transport = undefined;
-  adminSql(`
-    delete from public.organizations where name like 'ITest EvalJob%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest EvalJob %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.evaljob.itest' and created_at < now() - interval '1 hour';`);
+  await deleteOrg(orgId);
+  await dropWhere('jobs', 'organization_id', [orgId]);
+  await dropUsers(DOMAIN);
 });
 
 describe('the ai.eval job', () => {
@@ -110,10 +97,12 @@ describe('the ai.eval job', () => {
   it('asks every live question as the requester, under the user throttle, and records the metrics on the job', { timeout: 180_000 }, async () => {
     evalDeps.transport = scriptedModel();
     const jobId = await enqueueServerJob({ userId: ownerId, requestId: `itest-${RUN}` }, { organizationId: orgId, jobType: 'ai.eval' });
-    const row = () => adminSql(`select status || '|' || attempts || '/' || max_attempts || '|' || coalesce(last_error, '-') || ' cases=' || coalesce((select jsonb_agg(c) filter (where (c ->> 'ok') = 'false') from jsonb_array_elements(result -> 'cases') c)::text, '-') from public.jobs where id = '${jobId}'`);
-    expect(await drainUntilFinished(drainJobs, jobId), row()).toBe('succeeded');
+    const status = await drainUntilFinished(drainJobs, jobId);
+    const row = await job(jobId);
+    const failed = ((row.result as { cases?: Array<{ ok: boolean }> } | null)?.cases ?? []).filter((c) => !c.ok);
+    expect(status, `${String(row.status)}|${String(row.attempts)}/${String(row.max_attempts)}|${String(row.last_error ?? '-')} cases=${JSON.stringify(failed)}`).toBe('succeeded');
 
-    const result = JSON.parse(adminSql(`select result::text from public.jobs where id = '${jobId}'`)) as {
+    const result = row.result as {
       metrics: { cases: number; failures: number; groundingFirstPassRate: number; refusalCorrectness: number };
       cases: Array<{ id: string; ok: boolean; outcome: string }>;
       prompt_version: string; below_target: string[];
@@ -126,14 +115,13 @@ describe('the ai.eval job', () => {
     expect(result.prompt_version).toMatch(/^analyst-/);
 
     // Every question left a real, server-persisted turn behind it.
-    expect(adminSql(`select count(*) from public.ai_messages where organization_id = '${orgId}' and role = 'assistant'`)).toBe(String(LIVE_QUESTIONS.length));
+    const assistant = await orgCollection(fs(), orgId, 'ai_messages').where('role', '==', 'assistant').get();
+    expect(assistant.size).toBe(LIVE_QUESTIONS.length);
   });
 
   it('refuses to run with nobody to act as', async () => {
-    const jobId = adminSql(`
-      insert into public.jobs (organization_id, job_type, payload, max_attempts)
-      values ('${orgId}', 'ai.eval', '{}'::jsonb, 1) returning id`).split('\n')[0]!.trim();
+    const jobId = await enqueue(orgId, 'ai.eval', {}, 1, null);
     expect(await drainUntilFinished(drainJobs, jobId)).not.toBe('succeeded');
-    expect(adminSql(`select last_error from public.jobs where id = '${jobId}'`)).toMatch(/nobody did/);
+    expect(String((await job(jobId)).last_error)).toMatch(/nobody did/);
   });
 });

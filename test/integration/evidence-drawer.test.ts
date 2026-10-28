@@ -3,13 +3,22 @@ import { buildMetricBundle, type MetricBundleItem } from '@/core/db';
 import { NotFound, ValidationError } from '@/core/errors';
 import { Decimal, toMoneyString } from '@/core/money';
 import { permissionsFor } from '@/core/permissions';
-import { drainJobs } from '@/modules/jobs';
 import {
   buildBundleForMetric, getBundle, getDocumentReference, loadEvidenceDrawer, resolveDescriptor,
   resolveItem, type QueryDescriptorV1,
 } from '@/modules/evidence';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished, sqlstate } from './setup';
+import { API_FUNCTIONS } from '@/db/api';
+import { periodId } from '@/db/app/shared';
+import { orgRows } from '@/db/rls';
+import { newId, nowIso, orgCollection, orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, deleteOrg, drainUntilFinished, fs, rpc } from './setup';
+import { assignEmployee, auditEvents, createOrgFixture, deletePlatformUser } from './r-fixtures';
+import {
+  accountFor, currentCells, currentSnapshot, deleteAuthUsers, deleteJobsOf, drainShared, dropQueuedRecalculation,
+  queueCalculation, seedAccount,
+  seedBankAccount, seedBankTransaction, seedBatch, seedDocument, seedImportRow, seedLedgerEntry, seedStatusEvent,
+} from './evidence-fixtures';
 
 /**
  * The evidence chain, end to end (TEST_STRATEGY.md §9; EVIDENCE_MODEL.md §6, §8, §9).
@@ -20,25 +29,21 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished, sqlstate } fro
  * rows behind it are the same thing, and a fixture snapshot with a hand-written descriptor would
  * prove only that the test author can keep two hand-written things in agreement.
  *
- * Run-unique fixtures (ADR-052.12).
+ * Run-unique fixtures (ADR-052.12), written straight into Firestore (`evidence-fixtures.ts`).
  */
 
 const RUN = `e${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.evidence.itest`;
+const DOMAIN = `${RUN}.evidence.itest.motion`;
 
 let ownerId: string;
 let clientUserId: string;
 let orgId: string;
 let mayPeriodId: string;
 let documentId: string;
+const otherOrgs: string[] = [];
+const platformUsers: string[] = [];
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
-function accountId(category: string): string {
-  return one(`
-    select id from public.accounts
-     where organization_id = '${orgId}' and standard_category = '${category}' and is_system`);
-}
+const accountId = (category: string): Promise<string> => accountFor(orgId, category);
 
 /** The context a page hands a service: the caller's own client, their real permission set. */
 function contextFor(
@@ -60,64 +65,53 @@ function contextFor(
   };
 }
 
-function snapshotOf(metricKey: string): string {
-  return one(`
-    select c.snapshot_id::text from public.metric_current c
-     where c.organization_id = '${orgId}' and c.period_id = '${mayPeriodId}'
-       and c.metric_key = '${metricKey}' and c.dimension_type = 'none'`);
+async function snapshotOf(metricKey: string): Promise<string> {
+  const cell = (await currentCells(orgId, mayPeriodId, metricKey))[0];
+  return String(cell?.snapshot_id ?? '');
+}
+
+/** The latest calculation run of the organisation (`order by started_at desc limit 1`). */
+async function latestRunId(): Promise<string> {
+  const runs = (await orgCollection(fs(), orgId, 'calculation_runs').get()).docs.map((d) => d.data());
+  runs.sort((a, b) => String(b.started_at ?? '').localeCompare(String(a.started_at ?? '')));
+  return String(runs[0]?.id ?? '');
+}
+
+/** The health score bundle of May (`evidence_bundles` ⋈ `health_scores`). */
+async function mayHealthBundle(): Promise<string> {
+  const bundles = await orgCollection(fs(), orgId, 'evidence_bundles').where('kind', '==', 'health_score').get();
+  for (const b of bundles.docs) {
+    const h = await orgRow(fs(), orgId, 'health_scores', String(b.get('origin_id'))).get();
+    if (h.exists && h.get('period_id') === mayPeriodId) return b.id;
+  }
+  return '';
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  clientUserId = createAuthUser(`client@${DOMAIN}`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  clientUserId = await createAuthUser(`client@${DOMAIN}`);
 
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', {
-    p_name: `ITest Evidence ${RUN}`,
-  });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status)
-    values ('${orgId}', '${clientUserId}', 'client', 'active')`);
-
-  mayPeriodId = one(`
-    select id from public.fiscal_periods
-     where organization_id = '${orgId}' and period_start = '2026-05-01'`);
+  orgId = (await createOrgFixture({
+    name: `ITest Evidence ${RUN}`, ownerId, members: [{ userId: clientUserId, role: 'client' }],
+  })).id;
+  mayPeriodId = periodId(orgId, '2026-05-01');
 
   // A source document, so the record → document chain (level 4) has something real at the end.
-  documentId = one(`
-    insert into public.source_documents
-           (organization_id, storage_path, original_filename, mime_type, byte_size, sha256,
-            status, document_kind, page_count)
-    values ('${orgId}', '${orgId}/evidence/gl.csv', 'gl.csv', 'text/csv', 10, decode('e5','hex'),
-            'ready', 'general_ledger', null)
-    returning id`);
+  documentId = await seedDocument(orgId, { name: 'gl.csv', kind: 'general_ledger' });
 
-  const batchId = one(`
-    insert into public.import_batches
-           (organization_id, source_document_id, import_type, target_table, status,
-            extraction_method, period_start, period_end, committed_at)
-    values ('${orgId}', '${documentId}', 'general_ledger', 'ledger_entries', 'committed',
-            'csv', '2026-05-01', '2026-05-31', now())
-    returning id`);
+  const batchId = await seedBatch(orgId, {
+    documentId, importType: 'general_ledger', targetTable: 'ledger_entries', status: 'committed',
+    periodStart: '2026-05-01', periodEnd: '2026-05-31',
+  });
 
-  const postTo = (
-    account: string, direction: string, amount: string, day: string, line: number,
+  const postTo = async (
+    account: string, direction: 'debit' | 'credit', amount: string, day: string, line: number,
   ) => {
-    const rowId = one(`
-      insert into public.import_rows
-             (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
-      values ('${orgId}', '${batchId}', ${line}, 'csv:row:${line}', '{}'::jsonb, '{}'::jsonb, 'committed')
-      returning id`);
-    const entryId = one(`
-      insert into public.ledger_entries
-             (organization_id, entry_date, account_id, direction, amount, period_id, record_status,
-              source_document_id, import_batch_id, import_row_id, source_ref)
-      values ('${orgId}', '2026-05-${day}', '${account}', '${direction}', ${amount},
-              '00000000-0000-0000-0000-000000000000', 'accepted',
-              '${documentId}', '${batchId}', '${rowId}', 'csv:row:${line}')
-      returning id`);
+    const rowId = await seedImportRow(orgId, { batchId, rowNumber: line, sourceRef: `csv:row:${line}` });
+    const entryId = await seedLedgerEntry(orgId, {
+      date: `2026-05-${day}`, accountId: account, direction, amount, status: 'accepted',
+      documentId, batchId, importRowId: rowId, sourceRef: `csv:row:${line}`,
+    });
     /*
      * The `accepted` lifecycle event, exactly as `api.commit_import_batch` writes it.
      *
@@ -127,19 +121,16 @@ beforeAll(async () => {
      * and skips the event is therefore a row the ENGINE can see and the EVIDENCE cannot — which is
      * a state the product never reaches, and would make this suite prove nothing.
      */
-    adminSql(`
-      insert into public.record_status_events
-             (organization_id, record_table, record_id, event, import_batch_id)
-      values ('${orgId}', 'ledger_entries', '${entryId}', 'accepted', '${batchId}')`);
+    await seedStatusEvent(orgId, { table: 'ledger_entries', recordId: entryId, event: 'accepted', batchId });
   };
 
-  const post = (category: string, direction: string, amount: string, day: string, line: number) =>
-    postTo(accountId(category), direction, amount, day, line);
+  const post = async (category: string, direction: 'debit' | 'credit', amount: string, day: string, line: number) =>
+    postTo(await accountId(category), direction, amount, day, line);
 
-  post('revenue', 'credit', '20000.00', '10', 2);
-  post('revenue', 'credit', '5000.00', '18', 3);
-  post('cost_of_sales', 'debit', '6000.00', '12', 4);
-  post('payroll', 'debit', '5000.00', '25', 5);
+  await post('revenue', 'credit', '20000.00', '10', 2);
+  await post('revenue', 'credit', '5000.00', '18', 3);
+  await post('cost_of_sales', 'debit', '6000.00', '12', 4);
+  await post('payroll', 'debit', '5000.00', '25', 5);
 
   /*
    * The fixture asserts itself before the engine runs.
@@ -148,30 +139,25 @@ beforeAll(async () => {
    * calculation without checking they were there would report a wrong TOTAL when what actually went
    * wrong was a missing ROW — which is exactly the shape of the confusing failure this replaces.
    */
-  expect(one(`
-    select count(*)::text from public.ledger_entries
-     where organization_id = '${orgId}' and record_status = 'accepted'`),
-  'every seeded entry is accepted before the engine sees anything').toBe('4');
+  const accepted = await orgCollection(fs(), orgId, 'ledger_entries').where('record_status', '==', 'accepted').get();
+  expect(accepted.size, 'every seeded entry is accepted before the engine sees anything').toBe(4);
 
-  // `adminSql`, not `one()`: `one()` wraps in its own CTE, and a data-modifying WITH may not nest.
-  const jobId = adminSql(`
-    insert into public.jobs (organization_id, job_type, payload, max_attempts)
-    values ('${orgId}', 'calculation.run',
-            '{"trigger":"recalc_manual","as_of":"2026-06-15"}'::jsonb, 3)
-    returning id`).split('\n')[0]!.trim();
+  const jobId = await queueCalculation(orgId, { trigger: 'recalc_manual', as_of: '2026-06-15' });
 
   // Waited on by ITS OWN row, not by a claim count: the queue is shared, and a fixed budget is a
   // bet that no other suite left work in it.
-  expect(await drainUntilFinished(drainJobs, jobId),
+  expect(await drainUntilFinished(drainShared, jobId),
     'the calculation this suite rests on must have run').toBe('succeeded');
-});
+}, 300_000);
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Evidence%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Evidence %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.evidence.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  for (const org of [orgId, ...otherOrgs]) {
+    if (!org) continue;
+    await deleteJobsOf(org);
+    await deleteOrg(org);
+  }
+  for (const uid of platformUsers) await deletePlatformUser(uid);
+  await deleteAuthUsers(DOMAIN);
 });
 
 /*
@@ -183,25 +169,21 @@ afterAll(() => {
  * others; both were the engine being consistent with itself about an account, and neither told
  * us anything about whether the drawer reconciles.
  */
-const figureFor = (metricKey: string): string => one(`
-  select s.value::text from public.metric_current c
-    join public.metric_snapshots s
-      on s.organization_id = c.organization_id and s.id = c.snapshot_id
-   where c.organization_id = '${orgId}' and c.period_id = '${mayPeriodId}'
-     and c.metric_key = '${metricKey}' and c.dimension_type = 'none'`);
+const figureFor = async (metricKey: string): Promise<string> =>
+  String((await currentSnapshot(orgId, mayPeriodId, metricKey))?.value ?? '');
 
-/** NUMERIC(20,6) from psql to the two-decimal money string the resolver returns (ADR-006). */
+/** The stored decimal string to the two-decimal money string the resolver returns (ADR-006). */
 const asMoney = (value: string): string => toMoneyString(new Decimal(value));
 
 describe('every figure opens into the rows behind it (§9)', () => {
-  it('the run wrote the figures this suite is about', () => {
-    expect(figureFor('revenue'), 'revenue was computed').toMatch(/^\d+\.\d+$/);
-    expect(figureFor('gross_profit'), 'and so was gross profit').toMatch(/^\d+\.\d+$/);
+  it('the run wrote the figures this suite is about', async () => {
+    expect(await figureFor('revenue'), 'revenue was computed').toMatch(/^\d+\.\d+$/);
+    expect(await figureFor('gross_profit'), 'and so was gross profit').toMatch(/^\d+\.\d+$/);
   });
 
   it('a leaf metric materialises a bundle of the snapshot, its run and one selection (§5)', async () => {
     const ctx = contextFor(ownerId, 'owner');
-    const bundleId = await buildBundleForMetric(ctx, snapshotOf('revenue'));
+    const bundleId = await buildBundleForMetric(ctx, await snapshotOf('revenue'));
 
     const bundle = await getBundle(ctx, bundleId);
     expect(bundle.kind).toBe('metric');
@@ -218,19 +200,19 @@ describe('every figure opens into the rows behind it (§9)', () => {
 
   it('the selection reconciles to the figure it supports, to the cent (§9)', async () => {
     const ctx = contextFor(ownerId, 'owner');
-    const view = await loadEvidenceDrawer(ctx, await buildBundleForMetric(ctx, snapshotOf('revenue')));
+    const view = await loadEvidenceDrawer(ctx, await buildBundleForMetric(ctx, await snapshotOf('revenue')));
 
     expect(view.records).toHaveLength(1);
     const block = view.records[0]!;
     expect(block.selection.count, 'both revenue entries').toBe(2);
     expect(block.selection.total, 'the rows total the figure they are the evidence for')
-      .toBe(asMoney(figureFor('revenue')));
+      .toBe(asMoney(await figureFor('revenue')));
     expect(block.reconciles, 'the rows behind the number ARE the number').toBe(true);
   });
 
   it('resolving the same descriptor twice returns the same ids in the same order (§9)', async () => {
     const ctx = contextFor(ownerId, 'owner');
-    const bundleId = await buildBundleForMetric(ctx, snapshotOf('revenue'));
+    const bundleId = await buildBundleForMetric(ctx, await snapshotOf('revenue'));
     const item = (await getBundle(ctx, bundleId)).items.find((i) => i.itemType === 'query')!;
 
     const first = await resolveItem(ctx, item.id);
@@ -244,22 +226,22 @@ describe('every figure opens into the rows behind it (§9)', () => {
 
   it('materialising twice returns the same bundle, because bundles are immutable (§8.1)', async () => {
     const ctx = contextFor(ownerId, 'owner');
-    const snapshot = snapshotOf('revenue');
+    const snapshot = await snapshotOf('revenue');
     expect(await buildBundleForMetric(ctx, snapshot)).toBe(await buildBundleForMetric(ctx, snapshot));
 
-    expect(Number(one(`
-      select count(*) from public.evidence_bundles
-       where organization_id = '${orgId}' and kind = 'metric' and origin_id = '${snapshot}'`))).toBe(1);
+    const bundles = await orgCollection(fs(), orgId, 'evidence_bundles').where('kind', '==', 'metric')
+      .where('origin_id', '==', snapshot).get();
+    expect(bundles.size).toBe(1);
   });
 });
 
 describe('a derived metric walks to leaves that each reconcile (F-C-15, §6 level 3)', () => {
   it('gross profit names its components, and each block reproduces its own figure', async () => {
     const ctx = contextFor(ownerId, 'owner');
-    const view = await loadEvidenceDrawer(ctx, await buildBundleForMetric(ctx, snapshotOf('gross_profit')));
+    const view = await loadEvidenceDrawer(ctx, await buildBundleForMetric(ctx, await snapshotOf('gross_profit')));
 
     expect(view.metric?.metricKey).toBe('gross_profit');
-    expect(new Decimal(view.metric!.value!).equals(new Decimal(figureFor('gross_profit'))),
+    expect(new Decimal(view.metric!.value!).equals(new Decimal(await figureFor('gross_profit'))),
       'the drawer shows the figure the run stored').toBe(true);
 
     expect(view.components.map((c) => c.name).sort()).toEqual(['cost_of_sales', 'revenue']);
@@ -271,8 +253,8 @@ describe('a derived metric walks to leaves that each reconcile (F-C-15, §6 leve
     // One reconciliation block per leaf, each openable to its rows (§6).
     const blocks = Object.fromEntries(view.records.map((r) => [r.forLabel, r]));
     expect(Object.keys(blocks).sort()).toEqual(['Cost of sales', 'Revenue']);
-    expect(blocks.Revenue!.selection.total).toBe(asMoney(figureFor('revenue')));
-    expect(blocks['Cost of sales']!.selection.total).toBe(asMoney(figureFor('cost_of_sales')));
+    expect(blocks.Revenue!.selection.total).toBe(asMoney(await figureFor('revenue')));
+    expect(blocks['Cost of sales']!.selection.total).toBe(asMoney(await figureFor('cost_of_sales')));
     // The whole point: each leaf reconciles to its own figure, and together they make the derived
     // one — which is what a reader disputing gross profit is actually checking.
     for (const block of view.records) expect(block.reconciles).toBe(true);
@@ -286,7 +268,7 @@ describe('a derived metric walks to leaves that each reconcile (F-C-15, §6 leve
    */
   it('pages one component’s rows without moving another’s', async () => {
     const ctx = contextFor(ownerId, 'owner');
-    const bundleId = await buildBundleForMetric(ctx, snapshotOf('gross_profit'));
+    const bundleId = await buildBundleForMetric(ctx, await snapshotOf('gross_profit'));
 
     const whole = await loadEvidenceDrawer(ctx, bundleId);
     const revenue = whole.records.find((r) => r.forLabel === 'Revenue')!;
@@ -318,7 +300,7 @@ describe('a derived metric walks to leaves that each reconcile (F-C-15, §6 leve
 describe('as-of semantics survive what happens to the data afterwards (§8.7)', () => {
   it('a superseded record still resolves through the descriptor that was written before it', async () => {
     const ctx = contextFor(ownerId, 'owner');
-    const bundleId = await buildBundleForMetric(ctx, snapshotOf('revenue'));
+    const bundleId = await buildBundleForMetric(ctx, await snapshotOf('revenue'));
     const item = (await getBundle(ctx, bundleId)).items.find((i) => i.itemType === 'query')!;
 
     const before = await resolveItem(ctx, item.id);
@@ -327,29 +309,23 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
     const publishedTotal = before.selection.total;
 
     // Supersede one of the two revenue entries with a correction, the way a re-import would.
-    const supersededId = one(`
-      select e.id::text from public.ledger_entries e
-       join public.accounts a on a.id = e.account_id
-      where e.organization_id = '${orgId}' and a.standard_category = 'revenue'
-      order by e.amount desc limit 1`);
-    const replacementId = one(`
-      insert into public.ledger_entries
-             (organization_id, entry_date, account_id, direction, amount, period_id, record_status)
-      select organization_id, entry_date, account_id, direction, 21000.00, period_id, 'accepted'
-        from public.ledger_entries where id = '${supersededId}'
-      returning id`);
-    adminSql(`
-      insert into public.record_status_events
-             (organization_id, record_table, record_id, event)
-      values ('${orgId}', 'ledger_entries', '${replacementId}', 'accepted')`);
-    adminSql(`
-      update public.ledger_entries
-         set superseded_by = '${replacementId}', superseded_at = now()
-       where organization_id = '${orgId}' and id = '${supersededId}'`);
-    adminSql(`
-      insert into public.record_status_events
-             (organization_id, record_table, record_id, event, related_record_id)
-      values ('${orgId}', 'ledger_entries', '${supersededId}', 'superseded', '${replacementId}')`);
+    const revenueAccounts = new Set((await orgCollection(fs(), orgId, 'accounts')
+      .where('standard_category', '==', 'revenue').get()).docs.map((d) => d.id));
+    const revenueEntries = (await orgCollection(fs(), orgId, 'ledger_entries').get()).docs
+      .map((d) => d.data()).filter((e) => revenueAccounts.has(String(e.account_id)))
+      .sort((a, b) => new Decimal(String(b.amount)).comparedTo(new Decimal(String(a.amount))));
+    const superseded = revenueEntries[0]!;
+    const supersededId = String(superseded.id);
+    const replacementId = await seedLedgerEntry(orgId, {
+      date: String(superseded.entry_date), accountId: String(superseded.account_id),
+      direction: superseded.direction as 'debit' | 'credit', amount: '21000.00', status: 'accepted',
+    });
+    await seedStatusEvent(orgId, { table: 'ledger_entries', recordId: replacementId, event: 'accepted' });
+    await orgRow(fs(), orgId, 'ledger_entries', supersededId)
+      .update({ superseded_by: replacementId, superseded_at: nowIso() });
+    await seedStatusEvent(orgId, {
+      table: 'ledger_entries', recordId: supersededId, event: 'superseded', relatedId: replacementId,
+    });
 
     const after = await resolveItem(ctx, item.id);
     if (after.kind !== 'query') throw new Error('expected a selection');
@@ -377,30 +353,21 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
    */
   it('survives the account behind it being re-categorised (F-C-07)', async () => {
     const ctx = contextFor(ownerId, 'owner');
-    const runId = one(`
-      select id::text from public.calculation_runs
-       where organization_id = '${orgId}' order by started_at desc limit 1`);
+    const runId = await latestRunId();
 
-    const account = one(`
-      insert into public.accounts
-             (organization_id, code, name, standard_category, account_type, mapping_confidence)
-      values ('${orgId}', '6100', 'Subscriptions', 'other_expense', 'expense', 'confirmed')
-      returning id`);
-    const entry = one(`
-      insert into public.ledger_entries
-             (organization_id, entry_date, account_id, direction, amount, period_id, record_status)
-      values ('${orgId}', '2026-05-22', '${account}', 'debit', 750.00,
-              '00000000-0000-0000-0000-000000000000', 'accepted')
-      returning id`);
-    adminSql(`
-      insert into public.record_status_events (organization_id, record_table, record_id, event)
-      values ('${orgId}', 'ledger_entries', '${entry}', 'accepted')`);
+    const account = await seedAccount(orgId, {
+      code: '6100', name: 'Subscriptions', category: 'other_expense', accountType: 'expense',
+    });
+    const entry = await seedLedgerEntry(orgId, {
+      date: '2026-05-22', accountId: account, direction: 'debit', amount: '750.00', status: 'accepted',
+    });
+    await seedStatusEvent(orgId, { table: 'ledger_entries', recordId: entry, event: 'accepted' });
 
     const descriptor = {
       v: 1,
       table: 'ledger_entries',
       filters: { account_ids: [account] },
-      as_of: { calculation_run_id: runId, aggregated_at: one("select to_json(now())#>>'{}'") },
+      as_of: { calculation_run_id: runId, aggregated_at: nowIso() },
       order: [{ field: 'entry_date', dir: 'asc' }, { field: 'id', dir: 'asc' }],
     } as QueryDescriptorV1;
 
@@ -408,10 +375,11 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
     expect(before.count, 'the one entry on that account').toBe(1);
     expect(before.rows[0]!.standardCategory).toBe('other_expense');
 
-    const { error } = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-      .schema('api').rpc('remap_account', { p_account: account, p_category: 'marketing' });
+    const { error } = await rpc(clientFor(ownerId, { email: `owner@${DOMAIN}` }),
+      'remap_account', { p_account: account, p_category: 'marketing' });
     expect(error, 'the remap itself must succeed, or the test proves nothing').toBeNull();
-    expect(one(`select standard_category::text from public.accounts where id = '${account}'`))
+    await dropQueuedRecalculation(orgId);
+    expect((await orgRow(fs(), orgId, 'accounts', account).get()).get('standard_category'))
       .toBe('marketing');
 
     const after = await resolveDescriptor(ctx, descriptor);
@@ -426,20 +394,19 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
 
   it('survives the batch behind it being rolled back (F-C-07)', async () => {
     const ctx = contextFor(ownerId, 'owner');
-    const item = (await getBundle(ctx, await buildBundleForMetric(ctx, snapshotOf('revenue'))))
+    const item = (await getBundle(ctx, await buildBundleForMetric(ctx, await snapshotOf('revenue'))))
       .items.find((i) => i.itemType === 'query')!;
 
     const before = await resolveItem(ctx, item.id);
     if (before.kind !== 'query') throw new Error('expected a selection');
 
-    const batch = one(`
-      select b.id::text from public.import_batches b
-       where b.organization_id = '${orgId}' and b.status = 'committed' limit 1`);
-    const { error } = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-      .schema('api').rpc('rollback_import_batch', {
-        p_batch: batch, p_reason: 'itest: the evidence must survive this',
-      });
+    const batch = (await orgCollection(fs(), orgId, 'import_batches').where('status', '==', 'committed')
+      .limit(1).get()).docs[0]!.id;
+    const { error } = await rpc(clientFor(ownerId, { email: `owner@${DOMAIN}` }), 'rollback_import_batch', {
+      p_batch: batch, p_reason: 'itest: the evidence must survive this',
+    });
     expect(error).toBeNull();
+    await dropQueuedRecalculation(orgId);
 
     /*
      * The rows are `rejected` now and no future run will count them. The published figure still
@@ -452,10 +419,8 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
     if (after.kind !== 'query') throw new Error('expected a selection');
     expect(after.selection.rows.map((r) => r.id)).toEqual(before.selection.rows.map((r) => r.id));
     expect(after.selection.total).toBe(before.selection.total);
-    expect(one(`
-      select count(*) from public.ledger_entries
-       where organization_id = '${orgId}' and record_status = 'rejected'`))
-      .not.toBe('0');
+    expect((await orgCollection(fs(), orgId, 'ledger_entries').where('record_status', '==', 'rejected').get()).size)
+      .not.toBe(0);
   });
 });
 
@@ -479,12 +444,7 @@ describe('as-of semantics survive what happens to the data afterwards (§8.7)', 
  */
 describe('a health score carries the figures it was worked out from (§5)', () => {
   it('writes one bundle per score, holding the run and every snapshot a dimension used', async () => {
-    const bundleId = one(`
-      select b.id::text from public.evidence_bundles b
-       join public.health_scores h
-         on h.organization_id = b.organization_id and h.id = b.origin_id
-      where b.organization_id = '${orgId}' and b.kind = 'health_score'
-        and h.period_id = '${mayPeriodId}' limit 1`);
+    const bundleId = await mayHealthBundle();
     expect(bundleId, 'the run wrote a health bundle').toMatch(/^[0-9a-f-]{36}$/);
 
     const view = await loadEvidenceDrawer(contextFor(ownerId, 'owner'), bundleId);
@@ -502,12 +462,7 @@ describe('a health score carries the figures it was worked out from (§5)', () =
   });
 
   it('names each snapshot exactly once, however many dimensions used it', async () => {
-    const bundleId = one(`
-      select b.id::text from public.evidence_bundles b
-       join public.health_scores h
-         on h.organization_id = b.organization_id and h.id = b.origin_id
-      where b.organization_id = '${orgId}' and b.kind = 'health_score'
-        and h.period_id = '${mayPeriodId}' limit 1`);
+    const bundleId = await mayHealthBundle();
 
     const view = await loadEvidenceDrawer(contextFor(ownerId, 'owner'), bundleId);
     const refs = view.bundle.items
@@ -522,35 +477,37 @@ describe('a bundle that pins specific rows (§4)', () => {
   let bundleId: string;
   let supersededEntry: string;
 
-  beforeAll(() => {
-    const trigger = snapshotOf('revenue');
-    const comparison = snapshotOf('cost_of_sales');
-    const runId = one(`
-      select calculation_run_id::text from public.metric_snapshots where id = '${trigger}'`);
+  beforeAll(async () => {
+    const trigger = await snapshotOf('revenue');
+    const comparison = await snapshotOf('cost_of_sales');
+    const runId = String((await orgRow(fs(), orgId, 'metric_snapshots', trigger).get()).get('calculation_run_id'));
 
     // A row that has since been REPLACED, so §8.3's "still fetched, shown with its badge" is under
     // test rather than assumed. The as-of suite above superseded the larger revenue entry.
-    supersededEntry = one(`
-      select e.id::text from public.ledger_entries e
-       where e.organization_id = '${orgId}' and e.superseded_by is not null limit 1`);
+    supersededEntry = (await orgCollection(fs(), orgId, 'ledger_entries').get()).docs
+      .find((d) => d.get('superseded_by') !== null && d.get('superseded_by') !== undefined)!.id;
 
     // Exactly the shape `app.build_alert_bundle` writes: the figure it fired on, the figure it
     // compared against, the rows it pinned, and the aggregate behind them.
-    bundleId = one(`
-      insert into public.evidence_bundles
-             (organization_id, kind, origin_table, calculation_run_id, created_by_type)
-      values ('${orgId}', 'alert', 'alerts', '${runId}', 'system')
-      returning id`);
+    bundleId = newId();
+    await orgRow(fs(), orgId, 'evidence_bundles', bundleId).set({
+      id: bundleId, organization_id: orgId, kind: 'alert', origin_table: 'alerts', origin_id: null,
+      calculation_run_id: runId, created_by_type: 'system', created_by: null, origin_message_id: null,
+      created_at: nowIso(),
+    });
 
-    const item = (sort: number, type: string, ref: string | null, label: string) => adminSql(`
-      insert into public.evidence_items
-             (organization_id, bundle_id, sort_order, item_type, ref_id, label, assurance_level)
-      values ('${orgId}', '${bundleId}', ${sort}, '${type}',
-              ${ref === null ? 'null' : `'${ref}'`}, '${label}', 'verified')`);
+    const item = (sort: number, type: string, ref: string | null, label: string) => {
+      const id = newId();
+      return orgRow(fs(), orgId, 'evidence_items', id).set({
+        id, organization_id: orgId, bundle_id: bundleId, sort_order: sort, item_type: type, ref_id: ref,
+        ref_revision_no: null, query_descriptor: null, descriptor_hash: null, label, claim: null,
+        assurance_level: 'verified', created_at: nowIso(),
+      });
+    };
 
-    item(0, 'metric_snapshot', trigger, 'Revenue, May 2026');
-    item(1, 'metric_snapshot', comparison, 'Cost of sales, May 2026');
-    item(2, 'ledger_entry', supersededEntry, 'The entry this fired on');
+    await item(0, 'metric_snapshot', trigger, 'Revenue, May 2026');
+    await item(1, 'metric_snapshot', comparison, 'Cost of sales, May 2026');
+    await item(2, 'ledger_entry', supersededEntry, 'The entry this fired on');
   });
 
   it('does not present a cited figure as part of an arithmetic it was no part of', async () => {
@@ -593,51 +550,32 @@ describe('a published selection survives a bank row being re-categorised (F-C-07
   let movedTxn: string;
   let descriptor: QueryDescriptorV1;
 
-  beforeAll(() => {
-    bankAccount = one(`
-      insert into public.bank_accounts
-             (organization_id, name, account_type, bank_name, account_number_masked, is_active)
-      values ('${orgId}', 'Current', 'current', 'Test Bank', '****4321', true)
-      returning id`);
-    marketingAccount = accountId('marketing');
-    payrollAccount = accountId('payroll');
+  beforeAll(async () => {
+    bankAccount = await seedBankAccount(orgId, { name: 'Current', accountType: 'current' });
+    marketingAccount = await accountId('marketing');
+    payrollAccount = await accountId('payroll');
 
-    const spend = (amount: string, day: string, category: string) => {
-      const id = one(`
-        insert into public.bank_transactions
-               (organization_id, bank_account_id, transaction_date, amount, description_raw,
-                category_account_id, category_source, record_status, period_id)
-        values ('${orgId}', '${bankAccount}', '2026-05-${day}', ${amount}, 'CARD PAYMENT',
-                '${category}', 'rule', 'accepted', '00000000-0000-0000-0000-000000000000')
-        returning id`);
-      adminSql(`
-        insert into public.record_status_events (organization_id, record_table, record_id, event)
-        values ('${orgId}', 'bank_transactions', '${id}', 'accepted')`);
+    const spend = async (amount: string, day: string, category: string) => {
+      const id = await seedBankTransaction(orgId, {
+        bankAccountId: bankAccount, date: `2026-05-${day}`, amount, description: 'CARD PAYMENT',
+        categoryAccountId: category, categorySource: 'rule', status: 'accepted',
+      });
+      await seedStatusEvent(orgId, { table: 'bank_transactions', recordId: id, event: 'accepted' });
       return id;
     };
 
-    movedTxn = spend('-400.00', '06', marketingAccount);
-    spend('-250.00', '14', marketingAccount);
-    spend('-900.00', '21', payrollAccount);
+    movedTxn = await spend('-400.00', '06', marketingAccount);
+    await spend('-250.00', '14', marketingAccount);
+    await spend('-900.00', '21', payrollAccount);
 
-    const runId = one(`
-      select id::text from public.calculation_runs
-       where organization_id = '${orgId}' order by started_at desc limit 1`);
+    const runId = await latestRunId();
 
     /*
-     * The as-of instant comes from the DATABASE, not from Node.
-     *
-     * `record_status_events.occurred_at` and `category_history.valid_from` both default to the
-     * database's `now()`. Taking the instant from the test process compares two clocks, and the
-     * container's drifts far enough from the host's to land the as-of between the two rows it is
-     * meant to see — which made this suite pass alone and fail in a full run, for a reason that has
-     * nothing to do with what it tests.
-     *
-     * Serialised through `to_json`, which is ISO 8601 with an offset. `now()::text` is not: it is
-     * "2026-09-06 18:05:12.34+00", which `new Date()` reads as LOCAL time and shifts by the host's
-     * offset — five and a half hours, on this machine.
+     * The as-of instant is taken after the rows' own timestamps. On PostgreSQL it had to come from
+     * the database's clock (the container drifted from the host); on Firestore every timestamp is
+     * written by this process with `nowIso()`, so there is one clock and the instant is simply now.
      */
-    const aggregatedAt = one("select to_json(now())#>>'{}'");
+    const aggregatedAt = nowIso();
 
     descriptor = {
       v: 1,
@@ -657,13 +595,12 @@ describe('a published selection survives a bank row being re-categorised (F-C-07
 
     // A reviewer decides one of them was really payroll. Every future figure changes; no published
     // one may.
-    const { error } = await clientFor(ownerId, { email: `owner@${DOMAIN}` })
-      .schema('api').rpc('override_bank_category', {
-        p_txn: movedTxn, p_account: payrollAccount,
-      });
+    const { error } = await rpc(clientFor(ownerId, { email: `owner@${DOMAIN}` }), 'override_bank_category', {
+      p_txn: movedTxn, p_account: payrollAccount,
+    });
     expect(error, 'the override itself must succeed, or the test proves nothing').toBeNull();
-    expect(one(`
-      select category_account_id::text from public.bank_transactions where id = '${movedTxn}'`))
+    await dropQueuedRecalculation(orgId);
+    expect((await orgRow(fs(), orgId, 'bank_transactions', movedTxn).get()).get('category_account_id'))
       .toBe(payrollAccount);
 
     const after = await resolveDescriptor(ctx, descriptor);
@@ -691,7 +628,7 @@ describe('a published selection survives a bank row being re-categorised (F-C-07
 describe('the permission stop at the document level (§9, §10, CD-17)', () => {
   it('a client reads statement, metric, calculation and records', async () => {
     const ctx = contextFor(clientUserId, 'client');
-    const view = await loadEvidenceDrawer(ctx, await buildBundleForMetric(ctx, snapshotOf('revenue')));
+    const view = await loadEvidenceDrawer(ctx, await buildBundleForMetric(ctx, await snapshotOf('revenue')));
     expect(view.metric?.metricKey).toBe('revenue');
     expect(view.records[0]!.selection.count).toBe(2);
   });
@@ -699,9 +636,8 @@ describe('the permission stop at the document level (§9, §10, CD-17)', () => {
   it('and is told the document level is locked, rather than shown an empty panel', async () => {
     // Pinned by its source reference, not by category: the F-C-07 case above re-categorises an
     // account, and a test that selected by category would quietly follow it to a different row.
-    const recordId = one(`
-      select id::text from public.ledger_entries
-       where organization_id = '${orgId}' and source_ref = 'csv:row:3'`);
+    const recordId = (await orgCollection(fs(), orgId, 'ledger_entries').where('source_ref', '==', 'csv:row:3')
+      .get()).docs[0]!.id;
 
     const asClient = await getDocumentReference(
       contextFor(clientUserId, 'client'), { table: 'ledger_entries', id: recordId },
@@ -743,14 +679,16 @@ describe('an employee reaches evidence only where assigned (§9)', () => {
   });
 
   beforeAll(async () => {
-    assignedId = createAuthUser(`assigned@${DOMAIN}`);
-    unassignedId = createAuthUser(`unassigned@${DOMAIN}`);
-    adminSql(`
-      insert into public.platform_users (user_id, platform_role, status) values
-        ('${assignedId}', 'employee', 'active'), ('${unassignedId}', 'employee', 'active');
-      insert into public.organization_assignments (organization_id, employee_user_id, status)
-      values ('${orgId}', '${assignedId}', 'active');`);
-    bundleId = await buildBundleForMetric(contextFor(ownerId, 'owner'), snapshotOf('revenue'));
+    assignedId = await createAuthUser(`assigned@${DOMAIN}`);
+    unassignedId = await createAuthUser(`unassigned@${DOMAIN}`);
+    platformUsers.push(assignedId, unassignedId);
+    await assignEmployee(orgId, assignedId);
+    // A platform employee, active, with no assignment here.
+    await fs().collection('platform_users').doc(unassignedId).set({
+      user_id: unassignedId, platform_role: 'employee', status: 'active', granted_by: null, notes: null,
+      created_at: nowIso(), updated_at: nowIso(),
+    });
+    bundleId = await buildBundleForMetric(contextFor(ownerId, 'owner'), await snapshotOf('revenue'));
   });
 
   it('the assigned employee opens the bundle and descends to the records', async () => {
@@ -764,89 +702,41 @@ describe('an employee reaches evidence only where assigned (§9)', () => {
       .rejects.toBeInstanceOf(NotFound);
 
     // And nothing of the underlying rows either, addressed directly.
-    const direct = await clientFor(unassignedId)
-      .from('evidence_items').select('id').eq('bundle_id', bundleId);
-    expect(direct.data ?? []).toHaveLength(0);
+    const direct = await orgRows(clientFor(unassignedId), orgId, 'evidence_items', (q) => q.where('bundle_id', '==', bundleId));
+    expect(direct).toHaveLength(0);
   });
 
   it('revoking the assignment closes it again', async () => {
-    adminSql(`update public.organization_assignments set status = 'revoked'
-               where organization_id = '${orgId}' and employee_user_id = '${assignedId}'`);
+    const assignment = orgRow(fs(), orgId, 'organization_assignments', assignedId);
+    await assignment.update({ status: 'revoked' });
     await expect(loadEvidenceDrawer(employeeContext(assignedId), bundleId))
       .rejects.toBeInstanceOf(NotFound);
-    adminSql(`update public.organization_assignments set status = 'active'
-               where organization_id = '${orgId}' and employee_user_id = '${assignedId}'`);
+    await assignment.update({ status: 'active' });
   });
 });
 
 describe('a bundle belongs to exactly one organisation (§8.4, isolation case 3)', () => {
   it('another organisation’s context gets NotFound, not a permission error', async () => {
-    const strangerId = createAuthUser(`stranger@${DOMAIN}`);
-    const other = await clientFor(strangerId).schema('api').rpc('create_organization', {
-      p_name: `ITest Evidence Other ${RUN}`,
-    });
-    const otherOrgId = other.data as unknown as string;
+    const strangerId = await createAuthUser(`stranger@${DOMAIN}`);
+    const otherOrgId = (await createOrgFixture({ name: `ITest Evidence Other ${RUN}`, ownerId: strangerId })).id;
+    otherOrgs.push(otherOrgId);
 
     const ownerCtx = contextFor(ownerId, 'owner');
-    const bundleId = await buildBundleForMetric(ownerCtx, snapshotOf('revenue'));
+    const bundleId = await buildBundleForMetric(ownerCtx, await snapshotOf('revenue'));
 
     await expect(getBundle(contextFor(strangerId, 'owner', otherOrgId), bundleId))
       .rejects.toMatchObject({ code: 'NOT_FOUND' });
   });
 });
 
-describe('bundles cannot be rewritten after the fact (§8.8)', () => {
-  it('UPDATE on an evidence item raises IMMUTABLE', async () => {
-    const ctx = contextFor(ownerId, 'owner');
-    const bundleId = await buildBundleForMetric(ctx, snapshotOf('revenue'));
-    const itemId = one(`
-      select id::text from public.evidence_items
-       where organization_id = '${orgId}' and bundle_id = '${bundleId}' limit 1`);
-
-    expect(() => adminSql(`
-      update public.evidence_items set label = 'rewritten' where id = '${itemId}'`))
-      .toThrow(/IMMUTABLE/);
-  });
-
-  it('and so does DELETE on the bundle', async () => {
-    const ctx = contextFor(ownerId, 'owner');
-    const bundleId = await buildBundleForMetric(ctx, snapshotOf('revenue'));
-    expect(() => adminSql(`delete from public.evidence_bundles where id = '${bundleId}'`))
-      .toThrow(/IMMUTABLE/);
-  });
-
-  /*
-   * §8.8 lists `category_history` and `account_category_history` among the append-only tables, and
-   * they do not carry `append_only_guard` — they carry `history_close_only`, which is the same
-   * promise made precisely. A period of validity ENDS by writing `valid_to` on the row that is
-   * ending, so a blanket UPDATE ban would make the history unwritable; the trigger allows that one
-   * column, once, and refuses everything else including DELETE. Installing the blunt guard here
-   * broke re-categorising an account, which is how this test came to exist.
-   */
-  it('the category history the resolver reads can be closed, and nothing more', () => {
-    expect(Number(one(`
-      select count(*) from pg_trigger
-       where tgname = 'history_close_only'
-         and tgrelid in ('public.category_history'::regclass,
-                         'public.account_category_history'::regclass)`))).toBe(2);
-
-    const row = one(`
-      insert into public.account_category_history
-             (organization_id, account_id, standard_category, valid_from)
-      select '${orgId}', id, standard_category, now() from public.accounts
-       where organization_id = '${orgId}' and standard_category = 'revenue' and is_system
-      returning id`);
-    expect(() => adminSql(`
-      update public.account_category_history set standard_category = 'marketing'
-       where id = '${row}'`)).toThrow(/IMMUTABLE/);
-    expect(() => adminSql(`
-      delete from public.account_category_history where id = '${row}'`)).toThrow(/IMMUTABLE/);
-
-    // …and closing the interval, which is the one write the resolver's history depends on, works.
-    adminSql(`
-      update public.account_category_history set valid_to = now() where id = '${row}'`);
-  });
-});
+/*
+ * §8.8 (bundles cannot be rewritten after the fact). On PostgreSQL this was proved by the
+ * `append_only_guard` and `history_close_only` TRIGGERS refusing an UPDATE or DELETE from the admin
+ * connection. Firestore has no triggers: the browser can reach no document at all
+ * (`firebase/firestore.rules` denies everything), and immutability is that NO `api.*` function
+ * offers the mutation (FIRESTORE_DATA_MODEL.md §4). The assertion that remains true and checkable is
+ * the second half — see "nobody can forge evidence" below: there is no evidence-writing surface.
+ */
 
 describe('nobody can forge evidence (§8.5, ADR-066)', () => {
   /*
@@ -864,16 +754,16 @@ describe('nobody can forge evidence (§8.5, ADR-066)', () => {
   const draft = (over: Partial<MetricBundleItem> & Pick<MetricBundleItem, 'item_type' | 'label'>): MetricBundleItem => ({
     ref_id: null, query_descriptor: null, descriptor_hash: null, assurance_level: 'verified', ...over,
   });
-  const root = (key: string) => draft({ item_type: 'metric_snapshot', ref_id: snapshotOf(key), label: key });
+  const root = async (key: string) => draft({ item_type: 'metric_snapshot', ref_id: await snapshotOf(key), label: key });
 
   it('a user token has no bundle-writing function to call at all', async () => {
-    const db = clientFor(clientUserId, { email: `client@${DOMAIN}` });
-    const { error } = await db.schema('api').rpc('build_metric_bundle', {
-      p_snapshot: snapshotOf('revenue'), p_items: [],
-    });
-    expect(error).not.toBeNull();
-    // PostgREST: no such function in an exposed schema. Not 42501 — there is nothing to be denied.
-    expect(error!.code).toBe('PGRST202');
+    // No such function among the `api.*` a user can reach. Not 42501 — there is nothing to be denied.
+    expect(API_FUNCTIONS.build_metric_bundle).toBeUndefined();
+    expect(Object.keys(API_FUNCTIONS).filter((name) => /bundle|evidence/.test(name)),
+      'no user-callable function writes evidence').toEqual([]);
+    await expect(rpc(clientFor(clientUserId, { email: `client@${DOMAIN}` }), 'build_metric_bundle', {
+      p_snapshot: await snapshotOf('revenue'), p_items: [],
+    })).rejects.toThrow(/not defined/);
   });
 
   /*
@@ -883,13 +773,13 @@ describe('nobody can forge evidence (§8.5, ADR-066)', () => {
    */
   it('refuses the audit’s poison: a descriptor that is not a leaf of the figure’s own tree', async () => {
     await expect(buildMetricBundle(asServer(clientUserId), {
-      snapshotId: snapshotOf('cost_of_sales'),
+      snapshotId: await snapshotOf('cost_of_sales'),
       items: [
-        root('cost_of_sales'),
+        await root('cost_of_sales'),
         draft({
           item_type: 'query',
           label: 'FABRICATED BY CLIENT',
-          query_descriptor: { v: 1, table: 'ledger_entries', filters: { category_account_ids: [accountId('payroll')] } },
+          query_descriptor: { v: 1, table: 'ledger_entries', filters: { category_account_ids: [await accountId('payroll')] } },
           descriptor_hash: 'ab'.repeat(32),
         }),
       ],
@@ -898,61 +788,50 @@ describe('nobody can forge evidence (§8.5, ADR-066)', () => {
 
   it('refuses claim text on a metric bundle: figures, not sentences', async () => {
     await expect(buildMetricBundle(asServer(ownerId), {
-      snapshotId: snapshotOf('operating_expenses'),
-      items: [{ ...root('operating_expenses'), claim: 'Revenue was £1 and the owner is lying' } as MetricBundleItem],
+      snapshotId: await snapshotOf('operating_expenses'),
+      items: [{ ...(await root('operating_expenses')), claim: 'Revenue was £1 and the owner is lying' } as MetricBundleItem],
     })).rejects.toThrow(/figures, not claims/);
   });
 
   it('refuses a snapshot that is not in the figure’s tree, a foreign run, and a foreign dimension', async () => {
     // net_profit is derived; closing_cash is a real figure that is no part of its tree.
     await expect(buildMetricBundle(asServer(ownerId), {
-      snapshotId: snapshotOf('net_profit'),
-      items: [root('net_profit'), root('closing_cash')],
+      snapshotId: await snapshotOf('net_profit'),
+      items: [await root('net_profit'), await root('closing_cash')],
     })).rejects.toThrow(/not a snapshot in this figure/);
 
     await expect(buildMetricBundle(asServer(ownerId), {
-      snapshotId: snapshotOf('net_profit'),
-      items: [root('net_profit'), draft({ item_type: 'calculation_run', ref_id: snapshotOf('net_profit'), label: 'run' })],
+      snapshotId: await snapshotOf('net_profit'),
+      items: [await root('net_profit'), draft({ item_type: 'calculation_run', ref_id: await snapshotOf('net_profit'), label: 'run' })],
     })).rejects.toThrow(/not the run that produced/);
 
     await expect(buildMetricBundle(asServer(ownerId), {
-      snapshotId: snapshotOf('net_profit'),
-      items: [root('net_profit'), draft({ item_type: 'account', ref_id: accountId('revenue'), label: 'acct' })],
+      snapshotId: await snapshotOf('net_profit'),
+      items: [await root('net_profit'), draft({ item_type: 'account', ref_id: await accountId('revenue'), label: 'acct' })],
     })).rejects.toThrow(/not the dimension/);
   });
 
   it('refuses an item type a metric bundle may not carry, and an empty bundle (§8.6)', async () => {
     await expect(buildMetricBundle(asServer(ownerId), {
-      snapshotId: snapshotOf('operating_profit'),
+      snapshotId: await snapshotOf('operating_profit'),
       items: [{ ...draft({ item_type: 'metric_snapshot', label: 'forged' }), item_type: 'alert' } as unknown as MetricBundleItem],
     })).rejects.toBeInstanceOf(ValidationError);
 
     await expect(buildMetricBundle(asServer(ownerId), {
-      snapshotId: snapshotOf('operating_profit'), items: [],
+      snapshotId: await snapshotOf('operating_profit'), items: [],
     })).rejects.toBeInstanceOf(ValidationError);
   });
 
   it('answers an actor with no standing in the organisation with NOT_FOUND, not a denial', async () => {
-    const outsiderId = createAuthUser(`outsider@${DOMAIN}`);
+    const outsiderId = await createAuthUser(`outsider@${DOMAIN}`);
     await expect(buildMetricBundle(asServer(outsiderId), {
-      snapshotId: snapshotOf('revenue'), items: [root('revenue')],
+      snapshotId: await snapshotOf('revenue'), items: [await root('revenue')],
     })).rejects.toBeInstanceOf(NotFound);
   });
 
   it('writes an audit event naming who materialised the bundle', async () => {
-    const bundleId = await buildBundleForMetric(contextFor(ownerId, 'owner'), snapshotOf('gross_profit'));
-    const actor = one(`
-      select actor_user_id::text from public.audit_events
-       where organization_id = '${orgId}' and action = 'evidence.bundle_built'
-         and target_id = '${bundleId}'`);
-    expect(actor).toBe(ownerId);
-  });
-
-  it('and no authenticated role can write the evidence tables directly (ADR-026)', async () => {
-    const db = clientFor(ownerId, { email: `owner@${DOMAIN}` });
-    const { error } = await db.from('evidence_bundles').insert({
-      organization_id: orgId, kind: 'metric', origin_table: 'metric_snapshots',
-    });
-    expect(sqlstate(error)).toBe('42501');
+    const bundleId = await buildBundleForMetric(contextFor(ownerId, 'owner'), await snapshotOf('gross_profit'));
+    const events = (await auditEvents(orgId, 'evidence.bundle_built')).filter((e) => e.target_id === bundleId);
+    expect(events.map((e) => e.actor_user_id)).toEqual([ownerId]);
   });
 });

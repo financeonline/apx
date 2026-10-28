@@ -5,7 +5,7 @@ import motion from './eslint-rules/index.js';
 
 export default tseslint.config(
   // public/ocr: vendored OCR files copied from node_modules (ADR-175). logs: local, git-ignored run output.
-  { ignores: ['.next/**', 'node_modules/**', 'coverage/**', 'supabase/**', 'next-env.d.ts', 'eslint-rules/**', 'public/ocr/**', 'logs/**'] },
+  { ignores: ['.next/**', 'node_modules/**', 'coverage/**', 'firebase/**', 'next-env.d.ts', 'eslint-rules/**', 'public/ocr/**', 'logs/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...next,
@@ -16,16 +16,16 @@ export default tseslint.config(
       '@typescript-eslint/no-explicit-any': 'error',
       'no-console': ['error', { allow: ['warn', 'error'] }],
       // Architecture enforcement (SERVICE_ARCHITECTURE.md §8, TEST_STRATEGY.md §1)
-      'motion/no-service-role-outside-sanctioned-files': 'error',
+      'motion/no-admin-sdk-outside-sanctioned-files': 'error',
       'motion/no-api-server-outside-server-rpc': 'error',
-      'motion/no-unscoped-service-query': 'error',
       'motion/no-money-parsefloat': 'error',
       'motion/no-arithmetic-in-components': 'error',
       'motion/no-deep-module-import': 'error',
       'motion/no-direct-table-write': 'error',
       'motion/no-role-name-literals': [
         'error',
-        { allow: ['src/core/permissions/', 'src/modules/tenancy/domain/', 'src/modules/tenancy/services/resolve-access.ts'] },
+        // src/db is the database layer: role resolution there is the port of the SQL that resolved roles.
+        { allow: ['src/core/permissions/', 'src/modules/tenancy/domain/', 'src/modules/tenancy/services/resolve-access.ts', 'src/db/'] },
       ],
     },
   },
@@ -37,10 +37,22 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            { group: ['@supabase/*'], message: 'Components and routes never import Supabase directly; use modules/* services (ADR-013).' },
+            { group: ['@supabase/*'], message: 'APX no longer uses Supabase (FIRESTORE_DATA_MODEL.md).' },
+            { group: ['firebase-admin', 'firebase-admin/*', '@/db', '@/db/*'], message: 'Components and routes never reach the database directly; use modules/* services (ADR-013).' },
             { group: ['@anthropic-ai/*'], message: 'Only modules/ai/data/claude-client.ts imports the Anthropic SDK (ADR-023).' },
           ],
         },
+      ],
+    },
+  },
+  // The session route turns a Firebase ID token into a session cookie: it is the one route that holds
+  // the Admin SDK's Auth (FIRESTORE_DATA_MODEL.md §2).
+  {
+    files: ['src/app/auth/**/*.{ts,tsx}'],
+    rules: {
+      'no-restricted-imports': [
+        'error',
+        { patterns: [{ group: ['@supabase/*'], message: 'APX no longer uses Supabase (FIRESTORE_DATA_MODEL.md).' }] },
       ],
     },
   },
@@ -61,7 +73,7 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            { group: ['@supabase/*', '@/core/db', '@/core/db/*'], message: 'domain/ is pure: no I/O (ADR-022).' },
+            { group: ['@supabase/*', 'firebase-admin', 'firebase-admin/*', 'firebase', 'firebase/*', '@/core/db', '@/core/db/*', '@/db', '@/db/*'], message: 'domain/ is pure: no I/O (ADR-022).' },
             { group: ['next/*', 'react'], message: 'domain/ is framework-free (ADR-022).' },
           ],
         },

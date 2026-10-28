@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { cleanUpOwn, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, onboard, seedUser, signIn, uniqueName } from './fixtures';
+import { firstPeriod, orgIdBySlug, orgRows, seedAction, seedAlert, seedRun } from './firestore';
 
 /**
  * The Action Centre (SOW §17; ADR-098).
@@ -20,23 +21,18 @@ const ORG = uniqueName('Action Centre Ltd');
 test.afterAll(() => cleanUpOwn([ORG, `${ORG} Alerts`], ['ac-owner', 'ac-alerts']));
 
 test('the Action Centre answers what needs doing, what is late, and what is mine', async ({ page }) => {
-  const owner = seedUser('ac-owner');
+  const owner = await seedUser('ac-owner');
   await signIn(page, owner);
   const slug = await onboard(page, ORG);
-  const orgId = sql(`select id from public.organizations where slug = '${slug}'`);
+  const orgId = await orgIdBySlug(slug);
 
   // Three actions with different shapes: one late, one undated, one finished.
-  const make = (title: string, priority: string, status: string, due: string, ownerId: string) => sql(`
-    with q as (
-      insert into public.actions (organization_id, title, priority, status, due_date, owner_user_id,
-                                  source_type, created_by, completed_at)
-      values ('${orgId}', '${title}', '${priority}', '${status}', ${due}, ${ownerId},
-              'user', '${owner.userId}', ${status === 'completed' ? 'now()' : 'null'})
-      returning id) select * from q`);
+  const make = (title: string, priority: string, status: string, due: string | null, ownerId: string | null) =>
+    seedAction(orgId, { title, priority, status, due, owner: ownerId, createdBy: owner.userId });
 
-  make('Chase the overdue invoice', 'high', 'open', `'2020-01-01'`, `'${owner.userId}'`);
-  make('Think about pricing', 'low', 'open', 'null', 'null');
-  make('Filed the VAT return', 'medium', 'completed', `'2026-01-01'`, `'${owner.userId}'`);
+  await make('Chase the overdue invoice', 'high', 'open', '2020-01-01', owner.userId);
+  await make('Think about pricing', 'low', 'open', null, null);
+  await make('Filed the VAT return', 'medium', 'completed', '2026-01-01', owner.userId);
 
   await page.goto(`/app/${slug}/actions`);
 
@@ -69,39 +65,23 @@ test('the Action Centre answers what needs doing, what is late, and what is mine
 
 test('an action made from a critical alert arrives critical, not medium', async ({ page }) => {
   // Its own user: `seedUser` inserts, so two tests sharing a local part collide on the email index.
-  const owner = seedUser('ac-alerts');
+  const owner = await seedUser('ac-alerts');
   await signIn(page, owner);
   const slug = await onboard(page, `${ORG} Alerts`);
-  const orgId = sql(`select id from public.organizations where slug = '${slug}'`);
+  const orgId = await orgIdBySlug(slug);
+  const period = await firstPeriod(orgId);
 
-  const runId = sql(`
-    with q as (
-      insert into public.calculation_runs (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-      select '${orgId}', 'recalc_manual', '1.0.0', p.id, p.id, '2026-06-15', 'succeeded'
-        from public.fiscal_periods p where p.organization_id = '${orgId}' order by p.period_start limit 1
-      returning id) select * from q`);
-  const alertId = sql(`
-    with q as (
-      insert into public.alerts (organization_id, period_id, rule_key, rule_version, severity, key_kind,
-                                 calculation_run_id, title, explanation, status, first_seen_at, dedupe_key)
-      select '${orgId}', p.id, 'cash.runway_low', '1', 'critical', 'state', '${runId}',
-             'Cash would last under two months', 'Runway is 1.4 months.', 'open', now(), 'e2e-ac-${Date.now()}'
-        from public.fiscal_periods p where p.organization_id = '${orgId}' order by p.period_start limit 1
-      returning id) select * from q`);
-
+  const runId = await seedRun(orgId, { periodFrom: period, asOf: '2026-06-15' });
   /*
    * An alert without a current revision is not a state the engine produces: `persist_alerts` writes
    * revision 1 in the same transaction as the row, and the conversion pins the revision it saw
-   * (ADR-034). The fixture has to build the same shape or it is testing a row the product cannot
+   * (ADR-034). `seedAlert` builds the same shape, or this would be testing a row the product cannot
    * make.
    */
-  const revisionId = sql(`
-    with q as (
-      insert into public.alert_revisions (organization_id, alert_id, revision_no, rule_version,
-                                          severity, explanation, calculation_run_id)
-      values ('${orgId}', '${alertId}', 1, '1', 'critical', 'Runway is 1.4 months.', '${runId}')
-      returning id) select * from q`);
-  sql(`update public.alerts set current_revision_id = '${revisionId}' where id = '${alertId}'`);
+  const alertId = await seedAlert(orgId, {
+    periodId: period, runId, ruleKey: 'cash.runway_low', severity: 'critical',
+    title: 'Cash would last under two months', explanation: 'Runway is 1.4 months.', dedupeKey: `e2e-ac-${Date.now()}`,
+  });
 
   await page.goto(`/app/${slug}/insights/alerts/${alertId}`);
   await page.getByRole('button', { name: /add this to the action centre/i }).click();
@@ -113,7 +93,7 @@ test('an action made from a critical alert arrives critical, not medium', async 
    * something it is not about.
    */
   await expect.poll(
-    () => sql(`select priority from public.actions where organization_id = '${orgId}' and source_id = '${alertId}'`),
+    async () => String((await orgRows(orgId, 'actions', (a) => a.source_id === alertId))[0]?.priority ?? ''),
     { timeout: 30_000, message: 'the rule said critical, so the task is critical' },
   ).toBe('critical');
 

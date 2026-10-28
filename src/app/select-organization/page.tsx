@@ -1,6 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createUserClient } from '@/core/db/user-client';
-import { landingPathForRole, listMyOrganizations } from '@/modules/tenancy';
+import { landingPathForRole, listMyOrganizations, sessionUserOf } from '@/modules/tenancy';
 import { adviserOrganisations } from '@/modules/portfolio';
 import { Card, CardBody, Badge } from '@/components/ui/surfaces';
 import { ORG_STATUS_LABELS, ROLE_LABELS } from '@/components/labels';
@@ -12,8 +12,7 @@ export const dynamic = 'force-dynamic';
 
 export default async function SelectOrganizationPage() {
   const db = await createUserClient();
-  const { data } = await db.auth.getUser();
-  if (!data.user) redirect('/sign-in?next=/select-organization');
+  if (!sessionUserOf(db)) redirect('/sign-in?next=/select-organization');
 
   const organizations = await listMyOrganizations(db);
   if (organizations.length === 0) redirect('/onboarding');

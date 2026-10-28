@@ -1,7 +1,10 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import type { DocumentData, Query } from 'firebase-admin/firestore';
+import { callApi } from '@/core/db';
 import { signedFromEntry, toMoneyString } from '@/core/money';
+import { orgRows } from '@/db/rls';
+import { orgCollection, type OrgTable } from '@/db/schema';
+import type { Db } from '@/db/types';
 import type { AlertSeverity, AlertSubjectType, RecordObservation } from '../domain/types';
 import type { ExistingAlert } from '../domain/lifecycle';
 import type { OpenInvoiceObservation } from '../domain/context';
@@ -15,9 +18,45 @@ import type { OpenInvoiceObservation } from '../domain/context';
  * written — rather than being copied onto the alert row, where the two could drift.
  */
 
-function unwrap<T>(data: T[] | null, error: unknown, requestId?: string): T[] {
-  if (error) throw toMotionError(error, requestId);
-  return data ?? [];
+/**
+ * The rows of one organisation's table, as the caller may read them.
+ *
+ * A USER handle reads through the ported row policies (`src/db/rls.ts`), as the caller's JWT read
+ * through RLS. The SERVICE handle is the `alerts.evaluate` job, which read with the service role on
+ * PostgreSQL and so saw every row; it reads the collection directly — but only the organisation its
+ * job is scoped to (ADR-090), so a handler naming the wrong organisation reads nothing.
+ */
+async function rowsOf<T>(db: Db, orgId: string, table: OrgTable, refine?: (q: Query) => Query): Promise<T[]> {
+  if (db.actor.kind === 'service') {
+    if (db.actor.scope !== null && db.actor.scope !== orgId) return [];
+    const base: Query = orgCollection(db.fs, orgId, table);
+    const snap = await (refine ? refine(base) : base).get();
+    return snap.docs.map((d) => d.data() as T);
+  }
+  return orgRows<T>(db, orgId, table, refine);
+}
+
+/** `where(field, 'in', ids)` in chunks of 30 (Firestore's limit), the results concatenated. */
+async function rowsIn<T>(
+  db: Db, orgId: string, table: OrgTable, field: string, ids: readonly string[],
+  refine: (q: Query) => Query = (q) => q,
+): Promise<T[]> {
+  const unique = [...new Set(ids)];
+  const out: T[] = [];
+  for (let i = 0; i < unique.length; i += 30) {
+    const chunk = unique.slice(i, i + 30);
+    out.push(...await rowsOf<T>(db, orgId, table, (q) => refine(q.where(field, 'in', chunk))));
+  }
+  return out;
+}
+
+/** The current revision of each alert (the old `alerts_current_revision_fk` embed), by its id. */
+async function currentRevisions<T extends DocumentData>(
+  db: Db, orgId: string, revisionIds: ReadonlyArray<string | null>,
+): Promise<Map<string, T>> {
+  const ids = revisionIds.filter((id): id is string => id != null);
+  const rows = ids.length === 0 ? [] : await rowsIn<T>(db, orgId, 'alert_revisions', 'id', ids);
+  return new Map(rows.map((row) => [String(row.id), row]));
 }
 
 interface AlertRow {
@@ -30,11 +69,9 @@ interface AlertRow {
   dismissed_at: string | null;
   first_seen_at: string;
   current_revision_id: string | null;
-  alert_revisions: {
-    revision_no: number;
-    evidence_bundle_id: string | null;
-  } | null;
 }
+
+interface RevisionRef { id: string; revision_no: number; evidence_bundle_id: string | null }
 
 /**
  * Every alert that could still be affected by a re-evaluation.
@@ -44,25 +81,21 @@ interface AlertRow {
  * only the open ones would quietly break that, and the break would look like correct behaviour.
  */
 export async function loadExistingAlerts(
-  db: SupabaseClient, orgId: string, requestId?: string,
+  db: Db, orgId: string, _requestId?: string,
 ): Promise<Map<string, ExistingAlert>> {
-  const { data, error } = await db
-    .from('alerts')
-    .select(`id, dedupe_key, rule_key, status, severity, threshold_summary, dismissed_at,
-             first_seen_at, current_revision_id,
-             alert_revisions!alerts_current_revision_fk (revision_no, evidence_bundle_id)`)
-    .eq('organization_id', orgId);
-
-  const rows = unwrap(data as unknown as AlertRow[] | null, error, requestId);
+  const rows = await rowsOf<AlertRow>(db, orgId, 'alerts');
+  const revisions = await currentRevisions<RevisionRef>(db, orgId, rows.map((row) => row.current_revision_id));
+  const revisionOf = (row: AlertRow) => (row.current_revision_id ? revisions.get(row.current_revision_id) ?? null : null);
 
   const bundleIds = rows
-    .map((row) => row.alert_revisions?.evidence_bundle_id)
+    .map((row) => revisionOf(row)?.evidence_bundle_id)
     .filter((id): id is string => id != null);
-  const pinsByBundle = await loadPins(db, orgId, bundleIds, requestId);
+  const pinsByBundle = await loadPins(db, orgId, bundleIds);
 
   const out = new Map<string, ExistingAlert>();
   for (const row of rows) {
-    const bundleId = row.alert_revisions?.evidence_bundle_id ?? null;
+    const revision = revisionOf(row);
+    const bundleId = revision?.evidence_bundle_id ?? null;
     const pins = bundleId === null
       ? { snapshotIds: [], recordIds: [] }
       : pinsByBundle.get(bundleId) ?? { snapshotIds: [], recordIds: [] };
@@ -72,7 +105,7 @@ export async function loadExistingAlerts(
       ruleKey: row.rule_key,
       status: row.status,
       severity: row.severity,
-      revisionNo: row.alert_revisions?.revision_no ?? 0,
+      revisionNo: revision?.revision_no ?? 0,
       thresholdSummary: row.threshold_summary ?? {},
       snapshotIds: pins.snapshotIds,
       recordIds: pins.recordIds,
@@ -90,18 +123,15 @@ interface PinRow {
 }
 
 async function loadPins(
-  db: SupabaseClient, orgId: string, bundleIds: readonly string[], requestId?: string,
+  db: Db, orgId: string, bundleIds: readonly string[],
 ): Promise<Map<string, { snapshotIds: string[]; recordIds: string[] }>> {
   const out = new Map<string, { snapshotIds: string[]; recordIds: string[] }>();
   if (bundleIds.length === 0) return out;
 
-  const { data, error } = await db
-    .from('evidence_items')
-    .select('bundle_id, item_type, ref_id')
-    .eq('organization_id', orgId)
-    .in('bundle_id', [...new Set(bundleIds)]);
-
-  for (const row of unwrap(data as unknown as PinRow[] | null, error, requestId)) {
+  // In `sort_order`, the order the bundle was written in (the SQL read had no order; this is stable).
+  const items = await rowsIn<PinRow & { sort_order: number }>(db, orgId, 'evidence_items', 'bundle_id', bundleIds);
+  items.sort((a, b) => (a.bundle_id < b.bundle_id ? -1 : a.bundle_id > b.bundle_id ? 1 : a.sort_order - b.sort_order));
+  for (const row of items) {
     if (row.ref_id === null) continue;
     const entry = out.get(row.bundle_id) ?? { snapshotIds: [], recordIds: [] };
     if (row.item_type === 'metric_snapshot') entry.snapshotIds.push(row.ref_id);
@@ -130,21 +160,16 @@ interface LedgerRow {
 
 /** Accepted ledger entries for a set of periods, pinned to the run's instant (§2.4). */
 export async function loadLedgerRecords(
-  db: SupabaseClient, orgId: string, periodIds: readonly string[], aggregatedAt: string,
-  requestId?: string,
+  db: Db, orgId: string, periodIds: readonly string[], aggregatedAt: string,
+  _requestId?: string,
 ): Promise<RecordObservation[]> {
   if (periodIds.length === 0) return [];
-  const { data, error } = await db
-    .from('ledger_entries')
-    .select(`id, period_id, entry_date, direction, amount, description, counterparty_id,
-             account_id, dedupe_hash, duplicate_reviewed`)
-    .eq('organization_id', orgId)
-    .in('period_id', [...periodIds])
-    .eq('record_status', 'accepted')
-    .is('superseded_by', null)
-    .lte('created_at', aggregatedAt);
+  // Equalities in the query (single-field indexes merge); the instant bound is applied here.
+  const rows = (await rowsIn<LedgerRow & { created_at: string }>(db, orgId, 'ledger_entries', 'period_id', periodIds,
+    (q) => q.where('record_status', '==', 'accepted').where('superseded_by', '==', null)))
+    .filter((row) => notAfter(row.created_at, aggregatedAt));
 
-  return unwrap(data as unknown as LedgerRow[] | null, error, requestId).map((row) => ({
+  return rows.map((row) => ({
     id: row.id,
     table: 'ledger_entries' as const,
     periodId: row.period_id,
@@ -182,21 +207,15 @@ interface InvoiceRow {
 }
 
 export async function loadInvoiceRecords(
-  db: SupabaseClient, orgId: string, periodIds: readonly string[], aggregatedAt: string,
-  requestId?: string,
+  db: Db, orgId: string, periodIds: readonly string[], aggregatedAt: string,
+  _requestId?: string,
 ): Promise<RecordObservation[]> {
   if (periodIds.length === 0) return [];
-  const { data, error } = await db
-    .from('invoices')
-    .select(`id, period_id, issue_date, due_date, total_amount, balance_due, invoice_type,
-             counterparty_id, description, invoice_number, dedupe_hash, duplicate_reviewed`)
-    .eq('organization_id', orgId)
-    .in('period_id', [...periodIds])
-    .eq('record_status', 'accepted')
-    .is('superseded_by', null)
-    .lte('created_at', aggregatedAt);
+  const rows = (await rowsIn<InvoiceRow & { created_at: string }>(db, orgId, 'invoices', 'period_id', periodIds,
+    (q) => q.where('record_status', '==', 'accepted').where('superseded_by', '==', null)))
+    .filter((row) => notAfter(row.created_at, aggregatedAt));
 
-  return unwrap(data as unknown as InvoiceRow[] | null, error, requestId).map((row) => ({
+  return rows.map((row) => ({
     id: row.id,
     table: 'invoices' as const,
     periodId: row.period_id,
@@ -219,41 +238,34 @@ export async function loadInvoiceRecords(
 /**
  * Every invoice the receivables and payables deterioration rules may name (ADR-120 hardening): the
  * current row of each accepted, non-superseded, non-void invoice issued by `issuedBy`, visible at
- * the run's aggregation instant — the set the engine aged. Paged: PostgREST's 1,000-row cap is
- * silent, and a business with a thousand open invoices is exactly the one these rules are for.
+ * the run's aggregation instant — the set the engine aged. Read whole (PostgreSQL paged around
+ * PostgREST's 1,000-row cap): a business with a thousand open invoices is exactly the one these
+ * rules are for.
  */
 export async function loadOpenInvoices(
-  db: SupabaseClient, orgId: string, issuedBy: string, aggregatedAt: string, requestId?: string,
+  db: Db, orgId: string, issuedBy: string, aggregatedAt: string, _requestId?: string,
 ): Promise<OpenInvoiceObservation[]> {
-  const PAGE = 1000;
-  const out: OpenInvoiceObservation[] = [];
-  for (let from = 0; ; from += PAGE) {
-    const { data, error } = await db
-      .from('invoices')
-      .select('id, invoice_type, issue_date, due_date, total_amount, balance_due, paid_date, description, invoice_number')
-      .eq('organization_id', orgId)
-      .eq('record_status', 'accepted')
-      .is('superseded_by', null)
-      .neq('status', 'void')
-      .lte('created_at', aggregatedAt)
-      .lte('issue_date', issuedBy)
-      .order('id')
-      .range(from, from + PAGE - 1);
-    const rows = unwrap(data as unknown as Array<Record<string, unknown>> | null, error, requestId);
-    for (const row of rows) {
-      out.push({
-        id: row.id as string,
-        invoiceType: row.invoice_type as OpenInvoiceObservation['invoiceType'],
-        issueDate: row.issue_date as string,
-        dueDate: (row.due_date as string | null) ?? null,
-        totalAmount: String(row.total_amount),
-        balanceDue: String(row.balance_due),
-        paidDate: (row.paid_date as string | null) ?? null,
-        description: (row.description as string | null) ?? (row.invoice_number as string | null) ?? null,
-      });
-    }
-    if (rows.length < PAGE) return out;
-  }
+  // The equalities in the query; `status <> 'void'`, the two bounds and the order by id here.
+  const rows = (await rowsOf<Record<string, unknown>>(db, orgId, 'invoices',
+    (q) => q.where('record_status', '==', 'accepted').where('superseded_by', '==', null)))
+    .filter((row) => row.status !== 'void' && notAfter(String(row.created_at), aggregatedAt)
+      && String(row.issue_date) <= issuedBy)
+    .sort((x, y) => (String(x.id) < String(y.id) ? -1 : String(x.id) > String(y.id) ? 1 : 0));
+  return rows.map((row) => ({
+    id: row.id as string,
+    invoiceType: row.invoice_type as OpenInvoiceObservation['invoiceType'],
+    issueDate: row.issue_date as string,
+    dueDate: (row.due_date as string | null) ?? null,
+    totalAmount: String(row.total_amount),
+    balanceDue: String(row.balance_due),
+    paidDate: (row.paid_date as string | null) ?? null,
+    description: (row.description as string | null) ?? (row.invoice_number as string | null) ?? null,
+  }));
+}
+
+/** `created_at <= instant`, compared as instants (stored ISO strings may differ in precision). */
+function notAfter(createdAt: string, instant: string): boolean {
+  return new Date(createdAt).getTime() <= new Date(instant).getTime();
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -298,16 +310,11 @@ interface ListRow {
   last_evaluated_at: string;
   status_reason_code: string;
   action_id: string | null;
-  alert_revisions: { evidence_bundle_id: string | null } | null;
+  dedupe_key: string;
+  current_revision_id: string | null;
 }
 
-const LIST_SELECT = `
-  id, rule_key, severity, status, title, explanation, recommended_next_step, threshold_summary,
-  metric_key, period_id, subject_type, subject_id, first_seen_at, last_evaluated_at,
-  status_reason_code, action_id,
-  alert_revisions!alerts_current_revision_fk (evidence_bundle_id)`;
-
-function toListRow(row: ListRow): AlertListRow {
+function toListRow(row: ListRow, revision: { evidence_bundle_id: string | null } | null): AlertListRow {
   return {
     id: row.id,
     ruleKey: row.rule_key,
@@ -324,7 +331,7 @@ function toListRow(row: ListRow): AlertListRow {
     firstSeenAt: row.first_seen_at,
     lastEvaluatedAt: row.last_evaluated_at,
     statusReasonCode: row.status_reason_code,
-    evidenceBundleId: row.alert_revisions?.evidence_bundle_id ?? null,
+    evidenceBundleId: revision?.evidence_bundle_id ?? null,
     // §8's convert row: an alert names the action somebody already made from it, so the interface
     // offers the button once rather than inviting two people to do the same work.
     actionId: row.action_id ?? null,
@@ -338,33 +345,40 @@ export interface AlertQuery {
   readonly limit?: number;
 }
 
-/** The alert list, filtered. RLS decides which organisation's rows come back. */
-export async function loadAlerts(
-  db: SupabaseClient, orgId: string, query: AlertQuery = {}, requestId?: string,
-): Promise<AlertListRow[]> {
-  let builder = db.from('alerts').select(LIST_SELECT).eq('organization_id', orgId);
+/**
+ * `severity_enum`'s declaration order (critical … info): the list sorted on the enum's position,
+ * as PostgreSQL sorted an enum, not on its label.
+ */
+const SEVERITY_RANK: Readonly<Record<AlertSeverity, number>> = { critical: 0, high: 1, medium: 2, low: 3, info: 4 };
 
-  if (query.statuses && query.statuses.length > 0) builder = builder.in('status', [...query.statuses]);
-  if (query.severities && query.severities.length > 0) {
-    builder = builder.in('severity', [...query.severities]);
-  }
-  if (query.periodId !== undefined) builder = builder.eq('period_id', query.periodId);
+/** The alert list, filtered. The row policies decide which rows come back. */
+export async function loadAlerts(
+  db: Db, orgId: string, query: AlertQuery = {}, _requestId?: string,
+): Promise<AlertListRow[]> {
+  // The status filter in the query; severity, period, the order and the limit here (no composite index).
+  const rows = (await rowsOf<ListRow>(db, orgId, 'alerts', (q) => (
+    query.statuses && query.statuses.length > 0 ? q.where('status', 'in', [...query.statuses]) : q)))
+    .filter((row) => (!query.severities || query.severities.length === 0 || query.severities.includes(row.severity))
+      && (query.periodId === undefined || row.period_id === query.periodId));
 
   /*
    * N-7 (Step 0F): one run evaluates every alert at the same instant, so severity and recency tie
    * between, say, a cost spike and a concentration alert of the same severity — and the order (and,
    * past the limit, the membership) of the list was whatever the plan returned. Ties are broken by
    * the rule, then by the alert's identity (`dedupe_key`, unique per organisation): a total order, so
-   * the same alerts always come back in the same order.
+   * the same alerts always come back in the same order. The keys are the SQL's:
+   * `severity desc, last_evaluated_at desc, rule_key, dedupe_key`.
    */
-  const { data, error } = await builder
-    .order('severity', { ascending: false })
-    .order('last_evaluated_at', { ascending: false })
-    .order('rule_key', { ascending: true })
-    .order('dedupe_key', { ascending: true })
-    .limit(query.limit ?? 200);
+  const cmp = (x: string, y: string) => (x < y ? -1 : x > y ? 1 : 0);
+  rows.sort((a, b) => (SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity])
+    || (new Date(b.last_evaluated_at).getTime() - new Date(a.last_evaluated_at).getTime())
+    || cmp(a.rule_key, b.rule_key)
+    || cmp(a.dedupe_key, b.dedupe_key));
+  const page = rows.slice(0, query.limit ?? 200);
 
-  return unwrap(data as unknown as ListRow[] | null, error, requestId).map(toListRow);
+  const revisions = await currentRevisions<{ id: string; evidence_bundle_id: string | null }>(
+    db, orgId, page.map((row) => row.current_revision_id));
+  return page.map((row) => toListRow(row, row.current_revision_id ? revisions.get(row.current_revision_id) ?? null : null));
 }
 
 export interface AlertRevisionRow {
@@ -378,20 +392,16 @@ export interface AlertRevisionRow {
 
 /** The history of what an alert said, newest first (ADR-034, F-C-16). */
 export async function loadAlertHistory(
-  db: SupabaseClient, orgId: string, alertId: string, requestId?: string,
+  db: Db, orgId: string, alertId: string, _requestId?: string,
 ): Promise<AlertRevisionRow[]> {
-  const { data, error } = await db
-    .from('alert_revisions')
-    .select('revision_no, severity, explanation, threshold_summary, evidence_bundle_id, created_at')
-    .eq('organization_id', orgId)
-    .eq('alert_id', alertId)
-    .order('revision_no', { ascending: false });
-
-  return unwrap(data as unknown as Array<{
+  const rows = await rowsOf<{
     revision_no: number; severity: AlertSeverity; explanation: string;
     threshold_summary: Record<string, string | null> | null;
     evidence_bundle_id: string | null; created_at: string;
-  }> | null, error, requestId).map((row) => ({
+  }>(db, orgId, 'alert_revisions', (q) => q.where('alert_id', '==', alertId));
+  rows.sort((a, b) => b.revision_no - a.revision_no);
+
+  return rows.map((row) => ({
     revisionNo: row.revision_no,
     severity: row.severity,
     explanation: row.explanation,
@@ -409,18 +419,17 @@ export async function loadAlertHistory(
  * `api.set_alert_status` (DATABASE_ARCHITECTURE.md §14.2).
  *
  * The function enforces the permission itself, including the client's partial `alerts.manage` — a
- * client may acknowledge and nothing else. The call is made through the CALLER's client, never the
- * service role, so RLS and that check are the things actually deciding.
+ * client may acknowledge and nothing else. The call is made for the CALLER's handle, never the
+ * server's, so the row policies and that check are the things actually deciding.
  */
 export async function setAlertStatus(
-  db: SupabaseClient,
+  db: Db,
   input: { alertId: string; status: string; reason: string | null },
   requestId?: string,
 ): Promise<void> {
-  const { error } = await db.schema('api').rpc('set_alert_status', {
+  await callApi(db, 'set_alert_status', {
     p_alert: input.alertId,
     p_status: input.status,
     p_reason: input.reason,
-  });
-  if (error) throw toMotionError(error, requestId);
+  }, requestId);
 }

@@ -4,7 +4,8 @@ import { callApi } from '../data/rpc';
 import type { AccessContext } from '../context';
 
 export interface AuditEntry {
-  id: number;
+  /** A uuid since the move to Firestore (it was a bigint identity). */
+  id: string;
   action: string;
   actorType: string;
   actorName: string | null;
@@ -27,7 +28,7 @@ export async function listOrgAuditEvents(
     ctx.requestId,
   );
   return (rows ?? []).map((r: Record<string, unknown>) => ({
-    id: Number(r.id),
+    id: String(r.id),
     action: String(r.action),
     actorType: String(r.actor_type),
     actorName: (r.actor_name as string | null) ?? null,

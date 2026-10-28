@@ -12,8 +12,10 @@ process.env.E2E_RUN_TAG ??= `e2e${Date.now().toString(36)}`;
 /**
  * Playwright (TEST_STRATEGY.md §11, §12).
  *
- * The journeys run against the SAME local Supabase the integration suite uses, with the app served
- * from a production build. A dev server would test a different bundle from the one that ships, and
+ * The journeys run against the SAME local Firebase emulators the integration suite uses (project
+ * `demo-apx`, started with `npm run db:start`; FIRESTORE_DATA_MODEL.md §1), with the app served
+ * from a production build. Fixtures reach the emulators through `e2e/firestore.ts`, which refuses
+ * any project that is not a `demo-` one. A dev server would test a different bundle from the one that ships, and
  * §12's whole purpose is to exercise what a person actually gets.
  *
  * Serial, single worker: the journeys create organisations and drain the shared job queue, and two

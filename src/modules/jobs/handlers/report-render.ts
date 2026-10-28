@@ -1,6 +1,6 @@
 import 'server-only';
 import { createHash, randomUUID } from 'node:crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { recordReportFile, recordReportPdf } from '@/core/db';
 import { log } from '@/core/logging';
 import { putObject, REPORTS_BUCKET, reportKey, storedReportKey } from '@/core/storage/signer';
@@ -31,7 +31,7 @@ export async function runReportRenderJob(
   if (orgId === null) {
     return { status: 'failed', error: 'report.render has no organization to scope to' };
   }
-  const scoped = scope.db as SupabaseClient;
+  const scoped = scope.db as Db;
 
   // Phase 17: the PDF of a stored report — the daily and weekly briefs, the adviser and custom
   // reports. It renders the content as STORED, so it says what the report said.
@@ -103,7 +103,7 @@ async function renderStored(kind: string, version: string, content: unknown): Pr
 }
 
 async function renderStoredReport(
-  job: ClaimedJob, scoped: SupabaseClient, orgId: string, reportId: string,
+  job: ClaimedJob, scoped: Db, orgId: string, reportId: string,
 ): Promise<JobOutcome> {
   const stored = await loadStoredReportForJob(scoped, orgId, reportId);
   if (stored === null) return { status: 'failed', error: 'that report does not exist' };

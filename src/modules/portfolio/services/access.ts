@@ -1,6 +1,6 @@
 import 'server-only';
 import { cache } from 'react';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { NotFound } from '@/core/errors';
 import { newRequestId } from '@/core/logging';
 import { createUserClient } from '@/core/db/user-client';
@@ -21,13 +21,13 @@ import { ADVISER_ROLES, type AdviserRole, type PortfolioOrganisation } from '../
  * turn check accept only these two roles (20261018000030).
  *
  * Nothing is added here that the database did not already grant, and nothing decided here is
- * relied on alone: every read the portfolio makes puts these ids in its statement AND runs under
- * the caller's RLS.
+ * relied on alone: every read the portfolio makes puts these ids in its query AND is re-scoped by
+ * the `api.portfolio_*` function to the caller's own adviser set.
  */
 
 export interface PortfolioContext {
   readonly userId: string;
-  readonly db: SupabaseClient;
+  readonly db: Db;
   readonly requestId: string;
   readonly organisations: readonly PortfolioOrganisation[];
   readonly organisationIds: readonly string[];
@@ -53,7 +53,7 @@ export function adviserOrganisations(rows: readonly OrganizationSummary[]): Port
 }
 
 export async function resolvePortfolioContext(
-  db: SupabaseClient, userId: string, requestId: string,
+  db: Db, userId: string, requestId: string,
 ): Promise<PortfolioContext> {
   const rows = await listMyOrganizations(db);
   const organisations = adviserOrganisations(rows);
@@ -80,7 +80,6 @@ export async function resolvePortfolioContext(
 /** The request-scoped context for the `/portfolio` family. `NotFound` for anyone without a portfolio. */
 export const getPortfolioContext = cache(async (): Promise<PortfolioContext> => {
   const db = await createUserClient();
-  const { data } = await db.auth.getUser();
-  if (!data.user) throw new NotFound();
-  return resolvePortfolioContext(db, data.user.id, newRequestId());
+  if (db.actor.kind !== 'user') throw new NotFound();
+  return resolvePortfolioContext(db, db.actor.userId, newRequestId());
 });

@@ -1,7 +1,8 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { callApi } from '@/core/db';
-import { toMotionError } from '@/core/errors';
 import { Decimal, parseDecimalOrNull } from '@/core/money';
+import { canReadGlobal, orgQuery, orgRowById, orgRows } from '@/db/rls';
+import { globalRow } from '@/db/schema';
+import type { Db } from '@/db/types';
 
 /**
  * Step 0F follow-up: what a trial balance or P&L report COVERS, month by month, and the owner's
@@ -50,17 +51,13 @@ export interface ReportCompletenessView {
 
 /** For a committed trial balance or P&L report; `null` for anything else. */
 export async function loadReportCompleteness(
-  db: SupabaseClient, orgId: string, batchId: string,
+  db: Db, orgId: string, batchId: string,
 ): Promise<ReportCompletenessView | null> {
-  const { data: batch, error } = await db.from('import_batches')
-    .select('import_type, target_table, status, confirmations, invoice_list_kind, period_start, balance_basis')
-    .eq('organization_id', orgId).eq('id', batchId).maybeSingle();
-  if (error) throw toMotionError(error);
-  const b = batch as {
+  const b = await orgRowById<{
     import_type: string; target_table: string; status: string; invoice_list_kind: string | null; period_start: string | null;
     balance_basis: string | null;
     confirmations: Record<string, { at?: string; value?: { report_complete?: string; opening?: string } }> | null;
-  } | null;
+  }>(db, orgId, 'import_batches', batchId);
   if (b === null || b.status !== 'committed') return null;
   // R-2: a FULL invoice list has one answer — whether it holds every invoice unpaid at its start.
   if (b.target_table === 'invoices' && (b.invoice_list_kind ?? 'full') === 'full' && b.period_start !== null) {
@@ -70,37 +67,25 @@ export async function loadReportCompleteness(
     || (b.import_type !== 'trial_balance' && b.import_type !== 'pnl_report' && b.import_type !== 'balance_sheet')) return null;
 
   const [rows, attestations] = await Promise.all([
-    db.from('period_balances').select('period_start, closing_balance')
-      .eq('organization_id', orgId).eq('import_batch_id', batchId)
-      .eq('record_status', 'accepted').is('superseded_by', null),
-    db.from('report_completeness_attestations')
-      .select('id, period_start, coverage, scope, reason, attested_by, attested_role, attested_at, supersedes_id')
-      .eq('organization_id', orgId).eq('import_batch_id', batchId)
-      .order('attested_at', { ascending: false }).order('id', { ascending: false }),
+    orgRows<{ period_start: string; closing_balance: string | null }>(db, orgId, 'period_balances', (q) => q
+      .where('import_batch_id', '==', batchId)
+      .where('record_status', '==', 'accepted')
+      .where('superseded_by', '==', null)),
+    attestationsOf(db, orgId, batchId),
   ]);
-  if (rows.error) throw toMotionError(rows.error);
-  if (attestations.error) throw toMotionError(attestations.error);
-
-  const people = new Map<string, string>();
-  const ids = [...new Set((attestations.data ?? []).map((a) => String(a.attested_by)))];
-  if (ids.length > 0) {
-    const { data } = await db.from('profiles').select('id, full_name, email').in('id', ids);
-    for (const p of (data ?? []) as Array<{ id: string; full_name: string | null; email: string | null }>) {
-      people.set(p.id, p.full_name ?? p.email ?? 'A team member');
-    }
-  }
+  const people = await peopleNames(db, attestations.map((a) => String(a.attested_by)));
 
   const raw = b.confirmations?.['IMP-TB-016'];
   const answer = raw?.value?.report_complete;
   const importAnswer = answer === 'complete' || answer === 'partial' ? { value: answer, at: raw?.at ?? null } as const : null;
 
   const byMonth = new Map<string, Decimal[]>();
-  for (const r of (rows.data ?? []) as Array<{ period_start: string; closing_balance: string | null }>) {
+  for (const r of rows) {
     const list = byMonth.get(r.period_start) ?? [];
     list.push(parseDecimalOrNull(r.closing_balance) ?? new Decimal(0));
     byMonth.set(r.period_start, list);
   }
-  const history: CompletenessAttestationView[] = ((attestations.data ?? []) as Array<Record<string, unknown>>).map((a) => ({
+  const history: CompletenessAttestationView[] = attestations.map((a) => ({
     id: String(a.id),
     month: String(a.period_start),
     coverage: a.coverage as CompletenessAnswer,
@@ -133,29 +118,47 @@ export async function loadReportCompleteness(
   };
 }
 
+/** Every attestation of one import, newest first (`attested_at desc, id desc`), sorted here. */
+async function attestationsOf(db: Db, orgId: string, batchId: string): Promise<Array<Record<string, unknown>>> {
+  const rows = await orgRows<Record<string, unknown>>(db, orgId, 'report_completeness_attestations', (q) => q
+    .where('import_batch_id', '==', batchId));
+  return rows.sort((a, b) => String(b.attested_at).localeCompare(String(a.attested_at))
+    || String(b.id).localeCompare(String(a.id)));
+}
+
+/** How many invoices an import wrote, counted on the server (`count`, no rows read). */
+async function invoiceCount(db: Db, orgId: string, batchId: string): Promise<number> {
+  const scoped = await orgQuery(db, orgId, 'invoices');
+  if (!scoped) return 0;
+  const snap = await scoped.query.where('import_batch_id', '==', batchId).count().get();
+  return snap.data().count;
+}
+
+/** The names attestations are shown under: a profile's full name, else its email. */
+async function peopleNames(db: Db, userIds: readonly string[]): Promise<Map<string, string>> {
+  const people = new Map<string, string>();
+  const ids = [...new Set(userIds)].filter(Boolean);
+  if (ids.length === 0 || !(await canReadGlobal(db, 'profiles'))) return people;
+  const snaps = await Promise.all(ids.map((id) => globalRow(db.fs, 'profiles', id).get()));
+  for (const p of snaps) {
+    if (!p.exists) continue;
+    people.set(p.id, (p.get('full_name') as string | null) ?? (p.get('email') as string | null) ?? 'A team member');
+  }
+  return people;
+}
+
 /** R-2: the opening answer of a full invoice list, as one "month" — the month the list starts in. */
 async function loadInvoiceListOpening(
-  db: SupabaseClient, orgId: string, batchId: string, periodStart: string,
+  db: Db, orgId: string, batchId: string, periodStart: string,
   imported: { at?: string; value?: { opening?: string } } | undefined,
 ): Promise<ReportCompletenessView> {
   const month = `${periodStart.slice(0, 7)}-01`;
   const [count, attestations] = await Promise.all([
-    db.from('invoices').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('import_batch_id', batchId),
-    db.from('report_completeness_attestations')
-      .select('id, period_start, coverage, scope, reason, attested_by, attested_role, attested_at, supersedes_id')
-      .eq('organization_id', orgId).eq('import_batch_id', batchId)
-      .order('attested_at', { ascending: false }).order('id', { ascending: false }),
+    invoiceCount(db, orgId, batchId),
+    attestationsOf(db, orgId, batchId),
   ]);
-  if (attestations.error) throw toMotionError(attestations.error);
-  const people = new Map<string, string>();
-  const ids = [...new Set((attestations.data ?? []).map((a) => String(a.attested_by)))];
-  if (ids.length > 0) {
-    const { data } = await db.from('profiles').select('id, full_name, email').in('id', ids);
-    for (const p of (data ?? []) as Array<{ id: string; full_name: string | null; email: string | null }>) {
-      people.set(p.id, p.full_name ?? p.email ?? 'A team member');
-    }
-  }
-  const history: CompletenessAttestationView[] = ((attestations.data ?? []) as Array<Record<string, unknown>>).map((a) => ({
+  const people = await peopleNames(db, attestations.map((a) => String(a.attested_by)));
+  const history: CompletenessAttestationView[] = attestations.map((a) => ({
     id: String(a.id), month: String(a.period_start), coverage: a.coverage as CompletenessAnswer, scope: a.scope as ReportScope,
     reason: String(a.reason), attestedBy: people.get(String(a.attested_by)) ?? 'A team member',
     attestedRole: a.attested_role as 'owner' | 'admin', attestedAt: String(a.attested_at),
@@ -171,7 +174,7 @@ async function loadInvoiceListOpening(
       month,
       current: latest?.coverage ?? importAnswer?.value ?? 'unconfirmed',
       source: latest ? 'owner_review' : importAnswer ? 'import_review' : null,
-      lines: count.count ?? 0,
+      lines: count,
       balances: null,
     }],
     history,
@@ -184,7 +187,7 @@ async function loadInvoiceListOpening(
  * it and queues the recalculation.
  */
 export async function attestReportCompleteness(
-  db: SupabaseClient,
+  db: Db,
   input: { readonly batchId: string; readonly month: string; readonly coverage: CompletenessAnswer; readonly reason: string },
   requestId?: string,
 ): Promise<string> {

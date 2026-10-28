@@ -1,7 +1,8 @@
 import 'server-only';
-import { NotFound, ValidationError, toMotionError } from '@/core/errors';
+import { NotFound, ValidationError } from '@/core/errors';
 import { assertCan, can } from '@/core/permissions';
 import { callApi } from '@/core/db';
+import { orgRowById, orgRows } from '@/db/rls';
 import type { AccessContext } from '@/modules/tenancy';
 import { notificationHref, readableNotificationKinds } from '../domain/notifications';
 
@@ -9,7 +10,7 @@ import { notificationHref, readableNotificationKinds } from '../domain/notificat
  * Team/Client Management (Agreement §4; ADR-144): comments on actions, the client's requests and the
  * team's deliverables with their history, and a per-person notification inbox. In-app only.
  *
- * Reads go through the caller's own client, so RLS decides what they see. Writes are `api.*`
+ * Reads are made as the caller (`src/db/rls.ts`), so each table's policy decides what they see. Writes are `api.*`
  * functions, which check the permission, write the history and send the notifications.
  *
  * Names: a colleague's name is shown only to someone with `users.view` (as the Action Centre does);
@@ -54,15 +55,15 @@ export interface NotificationView {
 export async function listNotifications(ctx: AccessContext, limit = 50): Promise<NotificationView[]> {
   assertCan(ctx, 'dashboard.view');
   const kinds = readableNotificationKinds((p) => can(ctx, p));
-  const { data, error } = await ctx.db.from('notifications')
-    .select('id, kind, title, body, href, read_at, created_at')
-    .eq('organization_id', orgOf(ctx)).eq('user_id', ctx.userId).in('kind', kinds)
-    .order('created_at', { ascending: false }).limit(limit);
-  if (error) throw toMotionError(error, ctx.requestId);
-  return ((data ?? []) as Array<{ id: string; kind: string; title: string; body: string | null; href: string | null; read_at: string | null; created_at: string }>)
+  if (kinds.length === 0) return [];
+  // Composite index: notifications (user_id, kind, created_at DESC).
+  const rows = await orgRows(ctx.db, orgOf(ctx), 'notifications', (q) => q
+    .where('user_id', '==', ctx.userId).where('kind', 'in', [...kinds])
+    .orderBy('created_at', 'desc').limit(limit));
+  return (rows as Array<{ id: string; kind: string; title: string; body: string | null; href: string | null; read_at: string | null; created_at: string }>)
     .map((n) => ({
       id: n.id, kind: n.kind, title: n.title, body: n.body,
-      href: notificationHref(n.kind, n.href, ctx.orgSlug), read: n.read_at !== null, createdAt: n.created_at,
+      href: notificationHref(n.kind, n.href ?? null, ctx.orgSlug), read: (n.read_at ?? null) !== null, createdAt: n.created_at,
     }));
 }
 
@@ -70,10 +71,10 @@ export async function listNotifications(ctx: AccessContext, limit = 50): Promise
 export async function unreadCount(ctx: AccessContext): Promise<number> {
   if (!ctx.orgId || !can(ctx, 'dashboard.view')) return 0;
   const kinds = readableNotificationKinds((p) => can(ctx, p));
-  const { count, error } = await ctx.db.from('notifications').select('id', { count: 'exact', head: true })
-    .eq('organization_id', ctx.orgId).eq('user_id', ctx.userId).in('kind', kinds).is('read_at', null);
-  if (error) throw toMotionError(error, ctx.requestId);
-  return count ?? 0;
+  if (kinds.length === 0) return 0;
+  const rows = await orgRows(ctx.db, ctx.orgId, 'notifications', (q) => q
+    .where('user_id', '==', ctx.userId).where('read_at', '==', null).where('kind', 'in', [...kinds]).select('id'));
+  return rows.length;
 }
 
 export async function markNotificationsRead(ctx: AccessContext, ids: readonly string[] | null): Promise<number> {
@@ -94,11 +95,9 @@ export interface CommentView {
 
 export async function listActionComments(ctx: AccessContext, actionId: string): Promise<CommentView[]> {
   assertCan(ctx, 'actions.view');
-  const { data, error } = await ctx.db.from('action_comments')
-    .select('id, author_id, body, created_at')
-    .eq('organization_id', orgOf(ctx)).eq('action_id', actionId).order('created_at').limit(500);
-  if (error) throw toMotionError(error, ctx.requestId);
-  const rows = (data ?? []) as Array<{ id: string; author_id: string; body: string; created_at: string }>;
+  // Composite index: action_comments (action_id, created_at).
+  const rows = await orgRows(ctx.db, orgOf(ctx), 'action_comments', (q) => q
+    .where('action_id', '==', actionId).orderBy('created_at').limit(500)) as Array<{ id: string; author_id: string; body: string; created_at: string }>;
   const name = await namesFor(ctx, rows.map((r) => r.author_id));
   return rows.map((r) => ({ id: r.id, author: name(r.author_id), mine: r.author_id === ctx.userId, body: r.body, createdAt: r.created_at }));
 }
@@ -148,21 +147,17 @@ interface ItemRow {
   due_date: string | null; created_by: string; created_at: string; updated_at: string;
 }
 
-const ITEM_SELECT = 'id, kind, title, detail, status, due_date, created_by, created_at, updated_at';
-
 function toItem(row: ItemRow, name: (id: string) => string, me: string): EngagementItemView {
   return {
-    id: row.id, kind: row.kind, title: row.title, detail: row.detail, status: row.status, dueDate: row.due_date,
+    id: row.id, kind: row.kind, title: row.title, detail: row.detail ?? null, status: row.status, dueDate: row.due_date ?? null,
     createdBy: name(row.created_by), mine: row.created_by === me, createdAt: row.created_at, updatedAt: row.updated_at,
   };
 }
 
 export async function listEngagementItems(ctx: AccessContext): Promise<EngagementItemView[]> {
   assertCan(ctx, 'actions.view');
-  const { data, error } = await ctx.db.from('engagement_items').select(ITEM_SELECT)
-    .eq('organization_id', orgOf(ctx)).order('updated_at', { ascending: false }).limit(200);
-  if (error) throw toMotionError(error, ctx.requestId);
-  const rows = (data ?? []) as ItemRow[];
+  const rows = await orgRows<ItemRow>(ctx.db, orgOf(ctx), 'engagement_items', (q) => q
+    .orderBy('updated_at', 'desc').limit(200));
   const name = await namesFor(ctx, rows.map((r) => r.created_by));
   return rows.map((r) => toItem(r, name, ctx.userId));
 }
@@ -173,16 +168,12 @@ export async function getEngagementItem(ctx: AccessContext, itemId: string): Pro
   assertCan(ctx, 'actions.view');
   if (!/^[0-9a-f-]{36}$/i.test(itemId)) return null;
   const orgId = orgOf(ctx);
-  const { data, error } = await ctx.db.from('engagement_items').select(ITEM_SELECT)
-    .eq('organization_id', orgId).eq('id', itemId).maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
+  const data = await orgRowById<ItemRow>(ctx.db, orgId, 'engagement_items', itemId);
   if (data === null) return null;
-  const { data: events, error: eventsError } = await ctx.db.from('engagement_events')
-    .select('id, actor_id, event, from_status, to_status, note, created_at')
-    .eq('organization_id', orgId).eq('item_id', itemId).order('created_at').limit(500);
-  if (eventsError) throw toMotionError(eventsError, ctx.requestId);
-  const eventRows = (events ?? []) as Array<{ id: string; actor_id: string; event: EngagementEventView['event']; from_status: EngagementStatus | null; to_status: EngagementStatus | null; note: string | null; created_at: string }>;
-  const row = data as ItemRow;
+  // Composite index: engagement_events (item_id, created_at).
+  const eventRows = await orgRows(ctx.db, orgId, 'engagement_events', (q) => q
+    .where('item_id', '==', itemId).orderBy('created_at').limit(500)) as Array<{ id: string; actor_id: string; event: EngagementEventView['event']; from_status: EngagementStatus | null; to_status: EngagementStatus | null; note: string | null; created_at: string }>;
+  const row = data;
   const name = await namesFor(ctx, [row.created_by, ...eventRows.map((e) => e.actor_id)]);
   return {
     item: toItem(row, name, ctx.userId),

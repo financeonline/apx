@@ -1,15 +1,23 @@
-import { readFileSync, readdirSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import {
+  DOCUMENT_KINDS as DB_DOCUMENT_KINDS, IMPORT_TYPES as DB_IMPORT_TYPES, importTargetOf,
+} from '@/db/app/imports-shared';
+import {
+  ENTRY_DIRECTIONS as DB_ENTRY_DIRECTIONS, INVOICE_STATUSES as DB_INVOICE_STATUSES, INVOICE_TYPES as DB_INVOICE_TYPES,
+} from '@/db/app/imports-records';
 
 /**
  * The upload → register → parse → reference creation → validation path, through the real
  * `startImport` (IMPORT_ENGINE.md §2–§8).
  *
  * Every line of the wizard, the pipeline and validation runs for real. Only the edges are replaced:
- * the service-role RPCs, the storage signer and the caller's Supabase client — by a recording fake
- * that applies the database's own rules, read from the migrations rather than restated here:
- *   - `register_document` casts `document_kind` to `document_kind_enum` (and fails as Postgres does);
+ * the service-role RPCs, the storage signer, `callApi` and the caller's policy-filtered reads
+ * (`src/db/rls.ts`) — by a recording fake
+ * that applies the database's own rules, taken from the database layer (`src/db`) rather than
+ * restated here:
+ *   - `register_document` casts `document_kind` to `document_kind_enum` (and fails as the database layer does);
  *   - `api.start_import_batch` chooses the target with its CASE and requires a bank account for a
  *     statement;
  *   - `api.create_import_counterparties` / `create_import_accounts` insert by `app.normalize_name`.
@@ -20,35 +28,14 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
  * through commit, against a real database.
  */
 
-const MIGRATIONS = path.resolve(process.cwd(), 'supabase/migrations');
-const migrationSql = readdirSync(MIGRATIONS).filter((f) => f.endsWith('.sql')).sort()
-  .map((f) => readFileSync(path.join(MIGRATIONS, f), 'utf8'));
+const DOCUMENT_KINDS = new Set<string>(DB_DOCUMENT_KINDS);
+const IMPORT_TYPE_ENUM = new Set<string>(DB_IMPORT_TYPES);
+const INVOICE_TYPES = new Set<string>(DB_INVOICE_TYPES);
+const INVOICE_STATUSES = new Set<string>(DB_INVOICE_STATUSES);
+const ENTRY_DIRECTIONS = new Set<string>(DB_ENTRY_DIRECTIONS);
 
-function enumValues(name: string): Set<string> {
-  for (const sql of migrationSql) {
-    const match = new RegExp(`create type public\\.${name} as enum\\s*\\(([^)]*)\\)`).exec(sql);
-    if (match) return new Set([...match[1]!.matchAll(/'([a-z_]+)'/g)].map((m) => m[1]!));
-  }
-  throw new Error(`${name} is not defined`);
-}
-
-/** `api.start_import_batch`'s CASE, from its newest definition. */
-function sqlTargetFor(importType: string): string {
-  let body = '';
-  for (const sql of migrationSql) {
-    const at = sql.search(/create (or replace )?function api\.start_import_batch\(/);
-    if (at >= 0) body = sql.slice(at);
-  }
-  const block = /v_target := case p_import_type([\s\S]*?)end::public\.import_target_enum/.exec(body)![1]!;
-  const hit = new RegExp(`when '${importType}' then '([a-z_]+)'`).exec(block);
-  return hit ? hit[1]! : /else '([a-z_]+)'/.exec(block)![1]!;
-}
-
-const DOCUMENT_KINDS = enumValues('document_kind_enum');
-const IMPORT_TYPE_ENUM = enumValues('import_type_enum');
-const INVOICE_TYPES = enumValues('invoice_type_enum');
-const INVOICE_STATUSES = enumValues('invoice_status_enum');
-const ENTRY_DIRECTIONS = enumValues('entry_direction_enum');
+/** `api.start_import_batch`'s target, as the database layer computes it. */
+const sqlTargetFor = (importType: string): string => importTargetOf(importType as (typeof DB_IMPORT_TYPES)[number]);
 
 /** `app.normalize_name`: lower, every run of non-alphanumerics to one space, trimmed. */
 // The database's key (app.normalize_name); its parity with Postgres is tested in
@@ -97,27 +84,34 @@ function reset(): void {
   state.refuseCounterparties = false;
 }
 
-/** Just enough of PostgREST's query builder for the reads on this path. */
-class Query implements PromiseLike<{ data: Row[]; error: null }> {
+/**
+ * Just enough of a Firestore query for the reads on this path, standing in for `src/db/rls.ts`
+ * (`orgRows` / `orgRowById` / `orgQuery`, mocked below): `==` and `in` filters, `select`, `orderBy`,
+ * `offset`, `limit` and `count`.
+ */
+class Query {
   private filters: Array<(row: Row) => boolean> = [];
-  private window: [number, number] | null = null;
-  constructor(private readonly table: string) {}
+  private skip = 0;
+  private take: number | null = null;
+  constructor(private readonly table: string, private readonly orgId: string) {}
+  where(column: string, op: string, value: unknown) {
+    if (op === '==') this.filters.push((r) => (r[column] ?? null) === value);
+    else if (op === 'in') this.filters.push((r) => (value as unknown[]).includes(r[column]));
+    else if (op === '!=') this.filters.push((r) => (r[column] ?? null) !== value);
+    else throw new Error(`the fake query has no ${op}`);
+    return this;
+  }
   select() { return this; }
-  order() { return this; }
-  limit() { return this; }
-  eq(column: string, value: unknown) { this.filters.push((r) => r[column] === value); return this; }
-  is(column: string, value: unknown) { this.filters.push((r) => (r[column] ?? null) === value); return this; }
-  neq(column: string, value: unknown) { this.filters.push((r) => r[column] !== value); return this; }
-  in(column: string, values: readonly unknown[]) { this.filters.push((r) => values.includes(r[column])); return this; }
-  range(from: number, to: number) { this.window = [from, to]; return this; }
-  private result(): Row[] {
-    const rows = (state.tables[this.table] ?? []).filter((r) => this.filters.every((f) => f(r)));
-    return this.window === null ? rows : rows.slice(this.window[0], this.window[1] + 1);
+  orderBy() { return this; }
+  offset(n: number) { this.skip = n; return this; }
+  limit(n: number) { this.take = n; return this; }
+  rows(): Row[] {
+    const rows = (state.tables[this.table] ?? [])
+      .filter((r) => (r.organization_id ?? this.orgId) === this.orgId)
+      .filter((r) => this.filters.every((f) => f(r)));
+    return rows.slice(this.skip, this.take === null ? undefined : this.skip + this.take);
   }
-  maybeSingle() { return Promise.resolve({ data: this.result()[0] ?? null, error: null }); }
-  then<A, B>(ok?: ((v: { data: Row[]; error: null }) => A | PromiseLike<A>) | null, bad?: ((e: unknown) => B | PromiseLike<B>) | null) {
-    return Promise.resolve({ data: this.result(), error: null, count: this.result().length }).then(ok, bad);
-  }
+  count() { return { get: async () => ({ data: () => ({ count: this.rows().length }) }) }; }
 }
 
 function pgError(message: string, code: string) {
@@ -177,15 +171,42 @@ async function apiRpc(fn: string, args: Record<string, unknown>) {
   throw new Error(`the fake has no api.${fn}`);
 }
 
-const fakeDb = {
-  from: (table: string) => new Query(table),
-  schema: () => ({ rpc: apiRpc }),
+/** The organisation document `validateBatch` reads its currency and timezone from. */
+const fakeFs = {
+  collection: (table: string) => ({
+    doc: (id: string) => ({
+      get: async () => {
+        const row = (state.tables[table] ?? []).find((r) => r.id === id);
+        return { exists: row !== undefined, id, data: () => row, get: (field: string) => row?.[field] };
+      },
+    }),
+  }),
 };
+
+const fakeDb = { fs: fakeFs, actor: { kind: 'user', userId: '0a000000-0000-4000-8000-000000000001', email: null, authTime: null }, meta: {} };
+
+vi.mock('@/db/rls', () => ({
+  orgRows: vi.fn(async (_db: unknown, orgId: string, table: string, refine?: (q: Query) => Query) => {
+    const q = new Query(table, orgId);
+    return (refine ? refine(q) : q).rows();
+  }),
+  orgRowById: vi.fn(async (_db: unknown, orgId: string, table: string, id: string) =>
+    new Query(table, orgId).where('id', '==', id).rows()[0] ?? null),
+  orgQuery: vi.fn(async (_db: unknown, orgId: string, table: string) => ({ query: new Query(table, orgId), keep: null })),
+  canReadGlobal: vi.fn(async () => true),
+}));
 
 vi.mock('@/core/db', async (importOriginal) => {
   const actual = await importOriginal<typeof import('@/core/db')>();
+  const { toMotionError } = await import('@/core/errors');
   return {
     ...actual,
+    // `api.*`: the fake functions above, refusing the way the ported functions do (a MotionError).
+    callApi: vi.fn(async (_db: unknown, fn: string, args: Record<string, unknown>, requestId?: string) => {
+      const result = await apiRpc(fn, args);
+      if (result.error) throw toMotionError(result.error, requestId);
+      return result.data;
+    }),
     // `api_server.register_document`: the `::document_kind_enum` cast is where an invoice upload died.
     registerDocument: vi.fn(async (_actor: unknown, _org: string, meta: Record<string, unknown>) => {
       state.log.push('register_document');

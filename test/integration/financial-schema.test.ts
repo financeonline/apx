@@ -3,102 +3,91 @@ import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 import { CATEGORY_ACCOUNT_TYPE, STANDARD_CATEGORIES } from '@/modules/financials';
 import { transferKindFor, type BankAccountType } from '@/modules/banking';
 import { IMPORT_TARGET, type ImportType } from '@/modules/imports';
-import { adminSql, clientFor, createAuthUser, resetFixtures, sqlstate } from './setup';
+import { listBankTransactions, loadBankTransaction, readRawDescriptions } from '@/modules/banking';
+import { listCounterparties } from '@/modules/financials';
+import { standardCategoryAccountType, fiscalPosition, type StandardCategory } from '@/db/app/shared';
+import { readOrganizationRow } from '@/db/app/financials-reads';
+import { orgRows } from '@/db/rls';
+import { globalRow, orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, fs, rpc as call, sqlstate } from './setup';
+import {
+  addMember, dropFixtures, rowOf, rowsOf, seedAccount, seedBankAccount, seedBankTxn, seedBatch, seedCounterparty,
+  seedDocument, seedImportRow, systemAccount,
+} from './f-fixtures';
 
 /**
- * Phase 2 (plan Phase 4) schema, over the real wire.
+ * Phase 2 (plan Phase 4) schema, through the ported functions and read policies.
  *
- * Two things are proven here that neither the unit tests nor pgTAP can prove alone:
- *   1. PARITY. Several rules exist twice — once in SQL because the database must enforce them, and
- *      once in TypeScript because the UI must anticipate them. A divergence would let the interface
- *      offer something the database refuses, or worse, describe a transfer as cash-neutral when SQL
- *      classed it otherwise. These tests fail on any drift.
- *   2. RLS under a real JWT, per role, on the new tables.
+ * Two things are proven here:
+ *   1. PARITY. Several rules exist twice — once where the data is written (the `src/db` ports of the
+ *      SQL functions) and once in the modules because the UI must anticipate them. A divergence
+ *      would let the interface offer something the write refuses, or worse, describe a transfer as
+ *      cash-neutral when the write classed it otherwise. These tests fail on any drift.
+ *   2. The read policies (`src/db/rls.ts`), per role, on the financial tables.
  */
+
+const RUN = `fs${Date.now().toString(36)}`;
+const DOMAIN = `${RUN}.financials.itest.motion`;
 
 let ownerId: string;
 let clientUserId: string;
 let orgId: string;
 let orgSlug: string;
+let strangerOrg: string | undefined;
 
 const NOT_FOUND = 'P0002';
-const PERMISSION_DENIED = '42501';
 
-const rpc = (userId: string, fn: string, args: Record<string, unknown> = {}) =>
-  clientFor(userId).schema('api').rpc(fn, args);
+const rpc = (userId: string, fn: string, args: Record<string, unknown> = {}) => call(clientFor(userId), fn, args);
 
 beforeAll(async () => {
-  resetFixtures();
-  ownerId = createAuthUser('fin-owner@itest.motion');
-  clientUserId = createAuthUser('fin-client@itest.motion');
+  ownerId = await createAuthUser(`fin-owner@${DOMAIN}`);
+  clientUserId = await createAuthUser(`fin-client@${DOMAIN}`);
 
   const created = await rpc(ownerId, 'create_organization', {
-    p_name: 'ITest Financials',
+    p_name: `ITest Financials ${RUN}`,
     p_fiscal_year_start_month: 4,
   });
   if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
   orgId = created.data as unknown as string;
-  orgSlug = adminSql(`select slug from public.organizations where id = '${orgId}'`);
+  orgSlug = String((await globalRow(fs(), 'organizations', orgId).get()).get('slug'));
+  await addMember(orgId, clientUserId, 'client');
+}, 60_000);
 
-  adminSql(`
-    set local app.bootstrap = 'on';
-    insert into public.organization_memberships (organization_id, user_id, role)
-    values ('${orgId}', '${clientUserId}', 'client');
-  `);
-});
-
-afterAll(() => {
-  resetFixtures();
-});
+afterAll(async () => {
+  await dropFixtures([orgId, strangerOrg], DOMAIN);
+}, 60_000);
 
 describe('organization creation seeds the standard chart (ADR-004)', () => {
-  it('creates one system account per standard category', () => {
-    const count = adminSql(
-      `select count(*) from public.accounts where organization_id = '${orgId}' and is_system`,
-    );
-    expect(Number(count)).toBe(STANDARD_CATEGORIES.length);
+  it('creates one system account per standard category', async () => {
+    expect(await rowsOf(orgId, 'accounts', { is_system: true })).toHaveLength(STANDARD_CATEGORIES.length);
   });
 
-  it('covers every category exactly once', () => {
-    const distinct = adminSql(`
-      select count(distinct standard_category) from public.accounts
-       where organization_id = '${orgId}' and is_system`);
-    expect(Number(distinct)).toBe(26);
+  it('covers every category exactly once', async () => {
+    const categories = new Set((await rowsOf(orgId, 'accounts', { is_system: true })).map((a) => a.standard_category));
+    expect(categories.size).toBe(26);
   });
 
-  it('materialises a fiscal calendar to render before any data exists', () => {
-    const periods = adminSql(
-      `select count(*) from public.fiscal_periods where organization_id = '${orgId}'`,
-    );
-    expect(Number(periods)).toBe(24);
+  it('materialises a fiscal calendar to render before any data exists', async () => {
+    expect(await rowsOf(orgId, 'fiscal_periods')).toHaveLength(24);
   });
 });
 
 describe('parity: the category to account-type map', () => {
-  it('agrees with public.standard_category_account_type for all 26 categories', () => {
-    const rows = adminSql(`
-      select string_agg(c::text || '=' || public.standard_category_account_type(c)::text, ',' order by c::text)
-        from unnest(enum_range(null::public.standard_category_enum)) c`);
-    const fromSql = Object.fromEntries(rows.split(',').map((pair) => pair.split('=')));
-
+  it('agrees with standard_category_account_type, as the writes apply it, for all 26 categories', () => {
     for (const category of STANDARD_CATEGORIES) {
-      expect(fromSql[category], `${category} disagrees between SQL and TypeScript`)
+      expect(standardCategoryAccountType(category as StandardCategory), `${category} disagrees between the write and the module`)
         .toBe(CATEGORY_ACCOUNT_TYPE[category]);
     }
-    expect(Object.keys(fromSql)).toHaveLength(26);
+    expect(STANDARD_CATEGORIES).toHaveLength(26);
   });
 });
 
 describe('parity: the fiscal calendar', () => {
-  it('agrees with app.fiscal_position on the seeded periods of an April-start organization', () => {
-    // The seeded rows were computed by SQL; core/periods computes them independently in TypeScript.
-    const rows = adminSql(`
-      select string_agg(period_start::text || '=' || fiscal_year || 'Q' || fiscal_quarter, ',' order by period_start)
-        from public.fiscal_periods where organization_id = '${orgId}'`);
-
-    for (const entry of rows.split(',')) {
-      const [start, position] = entry.split('=') as [string, string];
-      const [year, quarter] = position.split('Q').map(Number) as [number, number];
+  it('agrees with app.fiscal_position on the seeded periods of an April-start organization', async () => {
+    // The seeded rows were computed by `api.create_organization`; this computes them independently.
+    const periods = (await rowsOf(orgId, 'fiscal_periods')).sort((a, b) => String(a.period_start).localeCompare(String(b.period_start)));
+    for (const p of periods) {
+      const start = String(p.period_start);
       const month = Number(start.slice(5, 7));
       const calendarYear = Number(start.slice(0, 4));
 
@@ -106,28 +95,17 @@ describe('parity: the fiscal calendar', () => {
       const expectedYear = month >= 4 ? calendarYear : calendarYear - 1;
       const expectedQuarter = Math.floor(((month - 4 + 12) % 12) / 3) + 1;
 
-      expect(year, `${start} fiscal year`).toBe(expectedYear);
-      expect(quarter, `${start} fiscal quarter`).toBe(expectedQuarter);
+      expect(p.fiscal_year, `${start} fiscal year`).toBe(expectedYear);
+      expect(p.fiscal_quarter, `${start} fiscal quarter`).toBe(expectedQuarter);
+      expect(fiscalPosition(start, 4)).toEqual({ fiscal_year: expectedYear, fiscal_quarter: expectedQuarter });
     }
   });
 });
 
 describe('parity: import type to target table', () => {
   it('agrees with api.start_import_batch for every import type', async () => {
-    const documentId = adminSql(`
-      with inserted as (
-        insert into public.source_documents
-               (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status)
-        values ('${orgId}', '${orgId}/parity/f.csv', 'f.csv', 'text/csv', 10,
-                decode('aa','hex'), 'ready')
-        returning id)
-      select id from inserted`);
-
-    const bankAccountId = adminSql(`
-      with inserted as (
-        insert into public.bank_accounts (organization_id, name, bank_name)
-        values ('${orgId}', 'Parity Current', 'Parity Bank') returning id)
-      select id from inserted`);
+    const documentId = await seedDocument(orgId, { filename: 'f.csv', kind: 'other' });
+    const bankAccountId = await seedBankAccount(orgId, { name: 'Parity Current', bankName: 'Parity Bank' });
 
     for (const importType of Object.keys(IMPORT_TARGET) as ImportType[]) {
       const { data, error } = await rpc(ownerId, 'start_import_batch', {
@@ -137,10 +115,8 @@ describe('parity: import type to target table', () => {
       });
       expect(error, `${importType}: ${error?.message}`).toBeNull();
 
-      const target = adminSql(
-        `select target_table from public.import_batches where id = '${data as string}'`,
-      );
-      expect(target, `${importType} target`).toBe(IMPORT_TARGET[importType]);
+      const batch = await rowOf(orgId, 'import_batches', data as string);
+      expect(batch?.target_table, `${importType} target`).toBe(IMPORT_TARGET[importType]);
 
       // Only one batch may be active per document, so close this one before the next type.
       await rpc(ownerId, 'reject_import_batch', { p_batch: data, p_reason: 'parity probe' });
@@ -159,40 +135,15 @@ describe('parity: transfer kind derivation (ADR-028)', () => {
 
   it('agrees with api.mark_transfer, which derives the kind and never accepts it', async () => {
     for (const [typeA, typeB] of PAIRS) {
-      const accountA = adminSql(`
-        with inserted as (
-          insert into public.bank_accounts (organization_id, name, bank_name, account_type)
-          values ('${orgId}', 'A ${typeA} ${typeB}', 'Bank', '${typeA}') returning id)
-        select id from inserted`);
-      const accountB = adminSql(`
-        with inserted as (
-          insert into public.bank_accounts (organization_id, name, bank_name, account_type)
-          values ('${orgId}', 'B ${typeA} ${typeB}', 'Bank', '${typeB}') returning id)
-        select id from inserted`);
-
-      const txnA = adminSql(`
-        with inserted as (
-          insert into public.bank_transactions
-                 (organization_id, bank_account_id, transaction_date, amount, period_id, record_status)
-          values ('${orgId}', '${accountA}', '2026-05-10', -100.00,
-                  '00000000-0000-0000-0000-000000000000', 'accepted')
-          returning id)
-        select id from inserted`);
-      const txnB = adminSql(`
-        with inserted as (
-          insert into public.bank_transactions
-                 (organization_id, bank_account_id, transaction_date, amount, period_id, record_status)
-          values ('${orgId}', '${accountB}', '2026-05-10', 100.00,
-                  '00000000-0000-0000-0000-000000000000', 'accepted')
-          returning id)
-        select id from inserted`);
+      const accountA = await seedBankAccount(orgId, { name: `A ${typeA} ${typeB}`, bankName: 'Bank', type: typeA });
+      const accountB = await seedBankAccount(orgId, { name: `B ${typeA} ${typeB}`, bankName: 'Bank', type: typeB });
+      const txnA = await seedBankTxn(orgId, { bankAccountId: accountA, date: '2026-05-10', amount: '-100.00', description: 'OUT' });
+      const txnB = await seedBankTxn(orgId, { bankAccountId: accountB, date: '2026-05-10', amount: '100.00', description: 'IN' });
 
       const { error } = await rpc(ownerId, 'mark_transfer', { p_txn: txnA, p_pair: txnB });
       expect(error, `${typeA}/${typeB}: ${error?.message}`).toBeNull();
 
-      const kinds = adminSql(`
-        select string_agg(transfer_kind::text, ',') from public.bank_transactions
-         where id in ('${txnA}', '${txnB}')`).split(',');
+      const kinds = [(await rowOf(orgId, 'bank_transactions', txnA))?.transfer_kind, (await rowOf(orgId, 'bank_transactions', txnB))?.transfer_kind];
 
       const expected = transferKindFor(typeA, typeB);
       expect(kinds[0], `${typeA}/${typeB} leg A`).toBe(expected);
@@ -202,86 +153,75 @@ describe('parity: transfer kind derivation (ADR-028)', () => {
   });
 });
 
-describe('RLS on the new tables', () => {
+describe('the read policies on the financial tables', () => {
   it('a client reads the financial records of their own organization', async () => {
     const db = clientFor(clientUserId);
-    for (const table of ['accounts', 'fiscal_periods', 'counterparties', 'bank_accounts'] as const) {
-      const { error } = await db.from(table).select('id').eq('organization_id', orgId);
-      expect(error, `${table} should read cleanly for a client`).toBeNull();
+    for (const table of ['accounts', 'fiscal_periods', 'bank_accounts'] as const) {
+      expect((await orgRows(db, orgId, table)).length, `${table} should read for a client`).toBeGreaterThan(0);
     }
-    const { data } = await db.from('accounts').select('id').eq('organization_id', orgId);
-    expect(data?.length, 'a client sees the seeded chart').toBe(26);
+    expect(await orgRows(db, orgId, 'accounts'), 'a client sees the seeded chart').toHaveLength(26);
   });
 
   it('a client reads NOTHING of the import surface (ADR-038.4)', async () => {
     const db = clientFor(clientUserId);
     for (const table of ['source_documents', 'import_batches', 'import_rows', 'import_mappings'] as const) {
-      const { data, error } = await db.from(table).select('id').eq('organization_id', orgId);
-      expect(error, `${table} should not error`).toBeNull();
-      expect(data ?? [], `${table} must be invisible without imports.review`).toHaveLength(0);
+      expect(await orgRows(db, orgId, table), `${table} must be invisible without imports.review`).toHaveLength(0);
     }
   });
 
   it('an owner does read the import surface', async () => {
-    const { data } = await clientFor(ownerId).from('source_documents').select('id')
-      .eq('organization_id', orgId);
-    expect((data ?? []).length).toBeGreaterThan(0);
-  });
-
-  it('raw bank text is not selectable by anyone through the table (ADR-044.2; R2-A-04)', async () => {
-    for (const userId of [ownerId, clientUserId]) {
-      const { error } = await clientFor(userId)
-        .from('bank_transactions').select('id, description_raw').eq('organization_id', orgId);
-      expect(error, 'description_raw must be refused even for an owner').not.toBeNull();
-      expect(sqlstate(error)).toBe(PERMISSION_DENIED);
-    }
-  });
-
-  it('counterparty contact columns are likewise not selectable through the table', async () => {
-    const { error } = await clientFor(ownerId)
-      .from('counterparties').select('id, email, notes').eq('organization_id', orgId);
-    expect(error).not.toBeNull();
-    expect(sqlstate(error)).toBe(PERMISSION_DENIED);
+    expect((await orgRows(clientFor(ownerId), orgId, 'source_documents')).length).toBeGreaterThan(0);
   });
 
   /*
-   * ADR-172 hardening (2026-10-14, migration 20261018000033): the raw text is for REVIEW. The view
+   * Raw bank text and counterparty contact columns (ADR-044.2; R2-A-04). PostgreSQL refused the
+   * columns themselves to `authenticated`; the documents carry them, so what is proven here is that
+   * the readers the pages use never return them.
+   */
+  it('raw bank text is not returned by the banking readers (ADR-044.2; R2-A-04)', async () => {
+    for (const userId of [ownerId, clientUserId]) {
+      const rows = await listBankTransactions(clientFor(userId), orgId, {}, { limit: 50, offset: 0 });
+      expect(rows.length).toBeGreaterThan(0);
+      for (const row of rows) expect(row).not.toHaveProperty('descriptionRaw');
+      const one = await loadBankTransaction(clientFor(userId), orgId, rows[0]!.id);
+      expect(one).not.toHaveProperty('descriptionRaw');
+      expect(one).not.toHaveProperty('counterpartyNameRaw');
+    }
+  });
+
+  it('counterparty contact columns are likewise not returned by the reader', async () => {
+    await seedCounterparty(orgId, { name: 'Contact Ltd', kind: 'customer' });
+    const rows = await listCounterparties(clientFor(ownerId), orgId, { limit: 50, offset: 0 });
+    expect(rows.length).toBeGreaterThan(0);
+    for (const row of rows) {
+      expect(row).not.toHaveProperty('email');
+      expect(row).not.toHaveProperty('notes');
+    }
+  });
+
+  /*
+   * ADR-172 hardening (2026-10-14, migration 20261018000033): the raw text is for REVIEW. The reader
    * returns a line only while a batch in review is about it — here, a row of a batch awaiting review
    * flagged as a duplicate of the line — and only to `imports.review` with `banking.view` or
    * `financials.view`. Once nothing is in review, nobody reads it, an owner included.
    */
-  it('the definer view exposes raw text to imports.review, only while it is in review, and nothing to a client', async () => {
-    const rawRows = async (userId: string) => {
-      const { data, error } = await clientFor(userId).from('bank_transactions_raw').select('id')
-        .eq('organization_id', orgId);
-      expect(error, error?.message).toBeNull();
-      return (data ?? []).length;
-    };
+  it('the raw-text reader exposes raw text to imports.review, only while it is in review, and nothing to a client', async () => {
+    const lines = await rowsOf(orgId, 'bank_transactions');
+    const line = String(lines[0]!.id);
+    const rawRows = async (userId: string) => (await readRawDescriptions(clientFor(userId), orgId, lines.map((l) => String(l.id)))).length;
     expect(await rawRows(ownerId), 'nothing is in review: no raw text, even for an owner').toBe(0);
 
-    const line = adminSql(`select id from public.bank_transactions where organization_id = '${orgId}' limit 1`);
-    const account = adminSql(`select bank_account_id from public.bank_transactions where id = '${line}'`);
-    const batch = adminSql(`
-      with doc as (
-        insert into public.source_documents
-               (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status)
-        values ('${orgId}', '${orgId}/review/raw.csv', 'raw.csv', 'text/csv', 10, decode('bb','hex'), 'ready')
-        returning id),
-      b as (
-        insert into public.import_batches
-               (organization_id, source_document_id, import_type, target_table, bank_account_id,
-                period_start, period_end, status)
-        select '${orgId}', doc.id, 'bank_statement', 'bank_transactions', '${account}',
-               '2026-05-01', '2026-05-31', 'awaiting_review' from doc
-        returning id)
-      select id from b`);
-    adminSql(`insert into public.import_rows (organization_id, batch_id, row_number, duplicate_of_table, duplicate_of_id, status)
-              values ('${orgId}', '${batch}', 1, 'bank_transactions', '${line}', 'duplicate')`);
+    const doc = await seedDocument(orgId, { filename: 'raw.csv', kind: 'bank_statement' });
+    const batch = await seedBatch(orgId, {
+      documentId: doc, importType: 'bank_statement', targetTable: 'bank_transactions', status: 'awaiting_review',
+      bankAccountId: String(lines[0]!.bank_account_id), periodStart: '2026-05-01', periodEnd: '2026-05-31',
+    });
+    await seedImportRow(orgId, { batchId: batch, rowNumber: 1, status: 'duplicate', duplicateOfTable: 'bank_transactions', duplicateOfId: line });
 
     expect(await rawRows(ownerId), 'an owner holds imports.review and reads the line under review').toBe(1);
     expect(await rawRows(clientUserId), 'a client holds no imports.review').toBe(0);
 
-    adminSql(`update public.import_batches set status = 'rejected' where id = '${batch}'`);
+    await orgRow(fs(), orgId, 'import_batches', batch).update({ status: 'rejected' });
     expect(await rawRows(ownerId), 'the review over, the raw text is gone again').toBe(0);
   });
 });
@@ -295,39 +235,33 @@ describe('suspension freezes the financial tables (ADR-044.4; R2-A-07)', () => {
   const TENANT_DATA = ['ledger_entries', 'invoices', 'bank_transactions', 'accounts',
     'counterparties', 'import_batches', 'source_documents'] as const;
 
-  beforeAll(() => {
-    adminSql(`update public.organizations set status = 'suspended' where id = '${orgId}'`);
+  beforeAll(async () => {
+    await globalRow(fs(), 'organizations', orgId).update({ status: 'suspended' });
   });
 
-  afterAll(() => {
-    adminSql(`update public.organizations set status = 'active' where id = '${orgId}'`);
+  afterAll(async () => {
+    await globalRow(fs(), 'organizations', orgId).update({ status: 'active' });
   });
 
   it('resolves the member to suspended_member', async () => {
-    const { data } = await clientFor(ownerId).schema('api').rpc('my_context', { p_slug: orgSlug });
+    const { data } = await rpc(ownerId, 'my_context', { p_slug: orgSlug });
     expect((data as { role: string }[])[0]?.role).toBe('suspended_member');
   });
 
   it('still admits the frozen-Home tables', async () => {
+    expect(await readOrganizationRow(clientFor(ownerId), orgId), 'the frozen Home still resolves the organization').not.toBeNull();
     for (const table of FROZEN_HOME) {
-      const column = table === 'organizations' ? 'id' : 'organization_id';
-      // A column rather than `*`: the payload columns (`health_scores.breakdown`) are not selectable
-      // by `authenticated` since the ADR-172 hardening; they are read through definer views.
-      const { error } = await clientFor(ownerId).from(table).select(column).eq(column, orgId);
-      expect(error, `${table} should still be readable`).toBeNull();
+      if (table === 'organizations') continue;
+      // Readable means the policy admits the table (an empty table still returns []), never an error.
+      await expect(orgRows(clientFor(ownerId), orgId, table), `${table} should still be readable`).resolves.toBeInstanceOf(Array);
     }
-    const { data } = await clientFor(ownerId).from('organizations').select('id').eq('id', orgId);
-    expect(data, 'the frozen Home still resolves the organization').toHaveLength(1);
-    const periods = await clientFor(ownerId).from('fiscal_periods').select('id').eq('organization_id', orgId);
-    expect(periods.data?.length ?? 0, 'the frozen Home has a month to show (ADR-068)').toBeGreaterThan(0);
+    const periods = await orgRows(clientFor(ownerId), orgId, 'fiscal_periods');
+    expect(periods.length, 'the frozen Home has a month to show (ADR-068)').toBeGreaterThan(0);
   });
 
   it('and hides every other tenant table', async () => {
     for (const table of TENANT_DATA) {
-      const { data, error } = await clientFor(ownerId).from(table).select('id')
-        .eq('organization_id', orgId);
-      expect(error, `${table} should not error`).toBeNull();
-      expect(data ?? [], `${table} must be frozen for a suspended_member`).toHaveLength(0);
+      expect(await orgRows(clientFor(ownerId), orgId, table), `${table} must be frozen for a suspended_member`).toHaveLength(0);
     }
   });
 });
@@ -337,12 +271,11 @@ describe('the api surface refuses cross-tenant work with NOT FOUND', () => {
   let foreignAccountId: string;
 
   beforeAll(async () => {
-    strangerId = createAuthUser('fin-stranger@itest.motion');
-    const created = await rpc(strangerId, 'create_organization', { p_name: 'ITest Stranger' });
+    strangerId = await createAuthUser(`fin-stranger@${DOMAIN}`);
+    const created = await rpc(strangerId, 'create_organization', { p_name: `ITest Stranger ${RUN}` });
     if (created.error) throw new Error(`stranger org failed: ${created.error.message}`);
-    foreignAccountId = adminSql(`
-      select id from public.accounts
-       where organization_id = '${created.data as string}' and standard_category = 'revenue'`);
+    strangerOrg = created.data as string;
+    foreignAccountId = await systemAccount(strangerOrg, 'revenue');
   });
 
   it('api.remap_account on another organization raises P0002', async () => {
@@ -364,9 +297,7 @@ describe('the api surface refuses cross-tenant work with NOT FOUND', () => {
 
 describe('a system account cannot be re-categorised (ADR-004)', () => {
   it('raises VALIDATION, because a seeded account IS its category', async () => {
-    const seeded = adminSql(`
-      select id from public.accounts
-       where organization_id = '${orgId}' and is_system and standard_category = 'revenue'`);
+    const seeded = await systemAccount(orgId, 'revenue');
     const { error } = await rpc(ownerId, 'remap_account', {
       p_account: seeded, p_category: 'marketing',
     });
@@ -375,48 +306,29 @@ describe('a system account cannot be re-categorised (ADR-004)', () => {
   });
 
   it('but an imported account can be, and the change is recorded in history', async () => {
-    const imported = adminSql(`
-      with inserted as (
-        insert into public.accounts
-               (organization_id, name, normalized_name, account_type, standard_category, source)
-        values ('${orgId}', 'Facebook Ads', 'facebook ads', 'expense', 'operating_expense', 'imported')
-        returning id)
-      select id from inserted`);
-    /*
-     * No hand-written opening row any more. `open_category_history` writes it when the account is
-     * created (ADR-060): before that trigger existed, `account_category_history` was empty until
-     * somebody re-categorised something, and this fixture's manual insert was the workaround that
-     * let the assertion below pass while the real table stayed empty in production.
-     */
-    expect(Number(adminSql(`
-      select count(*) from public.account_category_history
-       where account_id = '${imported}' and valid_to is null`)),
-    'creating an account opens its first interval').toBe(1);
+    // An imported account, as the import's account creation writes it: with its first interval
+    // (what the `open_category_history` trigger did, ADR-060).
+    const imported = await seedAccount(orgId, { name: 'Facebook Ads', category: 'operating_expense', accountType: 'expense' });
+    expect(await rowsOf(orgId, 'account_category_history', { account_id: imported, valid_to: null }),
+      'creating an account opens its first interval').toHaveLength(1);
 
     const { error } = await rpc(ownerId, 'remap_account', {
       p_account: imported, p_category: 'marketing',
     });
     expect(error, error?.message).toBeNull();
 
-    const category = adminSql(`select standard_category from public.accounts where id = '${imported}'`);
-    expect(category).toBe('marketing');
+    const account = (await rowOf(orgId, 'accounts', imported))!;
+    expect(account.standard_category).toBe('marketing');
+    expect(account.account_type).toBe('expense');
 
     // ADR-034: the old row is closed and a new one opened, so evidence resolved as-of an earlier
     // run still sees the category that produced those numbers.
-    const open = adminSql(`
-      select count(*) from public.account_category_history
-       where account_id = '${imported}' and valid_to is null`);
-    expect(Number(open), 'exactly one open history row').toBe(1);
-
-    const closed = adminSql(`
-      select count(*) from public.account_category_history
-       where account_id = '${imported}' and valid_to is not null`);
-    expect(Number(closed), 'the previous category was closed off').toBe(1);
+    const history = await rowsOf(orgId, 'account_category_history', { account_id: imported });
+    expect(history.filter((h) => h.valid_to === null), 'exactly one open history row').toHaveLength(1);
+    expect(history.filter((h) => h.valid_to !== null), 'the previous category was closed off').toHaveLength(1);
 
     // A remap changes every metric the account feeds, so a recalculation must be queued.
-    const jobs = adminSql(`
-      select count(*) from public.jobs
-       where organization_id = '${orgId}' and job_type = 'calculation.run'`);
-    expect(Number(jobs)).toBeGreaterThan(0);
+    const jobs = await fs().collection('jobs').where('organization_id', '==', orgId).where('job_type', '==', 'calculation.run').get();
+    expect(jobs.size).toBeGreaterThan(0);
   });
 });

@@ -1,6 +1,7 @@
 import 'server-only';
 import { randomUUID } from 'node:crypto';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
+import { globalRow, orgCollection, orgRow } from '@/db/schema';
 import {
   aggregationInstant, applyBankingPass, enqueueServerJob, finishCalculationRun, finishChunk, finishHealth,
   setPeriodCompleteness, startCalculationRun,
@@ -78,7 +79,7 @@ export async function runCalculationJob(
     return { status: 'failed', error: 'calculation.run has no organization to scope to' };
   }
 
-  const scoped = scope.db as SupabaseClient;
+  const scoped = scope.db as Db;
   const payload = job.payload;
 
   const trigger = (typeof payload.trigger === 'string' ? payload.trigger : 'recalc_manual') as CalculationTrigger;
@@ -212,8 +213,8 @@ export async function runCalculationJob(
      * organisation has it switched on — a separate job, so an assessment always cites a run that
      * succeeded, and nothing at all happens while the flag is off.
      */
-    const { data: org } = await scoped.from('organizations').select('features').eq('id', orgId).maybeSingle();
-    if ((org as { features?: Record<string, unknown> } | null)?.features?.funding_readiness === true) {
+    const org = await globalRow(scoped.fs, 'organizations', orgId).get();
+    if ((org.get('features') as Record<string, unknown> | undefined)?.funding_readiness === true) {
       await enqueueServerJob(null, {
         organizationId: orgId, jobType: 'funding.assess', payload: { trigger: 'calculation_run', run_id: outcome.runId },
       }).catch((cause: unknown) => ({ deferred: cause instanceof Error ? cause.message : String(cause) }));
@@ -239,12 +240,8 @@ export async function runCalculationJob(
  * 31st; a business in Dubai must not have it dated the 2nd. The zone is a setting, so it is read
  * rather than assumed.
  */
-async function organisationToday(db: SupabaseClient, orgId: string): Promise<string> {
-  const { data } = await db
-    .from('organizations')
-    .select('timezone')
-    .eq('id', orgId)
-    .maybeSingle();
+async function organisationToday(db: Db, orgId: string): Promise<string> {
+  const data = (await globalRow(db.fs, 'organizations', orgId).get()).data() ?? null;
 
   const timezone = (data as { timezone?: string } | null)?.timezone ?? 'UTC';
   return new Intl.DateTimeFormat('en-CA', {
@@ -285,46 +282,36 @@ export function runTriggerRef(trigger: CalculationTrigger, ref: string | null, r
   }
 }
 
-async function isImportBatch(db: SupabaseClient, orgId: string, id: string): Promise<boolean> {
-  const { data } = await db.from('import_batches').select('id').eq('organization_id', orgId).eq('id', id).maybeSingle();
-  return data !== null;
+async function isImportBatch(db: Db, orgId: string, id: string): Promise<boolean> {
+  return (await orgRow(db.fs, orgId, 'import_batches', id).get()).exists;
 }
 
 /** The union of the periods each coalesced trigger touched (FU-16). */
 export async function periodsTouchedByAll(
-  db: SupabaseClient, orgId: string, refs: ReadonlyArray<string | null>,
+  db: Db, orgId: string, refs: ReadonlyArray<string | null>,
 ): Promise<string[]> {
   const sets = await Promise.all([...new Set(refs)].map((ref) => periodsTouchedBy(db, orgId, ref)));
   return [...new Set(sets.flat())].sort();
 }
 
 async function periodsTouchedBy(
-  db: SupabaseClient, orgId: string, batchId: string | null,
+  db: Db, orgId: string, batchId: string | null,
 ): Promise<string[]> {
-  if (batchId !== null) {
-    const { data: batch } = await db
-      .from('import_batches')
-      .select('period_start, period_end')
-      .eq('organization_id', orgId)
-      .eq('id', batchId)
-      .maybeSingle();
+  // One read of the calendar (a few dozen months), filtered here: the overlap test is a range on
+  // two fields, which a single Firestore query does not express without its own index.
+  const periods = (await orgCollection(db.fs, orgId, 'fiscal_periods').select('period_start', 'period_end').get())
+    .docs.map((d) => ({ id: d.id, start: String(d.get('period_start')), end: String(d.get('period_end')) }));
 
-    const range = batch as { period_start?: string; period_end?: string } | null;
+  if (batchId !== null) {
+    const snap = batchId ? await orgRow(db.fs, orgId, 'import_batches', batchId).get() : null;
+    const range = snap?.exists ? (snap.data() as { period_start?: string | null; period_end?: string | null }) : null;
     if (range?.period_start != null && range.period_end != null) {
-      const { data } = await db
-        .from('fiscal_periods')
-        .select('id')
-        .eq('organization_id', orgId)
-        .lte('period_start', range.period_end)
-        .gte('period_end', range.period_start);
-      const ids = ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
+      const ids = periods
+        .filter((p) => p.start <= range.period_end! && p.end >= range.period_start!)
+        .map((p) => p.id);
       if (ids.length > 0) return ids;
     }
   }
 
-  const { data } = await db
-    .from('fiscal_periods')
-    .select('id')
-    .eq('organization_id', orgId);
-  return ((data ?? []) as Array<{ id: string }>).map((row) => row.id);
+  return periods.map((p) => p.id);
 }

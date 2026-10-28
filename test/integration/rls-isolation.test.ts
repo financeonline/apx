@@ -1,230 +1,216 @@
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { canReadGlobal, orgRows } from '@/db/rls';
+import { organizationDoc } from '@/modules/tenancy';
+import { anonClient, clientFor, createAuthUser, fs, rpc, sqlstate } from './setup';
 import {
-  adminSql,
-  clientFor,
-  createAuthUser,
-  resetFixtures,
-  sqlstate,
-  PHASE1_TABLES,
-} from './setup';
+  assign, clientFirestoreRequest, dropAuditOf, dropOrg, dropUsers, idTokenFor, makePlatformUser, rawCount, slugOf,
+} from './tenancy-fixtures';
 
 /**
- * The adversarial suite (TEST_STRATEGY.md §4). Everything here runs through a real user JWT so RLS
- * and the api.* guards are the things actually under test; the service key is used only to build
- * fixtures, never to assert what a user can see.
+ * The adversarial suite (TEST_STRATEGY.md §4). Everything here runs as a real signed-in person —
+ * `clientFor(uid)` through the read policies of `src/db/rls.ts` and the `api.*` guards, or a real
+ * Firebase ID token straight at Firestore — so the tenant boundary is the thing actually under
+ * test. `fs()` builds fixtures only, never asserts what a user can see.
  */
+
+const RUN = `ri${Date.now().toString(36)}`;
+const DOMAIN = `${RUN}.isolation.itest.motion`;
+const PASSWORD = 'itest-password-1';
+const emailA = `owner-a@${DOMAIN}`;
+const emailB = `owner-b@${DOMAIN}`;
 
 let ownerA: string;
 let ownerB: string;
 let orgA: string;
 let orgB: string;
 let slugB: string;
+let employee: string;
 
 beforeAll(async () => {
-  resetFixtures();
-  ownerA = createAuthUser('owner-a@itest.motion');
-  ownerB = createAuthUser('owner-b@itest.motion');
+  ownerA = await createAuthUser(emailA, PASSWORD);
+  ownerB = await createAuthUser(emailB, PASSWORD);
 
-  const a = clientFor(ownerA, { email: 'owner-a@itest.motion' });
-  const b = clientFor(ownerB, { email: 'owner-b@itest.motion' });
-
-  const created = await a.schema('api').rpc('create_organization', { p_name: 'ITest Alpha' });
+  const created = await rpc<string>(clientFor(ownerA, { email: emailA }), 'create_organization', { p_name: `ITest Alpha ${RUN}` });
   expect(created.error).toBeNull();
-  orgA = created.data as string;
+  orgA = created.data!;
 
-  const createdB = await b.schema('api').rpc('create_organization', { p_name: 'ITest Beta' });
+  const createdB = await rpc<string>(clientFor(ownerB, { email: emailB }), 'create_organization', { p_name: `ITest Beta ${RUN}` });
   expect(createdB.error).toBeNull();
-  orgB = createdB.data as string;
+  orgB = createdB.data!;
+  slugB = await slugOf(orgB);
 
-  slugB = adminSql(`select slug from public.organizations where id = '${orgB}'`);
+  // Something in every table B's owner could leak: an invitation, besides the membership.
+  const invited = await rpc(clientFor(ownerB, { email: emailB }), 'invite_member', {
+    p_org: orgB, p_email: `someone-b@${DOMAIN}`, p_role: 'client',
+  });
+  expect(invited.error).toBeNull();
 });
 
-afterAll(() => resetFixtures());
+afterAll(async () => {
+  for (const org of [orgA, orgB]) {
+    if (!org) continue;
+    await dropAuditOf(org);
+    await dropOrg(org);
+  }
+  await dropUsers([ownerA, ownerB, employee].filter(Boolean));
+});
 
 describe('a member sees their own organization and nothing else', () => {
   it('api.my_organizations returns exactly one organization for each owner', async () => {
-    const a = clientFor(ownerA);
-    const { data, error } = await a.schema('api').rpc('my_organizations');
+    const { data, error } = await rpc<Array<{ organization_id: string; role: string }>>(clientFor(ownerA), 'my_organizations');
     expect(error).toBeNull();
     expect(data).toHaveLength(1);
-    expect((data as Array<{ organization_id: string; role: string }>)[0]!.organization_id).toBe(orgA);
-    expect((data as Array<{ role: string }>)[0]!.role).toBe('owner');
+    expect(data![0]!.organization_id).toBe(orgA);
+    expect(data![0]!.role).toBe('owner');
   });
 
-  it('owner A reads zero rows of organization B on every tenant table', async () => {
+  it('owner A reads nothing of organization B on every tenant table', async () => {
     const a = clientFor(ownerA);
-    for (const table of ['organizations', 'organization_memberships', 'invitations', 'audit_events'] as const) {
-      const column = table === 'organizations' ? 'id' : 'organization_id';
-      // `audit_events` carries row copies in `before`/`after`, which `authenticated` cannot select at
-      // all since the ADR-172 hardening (the trail is served by api.org_audit_events): a column list.
-      const columns = table === 'audit_events' ? 'id, organization_id, action' : '*';
-      const { data, error } = await a.from(table).select(columns).eq(column, orgB);
-      expect(error, `${table} should read cleanly`).toBeNull();
-      expect(data, `${table} must expose nothing of organization B`).toHaveLength(0);
+    // The rows exist (so "nothing" is a refusal, not an empty table).
+    expect(await rawCount(orgB, 'organization_memberships')).toBe(1);
+    expect(await rawCount(orgB, 'invitations')).toBe(1);
+
+    expect(await organizationDoc(a, orgB), 'organizations must expose nothing of B').toBeNull();
+    for (const table of ['organization_memberships', 'invitations', 'fiscal_periods', 'accounts'] as const) {
+      expect(await orgRows(a, orgB, table), `${table} must expose nothing of organization B`).toHaveLength(0);
     }
+    // The trail is served by api.org_audit_events only (ADR-172 hardening): B's is NOT_FOUND to A.
+    const trail = await rpc(a, 'org_audit_events', { p_org: orgB });
+    expect(sqlstate(trail.error)).toBe('P0002');
   });
 
   it('platform-class tables expose nothing to a tenant owner', async () => {
     const a = clientFor(ownerA);
-    for (const table of ['jobs', 'platform_settings', 'platform_org_settings', 'api_rate_limits'] as const) {
-      const { data } = await a.from(table).select('*');
-      expect(data ?? [], `${table} must be invisible to a tenant`).toHaveLength(0);
+    for (const table of ['jobs', 'platform_settings', 'api_rate_limits'] as const) {
+      expect(await canReadGlobal(a, table), `${table} must be invisible to a tenant`).toBe(false);
     }
+    expect(await orgRows(a, orgA, 'platform_org_settings'), 'even of their own organisation').toHaveLength(0);
   });
 
   it('profiles is own-row only', async () => {
-    const a = clientFor(ownerA);
-    const { data } = await a.from('profiles').select('id');
+    const { data } = await rpc<Array<{ user_id: string }>>(clientFor(ownerA), 'my_profile');
     expect(data).toHaveLength(1);
-    expect(data![0]!.id).toBe(ownerA);
+    expect(data![0]!.user_id).toBe(ownerA);
   });
 });
 
-describe('no table is writable by an authenticated user (ADR-026)', () => {
-  // A real column per table: an empty patch is a no-op and would not exercise the privilege.
-  // Each probe carries its own filter VALUE too. A uuid column given the text 'anything' is
-  // rejected as 22P02 (invalid input syntax) during parsing, before the privilege check ever
-  // runs — which would make the test pass for the wrong reason, or fail for the wrong one.
-  // Built lazily: the fixture ids only exist after beforeAll, and a describe body runs at
-  // collection time.
-  const probes = (): Record<string, { patch: Record<string, unknown>; filter: string; value: string }> => ({
-    organizations: { patch: { name: 'hijacked' }, filter: 'id', value: orgA },
-    profiles: { patch: { full_name: 'hijacked' }, filter: 'id', value: ownerA },
-    platform_users: { patch: { notes: 'hijacked' }, filter: 'user_id', value: ownerA },
-    organization_memberships: { patch: { role: 'owner' }, filter: 'organization_id', value: orgA },
-    organization_assignments: { patch: { revoked_reason: 'x' }, filter: 'organization_id', value: orgA },
-    invitations: { patch: { status: 'revoked' }, filter: 'organization_id', value: orgA },
-    ownership_transfers: { patch: { status: 'cancelled' }, filter: 'organization_id', value: orgA },
-    audit_events: { patch: { action: 'tampered' }, filter: 'organization_id', value: orgA },
-    jobs: { patch: { status: 'cancelled' }, filter: 'organization_id', value: orgA },
-    api_rate_limits: { patch: { count: 0 }, filter: 'bucket', value: 'anything' },
-    role_permissions: { patch: { permission: 'system.manage' }, filter: 'role', value: 'owner' },
-    platform_settings: { patch: { value: 1 }, filter: 'key', value: 'anything' },
-    platform_org_settings: { patch: { notes: 'x' }, filter: 'organization_id', value: orgA },
+describe('no collection is readable or writable by a browser (ADR-026; firebase/firestore.rules)', () => {
+  // The Firestore equivalent of "authenticated holds no table privilege": the client SDK's own
+  // credential, an ID token, sent straight to Firestore. Every path is refused, own data included.
+  const paths = (): Record<string, string> => ({
+    organizations: `organizations/${orgA}`,
+    profiles: `profiles/${ownerA}`,
+    platform_users: `platform_users/${ownerA}`,
+    organization_memberships: `organizations/${orgA}/organization_memberships/${ownerA}`,
+    organization_assignments: `organizations/${orgA}/organization_assignments/${ownerA}`,
+    invitations: `organizations/${orgA}/invitations/probe-${RUN}`,
+    ownership_transfers: `organizations/${orgA}/ownership_transfers/probe-${RUN}`,
+    audit_events: `audit_events/probe-${RUN}`,
+    jobs: `jobs/probe-${RUN}`,
+    api_rate_limits: `api_rate_limits/probe-${RUN}`,
+    platform_settings: `platform_settings/probe-${RUN}`,
+    platform_org_settings: `organizations/${orgA}/platform_org_settings/current`,
+  });
+  const TABLES = [
+    'organizations', 'profiles', 'platform_users', 'organization_memberships', 'organization_assignments',
+    'invitations', 'ownership_transfers', 'audit_events', 'jobs', 'api_rate_limits', 'platform_settings',
+    'platform_org_settings',
+  ];
+  let token: string;
+  beforeAll(async () => {
+    token = await idTokenFor(emailA, PASSWORD);
   });
 
-  it.each(PHASE1_TABLES)('UPDATE on %s is refused with 42501', async (table) => {
-    const probe = probes()[table]!;
-    const a = clientFor(ownerA);
-    const { error } = await a
-      .from(table)
-      .update(probe.patch)
-      .eq(probe.filter, probe.value);
-    expect(error, `${table} must refuse the write`).not.toBeNull();
-    expect(sqlstate(error), `${table} must refuse with a privilege error`).toBe('42501');
+  it.each(TABLES)('a write to %s is refused', async (table) => {
+    expect(await clientFirestoreRequest(token, 'PATCH', paths()[table]!, { name: 'hijacked', role: 'owner' }))
+      .toBe(403);
   });
 
-  it.each(PHASE1_TABLES)('INSERT into %s is refused with 42501', async (table) => {
-    const a = clientFor(ownerA);
-    const { error } = await a.from(table).insert(probes()[table]!.patch);
-    expect(error, `${table} must refuse the insert`).not.toBeNull();
-    expect(sqlstate(error), `${table} must refuse with a privilege error`).toBe('42501');
+  it.each(TABLES)('a read of %s is refused', async (table) => {
+    expect(await clientFirestoreRequest(token, 'GET', paths()[table]!)).toBe(403);
   });
 
-  it('DELETE on organization_memberships is refused', async () => {
-    const a = clientFor(ownerA);
-    const { error } = await a.from('organization_memberships').delete().eq('organization_id', orgA);
-    expect(error).not.toBeNull();
-    expect(sqlstate(error)).toBe('42501');
+  it('DELETE of a membership is refused', async () => {
+    expect(await clientFirestoreRequest(token, 'DELETE', paths().organization_memberships!)).toBe(403);
   });
 
-  it('INSERT into audit_events is refused (F-A-05)', async () => {
-    const a = clientFor(ownerA);
-    const { error } = await a.from('audit_events').insert({ action: 'forged', actor_type: 'user' });
-    expect(error).not.toBeNull();
-    expect(sqlstate(error)).toBe('42501');
-  });
-
-  it('the membership row survived every attempt', () => {
-    expect(adminSql(`select count(*) from public.organization_memberships where organization_id = '${orgA}'`)).toBe('1');
+  it('the membership and the organisation survived every attempt', async () => {
+    expect(await rawCount(orgA, 'organization_memberships')).toBe(1);
+    expect((await fs().collection('organizations').doc(orgA).get()).get('name')).toBe(`ITest Alpha ${RUN}`);
+    expect((await fs().collection('audit_events').doc(`probe-${RUN}`).get()).exists).toBe(false);
   });
 });
 
 describe('cross-tenant access is NOT FOUND, never FORBIDDEN (SECURITY_MODEL.md §14)', () => {
   it('api.my_context for another organization returns no row and no error', async () => {
-    const a = clientFor(ownerA);
-    const { data, error } = await a.schema('api').rpc('my_context', { p_slug: slugB });
+    const { data, error } = await rpc(clientFor(ownerA), 'my_context', { p_slug: slugB });
     expect(error).toBeNull();
     expect(data).toHaveLength(0);
   });
 
   it('api.update_organization on another organization raises NOT_FOUND, not PERMISSION_DENIED', async () => {
-    const a = clientFor(ownerA);
-    const { error } = await a.schema('api').rpc('update_organization', {
-      p_org: orgB,
-      p_patch: { name: 'hijacked' },
-    });
+    const { error } = await rpc(clientFor(ownerA), 'update_organization', { p_org: orgB, p_patch: { name: 'hijacked' } });
     expect(error).not.toBeNull();
     expect(sqlstate(error)).toBe('P0002');
-    expect(adminSql(`select name from public.organizations where id = '${orgB}'`)).toBe('ITest Beta');
+    expect((await fs().collection('organizations').doc(orgB).get()).get('name')).toBe(`ITest Beta ${RUN}`);
   });
 
   it('an invented organization id is indistinguishable from someone else’s', async () => {
     const a = clientFor(ownerA);
     const invented = '00000000-0000-4000-8000-000000000000';
-    const real = await a.schema('api').rpc('update_organization', { p_org: orgB, p_patch: { name: 'x' } });
-    const fake = await a.schema('api').rpc('update_organization', { p_org: invented, p_patch: { name: 'x' } });
-    expect(sqlstate(real)).toBe(sqlstate(fake));
+    const real = await rpc(a, 'update_organization', { p_org: orgB, p_patch: { name: 'x' } });
+    const fake = await rpc(a, 'update_organization', { p_org: invented, p_patch: { name: 'x' } });
+    expect(sqlstate(real.error)).toBe(sqlstate(fake.error));
+    expect(real.error?.message).toBe(fake.error?.message);
   });
 });
 
 describe('the server-asserted surface is unreachable from a browser (ADR-043)', () => {
-  it('api_server.record_access_event cannot be executed with a user JWT', async () => {
-    const a = clientFor(ownerA);
-    const { error } = await a.schema('api_server').rpc('record_access_event', {
-      p_actor: ownerA,
-      p_org: orgA,
-      p_action: 'org.data_viewed',
-    });
-    expect(error).not.toBeNull();
+  it('api_server.record_access_event cannot be executed as a user', async () => {
+    const { error } = await rpc(clientFor(ownerA), 'record_access_event', {
+      p_actor: ownerA, p_org: orgA, p_action: 'org.data_viewed',
+    }, { server: true });
+    expect(sqlstate(error)).toBe('42501');
   });
 
-  it('api_server.enqueue_job cannot be executed with a user JWT', async () => {
-    const a = clientFor(ownerA);
-    const { error } = await a.schema('api_server').rpc('enqueue_job', {
-      p_actor: ownerA,
-      p_org: orgA,
-      p_job_type: 'calculation.run',
-    });
+  it('nor by nobody at all', async () => {
+    const { error } = await rpc(anonClient(), 'record_access_event', {
+      p_actor: ownerA, p_org: orgA, p_action: 'auth.sign_in',
+    }, { server: true });
+    expect(sqlstate(error)).toBe('42501');
+  });
+
+  it('api_server.enqueue_job cannot be executed as a user', async () => {
+    const { error } = await rpc(clientFor(ownerA), 'enqueue_job', {
+      p_actor: ownerA, p_org: orgA, p_job_type: 'calculation.run',
+    }, { server: true });
     expect(error).not.toBeNull();
+    expect(sqlstate(error)).toBe('42501');
   });
 
   it('a user cannot enqueue org.purge through the user-intent surface', async () => {
-    const a = clientFor(ownerA);
-    const { error } = await a.schema('api').rpc('enqueue_job', {
-      p_org: orgA,
-      p_job_type: 'org.purge',
-      p_payload: {},
-    });
+    const { error } = await rpc(clientFor(ownerA), 'enqueue_job', { p_org: orgA, p_job_type: 'org.purge', p_payload: {} });
     expect(sqlstate(error)).toBe('42501');
   });
 });
 
-describe('platform staff reach only what they are assigned, at the database', () => {
-  let employee: string;
-
+describe('platform staff reach only what they are assigned', () => {
   beforeAll(async () => {
-    employee = createAuthUser('employee@itest.motion');
-    adminSql(`insert into public.platform_users (user_id, platform_role) values ('${employee}','employee')`);
-    adminSql(`insert into public.organization_assignments (organization_id, employee_user_id)
-              values ('${orgA}','${employee}')`);
+    employee = await createAuthUser(`employee@${DOMAIN}`, PASSWORD);
+    await makePlatformUser(employee, 'employee');
+    await assign(orgA, employee);
   });
 
   it('an assigned employee sees exactly the assigned organization, as employee', async () => {
-    const e = clientFor(employee);
-    const { data } = await e.schema('api').rpc('my_organizations');
+    const { data } = await rpc<Array<{ organization_id: string; role: string }>>(clientFor(employee), 'my_organizations');
     expect(data).toHaveLength(1);
-    const row = (data as Array<{ organization_id: string; role: string }>)[0]!;
-    expect(row.organization_id).toBe(orgA);
-    expect(row.role).toBe('employee');
+    expect(data![0]!.organization_id).toBe(orgA);
+    expect(data![0]!.role).toBe('employee');
   });
 
   it('an employee cannot govern the organization they advise', async () => {
-    const e = clientFor(employee);
-    const { error } = await e.schema('api').rpc('invite_member', {
-      p_org: orgA,
-      p_email: 'someone@itest.motion',
-      p_role: 'client',
+    const { error } = await rpc(clientFor(employee), 'invite_member', {
+      p_org: orgA, p_email: `someone@${DOMAIN}`, p_role: 'client',
     });
     expect(sqlstate(error)).toBe('42501');
   });

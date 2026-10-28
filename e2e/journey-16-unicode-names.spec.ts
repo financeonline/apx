@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { cleanUpOwn, drainQueue, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, drainQueue, onboard, seedUser, signIn, uniqueName } from './fixtures';
+import { orgIdBySlug, orgRows } from './firestore';
 
 /**
  * Journey 16 — customers named in five scripts, through the upload form (ADR-136, Step 0D).
@@ -27,7 +28,7 @@ const CSV = [
 test.afterAll(() => cleanUpOwn([ORG_NAME], ['journey16-owner']));
 
 test('a sales list with customers in five scripts imports each under its own name', async ({ page }) => {
-  const owner = seedUser('journey16-owner');
+  const owner = await seedUser('journey16-owner');
   await signIn(page, owner);
   const slug = await onboard(page, ORG_NAME);
 
@@ -57,9 +58,12 @@ test('a sales list with customers in five scripts imports each under its own nam
   await drainQueue(page, slug);
 
   // The database: six customers, display names exactly as the file had them.
-  const stored = sql(`
-    select string_agg(c.name, ' | ' order by c.name collate "C") from public.counterparties c
-      join public.organizations o on o.id = c.organization_id where o.slug = '${slug}'`);
+  // Ordered by code point, as `collate "C"` did: every name here is in the Basic Multilingual Plane,
+  // where JavaScript's UTF-16 comparison and UTF-8 byte order agree.
+  const stored = (await orgRows(await orgIdBySlug(slug), 'counterparties'))
+    .map((c) => String(c.name))
+    .sort((a, b) => (a < b ? -1 : a > b ? 1 : 0))
+    .join(' | ');
   expect(stored).toBe('Möller GmbH | Müller GmbH | ΟΔΟΣ Α.Ε. | ООО «Ромашка» | شركة الأمل | 株式会社トヨタ');
 
   // The screen: each customer under its own name.

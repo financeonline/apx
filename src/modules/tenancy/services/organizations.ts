@@ -1,10 +1,13 @@
 import 'server-only';
 import { z } from 'zod';
 import { assertCan } from '@/core/permissions';
-import { ValidationError, toMotionError } from '@/core/errors';
+import { ValidationError } from '@/core/errors';
 import { callApi } from '../data/rpc';
 import type { AccessContext } from '../context';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
+import { globalRow } from '@/db/schema';
+import { orgRoleOf } from '@/db/app/access';
+import { NotFound } from '@/core/errors';
 
 export const CreateOrganizationInput = z.object({
   name: z.string().trim().min(1, 'Enter a name').max(200),
@@ -36,7 +39,7 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
 
 /** Self-serve organization creation. The caller becomes its owner (DATABASE_ARCHITECTURE.md §14.1). */
 export async function createOrganization(
-  db: SupabaseClient,
+  db: Db,
   input: unknown,
   requestId?: string,
 ): Promise<string> {
@@ -189,24 +192,13 @@ export async function cancelDeletion(ctx: AccessContext): Promise<string> {
   return callApi<string>(ctx.db, 'cancel_deletion', { p_org: ctx.orgId }, ctx.requestId);
 }
 
-/** Rows per page when reading the accessible set: PostgREST's `max_rows`. */
-const ORGANIZATION_PAGE = 1_000;
-
 /**
- * One statement regardless of organization count (ADR-038.13), read in pages of `max_rows` so an
- * accessible set larger than one page — a super admin's, past 1,000 organisations — is read whole
- * rather than silently cut (ADR-117). Name order, with the id as the tiebreaker that makes pages stable.
+ * Every organisation the caller reaches, in name order with the id as the tiebreaker
+ * (`api.my_organizations`). One call regardless of how many (ADR-038.13): the accessible set is read
+ * whole, never cut at a page (ADR-117).
  */
-export async function listMyOrganizations(db: SupabaseClient): Promise<OrganizationSummary[]> {
-  const rows: Array<Record<string, string>> = [];
-  for (let from = 0; ; from += ORGANIZATION_PAGE) {
-    const { data, error } = await db.schema('api').rpc('my_organizations', {})
-      .order('name').order('organization_id').range(from, from + ORGANIZATION_PAGE - 1);
-    if (error) throw toMotionError(error);
-    const page = (data ?? []) as Array<Record<string, string>>;
-    rows.push(...page);
-    if (page.length < ORGANIZATION_PAGE) break;
-  }
+export async function listMyOrganizations(db: Db): Promise<OrganizationSummary[]> {
+  const rows = (await callApi<Array<Record<string, string>> | null>(db, 'my_organizations', {})) ?? [];
   return rows.map((r) => ({
     organizationId: r.organization_id!,
     slug: r.slug!,
@@ -216,6 +208,50 @@ export async function listMyOrganizations(db: SupabaseClient): Promise<Organizat
   }));
 }
 
-export async function setLastActiveOrg(db: SupabaseClient, organizationId: string): Promise<void> {
+export async function setLastActiveOrg(db: Db, organizationId: string): Promise<void> {
   await callApi(db, 'set_last_active_org', { p_org: organizationId });
+}
+
+/** The organisation document's fields a settings page shows. */
+export interface OrganizationRecord {
+  readonly id: string;
+  readonly name: string;
+  readonly legal_name: string | null;
+  readonly slug: string;
+  readonly timezone: string;
+  readonly fiscal_year_start_month: number;
+  readonly base_currency: string;
+  readonly country_code: string | null;
+  readonly status: string;
+  readonly plan: string;
+  readonly features: Record<string, unknown>;
+  readonly settings: Record<string, unknown>;
+}
+
+/**
+ * The caller's organisation, read as the server: `organizations_select` admitted an organisation in
+ * the caller's accessible set, and `orgRoleOf` is that set's test for one organisation.
+ */
+export async function organizationOf(ctx: AccessContext): Promise<OrganizationRecord> {
+  const o = ctx.orgId ? await organizationDoc(ctx.db, ctx.orgId) : null;
+  if (!o) throw new NotFound();
+  return {
+    id: String(o.id), name: String(o.name ?? ''), legal_name: (o.legal_name as string | null) ?? null, slug: String(o.slug ?? ''),
+    timezone: String(o.timezone ?? 'Europe/London'), fiscal_year_start_month: Number(o.fiscal_year_start_month ?? 1),
+    base_currency: String(o.base_currency ?? 'GBP'), country_code: (o.country_code as string | null) ?? null,
+    status: String(o.status ?? 'active'), plan: String(o.plan ?? 'trial'),
+    features: (o.features as Record<string, unknown> | undefined) ?? {},
+    settings: (o.settings as Record<string, unknown> | undefined) ?? {},
+  };
+}
+
+/**
+ * One organisation's document as the caller may read it (`organizations_select`: an organisation in
+ * the caller's accessible set), or null — the replacement for `db.from('organizations')…`.
+ */
+export async function organizationDoc(db: Db, orgId: string): Promise<Record<string, unknown> | null> {
+  const uid = db.actor.kind === 'user' ? db.actor.userId : null;
+  if (!uid || !orgId || !(await orgRoleOf(db.fs, uid, orgId))) return null;
+  const snap = await globalRow(db.fs, 'organizations', orgId).get();
+  return snap.exists ? { ...snap.data()!, id: snap.id } : null;
 }

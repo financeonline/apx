@@ -2,7 +2,7 @@ import { notFound } from 'next/navigation';
 import { UsersRound } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
-import { toMotionError } from '@/core/errors';
+import { listHeldCounterparties } from '@/modules/financials';
 import { heldNameKey } from '@/modules/imports';
 import { PageHeader, Card, CardBody, IconBadge } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
@@ -24,17 +24,11 @@ export default async function HeldNamesPage({ params }: { params: Promise<{ orgS
   requirePermission(ctx, 'customers.view');
   if (ctx.orgId === null) notFound();
 
-  const { data, error } = await ctx.db.from('counterparties')
-    .select('id, name, normalized_name, kind')
-    .eq('organization_id', ctx.orgId!)
-    .is('merged_into_id', null)
-    .like('normalized_name', '% [held %]')
-    .order('name');
-  if (error) throw toMotionError(error);
+  const data = await listHeldCounterparties(ctx.db, ctx.orgId);
 
   const groups = new Map<string, Array<{ id: string; name: string; kind: string }>>();
-  for (const row of (data ?? []) as Array<{ id: string; name: string; normalized_name: string; kind: string }>) {
-    const key = heldNameKey(row.normalized_name);
+  for (const row of data) {
+    const key = heldNameKey(row.normalizedName);
     if (key === null) continue;
     groups.set(key, [...(groups.get(key) ?? []), { id: row.id, name: row.name, kind: row.kind }]);
   }

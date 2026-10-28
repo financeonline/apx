@@ -1,6 +1,6 @@
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 import { recordAccessEvent } from '@/core/db';
+import { getObject } from '@/core/storage/signer';
 import { isMotionError } from '@/core/errors';
 import type { EffectiveRole } from '@/core/permissions';
 import { loadHome } from '@/modules/dashboard';
@@ -11,7 +11,15 @@ import {
 } from '@/modules/reporting';
 import { agreedPermissions, type AccessContext } from '@/modules/tenancy';
 import { tokenisePdf } from '../../src/modules/imports/domain/parsers/pdf-text';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished, serviceStorage } from './setup';
+import { auth } from '@/db/firestore';
+import { newId, nowIso, orgCollection, orgRow } from '@/db/schema';
+import type { Db } from '@/db/types';
+import { clientFor, createAuthUser, deleteOrg, drainUntilFinished, fs, rpc } from './setup';
+import { addMember, createOrgFixture } from './r-fixtures';
+import { ensureMonths, monthId, systemAccountId, writeJob } from './r-metrics';
+import {
+  writeAction, writeAlert, writeBankAccount, writeCounterparty, writeImportBatch, writeLedgerEntry, writeSourceDocument,
+} from './r-records';
 
 /**
  * The Monthly Management Report's summary edition, against the database (ADR-172 addendum; the
@@ -26,11 +34,15 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished, serviceStorage
  * same names ARE in the full PDF — so the fixture is one that would leak, and the summary's silence
  * is the edition's doing, not an empty month's.
  *
- * Run-unique fixtures (ADR-052.12), removed afterwards. Never companies "a"/"b".
+ * Run-unique fixtures (ADR-052.12), written into Firestore as an import and the engine leave them,
+ * removed afterwards. Never companies "a"/"b".
  */
 
+// Each case reads Home and the report several times over the shared emulator.
+vi.setConfig({ testTimeout: 180_000, hookTimeout: 300_000 });
+
 const RUN = `v${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.summary.itest`;
+const DOMAIN = `${RUN}.summary.itest.motion`;
 
 /** In every name below and nowhere else (the organisation's own name carries `RUN`, not this). */
 const MARK = `nm${RUN}`;
@@ -52,13 +64,12 @@ let juneId: string;
 let fullFileId: string;
 
 const email = (who: Who) => `${who}@${DOMAIN}`;
-const db = (who: Who): SupabaseClient => clientFor(ids[who], { email: email(who) });
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+const db = (who: Who): Db => clientFor(ids[who], { email: email(who) });
 
 /** The context a page hands a service, from the same `api.my_access` the resolver calls. */
 async function ctxFor(who: Who): Promise<AccessContext> {
-  const { data, error } = await db(who).schema('api').rpc('my_access', { p_slug: slug });
-  if (error) throw new Error(error.message);
+  const { data, error } = await rpc(db(who), 'my_access', { p_slug: slug });
+  if (error) throw error;
   const row = (data as Array<{ role: EffectiveRole; overrides: unknown; permissions: string[] }>)[0];
   if (!row) throw new Error(`${who} has no access to ${slug}`);
   return {
@@ -89,54 +100,37 @@ function drawn(text: string): string {
 }
 
 beforeAll(async () => {
-  for (const who of ['owner', 'client', 'third', 'stranger'] as Who[]) ids[who] = createAuthUser(email(who));
-  const created = await db('owner').schema('api').rpc('create_organization', { p_name: `ITest Summary ${RUN}` });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-  slug = one(`select slug from public.organizations where id = '${orgId}'`);
-  const other = await db('stranger').schema('api').rpc('create_organization', { p_name: `ITest Summary Other ${RUN}` });
-  otherOrgId = other.data as unknown as string;
+  for (const who of ['owner', 'client', 'third', 'stranger'] as Who[]) ids[who] = await createAuthUser(email(who));
+  const org = await createOrgFixture({ name: `ITest Summary ${RUN}`, ownerId: ids.owner });
+  orgId = org.id;
+  slug = org.slug;
+  otherOrgId = (await createOrgFixture({ name: `ITest Summary Other ${RUN}`, ownerId: ids.stranger })).id;
+  await ensureMonths(orgId, '2026-01-01', '2026-12-31');
+  await ensureMonths(otherOrgId, '2026-01-01', '2026-12-31');
 
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status) values
-      ('${orgId}', '${ids.client}', 'client', 'active'),
-      ('${orgId}', '${ids.third}', 'third_party', 'active');`);
+  await addMember(orgId, ids.client, 'client');
+  await addMember(orgId, ids.third, 'third_party');
 
-  mayId = one(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-05-01'`);
-  juneId = one(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-06-01'`);
+  mayId = monthId(orgId, '2026-05');
+  juneId = monthId(orgId, '2026-06');
 
   // April and May from a general ledger, so May has figures, a comparison month and a score.
-  const account = (category: string) => one(`
-    select id from public.accounts where organization_id = '${orgId}' and standard_category = '${category}' and is_system`);
-  const post = (category: string, direction: string, amount: string, date: string) => {
-    const id = one(`
-      insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status)
-      values ('${orgId}', '${date}', '${account(category)}', '${direction}', ${amount},
-              '00000000-0000-0000-0000-000000000000', 'accepted')
-      returning id`);
-    adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event)
-              values ('${orgId}', 'ledger_entries', '${id}', 'accepted')`);
-  };
-  post('revenue', 'credit', '38000.00', '2026-04-10');
-  post('cost_of_sales', 'debit', '8000.00', '2026-04-12');
-  post('payroll', 'debit', '11000.00', '2026-04-25');
-  post('revenue', 'credit', '40000.00', '2026-05-10');
-  post('cost_of_sales', 'debit', '9000.00', '2026-05-12');
-  post('payroll', 'debit', '12000.00', '2026-05-25');
+  const post = async (category: string, direction: 'debit' | 'credit', amount: string, date: string) =>
+    writeLedgerEntry(orgId, { accountId: await systemAccountId(orgId, category), date, direction, amount });
+  await post('revenue', 'credit', '38000.00', '2026-04-10');
+  await post('cost_of_sales', 'debit', '8000.00', '2026-04-12');
+  await post('payroll', 'debit', '11000.00', '2026-04-25');
+  await post('revenue', 'credit', '40000.00', '2026-05-10');
+  await post('cost_of_sales', 'debit', '9000.00', '2026-05-12');
+  await post('payroll', 'debit', '12000.00', '2026-05-25');
 
-  const doc = one(`
-    insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-    values ('${orgId}', '${orgId}/summary/gl.csv', 'gl.csv', 'text/csv', 10, decode('e6','hex'), 'ready', 'general_ledger')
-    returning id`);
-  adminSql(`
-    insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status,
-                                       extraction_method, period_start, period_end, committed_at)
-    values ('${orgId}', '${doc}', 'general_ledger', 'ledger_entries', 'committed', 'csv', '2026-04-01', '2026-05-31', now())`);
+  const doc = await writeSourceDocument(orgId, { path: `${orgId}/summary/gl.csv`, filename: 'gl.csv', kind: 'general_ledger', sha256: 'e6' });
+  await writeImportBatch(orgId, {
+    documentId: doc, importType: 'general_ledger', targetTable: 'ledger_entries', status: 'committed',
+    periodStart: '2026-04-01', periodEnd: '2026-05-31',
+  });
 
-  const jobId = adminSql(`
-    insert into public.jobs (organization_id, job_type, payload, max_attempts)
-    values ('${orgId}', 'calculation.run', '{"trigger":"recalc_manual","as_of":"2026-06-15"}'::jsonb, 3)
-    returning id`).split('\n')[0]!.trim();
+  const jobId = await writeJob(orgId, { jobType: 'calculation.run', payload: { trigger: 'recalc_manual', as_of: '2026-06-15' } });
   expect(await drainUntilFinished(drainJobs, jobId), 'the figures must exist').toBe('succeeded');
 
   /*
@@ -146,77 +140,76 @@ beforeAll(async () => {
    * that carries named detail in its condition (which the redacted view a 3rd party reads drops, and
    * the edition never prints).
    */
-  const runId = one(`select calculation_run_id from public.metric_current where organization_id = '${orgId}' and period_id = '${mayId}' limit 1`);
-  const scoreRun = one(`
-    insert into public.calculation_runs (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-    select organization_id, 'recalc_manual', engine_version, period_from, period_to, as_of, 'succeeded'
-      from public.calculation_runs where id = '${runId}'
-    returning id`);
-  adminSql(`
-    with h as (
-      insert into public.health_scores (organization_id, calculation_run_id, period_id, score, dimensions_used, dimensions_total, config_version, breakdown)
-      values ('${orgId}', '${scoreRun}', '${mayId}', 64, 3, 5, 'itest',
-              jsonb_build_array(
-                jsonb_build_object('key', 'profitability', 'score', 72, 'weight_config', 25, 'weight_applied', 40, 'included', true,
-                  'exclusion_reason', null, 'capped', false, 'cap_reason', null,
-                  'positives', '["Net margin of 47.5% is healthy"]'::jsonb, 'negatives', '[]'::jsonb,
-                  'metrics', '[]'::jsonb, 'rules', '[]'::jsonb,
-                  'conditions', jsonb_build_array(jsonb_build_object('rule_key', 'concentration.customer', 'subject_id', null,
-                                  'subject_key', '${NAMES.customer}', 'snapshot_ids', '[]'::jsonb, 'record_ids', '[]'::jsonb)),
-                  'positives_structured', '[]'::jsonb, 'negatives_structured', '[]'::jsonb,
-                  'data_quality', '{"completeness": 1, "warnings": []}'::jsonb),
-                jsonb_build_object('key', 'revenue_growth', 'score', 61, 'weight_config', 15, 'weight_applied', 30, 'included', true,
-                  'exclusion_reason', null, 'capped', false, 'cap_reason', null,
-                  'positives', '[]'::jsonb, 'negatives', '[]'::jsonb, 'metrics', '[]'::jsonb, 'rules', '[]'::jsonb, 'conditions', '[]'::jsonb,
-                  'positives_structured', '[]'::jsonb, 'negatives_structured', '[]'::jsonb,
-                  'data_quality', '{"completeness": 1, "warnings": []}'::jsonb),
-                jsonb_build_object('key', 'banking_health', 'score', null, 'weight_config', 15, 'weight_applied', 0, 'included', false,
-                  'exclusion_reason', 'no_bank_coverage', 'capped', false, 'cap_reason', null,
-                  'positives', '[]'::jsonb, 'negatives', '[]'::jsonb, 'metrics', '[]'::jsonb, 'rules', '[]'::jsonb, 'conditions', '[]'::jsonb,
-                  'positives_structured', '[]'::jsonb, 'negatives_structured', '[]'::jsonb,
-                  'data_quality', '{"completeness": 0, "warnings": []}'::jsonb)))
-      returning id, organization_id, period_id)
-    insert into public.health_current (organization_id, period_id, health_score_id)
-    select organization_id, period_id, id from h
-    on conflict (organization_id, period_id) do update set health_score_id = excluded.health_score_id`);
+  const pointer = (await orgCollection(fs(), orgId, 'metric_current').where('period_id', '==', mayId).limit(1).get()).docs[0]!;
+  const runId = String(pointer.get('calculation_run_id'));
+  const run = (await orgRow(fs(), orgId, 'calculation_runs', runId).get()).data()!;
+  const scoreRun = newId();
+  const now = nowIso();
+  await orgRow(fs(), orgId, 'calculation_runs', scoreRun).set({ ...run, id: scoreRun, job_id: null, status: 'succeeded', created_at: now, updated_at: now });
+  const empty = { positives: [], negatives: [], metrics: [], rules: [], conditions: [], positives_structured: [], negatives_structured: [] };
+  const healthId = newId();
+  await orgRow(fs(), orgId, 'health_scores', healthId).set({
+    id: healthId, organization_id: orgId, calculation_run_id: scoreRun, period_id: mayId, score: 64,
+    dimensions_used: 3, dimensions_total: 5, config_version: 'itest', created_at: now,
+    breakdown: [
+      { key: 'profitability', score: 72, weight_config: 25, weight_applied: 40, included: true, exclusion_reason: null,
+        capped: false, cap_reason: null, ...empty, positives: ['Net margin of 47.5% is healthy'],
+        conditions: [{ rule_key: 'concentration.customer', subject_id: null, subject_key: NAMES.customer, snapshot_ids: [], record_ids: [] }],
+        data_quality: { completeness: 1, warnings: [] } },
+      { key: 'revenue_growth', score: 61, weight_config: 15, weight_applied: 30, included: true, exclusion_reason: null,
+        capped: false, cap_reason: null, ...empty, data_quality: { completeness: 1, warnings: [] } },
+      { key: 'banking_health', score: null, weight_config: 15, weight_applied: 0, included: false,
+        exclusion_reason: 'no_bank_coverage', capped: false, cap_reason: null, ...empty,
+        data_quality: { completeness: 0, warnings: [] } },
+    ],
+  });
+  const currentRef = orgRow(fs(), orgId, 'health_current', mayId);
+  const previous = await currentRef.get();
+  await currentRef.set({
+    organization_id: orgId, period_id: mayId, health_score_id: healthId, calculation_run_id: scoreRun,
+    previous_health_score_id: previous.exists ? (previous.get('health_score_id') ?? null) : null, updated_at: now,
+  });
 
   // The named detail the FULL report prints: a customer, a bank account, an open alert naming the
   // customer, and an open action naming them.
-  adminSql(`
-    insert into public.counterparties (organization_id, name, normalized_name, kind)
-    values ('${orgId}', '${NAMES.customer}', lower('${NAMES.customer}'), 'customer');
-    insert into public.bank_accounts (organization_id, name, bank_name, account_type)
-    values ('${orgId}', '${NAMES.bank}', 'ITest Bank', 'savings');
-    insert into public.alerts (organization_id, period_id, rule_key, rule_version, severity, key_kind, calculation_run_id,
-                               title, explanation, status, recommended_next_step, first_seen_at, dedupe_key)
-    values ('${orgId}', '${mayId}', 'concentration.customer', '1', 'high', 'state', '${runId}',
-            '${NAMES.alertTitle}', '${NAMES.alertSentence}', 'open',
-            'Talk to ${NAMES.customer} about the payment terms', now(), 'itest-${RUN}');
-    insert into public.actions (organization_id, title, owner_user_id, created_by)
-    values ('${orgId}', '${NAMES.actionTitle}', '${ids.owner}', '${ids.owner}');`);
+  await writeCounterparty(orgId, NAMES.customer);
+  await writeBankAccount(orgId, { name: NAMES.bank, type: 'savings' });
+  const alertId = await writeAlert(orgId, {
+    periodId: mayId, runId, title: NAMES.alertTitle, severity: 'high', firstSeen: nowIso(), dedupeKey: `itest-${RUN}`,
+  });
+  // A rule key with no display template, so the stored sentence is what every surface prints (since
+  // ADR-177 a templated rule's wording is re-rendered from its threshold summary, which this fixture
+  // does not carry; the named detail must reach the full report for the test to mean anything).
+  await orgRow(fs(), orgId, 'alerts', alertId).update({
+    rule_key: 'fixture.customer_named', key_kind: 'state', explanation: NAMES.alertSentence,
+    recommended_next_step: `Talk to ${NAMES.customer} about the payment terms`,
+  });
+  const actionId = await writeAction(orgId, { title: NAMES.actionTitle, due: null, ownerId: ids.owner });
+  await orgRow(fs(), orgId, 'actions', actionId).update({ priority: 'medium' });
 
   // The FULL report's PDF, produced as the product does (the owner asks; the job renders and stores).
   const renderJob = await requestPdf(await ctxFor('owner'), mayId);
   expect(await drainUntilFinished(drainJobs, renderJob), 'the full PDF must render').toBe('succeeded');
-  fullFileId = one(`select id::text from public.report_files where organization_id = '${orgId}' and period_id = '${mayId}'`);
-});
+  const files = (await orgCollection(fs(), orgId, 'report_files').where('period_id', '==', mayId).get()).docs;
+  fullFileId = files[0]!.id;
+}, 180_000);
 
-afterAll(() => {
-  adminSql(`
-    delete from public.report_files where organization_id in (select id from public.organizations where name like 'ITest Summary%${RUN}');
-    delete from public.organizations where name like 'ITest Summary%${RUN}';
-    delete from public.api_rate_limits where actor_user_id in (select id from auth.users where email like '%@${DOMAIN}');
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Summary %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.summary.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  for (const org of [orgId, otherOrgId]) {
+    if (!org) continue;
+    for (const j of (await fs().collection('jobs').where('organization_id', '==', org).get()).docs) await j.ref.delete();
+    await deleteOrg(org);
+  }
+  for (const who of Object.keys(ids) as Who[]) {
+    await fs().collection('profiles').doc(ids[who]).delete();
+    await auth().deleteUser(ids[who]).catch(() => undefined);
+  }
 });
 
 describe('the fixture would leak: the FULL report carries the named detail', () => {
   it('its stored PDF prints the alert sentence, the alert title and the action title', async () => {
-    const path = one(`select storage_path from public.report_files where id = '${fullFileId}'`);
-    const { data, error } = await serviceStorage().storage.from('reports').download(path);
-    expect(error).toBeNull();
-    const text = await pdfText(new Uint8Array(await data!.arrayBuffer()));
+    const path = String((await orgRow(fs(), orgId, 'report_files', fullFileId).get()).get('storage_path'));
+    const text = await pdfText(await getObject({ orgId, userId: ids.owner }, 'reports', path));
     expect(text).toContain(drawn(NAMES.alertSentence));
     expect(text).toContain(drawn(NAMES.alertTitle));
     expect(text).toContain(drawn(NAMES.actionTitle));
@@ -292,8 +285,8 @@ describe('who gets which edition', () => {
       { userId: ids.third, requestId: `itest-${RUN}` },
       { organizationId: orgId, action: 'report.downloaded', targetTable: 'report_files', targetId: fullFileId },
     )).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    expect(Number(one(`select count(*) from public.audit_events where action = 'report.downloaded'
-                         and actor_user_id = '${ids.third}' and target_table = 'report_files'`))).toBe(0);
+    const events = await fs().collection('audit_events').where('actor_user_id', '==', ids.third).get();
+    expect(events.docs.filter((d) => d.get('action') === 'report.downloaded' && d.get('target_table') === 'report_files')).toHaveLength(0);
   });
 
   it('it records their summary-edition download against the month', async () => {
@@ -302,7 +295,8 @@ describe('who gets which edition', () => {
       { organizationId: orgId, action: 'report.downloaded', targetTable: 'fiscal_periods', targetId: mayId,
         metadata: { period_id: mayId, surface: 'summary_edition' } },
     );
-    expect(id).toBeGreaterThan(0);
+    // audit_events ids are uuids now (they were bigint identities).
+    expect(String(id)).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('a holder of financials.view reads the full report and its file, as before — and the summary edition too', async () => {
@@ -317,7 +311,7 @@ describe('who gets which edition', () => {
   });
 
   it('a client whose financials.view the owner switches off gets only the summary edition', async () => {
-    const { error } = await db('owner').schema('api').rpc('set_member_permission', {
+    const { error } = await rpc(db('owner'), 'set_member_permission', {
       p_org: orgId, p_user: ids.client, p_permission: 'financials.view', p_granted: false,
     });
     expect(error).toBeNull();
@@ -335,7 +329,7 @@ describe('the summary edition exists exactly where the full report would', () =>
   });
 
   it('not for another organisation\'s month', async () => {
-    const foreign = one(`select id from public.fiscal_periods where organization_id = '${otherOrgId}' and period_start = '2026-05-01'`);
+    const foreign = monthId(otherOrgId, '2026-05');
     expect(await getMonthlySummary(await ctxFor('third'), foreign)).toBeNull();
   });
 });

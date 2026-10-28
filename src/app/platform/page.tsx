@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { Activity, Building2, Clock, KeyRound, MessageSquareText } from 'lucide-react';
 import { countOpenFeedback } from '@/modules/ai';
+import { countGlobal, readableOrganizations } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, StatTile } from '@/components/ui/surfaces';
 import { CLICKABLE_CARD } from '@/components/ui/clickable-card';
@@ -16,10 +17,11 @@ const TILE_LINK = `block h-full rounded-card ${CLICKABLE_CARD}`;
 export default async function PlatformOverviewPage() {
   const ctx = await getPlatformContext();
 
-  const [{ count: organizations }, { count: platformUsers }, { count: jobs }, openFeedback] = await Promise.all([
-    ctx.db.from('organizations').select('id', { count: 'exact', head: true }),
-    ctx.db.from('platform_users').select('user_id', { count: 'exact', head: true }),
-    ctx.db.from('jobs').select('id', { count: 'exact', head: true }).eq('status', 'queued'),
+  // Each count is what the table's read policy admits (`src/modules/platform/services/reads.ts`).
+  const [organizations, platformUsers, jobs, openFeedback] = await Promise.all([
+    readableOrganizations(ctx.db).then((rows) => rows.length),
+    countGlobal(ctx.db, 'platform_users'),
+    countGlobal(ctx.db, 'jobs', (q) => q.where('status', '==', 'queued')),
     countOpenFeedback(ctx),
   ]);
 

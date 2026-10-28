@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { ValidationError } from '@/core/errors';
 import { addDays, isoWeekday } from '@/core/periods';
 import { computeInterimFigures } from '@/modules/financial-engine';
@@ -58,7 +58,7 @@ function movementLine(movement: MovementView): BriefMovementLine {
 }
 
 /** The latest complete month with figures, as Home and the monthly report show it (R17-1a). */
-export async function latestMonth(db: SupabaseClient, orgId: string, requestId?: string): Promise<BriefMonth | null> {
+export async function latestMonth(db: Db, orgId: string, requestId?: string): Promise<BriefMonth | null> {
   const [periods, withData, lastData] = await Promise.all([
     loadPeriods(db, orgId, requestId),
     loadPeriodsWithData(db, orgId, requestId),
@@ -109,7 +109,7 @@ export async function latestMonth(db: SupabaseClient, orgId: string, requestId?:
 }
 
 export async function composeBrief(input: {
-  readonly db: SupabaseClient;
+  readonly db: Db;
   readonly orgId: string;
   readonly kind: BriefKind;
   readonly windowStart: string;

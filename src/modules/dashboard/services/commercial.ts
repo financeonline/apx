@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { Decimal, formatMoney, formatPercent } from '@/core/money';
 import {
   type ConcentrationPoint,
@@ -73,14 +73,13 @@ const windowOf = (periods: readonly PeriodLabel[]) => ({
   to: periods[periods.length - 1]?.periodEnd ?? '9999-12-31',
 });
 
-async function baseCurrency(db: SupabaseClient, orgId: string): Promise<string> {
-  const { data } = await db.from('organizations').select('base_currency').eq('id', orgId).maybeSingle();
-  return ((data as { base_currency?: string } | null)?.base_currency) ?? 'GBP';
+async function baseCurrency(db: Db, orgId: string): Promise<string> {
+  return (await repo.loadOrganizationFacts(db, orgId))?.baseCurrency ?? 'GBP';
 }
 
 /** `customer_revenue` per period per counterparty, from `metric_current`. */
 async function customerRevenueByPeriod(
-  db: SupabaseClient, orgId: string, periodIds: readonly string[], requestId?: string,
+  db: Db, orgId: string, periodIds: readonly string[], requestId?: string,
 ): Promise<{ rows: SnapshotRow[]; byPeriod: Map<string, Map<string, string>> }> {
   const rows = await repo.loadDimensioned(db, orgId, 'customer_revenue', periodIds, requestId);
   const byPeriod = new Map<string, Map<string, string>>();
@@ -150,7 +149,7 @@ function productRow(orgSlug: string, product: Product, figures: ReturnType<typeo
 }
 
 export async function loadProducts(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
 ): Promise<ProductsView> {
   const [products, summary, currency] = await Promise.all([
     listProducts(db, orgId, requestId),
@@ -181,7 +180,7 @@ export interface ProductDetailView {
 export const PRODUCT_TREND_MONTHS = 12;
 
 export async function loadProductDetail(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, productId: string, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, productId: string, requestId?: string,
 ): Promise<ProductDetailView | null> {
   const products = await listProducts(db, orgId, requestId);
   const product = products.find((p) => p.id === productId);
@@ -261,7 +260,7 @@ export interface MarketingView {
 export const MARKETING_WINDOW_MONTHS = 12;
 
 async function campaignRows(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
 ): Promise<{ rows: CampaignRowView[]; window: PeriodLabel[]; channels: MarketingChannel[]; campaigns: Campaign[]; opportunities: OpportunityRow[]; currency: string; revenueRows: SnapshotRow[] }> {
   const window = trailing(scope, MARKETING_WINDOW_MONTHS);
   const [campaigns, channels, spend, opportunities, currency, revenue] = await Promise.all([
@@ -297,7 +296,7 @@ async function campaignRows(
 }
 
 export async function loadMarketing(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
 ): Promise<MarketingView> {
   const { rows, window, channels, currency } = await campaignRows(db, orgId, orgSlug, scope, requestId);
   const sum = (key: 'spendRaw' | 'attributedRevenueRaw') => rows.reduce((acc, r) => acc.plus(r[key]), new Decimal(0)).toFixed(2);
@@ -328,7 +327,7 @@ export interface CampaignDetailView {
 }
 
 export async function loadCampaignDetail(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, campaignId: string, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, campaignId: string, requestId?: string,
 ): Promise<CampaignDetailView | null> {
   const { rows, window, channels, campaigns, opportunities, currency, revenueRows } = await campaignRows(db, orgId, orgSlug, scope, requestId);
   const campaign = campaigns.find((c) => c.id === campaignId);
@@ -401,7 +400,7 @@ export const SALES_WINDOW_MONTHS = 3;
 export const SALES_LIST_LIMIT = 100;
 
 export async function loadSales(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
 ): Promise<SalesView> {
   void orgSlug;
   const window = trailing(scope, SALES_WINDOW_MONTHS);
@@ -472,7 +471,7 @@ export interface CommercialOverview {
 }
 
 export async function loadCommercialOverview(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, requestId?: string,
 ): Promise<CommercialOverview> {
   const twelve = trailing(scope, 12);
   const [headline, shares, revenueRows, products, marketing, sales, counterparties, concSeries] = await Promise.all([
@@ -562,7 +561,7 @@ export interface CustomerCommercialView {
 
 /** What Commercial adds to the customer page: contribution, product mix, how they were won, line splits. */
 export async function loadCustomerCommercial(
-  db: SupabaseClient, orgId: string, orgSlug: string, scope: PeriodScope, counterparty: Counterparty, invoiceIds: readonly string[], requestId?: string,
+  db: Db, orgId: string, orgSlug: string, scope: PeriodScope, counterparty: Counterparty, invoiceIds: readonly string[], requestId?: string,
 ): Promise<CustomerCommercialView> {
   const window = trailing(scope, 12);
   const [contributionRows, summary, products, opportunities, campaigns, lines, invoiceNets, currency] = await Promise.all([

@@ -1,6 +1,6 @@
 import 'server-only';
 import { z } from 'zod';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { callApi } from '@/core/db';
 import { ConflictError, ValidationError } from '@/core/errors';
 import {
@@ -32,7 +32,7 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
 }
 
 export async function startImportBatch(
-  db: SupabaseClient, input: unknown, requestId?: string,
+  db: Db, input: unknown, requestId?: string,
 ): Promise<string> {
   const parsed = parse(StartImportBatchInput, input);
   return callApi<string>(db, 'start_import_batch', {
@@ -49,7 +49,7 @@ export async function startImportBatch(
 }
 
 export async function saveImportMapping(
-  db: SupabaseClient, input: unknown, requestId?: string,
+  db: Db, input: unknown, requestId?: string,
 ): Promise<string> {
   const parsed = parse(SaveImportMappingInput, input);
   return callApi<string>(db, 'save_import_mapping', {
@@ -67,7 +67,7 @@ export async function saveImportMapping(
 }
 
 export async function decideImportRows(
-  db: SupabaseClient, input: unknown, requestId?: string,
+  db: Db, input: unknown, requestId?: string,
 ): Promise<number> {
   const parsed = parse(DecideImportRowsInput, input);
   return callApi<number>(db, 'decide_import_rows', {
@@ -81,7 +81,7 @@ export async function decideImportRows(
 }
 
 export async function setStatementBalances(
-  db: SupabaseClient, input: unknown, requestId?: string,
+  db: Db, input: unknown, requestId?: string,
 ): Promise<string> {
   const parsed = parse(SetStatementBalancesInput, input);
   return callApi<string>(db, 'set_statement_balances', {
@@ -92,7 +92,7 @@ export async function setStatementBalances(
 }
 
 export async function rejectImportBatch(
-  db: SupabaseClient, batchId: string, reason: string, requestId?: string,
+  db: Db, batchId: string, reason: string, requestId?: string,
 ): Promise<string> {
   return callApi<string>(db, 'reject_import_batch', {
     p_batch: batchId,
@@ -111,9 +111,9 @@ export async function rejectImportBatch(
 /**
  * Commit, rollback and replace (IMPORT_ENGINE.md §11, §12).
  *
- * Each is a thin wrapper over the SECURITY DEFINER function that does the real work. The gate, the
- * duplicate re-check, the supersession rules and the promotion of dependants all live in SQL, where
- * a direct PostgREST call cannot go round them. What these add is a typed result and — for the one
+ * Each is a thin wrapper over the `api.*` function that does the real work (`src/db/api/imports.ts`).
+ * The gate, the duplicate re-check, the supersession rules and the promotion of dependants all live
+ * there, behind the server, where no browser request can go round them. What these add is a typed result and — for the one
  * case the database deliberately signals rather than raises — a readable error.
  */
 
@@ -135,7 +135,7 @@ export interface CommitResult {
  * ConflictError here, at the boundary, once the flagging is safely committed.
  */
 export async function commitImportBatch(
-  db: SupabaseClient, batchId: string, requestId?: string,
+  db: Db, batchId: string, requestId?: string,
 ): Promise<CommitResult> {
   const result = await callApi<CommitResult>(db, 'commit_import_batch', { p_batch: batchId }, requestId);
 
@@ -157,7 +157,7 @@ export async function commitImportBatch(
 }
 
 export async function rollbackImportBatch(
-  db: SupabaseClient, batchId: string, reason: string, requestId?: string,
+  db: Db, batchId: string, reason: string, requestId?: string,
 ): Promise<{ rejected: number; promoted: number; restored: number }> {
   if (reason.trim() === '') {
     throw new ValidationError('Say why this import is being rolled back.');
@@ -167,7 +167,7 @@ export async function rollbackImportBatch(
 
 /** The corrected-file path: roll back the old batch and commit the new one in one transaction. */
 export async function replaceImportBatch(
-  db: SupabaseClient, oldBatchId: string, newBatchId: string, reason: string, requestId?: string,
+  db: Db, oldBatchId: string, newBatchId: string, reason: string, requestId?: string,
 ): Promise<unknown> {
   if (reason.trim() === '') {
     throw new ValidationError('Say why this import is being replaced.');
@@ -179,7 +179,7 @@ export async function replaceImportBatch(
 
 /** Records one of the confirmations §8.2 requires before a batch of this shape may commit. */
 export async function recordBatchConfirmation(
-  db: SupabaseClient, batchId: string, code: string, value: Record<string, unknown>,
+  db: Db, batchId: string, code: string, value: Record<string, unknown>,
   requestId?: string,
 ): Promise<string> {
   return callApi<string>(db, 'record_batch_confirmation', {
@@ -188,7 +188,7 @@ export async function recordBatchConfirmation(
 }
 
 export async function confirmPdfPage(
-  db: SupabaseClient, batchId: string, page: number, requestId?: string,
+  db: Db, batchId: string, page: number, requestId?: string,
 ): Promise<string> {
   return callApi<string>(db, 'confirm_pdf_page', { p_batch: batchId, p_page: page }, requestId);
 }
@@ -202,7 +202,7 @@ export async function confirmPdfPage(
  * feed a figure, rather than guessed at silently.
  */
 export async function createImportAccounts(
-  db: SupabaseClient,
+  db: Db,
   batchId: string,
   accounts: ReadonlyArray<{ name: string; code?: string | null; standardCategory?: string | null }>,
   requestId?: string,
@@ -226,7 +226,7 @@ export async function createImportAccounts(
  * a sales list, supplier for a purchase list) is decided in SQL from the batch, never by the caller.
  */
 export async function createImportCounterparties(
-  db: SupabaseClient,
+  db: Db,
   batchId: string,
   names: readonly string[],
   requestId?: string,

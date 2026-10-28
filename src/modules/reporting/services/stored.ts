@@ -1,6 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError, ValidationError } from '@/core/errors';
+import type { Db } from '@/db/types';
+import { ValidationError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import { callApi } from '@/core/db';
 import { addDays, fixedClock, isoWeekday, todayInTimeZone } from '@/core/periods';
@@ -9,6 +9,7 @@ import { BRIEF_CONTENT_VERSION, type BriefContent, type BriefKind } from '../dom
 import { briefWindows, composeBrief } from './brief';
 import { ADVISER_CONTENT_VERSION, composeAdviserReport, type AdviserContent } from './adviser';
 import { loadOrganisationBasics } from '../data/brief-sources';
+import { readRowById, readRows } from '@/db/app/caller-reads';
 import { composeFundingReport } from './funding-report';
 import { FUNDING_REPORT_VERSION, type FundingReportContent } from '../domain/funding-report';
 
@@ -41,7 +42,7 @@ export interface Composed {
 
 /** For the `report.compose` job. No permission check: `api.enqueue_job` made it. */
 export async function composeStoredReport(input: {
-  readonly db: SupabaseClient;
+  readonly db: Db;
   readonly orgId: string;
   readonly kind: ComposableKind;
   readonly windowStart: string | null;
@@ -98,23 +99,36 @@ interface ReportRow {
   content?: unknown; period_id: string | null;
 }
 
+/** Newest window first, then newest composition, then id — the order the list was read in. */
+const newestFirst = (a: ReportRow, b: ReportRow): number => {
+  for (const [x, y] of [[a.window_start, b.window_start], [a.created_at, b.created_at], [a.id, b.id]] as const) {
+    if (x !== y) return x < y ? 1 : -1;
+  }
+  return 0;
+};
+
+/**
+ * The fields a list needs, without `content` (a report can be large). `requested_by` is kept
+ * because the `reports` policy reads it to keep a Custom AI Report its author's own.
+ */
+const SUMMARY_FIELDS = [
+  'id', 'report_kind', 'window_start', 'window_end', 'origin', 'created_at', 'content_version', 'period_id', 'requested_by',
+] as const;
+
 /** The latest of each (kind, window), newest windows first. */
 export async function listStoredReports(
   ctx: AccessContext, kinds: readonly StoredKind[], limit = 60,
 ): Promise<StoredReportSummary[]> {
   assertCan(ctx, 'reports.view');
-  const { data, error } = await ctx.db.from('reports')
-    .select('id, report_kind, window_start, window_end, origin, created_at, content_version, period_id')
-    .eq('organization_id', orgOf(ctx))
-    .in('report_kind', [...kinds])
-    .order('window_start', { ascending: false })
-    .order('created_at', { ascending: false })
-    .order('id', { ascending: false })
-    .limit(limit * 3);
-  if (error) throw toMotionError(error, ctx.requestId);
+  if (kinds.length === 0) return [];
+  // One `in` filter in Firestore (no composite index); the order and the window here.
+  const rows = (await readRows<ReportRow>(ctx.db, orgOf(ctx), 'reports', (q) => q
+    .where('report_kind', 'in', [...kinds]).select(...SUMMARY_FIELDS)))
+    .sort(newestFirst)
+    .slice(0, limit * 3);
 
   const latest = new Map<string, StoredReportSummary>();
-  for (const row of (data ?? []) as ReportRow[]) {
+  for (const row of rows) {
     const key = `${row.report_kind}|${row.window_start}|${row.report_kind === 'custom_ai' ? row.id : ''}`;
     const seen = latest.get(key);
     if (seen === undefined) {
@@ -134,27 +148,22 @@ export async function getStoredReport(ctx: AccessContext, reportId: string): Pro
   const orgId = orgOf(ctx);
   if (!/^[0-9a-f-]{36}$/i.test(reportId)) return null;
 
-  const { data, error } = await ctx.db.from('reports')
-    .select('id, report_kind, window_start, window_end, origin, created_at, content_version, content, period_id')
-    .eq('organization_id', orgId).eq('id', reportId).maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
-  if (data === null) return null;
-  const row = data as ReportRow;
+  const row = await readRowById<ReportRow>(ctx.db, orgId, 'reports', reportId);
+  if (row === null) return null;
 
-  const [versions, file] = await Promise.all([
-    ctx.db.from('reports').select('id', { count: 'exact', head: true })
-      .eq('organization_id', orgId).eq('report_kind', row.report_kind).eq('window_start', row.window_start),
-    ctx.db.from('report_files').select('id, created_at')
-      .eq('organization_id', orgId).eq('report_id', reportId).is('deleted_at', null)
-      .order('created_at', { ascending: false }).limit(1),
+  // Both counted under the caller's policies, as the RLS-filtered count and select were.
+  const [versions, files] = await Promise.all([
+    readRows(ctx.db, orgId, 'reports', (q) => q
+      .where('report_kind', '==', row.report_kind).where('window_start', '==', row.window_start)
+      .select('id', 'report_kind', 'requested_by')),
+    readRows<{ id: string; created_at: string; report_id: string | null }>(ctx.db, orgId, 'report_files', (q) => q
+      .where('report_id', '==', reportId).where('deleted_at', '==', null)),
   ]);
-  if (versions.error) throw toMotionError(versions.error, ctx.requestId);
-  if (file.error) throw toMotionError(file.error, ctx.requestId);
-  const latestFile = (file.data?.[0] as { id: string; created_at: string } | undefined) ?? null;
+  const latestFile = files.sort((a, b) => (a.created_at < b.created_at ? 1 : a.created_at > b.created_at ? -1 : 0))[0] ?? null;
 
   return {
     id: row.id, kind: row.report_kind, windowStart: row.window_start, windowEnd: row.window_end,
-    origin: row.origin, createdAt: row.created_at, versions: versions.count ?? 1,
+    origin: row.origin, createdAt: row.created_at, versions: versions.length || 1,
     contentVersion: row.content_version, content: row.content, periodId: row.period_id,
     file: latestFile === null ? null : { id: latestFile.id, createdAt: latestFile.created_at },
   };
@@ -224,13 +233,11 @@ export async function requestStoredPdf(ctx: AccessContext, reportId: string): Pr
 
 /** For the render job: the stored report, read with the job's scoped client. */
 export async function loadStoredReportForJob(
-  db: SupabaseClient, orgId: string, reportId: string,
+  db: Db, orgId: string, reportId: string,
 ): Promise<{ kind: StoredKind; content: unknown; contentVersion: string } | null> {
-  const { data, error } = await db.from('reports')
-    .select('report_kind, content, content_version')
-    .eq('organization_id', orgId).eq('id', reportId).maybeSingle();
-  if (error) throw toMotionError(error);
-  if (data === null) return null;
-  const row = data as { report_kind: StoredKind; content: unknown; content_version: string };
+  const row = await readRowById<{ report_kind: StoredKind; content: unknown; content_version: string }>(
+    db, orgId, 'reports', reportId,
+  );
+  if (row === null) return null;
   return { kind: row.report_kind, content: row.content, contentVersion: row.content_version };
 }

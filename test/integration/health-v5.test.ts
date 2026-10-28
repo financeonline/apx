@@ -1,7 +1,12 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { periodId } from '@/db/app/shared';
+import { newId, nowIso, orgCollection, orgRow } from '@/db/schema';
 import { loadHealthCard } from '@/modules/health';
 import { drainJobs } from '@/modules/jobs';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished, serviceStorage } from './setup';
+import { drainUntilFinished, fs, rpc, serviceClientScoped } from './setup';
+import {
+  removeSeeded, seedAccepted, seedBatch, seedCounterparty, seedJob, seedLedgerEntry, seedOrg,
+} from '../fixtures/seed';
 
 /**
  * health.config.v5 end to end (ADR-147), against figures a real calculation run produced:
@@ -16,126 +21,141 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished, serviceStorage
  */
 
 const RUN = `h${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.health5.itest`;
-let ownerId: string;
+const DOMAIN = `${RUN}.health5.itest.motion`;
 let orgId: string;
 const MONTHS = ['2026-06', '2026-07', '2026-08'] as const;
 const END: Record<string, string> = { '2026-06': '2026-06-30', '2026-07': '2026-07-31', '2026-08': '2026-08-31' };
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`).split('\n')[0]?.trim() ?? '';
-const period = (ym: string) => one(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '${ym}-01'`);
+const period = (ym: string) => periodId(orgId, `${ym}-01`);
+const server = { server: true } as const;
 
 async function calculate(): Promise<void> {
-  const job = adminSql(`insert into public.jobs (organization_id, job_type, payload, max_attempts)
-                        values ('${orgId}', 'calculation.run', '{"trigger":"recalc_manual"}'::jsonb, 3) returning id`).split('\n')[0]!.trim();
+  const job = await seedJob(orgId, 'calculation.run', { trigger: 'recalc_manual' });
   expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
 }
 
-/** `key|included|score|exclusion` of a dimension in the month's current score. */
-function dimension(ym: string, key: string): string {
-  return one(`select (d->>'included') || '|' || coalesce(d->>'score', 'NULL') || '|' || coalesce(d->>'exclusion_reason', '')
-    from public.health_current hc join public.health_scores h on h.id = hc.health_score_id and h.organization_id = hc.organization_id,
-         jsonb_array_elements(h.breakdown) d
-   where hc.organization_id = '${orgId}' and hc.period_id = '${period(ym)}' and d->>'key' = '${key}'`);
+async function currentScore(ym: string): Promise<Record<string, unknown> | null> {
+  const pointer = await orgRow(fs(), orgId, 'health_current', period(ym)).get();
+  if (!pointer.exists) return null;
+  const score = await orgRow(fs(), orgId, 'health_scores', String(pointer.get('health_score_id'))).get();
+  return score.exists ? score.data()! : null;
 }
 
+/** `included|score|exclusion` of a dimension in the month's current score. */
+async function dimension(ym: string, key: string): Promise<string> {
+  const score = await currentScore(ym);
+  const d = ((score?.breakdown ?? []) as Array<Record<string, unknown>>).find((x) => x.key === key);
+  if (!d) return '';
+  return `${String(d.included)}|${d.score === null || d.score === undefined ? 'NULL' : String(d.score)}|${String(d.exclusion_reason ?? '')}`;
+}
+
+const calcQueued = async () => (await fs().collection('jobs').where('organization_id', '==', orgId)
+  .where('job_type', '==', 'calculation.run').where('status', '==', 'queued').get()).docs
+  .map((d) => d.data()).sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)));
+
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest Health5 ${RUN}` });
-  if (created.error) throw new Error(created.error.message);
-  orgId = created.data as unknown as string;
-  const account = (c: string) => one(`select id from public.accounts where organization_id = '${orgId}' and standard_category = '${c}' and is_system`);
-  const acme = one(`insert into public.counterparties (organization_id, name, normalized_name, kind) values ('${orgId}', 'Acme Ltd', 'acme ltd', 'customer') returning id`);
+  const seeded = await seedOrg({ name: `ITest Health5 ${RUN}`, ownerEmail: `owner@${DOMAIN}`, around: '2026-08-15' });
+  orgId = seeded.orgId;
+  const acme = await seedCounterparty(orgId, { name: 'Acme Ltd', kind: 'customer' });
 
   for (const ym of MONTHS) {
-    const doc = one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-                     values ('${orgId}', '${orgId}/h5/${ym}.csv', '${ym}.csv', 'text/csv', 10, decode('a5${ym.slice(5)}','hex'), 'ready', 'general_ledger') returning id`);
-    const batch = one(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at)
-                       values ('${orgId}', '${doc}', 'general_ledger', 'ledger_entries', 'committed', 'csv', '${ym}-01', '${END[ym]}', now()) returning id`);
+    const batch = await seedBatch(orgId, {
+      importType: 'general_ledger', target: 'ledger_entries', start: `${ym}-01`, end: END[ym]!,
+    });
     for (const [c, d, a, date, cp] of [['revenue', 'credit', '10000.00', `${ym}-10`, acme], ['payroll', 'debit', '6000.00', END[ym]!, null]] as const) {
-      const id = one(`insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status, source_document_id, import_batch_id, counterparty_id)
-                      values ('${orgId}', '${date}', '${account(c)}', '${d}', ${a}, '00000000-0000-0000-0000-000000000000', 'accepted', '${doc}', '${batch}', ${cp ? `'${cp}'` : 'null'}) returning id`);
-      adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id) values ('${orgId}', 'ledger_entries', '${id}', 'accepted', '${batch}')`);
+      const id = await seedLedgerEntry(orgId, {
+        date, accountId: seeded.accounts[c]!, direction: d, amount: a, batchId: batch, counterpartyId: cp,
+      });
+      await seedAccepted(orgId, 'ledger_entries', id, batch);
     }
   }
-  const campaign = one(`insert into public.campaigns (organization_id, name, normalized_name) values ('${orgId}', 'Spring', 'spring') returning id`);
+  const now = nowIso();
+  const campaign = newId();
+  await orgRow(fs(), orgId, 'campaigns', campaign).set({
+    id: campaign, organization_id: orgId, name: 'Spring', normalized_name: 'spring', channel_id: null,
+    starts_on: null, ends_on: null, status: 'active', notes: null, created_at: now, updated_at: now,
+  });
   for (const ym of MONTHS) {
-    adminSql(`insert into public.campaign_spend (organization_id, campaign_id, period_id, amount, currency) values ('${orgId}', '${campaign}', '${period(ym)}', 1000, 'GBP')`);
+    const id = newId();
+    await orgRow(fs(), orgId, 'campaign_spend', id).set({
+      id, organization_id: orgId, campaign_id: campaign, period_id: period(ym), amount: '1000.00', currency: 'GBP',
+      note: null, created_at: now, updated_at: now,
+    });
   }
-  adminSql(`insert into public.opportunities (organization_id, name, stage, counterparty_id, campaign_id, currency, created_on, stage_changed_on, won_on)
-            values ('${orgId}', 'Acme deal', 'won', '${acme}', '${campaign}', 'GBP', '2026-06-01', '2026-06-10', '2026-06-10')`);
+  const opp = newId();
+  await orgRow(fs(), orgId, 'opportunities', opp).set({
+    id: opp, organization_id: orgId, name: 'Acme deal', stage: 'won', counterparty_id: acme, campaign_id: campaign,
+    channel_id: null, estimated_value: null, currency: 'GBP', created_on: '2026-06-01', stage_changed_on: '2026-06-10',
+    won_on: '2026-06-10', lost_on: null, notes: null, created_by: null, created_at: now, updated_at: now,
+  });
   await calculate();
 }, 300_000);
 
-afterAll(() => {
-  adminSql(`delete from public.organizations where name like 'ITest Health5%${RUN}';
-            delete from auth.users where email like '%@${DOMAIN}';`);
+afterAll(async () => {
+  const mine = await fs().collection('jobs').where('organization_id', '==', orgId).get();
+  for (const d of mine.docs) await d.ref.delete();
+  await removeSeeded([orgId], DOMAIN);
 });
 
 describe('marketing efficiency, from the Commercial records, through a real run', () => {
-  it('August: 30,000.00 from the customer the campaign won, over 3,000.00 of spend = 10x → 50 + 20 = 70', () => {
+  it('August: 30,000.00 from the customer the campaign won, over 3,000.00 of spend = 10x → 50 + 20 = 70', async () => {
     // Window June–August. Acme was won 10 June, so all three months of its revenue count.
     // M2 has no earlier three months of spend to compare with → skipped.
-    expect(dimension('2026-08', 'marketing_efficiency')).toBe('true|70|');
+    expect(await dimension('2026-08', 'marketing_efficiency')).toBe('true|70|');
   });
 
-  it('a month whose three-month window starts before the first period with spend is still scored on its spend', () => {
+  it('a month whose three-month window starts before the first period with spend is still scored on its spend', async () => {
     // June: window April–June holds 1,000.00 of spend and 10,000.00 from Acme (won in June) → 10x.
-    expect(dimension('2026-06', 'marketing_efficiency')).toBe('true|70|');
+    expect(await dimension('2026-06', 'marketing_efficiency')).toBe('true|70|');
   });
 
-  it('no debt, receivables or payables established from a ledger alone: funding readiness is not scored', () => {
-    expect(dimension('2026-08', 'funding_readiness')).toBe('false|NULL|required_metric_missing');
+  it('no debt, receivables or payables established from a ledger alone: funding readiness is not scored', async () => {
+    expect(await dimension('2026-08', 'funding_readiness')).toBe('false|NULL|required_metric_missing');
   });
 });
 
 describe('a new Health config re-scores the whole history (ADR-147)', () => {
   it('queues the organisation, and the run rewrites every month — not only the latest', async () => {
-    const before = Number(one(`select count(*) from public.health_scores where organization_id = '${orgId}'`));
-    // As if the scores had been made under the previous config. Triggers off for this one statement:
-    // a stored score is otherwise immutable, which is exactly what makes the re-score necessary.
-    adminSql(`set session_replication_role = replica;
-              update public.health_scores set config_version = 'health.config.v4' where organization_id = '${orgId}';`);
+    const scores = orgCollection(fs(), orgId, 'health_scores');
+    const before = (await scores.get()).size;
+    // As if the scores had been made under the previous config. Written directly: a stored score is
+    // otherwise immutable (no function offers the change), which is what makes the re-score necessary.
+    for (const d of (await scores.get()).docs) await d.ref.update({ config_version: 'health.config.v4' });
 
-    const { data, error } = await serviceStorage().schema('api_server').rpc('enqueue_health_upgrade', { p_config_version: 'health.config.v5' });
+    const { data, error } = await rpc<number>(serviceClientScoped(), 'enqueue_health_upgrade', { p_config_version: 'health.config.v5' }, server);
     expect(error).toBeNull();
     expect(Number(data)).toBeGreaterThanOrEqual(1);
-    const job = one(`select id from public.jobs where organization_id = '${orgId}' and job_type = 'calculation.run' and status = 'queued' order by created_at desc limit 1`);
+    const job = (await calcQueued())[0]?.id as string | undefined;
     expect(job).toMatch(/^[0-9a-f-]{36}$/);
-    expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
+    expect(await drainUntilFinished(drainJobs, job!)).toBe('succeeded');
 
     // Every complete month has a new v5 score behind its current pointer.
     for (const ym of MONTHS) {
-      expect(one(`select h.config_version from public.health_current hc join public.health_scores h on h.id = hc.health_score_id
-                   where hc.organization_id = '${orgId}' and hc.period_id = '${period(ym)}'`), ym).toBe('health.config.v5');
+      expect((await currentScore(ym))?.config_version, ym).toBe('health.config.v5');
     }
-    expect(Number(one(`select count(*) from public.health_scores where organization_id = '${orgId}'`))).toBe(before + MONTHS.length);
+    expect((await scores.get()).size).toBe(before + MONTHS.length);
     // And with nothing left on another config, nothing more is queued for it.
-    const again = await serviceStorage().schema('api_server').rpc('enqueue_health_upgrade', { p_config_version: 'health.config.v5' });
-    const queuedNow = one(`select count(*) from public.jobs where organization_id = '${orgId}' and job_type = 'calculation.run' and status = 'queued'`);
+    const again = await rpc(serviceClientScoped(), 'enqueue_health_upgrade', { p_config_version: 'health.config.v5' }, server);
     expect(again.error).toBeNull();
-    expect(queuedNow).toBe('0');
-  });
+    expect(await calcQueued()).toHaveLength(0);
+  }, 300_000); // a full recalculation of the history runs inside this test
 
   it('refuses a config name that is not one', async () => {
-    const { error } = await serviceStorage().schema('api_server').rpc('enqueue_health_upgrade', { p_config_version: 'v5; drop table x' });
-    expect(error?.message).toMatch(/VALIDATION/);
+    const { error } = await rpc(serviceClientScoped(), 'enqueue_health_upgrade', { p_config_version: 'v5; drop table x' }, server);
+    expect(error?.code).toBe('VALIDATION');
   });
 });
 
 describe('scores under different configs are never compared (ADR-119 §5)', () => {
   it('Home and the reports show no change when the previous month was scored under other rules', async () => {
-    const db = serviceStorage();
+    const db = serviceClientScoped(orgId);
     const same = await loadHealthCard(db, orgId, period('2026-08'), period('2026-07'));
     expect(same?.changeVsPrevious).not.toBeNull();
-    const julyScore = one(`select health_score_id from public.health_current where organization_id = '${orgId}' and period_id = '${period('2026-07')}'`);
-    adminSql(`set session_replication_role = replica;
-              update public.health_scores set config_version = 'health.config.v4' where id = '${julyScore}';`);
+    const july = await orgRow(fs(), orgId, 'health_current', period('2026-07')).get();
+    await orgRow(fs(), orgId, 'health_scores', String(july.get('health_score_id'))).update({ config_version: 'health.config.v4' });
     const mixed = await loadHealthCard(db, orgId, period('2026-08'), period('2026-07'));
     expect(mixed?.score).not.toBeNull();
     expect(mixed?.changeVsPrevious).toBeNull();
   });
-
-  it('the Command Centre summary returns no previous month across a config change', () => {
-    expect(adminSql(`select position('h2.config_version = h1.config_version' in pg_get_functiondef('api.portfolio_summary(uuid[], date, date)'::regprocedure)) > 0`).trim()).toBe('t');
-  });
+  // The PostgreSQL suite also asserted `api.portfolio_summary`'s SQL text compared config versions
+  // (a pg_catalog check). That function is Team P's port now; the rule is theirs to test.
 });

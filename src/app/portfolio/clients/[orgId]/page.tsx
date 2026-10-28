@@ -5,6 +5,7 @@ import {
 import { notFound } from 'next/navigation';
 import { getPortfolioContext, hrefs, loadOpportunities, loadPortfolio, loadPortfolioActions, loadPortfolioAlerts } from '@/modules/portfolio';
 import { OpportunityList } from '../../_components/opportunities';
+import { readableOrganization } from '@/modules/platform';
 import { bandLabel } from '@/modules/health';
 import { PageHeader, Card, CardBody, CardHeader, Badge, IconBadge } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
@@ -33,7 +34,7 @@ export default async function PortfolioClientPage({ params }: { params: Promise<
   if (row === undefined) notFound();
   const links = hrefs(organisation);
   // Phase 16 (§11): one link to the client's Funding Readiness page, only while it is switched on.
-  const { data: features } = await ctx.db.from('organizations').select('features').eq('id', orgId).maybeSingle();
+  const features = await readableOrganization(ctx.db, orgId);
   const fundingOn = (features as { features?: Record<string, unknown> } | null)?.features?.funding_readiness === true;
   // This client's own detail, read for this client alone; the counts are the aggregate's (ADR-114).
   const [alerts, actions, opportunities] = await Promise.all([

@@ -1,7 +1,8 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { buildMetricBundle } from '@/core/db';
-import { NotFound, toMotionError, ValidationError } from '@/core/errors';
+import { NotFound, ValidationError } from '@/core/errors';
+import { orgRowById } from '@/db/rls';
+import type { Db } from '@/db/types';
 import { assertCan } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
 import { minAssurance, isAssuranceLevel, type AssuranceLevel } from '../domain/assurance';
@@ -64,20 +65,14 @@ function parseEvidenceQuery(value: unknown): EvidenceQuery | null {
   return result.data;
 }
 
-async function periodLabel(db: SupabaseClient, orgId: string, periodId: string): Promise<string | null> {
-  const { data, error } = await db
-    .from('fiscal_periods')
-    .select('label')
-    .eq('organization_id', orgId)
-    .eq('id', periodId)
-    .maybeSingle();
-  if (error) throw toMotionError(error);
-  return (data as { label?: string } | null)?.label ?? null;
+async function periodLabel(db: Db, orgId: string, periodId: string): Promise<string | null> {
+  const row = await orgRowById<{ label?: string }>(db, orgId, 'fiscal_periods', periodId);
+  return row?.label ?? null;
 }
 
 /** The counterparty or account a dimensioned snapshot is about (§5, "Dimension metrics add …"). */
 async function dimensionItem(
-  db: SupabaseClient,
+  db: Db,
   orgId: string,
   snapshot: Row,
 ): Promise<{ item: DraftItem; label: string } | null> {
@@ -86,20 +81,14 @@ async function dimensionItem(
   if (id === null || type === null || type === 'none') return null;
 
   if (type === 'counterparty') {
-    const { data, error } = await db
-      .from('counterparties').select('name').eq('organization_id', orgId).eq('id', id).maybeSingle();
-    if (error) throw toMotionError(error);
-    const name = (data as { name?: string } | null)?.name;
+    const name = (await orgRowById<{ name?: string }>(db, orgId, 'counterparties', id))?.name;
     if (name === undefined) return null;
     const label = counterpartyLabel({ name });
     return { item: { item_type: 'counterparty', ref_id: id, label, assurance_level: 'verified' }, label };
   }
 
   if (type === 'account' || type === 'category') {
-    const { data, error } = await db
-      .from('accounts').select('code, name').eq('organization_id', orgId).eq('id', id).maybeSingle();
-    if (error) throw toMotionError(error);
-    const row = data as { code?: string | null; name?: string } | null;
+    const row = await orgRowById<{ code?: string | null; name?: string }>(db, orgId, 'accounts', id);
     if (row?.name === undefined) return null;
     const label = accountLabel({ code: row.code ?? null, name: row.name });
     return { item: { item_type: 'account', ref_id: id, label, assurance_level: 'verified' }, label };

@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { seededOrgSlug, sql } from './fixtures';
+import { seededOrgSlug } from './fixtures';
+import { backend, newestFirst, orgIdBySlug, orgRows } from './firestore';
 
 /**
  * The two ends of the chain, clicked rather than typed (EVIDENCE_MODEL.md §1; ADR-096).
@@ -54,10 +55,10 @@ test.describe('from one record back to where it came from', () => {
   test('another organisation’s record is 404, not a denial', async ({ page }) => {
     const slug = seededOrgSlug();
     // A real ledger id belonging to somebody else: the answer must not differ from an invented one.
-    const foreign = sql(`
-      select e.id from public.ledger_entries e
-        join public.organizations o on o.id = e.organization_id
-       where o.slug <> '${slug}' limit 1`);
+    const { schema, setup } = await backend();
+    const elsewhere = await schema.acrossOrgs(setup.fs(), 'ledger_entries')
+      .where('organization_id', '!=', await orgIdBySlug(slug)).limit(1).get();
+    const foreign = String(elsewhere.docs[0]?.id ?? '');
     test.skip(foreign === '', 'needs a second organisation with a ledger');
     expect((await page.goto(`/app/${slug}/evidence/record/ledger/${foreign}`))?.status()).toBe(404);
   });
@@ -66,11 +67,8 @@ test.describe('from one record back to where it came from', () => {
 test.describe('from one file to what rests on it', () => {
   test('the document page says how many records rest on the file and which months', async ({ page }) => {
     const slug = seededOrgSlug();
-    const documentId = sql(`
-      select d.id from public.source_documents d
-        join public.organizations o on o.id = d.organization_id
-       where o.slug = '${slug}' and d.original_filename = 'gl-may.csv'
-       order by d.created_at desc limit 1`);
+    const files = await orgRows(await orgIdBySlug(slug), 'source_documents', (d) => d.original_filename === 'gl-may.csv');
+    const documentId = String(newestFirst(files)[0]?.id ?? '');
     test.skip(documentId === '', 'needs the seeded ledger file');
 
     await page.goto(`/app/${slug}/data/documents/${documentId}`);

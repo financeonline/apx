@@ -1,5 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
+import { globalRow, orgCollection, orgRow } from '@/db/schema';
 import { persistAlerts } from '@/core/db';
 import { evaluateAlerts } from '@/modules/alerts';
 import { loadBankRecords, loadObservations, loadRecurringGroups } from '@/modules/health';
@@ -30,7 +31,7 @@ export async function evaluateAlertsJob(
     return { status: 'failed', error: 'alerts.evaluate needs the run it is evaluating' };
   }
 
-  const scoped = scope.db as SupabaseClient;
+  const scoped = scope.db as Db;
 
   const run = await loadRun(scoped, orgId, runId);
   if (run === null) {
@@ -81,16 +82,10 @@ interface RunRow {
 }
 
 async function loadRun(
-  db: SupabaseClient, orgId: string, runId: string,
+  db: Db, orgId: string, runId: string,
 ): Promise<{ periodFrom: string; periodTo: string; aggregatedAt: string; asOf: string } | null> {
-  const { data } = await db
-    .from('calculation_runs')
-    .select('period_from, period_to, started_at, finished_at, chunks, as_of')
-    .eq('organization_id', orgId)
-    .eq('id', runId)
-    .maybeSingle();
-
-  const row = data as RunRow | null;
+  const snap = await orgRow(db.fs, orgId, 'calculation_runs', runId).get();
+  const row = snap.exists ? (snap.data() as RunRow) : null;
   if (row === null) return null;
 
   /*
@@ -133,19 +128,17 @@ interface PeriodRow {
 
 /** The periods the run wrote, oldest first (§8.3 "for P in periods ascending"). */
 async function loadRunPeriods(
-  db: SupabaseClient, orgId: string, from: string, to: string,
+  db: Db, orgId: string, from: string, to: string,
 ): Promise<Array<{ id: string; periodStart: string; periodEnd: string; isComplete: boolean }>> {
   const bounds = await periodBounds(db, orgId, from, to);
   if (bounds === null) return [];
-  const { data } = await db
-    .from('fiscal_periods')
-    .select('id, period_start, period_end, is_complete')
-    .eq('organization_id', orgId)
-    .gte('period_start', bounds.from)
-    .lte('period_start', bounds.to)
-    .order('period_start', { ascending: true });
+  const snap = await orgCollection(db.fs, orgId, 'fiscal_periods')
+    .where('period_start', '>=', bounds.from)
+    .where('period_start', '<=', bounds.to)
+    .orderBy('period_start', 'asc')
+    .get();
 
-  return ((data ?? []) as PeriodRow[]).map((row) => ({
+  return snap.docs.map((d) => d.data() as PeriodRow).map((row) => ({
     id: row.id,
     periodStart: row.period_start,
     periodEnd: row.period_end,
@@ -155,18 +148,16 @@ async function loadRunPeriods(
 
 /** The run's periods plus twelve months of lookback, which the trailing rules walk. */
 async function loadWindow(
-  db: SupabaseClient, orgId: string, from: string, to: string,
+  db: Db, orgId: string, from: string, to: string,
 ): Promise<Array<{ id: string; periodStart: string }>> {
   const bounds = await periodBounds(db, orgId, from, to);
   if (bounds === null) return [];
-  const { data } = await db
-    .from('fiscal_periods')
-    .select('id, period_start')
-    .eq('organization_id', orgId)
-    .lte('period_start', bounds.to)
-    .order('period_start', { ascending: true });
+  const snap = await orgCollection(db.fs, orgId, 'fiscal_periods')
+    .where('period_start', '<=', bounds.to)
+    .orderBy('period_start', 'asc')
+    .get();
 
-  const rows = ((data ?? []) as Array<{ id: string; period_start: string }>).map((row) => ({
+  const rows = snap.docs.map((d) => d.data() as { id: string; period_start: string }).map((row) => ({
     id: row.id, periodStart: row.period_start,
   }));
   const firstIndex = rows.findIndex((row) => row.periodStart >= bounds.from);
@@ -175,15 +166,12 @@ async function loadWindow(
 }
 
 async function periodBounds(
-  db: SupabaseClient, orgId: string, from: string, to: string,
+  db: Db, orgId: string, from: string, to: string,
 ): Promise<{ from: string; to: string } | null> {
-  const { data } = await db
-    .from('fiscal_periods')
-    .select('id, period_start')
-    .eq('organization_id', orgId)
-    .in('id', [from, to]);
-
-  const rows = (data ?? []) as Array<{ id: string; period_start: string }>;
+  const snaps = await Promise.all([
+    orgRow(db.fs, orgId, 'fiscal_periods', from).get(), orgRow(db.fs, orgId, 'fiscal_periods', to).get(),
+  ]);
+  const rows = snaps.filter((s) => s.exists).map((s) => s.data() as { id: string; period_start: string });
   const start = rows.find((row) => row.id === from)?.period_start;
   const end = rows.find((row) => row.id === to)?.period_start;
   if (start === undefined || end === undefined) return null;
@@ -191,33 +179,23 @@ async function periodBounds(
 }
 
 async function loadAccounts(
-  db: SupabaseClient, orgId: string,
+  db: Db, orgId: string,
 ): Promise<Array<{ id: string; name: string; standardCategory: string }>> {
-  const { data } = await db
-    .from('accounts')
-    .select('id, name, standard_category')
-    .eq('organization_id', orgId);
-  return ((data ?? []) as Array<{ id: string; name: string; standard_category: string }>)
+  const snap = await orgCollection(db.fs, orgId, 'accounts').select('id', 'name', 'standard_category').get();
+  return snap.docs.map((d) => d.data() as { id: string; name: string; standard_category: string })
     .map((row) => ({ id: row.id, name: row.name, standardCategory: row.standard_category }));
 }
 
 async function loadCounterparties(
-  db: SupabaseClient, orgId: string,
+  db: Db, orgId: string,
 ): Promise<Array<{ id: string; name: string }>> {
-  const { data } = await db
-    .from('counterparties')
-    .select('id, name')
-    .eq('organization_id', orgId);
-  return (data ?? []) as Array<{ id: string; name: string }>;
+  const snap = await orgCollection(db.fs, orgId, 'counterparties').select('id', 'name').get();
+  return snap.docs.map((d) => d.data() as { id: string; name: string });
 }
 
 async function loadSettings(
-  db: SupabaseClient, orgId: string,
+  db: Db, orgId: string,
 ): Promise<{ currency: string }> {
-  const { data } = await db
-    .from('organizations')
-    .select('base_currency')
-    .eq('id', orgId)
-    .maybeSingle();
-  return { currency: (data as { base_currency?: string } | null)?.base_currency ?? 'GBP' };
+  const org = await globalRow(db.fs, 'organizations', orgId).get();
+  return { currency: (org.get('base_currency') as string | undefined) ?? 'GBP' };
 }

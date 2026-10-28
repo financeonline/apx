@@ -4,7 +4,8 @@ import { resolvePeriodContext, TOOLS } from '@/modules/ai';
 import { loadHome, loadPeriodScope, loadPeriods, loadPeriodsWithData, loadProfitAndLoss } from '@/modules/dashboard';
 import { drainJobs } from '@/modules/jobs';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { addCommittedBatch, addCounterparty, addInvoice, dropUsers, dropWhere, enqueue, makeOrg } from './ai-fixtures';
+import { clientFor, createAuthUser, deleteOrg, drainUntilFinished } from './setup';
 
 /**
  * Home and the analyst answer the gross-profit question the same way (ADR-106).
@@ -20,8 +21,7 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  */
 
 const RUN = `gp${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.grossprofit.itest`;
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`).trim();
+const DOMAIN = `${RUN}.grossprofit.itest.motion`;
 
 let owner: string;
 let noCost: string;
@@ -64,54 +64,43 @@ const metricTool = async (orgId: string, key: string): Promise<ToolMetric> => {
 };
 
 async function seed(name: string, withCostOfSales: boolean): Promise<string> {
-  const created = await clientFor(owner).schema('api').rpc('create_organization', { p_name: name });
-  if (created.error) throw new Error(created.error.message);
-  const org = created.data as unknown as string;
+  const org = await makeOrg(owner, name);
 
-  const customer = one(`insert into public.counterparties (organization_id, name, kind)
-    values ('${org}', 'Big Client', 'customer') returning id`);
-  const invoice = (type: string, cp: string, num: string, sub: string, tax: string, total: string) =>
-    one(`insert into public.invoices
-        (organization_id, invoice_type, counterparty_id, invoice_number, issue_date, due_date, period_id,
-         subtotal, tax_amount, total_amount, amount_paid, status, record_status, assurance_level)
-      values ('${org}', '${type}', '${cp}', '${num}', '2026-08-10', '2026-09-09', '00000000-0000-0000-0000-000000000000',
-              ${sub}, ${tax}, ${total}, 0, 'open', 'accepted', 'verified') returning id`);
+  const customer = await addCounterparty(org, 'Big Client', 'customer');
+  const invoice = (type: 'sales' | 'purchase', cp: string, num: string, subtotal: string, tax: string, total: string) =>
+    addInvoice(org, { type, counterpartyId: cp, number: num, issueDate: '2026-08-10', dueDate: '2026-09-09', subtotal, tax, total });
 
-  invoice('sales', customer, 'S-1', '9000.00', '1800.00', '10800.00');
+  await invoice('sales', customer, 'S-1', '9000.00', '1800.00', '10800.00');
   if (withCostOfSales) {
-    const stock = one(`insert into public.counterparties (organization_id, name, kind, default_expense_category)
-      values ('${org}', 'Stock Co', 'supplier', 'cost_of_sales') returning id`);
-    invoice('purchase', stock, 'P-1', '2000.00', '400.00', '2400.00');
+    const stock = await addCounterparty(org, 'Stock Co', 'supplier', 'cost_of_sales');
+    await invoice('purchase', stock, 'P-1', '2000.00', '400.00', '2400.00');
   }
-  adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event)
-            select organization_id, 'invoices', id, 'accepted' from public.invoices where organization_id = '${org}'`);
-  const doc = one(`insert into public.source_documents
-      (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-    values ('${org}', '${org}/gp/i.csv', 'i.csv', 'text/csv', 10, digest('${org}gp', 'sha256'), 'ready', 'invoice') returning id`);
-  adminSql(`insert into public.import_batches
-      (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind)
-    values ('${org}', '${doc}', 'sales_invoices', 'invoices', 'committed', 'csv', '2026-08-01', '2026-08-31', now(), 'full')`);
+  const sales = await addCommittedBatch(org, {
+    importType: 'sales_invoices', targetTable: 'invoices', periodStart: '2026-08-01', periodEnd: '2026-08-31',
+    filename: 'i.csv', documentKind: 'invoice', invoiceListKind: 'full',
+  });
   // FU-12: costs need a full purchase list (ADR-126). Both organisations get one over the same range
   // as the sales list, so the no-cost organisation still reaches the ADR-106 no-direct-cost-accounts
   // reason rather than FU-12's no-coverage one.
-  adminSql(`insert into public.import_batches
-      (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind)
-    values ('${org}', '${doc}', 'purchase_invoices', 'invoices', 'committed', 'csv', '2026-08-01', '2026-08-31', now(), 'full')`);
-  const jobId = adminSql(`insert into public.jobs (organization_id, job_type, payload, max_attempts)
-    values ('${org}', 'calculation.run', '{"trigger":"recalc_manual","as_of":"2026-09-15"}'::jsonb, 3) returning id`).split('\n')[0]!.trim();
+  await addCommittedBatch(org, {
+    importType: 'purchase_invoices', targetTable: 'invoices', periodStart: '2026-08-01', periodEnd: '2026-08-31',
+    filename: 'i.csv', documentKind: 'invoice', invoiceListKind: 'full', documentId: sales.documentId,
+  });
+  const jobId = await enqueue(org, 'calculation.run', { trigger: 'recalc_manual', as_of: '2026-09-15' });
   expect(await drainUntilFinished(drainJobs, jobId)).toBe('succeeded');
   return org;
 }
 
 beforeAll(async () => {
-  owner = createAuthUser(`owner@${DOMAIN}`);
+  owner = await createAuthUser(`owner@${DOMAIN}`);
   noCost = await seed(`ITest GP none ${RUN}`, false);
   withCost = await seed(`ITest GP real ${RUN}`, true);
 }, 300_000);
 
-afterAll(() => {
-  adminSql(`delete from public.organizations where id in ('${noCost}', '${withCost}');
-            delete from auth.users where email like '%@${DOMAIN}';`);
+afterAll(async () => {
+  for (const org of [noCost, withCost]) if (org) await deleteOrg(org);
+  await dropWhere('jobs', 'organization_id', [noCost, withCost].filter(Boolean));
+  await dropUsers(DOMAIN);
 });
 
 describe('no cost of sales: every surface says the same thing (ADR-106)', () => {

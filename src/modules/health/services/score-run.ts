@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { log } from '@/core/logging';
 import type { AccountObservation, MetricObservation, RuleContext } from '@/modules/alerts';
 import { calculationRunLabel, metricSnapshotLabel } from '@/modules/evidence';
@@ -47,7 +47,7 @@ export interface HealthChunkRequest {
 }
 
 export interface HealthRunDeps {
-  readonly scoped: SupabaseClient;
+  readonly scoped: Db;
   /** `api_server.finish_health`, injected so the lint boundary holds and the loop stays testable. */
   readonly finishHealth: (input: Record<string, unknown>) => Promise<{ written: number }>;
 }

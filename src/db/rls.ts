@@ -214,8 +214,22 @@ const POLICIES: Partial<Record<OrgTable, Policy>> = {
   source_documents: anyOf('documents.view', 'imports.review'),
 };
 
-/** Builds the caller's read context for one organisation; memoises each permission check. */
-export async function readCtx(db: Db, orgId: string): Promise<ReadCtx | null> {
+/**
+ * Builds the caller's read context for one organisation, memoised per handle and organisation: the
+ * role, every permission check and the organisation's features are resolved once per request,
+ * however many rows and tables the page reads (a page builds its handle once per request).
+ */
+const ctxCache = new WeakMap<Db, Map<string, Promise<ReadCtx | null>>>();
+
+export function readCtx(db: Db, orgId: string): Promise<ReadCtx | null> {
+  let perDb = ctxCache.get(db);
+  if (!perDb) { perDb = new Map(); ctxCache.set(db, perDb); }
+  let hit = perDb.get(orgId);
+  if (!hit) { hit = buildReadCtx(db, orgId); perDb.set(orgId, hit); }
+  return hit;
+}
+
+async function buildReadCtx(db: Db, orgId: string): Promise<ReadCtx | null> {
   const uid = uidOf(db);
   if (!uid) return null;
   const role = await orgRoleOf(db.fs, uid, orgId);
@@ -248,6 +262,31 @@ export async function readCtx(db: Db, orgId: string): Promise<ReadCtx | null> {
   };
 }
 
+/**
+ * The server reads as the server (the service role bypassed RLS): a job scoped to an organisation
+ * reads that organisation's rows in full and NOTHING of any other — the scope is the boundary, as
+ * the `x-motion-org` header was. An unscoped server handle (a sweep, the queue) reads any.
+ */
+function serverMayRead(db: Db, orgId: string): boolean {
+  return db.actor.kind === 'service' && (db.actor.scope === null || db.actor.scope === orgId);
+}
+
+/** The policy's decision for this caller, memoised alongside the context. */
+const decisionCache = new WeakMap<ReadCtx, Map<OrgTable, Promise<Decision>>>();
+
+async function decide(db: Db, orgId: string, table: OrgTable): Promise<Decision> {
+  if (serverMayRead(db, orgId)) return ALL;
+  const policy = POLICIES[table];
+  if (!policy) return false;
+  const c = await readCtx(db, orgId);
+  if (!c) return false;
+  let perCtx = decisionCache.get(c);
+  if (!perCtx) { perCtx = new Map(); decisionCache.set(c, perCtx); }
+  let hit = perCtx.get(table);
+  if (!hit) { hit = policy(c); perCtx.set(table, hit); }
+  return hit;
+}
+
 async function underlyingRole(db: Db, orgId: string, uid: string): Promise<string | null> {
   const a = await orgRow(db.fs, orgId, 'organization_assignments', uid).get();
   if (a.exists && a.get('status') === 'active') return 'employee';
@@ -265,11 +304,8 @@ async function underlyingRole(db: Db, orgId: string, uid: string): Promise<strin
 export async function orgQuery(
   db: Db, orgId: string, table: OrgTable,
 ): Promise<{ query: Query; keep: ((rows: DocumentData[]) => Promise<DocumentData[]>) | null } | null> {
-  const policy = POLICIES[table];
-  if (!policy) return null;
-  const c = await readCtx(db, orgId);
-  if (!c) return null;
-  const decision = await policy(c);
+  if (!orgId) return null;
+  const decision = await decide(db, orgId, table);
   if (decision === false) return null;
   let query: Query = orgCollection(db.fs, orgId, table);
   for (const [field, op, value] of decision.where ?? []) query = query.where(field, op, value);
@@ -294,31 +330,30 @@ export async function orgRows<T = DocumentData>(
 export async function orgRowById<T = DocumentData>(
   db: Db, orgId: string, table: OrgTable, id: string,
 ): Promise<T | null> {
-  const scoped = await orgQuery(db, orgId, table);
-  if (!scoped || !id) return null;
-  const snap = await orgRow(db.fs, orgId, table, id).get();
-  if (!snap.exists) return null;
-  const rows = [snap.data()!];
-  // The query's own `where` clauses are re-applied to the fetched row.
-  const policy = POLICIES[table]!;
-  const c = await readCtx(db, orgId);
-  const decision = c ? await policy(c) : false;
-  if (decision === false) return null;
-  for (const [field, op, value] of decision.where ?? []) {
-    if (op === '==' && rows[0]![field] !== value) return null;
-  }
-  const kept = decision.keep ? await decision.keep(rows) : rows;
-  return (kept[0] as T | undefined) ?? null;
+  const rows = await orgRowsByIds<T>(db, orgId, table, [id]);
+  return rows[0] ?? null;
+}
+
+/**
+ * Several rows by id in one round trip, keeping only those the caller may see (in no particular
+ * order). The policy's `where` clauses are re-applied to each fetched row, then its `keep`.
+ */
+export async function orgRowsByIds<T = DocumentData>(
+  db: Db, orgId: string, table: OrgTable, ids: readonly string[],
+): Promise<T[]> {
+  const unique = [...new Set(ids)].filter(Boolean);
+  if (!orgId || unique.length === 0) return [];
+  const decision = await decide(db, orgId, table);
+  if (decision === false) return [];
+  const snaps = await db.fs.getAll(...unique.map((id) => orgRow(db.fs, orgId, table, id)));
+  const rows = snaps.filter((s) => s.exists).map((s) => s.data()!)
+    .filter((row) => (decision.where ?? []).every(([field, op, value]) => op !== '==' || row[field] === value));
+  return (decision.keep ? await decision.keep(rows) : rows) as T[];
 }
 
 async function visibleIds(c: ReadCtx, table: OrgTable, ids: string[]): Promise<Set<string>> {
-  const unique = [...new Set(ids)].filter(Boolean);
-  if (unique.length === 0) return new Set();
-  const out = new Set<string>();
-  for (const id of unique) {
-    if (await orgRowById(c.db, c.orgId, table, id)) out.add(id);
-  }
-  return out;
+  const rows = await orgRowsByIds(c.db, c.orgId, table, ids);
+  return new Set(rows.map((r) => String(r.id)));
 }
 
 async function ownAiMessageIds(c: ReadCtx, messageIds: string[]): Promise<Set<string>> {

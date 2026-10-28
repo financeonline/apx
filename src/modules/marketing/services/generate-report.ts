@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { failMarketingReport, finishMarketingReport, startMarketingReport } from '@/core/db/server-rpc';
 import { UpstreamError } from '@/core/errors';
 import { log } from '@/core/logging';
@@ -14,13 +14,13 @@ import { generateMarketingNarrative } from './generate-narrative';
  * `marketing.generate` — writing the marketing report (ADR-170).
  *
  * Queued by `api.request_marketing_report`, with the attempt row it fills, in one transaction, and run
- * with the job's scoped client. One attempt, never retried by the queue: every attempt is a paid model
+ * with the job's scoped handle. One attempt, never retried by the queue: every attempt is a paid model
  * call, so a failure is recorded on the row in plain words and the person decides whether to refresh.
  *
  *   1. `start_marketing_report` moves the attempt to running — or says there is nothing to do (it
  *      already finished, or Marketing was switched off after it was asked for).
  *   2. The organisation, its profile (re-checked: it may have been emptied since the request) and the
- *      product's own figures for Section 03 are read here, with the scoped client.
+ *      product's own figures for Section 03 are read here, with the scoped handle.
  *   3. The model writes Sections 01–02 and the Section 03 commentary from the profile and the figures.
  *   4. The report is assembled — the cover date and the sources are decided here, never by the model —
  *      and stored with the tokens it cost, which count under the monthly AI ceiling.
@@ -41,7 +41,7 @@ export const MARKETING_FAILURES = {
 } as const;
 
 export interface MarketingReportDeps {
-  readonly loadFinancials: (db: SupabaseClient, orgId: string) => Promise<MarketingFinancials | null>;
+  readonly loadFinancials: (db: Db, orgId: string) => Promise<MarketingFinancials | null>;
   readonly generateNarrative: typeof generateMarketingNarrative;
   readonly now: () => Date;
   /** Handed to the writer when set — a test's recorded transport. Production leaves it unset. */
@@ -69,7 +69,7 @@ function isTimeout(cause: unknown): boolean {
  * attempt in flight for the organisation (there is at most one). `deps` is the test seam.
  */
 export async function runMarketingReport(
-  scoped: SupabaseClient,
+  scoped: Db,
   orgId: string,
   reportId?: string,
   deps: Partial<MarketingReportDeps> = {},

@@ -1,7 +1,7 @@
 /**
  * Profit-and-loss metrics (FINANCIAL_ENGINE.md §3.1).
  *
- * Pure: aggregated amounts in, `MetricResult[]` out. No Supabase, no clock, no randomness, and no
+ * Pure: aggregated amounts in, `MetricResult[]` out. No database, no clock, no randomness, and no
  * iteration-order dependence — categories are walked in `STANDARD_CATEGORIES` order and accounts in
  * id order, so the same inputs serialise byte-identically every time (§1.1).
  *

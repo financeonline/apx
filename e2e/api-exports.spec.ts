@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { seededOrgSlug, sql } from './fixtures';
+import { seededOrgSlug } from './fixtures';
+import { auditEvents, orgIdBySlug } from './firestore';
 
 /**
  * `GET /api/exports/[kind]` (ROUTE_ARCHITECTURE.md §167; SECURITY_MODEL.md §8 step 4).
@@ -11,7 +12,8 @@ import { seededOrgSlug, sql } from './fixtures';
 test.describe('CSV export', () => {
   test('streams the ledger as CSV, defused, and records the export', async ({ page }) => {
     const slug = seededOrgSlug();
-    const before = Number(sql(`select count(*) from public.audit_events a join public.organizations o on o.id = a.organization_id where o.slug = '${slug}' and a.action = 'export.created'`));
+    const orgId = await orgIdBySlug(slug);
+    const before = (await auditEvents(orgId)).filter((a) => a.action === 'export.created').length;
 
     const response = await page.request.get(`/api/exports/ledger?org=${slug}`);
     expect(response.status(), await response.text()).toBe(200);
@@ -26,7 +28,9 @@ test.describe('CSV export', () => {
     for (const line of lines.slice(1)) {
       for (const cell of line.split(',')) expect(cell).not.toMatch(/^[=+@]/);
     }
-    expect(Number(sql(`select count(*) from public.audit_events a join public.organizations o on o.id = a.organization_id where o.slug = '${slug}' and a.action = 'export.created' and a.metadata ->> 'export_kind' = 'ledger'`))).toBe(before + 1);
+    const ledgerExports = (await auditEvents(orgId))
+      .filter((a) => a.action === 'export.created' && (a.metadata as { export_kind?: unknown } | null)?.export_kind === 'ledger');
+    expect(ledgerExports.length).toBe(before + 1);
   });
 
   test('every kind answers with its own header', async ({ page }) => {

@@ -1,16 +1,20 @@
 import { beforeAll, afterAll, describe, expect, it } from 'vitest';
 
 import { DB_REPRESENTABLE_SCENARIOS, type ResolutionScenario } from '../fixtures/resolution-scenarios';
-import { adminSql, clientFor, resetFixtures } from './setup';
+import { clientFor, rpc } from './setup';
+import { addMember, assign, dropOrg, dropPlatformUser, makeOrg, makePlatformUser } from './tenancy-fixtures';
 
 /**
  * Resolution parity (TEST_STRATEGY.md §3, finding F-A-06).
  *
- * `resolveEffectiveRole()` in TypeScript and `app.accessible_org_roles()` in SQL both decide what a
- * caller is inside one organization. Two implementations of one rule drift apart silently, and the
- * failure mode is a user seeing an organization they should not. So the same fixture table drives
- * both: test/unit/resolve-effective-role.test.ts asserts the TypeScript twin, and this file replays
- * every DB-representable row against the real database through a real user JWT.
+ * `resolveEffectiveRole()` (the pure TypeScript twin) and `orgRoleOf` / `accessibleOrgRoles`
+ * (`src/db/app/access.ts`, the port of `app.accessible_org_roles()` that every read policy and
+ * every `api.*` function consults) both decide what a caller is inside one organisation. Two
+ * implementations of one rule drift apart silently, and the failure mode is a user seeing an
+ * organisation they should not. So the same fixture table drives both:
+ * test/unit/resolve-effective-role.test.ts asserts the pure twin, and this file replays every
+ * representable row against the Firestore emulator through `api.my_context` and
+ * `api.my_organizations`, as a signed-in user.
  *
  * A disagreement here is the finding. Neither side may be adjusted to make a row pass.
  */
@@ -21,90 +25,59 @@ interface Materialised {
   readonly slug: string;
 }
 
+const RUN = `p${Date.now().toString(36)}`;
 const materialised: Materialised[] = [];
-/** Organizations that deliberately do not exist, to prove a slug swap resolves to nothing. */
-const MISSING_SLUG_PREFIX = 'itest-parity-missing-';
+const orgIds: string[] = [];
+const platformIds: string[] = [];
+/** Organisations that deliberately do not exist, to prove a slug swap resolves to nothing. */
+const MISSING_SLUG_PREFIX = `itest-${RUN}-missing-`;
 
-const sqlTimestamp = (minutes: number | null): string =>
-  minutes === null ? 'null' : `now() + interval '${minutes} minutes'`;
-
-function uuid(): string {
-  return crypto.randomUUID();
-}
+const at = (minutes: number | null): string | null =>
+  minutes === null ? null : new Date(Date.now() + minutes * 60_000).toISOString();
 
 /**
- * Build every scenario in ONE round trip. Each gets its own organization and its own user, so no
- * scenario can be contaminated by another's rows.
+ * Each scenario gets its own organisation and its own user (a Firebase-style uid, not a uuid), so
+ * no scenario can be contaminated by another's rows. The rows are written as the data model stores
+ * them; the platform-exclusivity rule lives in the writing functions now, and the fixture table
+ * already marks every combination it forbids as not representable.
  */
-function buildFixtures(): void {
-  const statements: string[] = [];
-
-  DB_REPRESENTABLE_SCENARIOS.forEach((scenario, index) => {
-    const userId = uuid();
-    const orgId = uuid();
-    const slug =
-      scenario.organizationStatus === 'missing'
-        ? `${MISSING_SLUG_PREFIX}${index}`
-        : `itest-parity-${index}`;
-
+async function buildFixtures(): Promise<void> {
+  for (const [index, scenario] of DB_REPRESENTABLE_SCENARIOS.entries()) {
+    const userId = `${RUN}u${index}`;
+    const slug = scenario.organizationStatus === 'missing' ? `${MISSING_SLUG_PREFIX}${index}` : `itest-${RUN}-${index}`;
     materialised.push({ scenario, userId, slug });
 
-    statements.push(`
-      insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
-                              email_confirmed_at, created_at, updated_at)
-      values ('${userId}','00000000-0000-0000-0000-000000000000','authenticated','authenticated',
-              'parity-${index}@itest.motion','x', now(), now(), now());
-    `);
-
-    // 'missing' means the slug resolves to no organization at all: nothing to insert.
-    if (scenario.organizationStatus !== 'missing') {
-      statements.push(`
-        insert into public.organizations (id, slug, name, status)
-        values ('${orgId}', '${slug}', 'ITest Parity ${index}', '${scenario.organizationStatus}');
-      `);
-    }
-
     if (scenario.platformUser) {
-      statements.push(`
-        insert into public.platform_users (user_id, platform_role, status)
-        values ('${userId}', '${scenario.platformUser.role}', '${scenario.platformUser.status}');
-      `);
+      await makePlatformUser(userId, scenario.platformUser.role, scenario.platformUser.status as 'active' /* stored as given: 'active' | 'suspended' */);
+      platformIds.push(userId);
     }
-
-    if (scenario.membership && scenario.organizationStatus !== 'missing') {
-      statements.push(`
-        insert into public.organization_memberships (organization_id, user_id, role, status)
-        values ('${orgId}', '${userId}', '${scenario.membership.role}', '${scenario.membership.status}');
-      `);
+    // 'missing' means the slug resolves to no organisation at all: nothing to write.
+    if (scenario.organizationStatus === 'missing') continue;
+    const orgId = await makeOrg({ name: `ITest Parity ${RUN} ${index}`, slug, status: scenario.organizationStatus });
+    orgIds.push(orgId);
+    if (scenario.membership) {
+      await addMember(orgId, userId, scenario.membership.role, { status: scenario.membership.status });
     }
-
-    if (scenario.assignment && scenario.organizationStatus !== 'missing') {
-      statements.push(`
-        insert into public.organization_assignments
-               (organization_id, employee_user_id, status, starts_at, ends_at)
-        values ('${orgId}', '${userId}', '${scenario.assignment.status}',
-                ${sqlTimestamp(scenario.assignment.startsAtMinutes)},
-                ${sqlTimestamp(scenario.assignment.endsAtMinutes)});
-      `);
+    if (scenario.assignment) {
+      await assign(orgId, userId, {
+        status: scenario.assignment.status,
+        startsAt: at(scenario.assignment.startsAtMinutes),
+        endsAt: at(scenario.assignment.endsAtMinutes),
+      });
     }
-  });
-
-  // The membership and assignment triggers are the contract too: if one of these inserts is
-  // refused, the fixture claims something the database forbids and the suite must fail loudly
-  // rather than silently testing fewer rows.
-  adminSql(`set local app.bootstrap = 'on'; ${statements.join('\n')}`);
+  }
 }
 
-beforeAll(() => {
-  resetFixtures();
-  buildFixtures();
+beforeAll(async () => {
+  await buildFixtures();
+}, 120_000);
+
+afterAll(async () => {
+  for (const id of orgIds) await dropOrg(id);
+  for (const id of platformIds) await dropPlatformUser(id);
 });
 
-afterAll(() => {
-  resetFixtures();
-});
-
-describe('the SQL resolver and the TypeScript resolver agree on every scenario', () => {
+describe('the data-layer resolver and the pure resolver agree on every scenario', () => {
   it('materialised every DB-representable scenario', () => {
     expect(materialised).toHaveLength(DB_REPRESENTABLE_SCENARIOS.length);
     expect(materialised.length).toBeGreaterThan(30);
@@ -114,9 +87,7 @@ describe('the SQL resolver and the TypeScript resolver agree on every scenario',
     'api.my_context resolves %s exactly as the pure resolver does',
     async (_id, index) => {
       const { scenario, userId, slug } = materialised[index]!;
-      const client = clientFor(userId);
-
-      const { data, error } = await client.schema('api').rpc('my_context', { p_slug: slug });
+      const { data, error } = await rpc(clientFor(userId), 'my_context', { p_slug: slug });
       expect(error, `${scenario.id} should resolve without error`).toBeNull();
 
       const row = (data as { role: string }[] | null)?.[0];
@@ -124,7 +95,7 @@ describe('the SQL resolver and the TypeScript resolver agree on every scenario',
 
       expect(
         actual,
-        `${scenario.id} — ${scenario.description}: SQL said "${actual}", the fixture expects "${scenario.expected}"`,
+        `${scenario.id} — ${scenario.description}: the data layer said "${actual}", the fixture expects "${scenario.expected}"`,
       ).toBe(scenario.expected);
     },
   );
@@ -134,8 +105,7 @@ describe('the SQL resolver and the TypeScript resolver agree on every scenario',
     expect(denied.length, 'the fixture must contain denial cases').toBeGreaterThan(0);
 
     for (const { scenario, userId, slug } of denied) {
-      const client = clientFor(userId);
-      const { data, error } = await client.schema('api').rpc('my_context', { p_slug: slug });
+      const { data, error } = await rpc(clientFor(userId), 'my_context', { p_slug: slug });
       expect(error, `${scenario.id} must not raise`).toBeNull();
       expect(data ?? [], `${scenario.id} must return no row`).toHaveLength(0);
     }
@@ -143,8 +113,7 @@ describe('the SQL resolver and the TypeScript resolver agree on every scenario',
 
   it('api.my_organizations never lists an organization my_context denies', async () => {
     for (const { scenario, userId, slug } of materialised) {
-      const client = clientFor(userId);
-      const { data } = await client.schema('api').rpc('my_organizations');
+      const { data } = await rpc(clientFor(userId), 'my_organizations');
       const listed = (data as { slug: string; role: string }[] | null) ?? [];
       const match = listed.find((o) => o.slug === slug);
 

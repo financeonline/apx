@@ -1,16 +1,17 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
 import { callApi } from '@/core/db/api-rpc';
-import { NotFound, toMotionError } from '@/core/errors';
+import { NotFound } from '@/core/errors';
 import { log } from '@/core/logging';
 import { assertCan } from '@/core/permissions';
 import { removeObject, SOURCE_DOCUMENTS_BUCKET } from '@/core/storage/signer';
 import type { AccessContext } from '@/modules/tenancy';
+import { orgRowById, orgRows } from '@/db/rls';
+import type { Db } from '@/db/types';
 
 /**
  * The document library (ROUTE_ARCHITECTURE.md §127–128; SERVICE_ARCHITECTURE.md §documents;
- * ADR-043.4; R2-A-09). Reads run under the caller's client — `source_documents` is an allow-list of
- * owner/admin/employee/super_admin, never a client (R2-A-07). Deleting is `api.delete_document`,
+ * ADR-043.4; R2-A-09). Reads run under the caller's read policy (`src/db/rls.ts`) — `source_documents`
+ * is an allow-list of owner/admin/employee/super_admin, never a client (R2-A-07). Deleting is `api.delete_document`,
  * which refuses a quarantined file and one an import still rests on, marks the row and returns the
  * path; the signer then removes the object, and `storage.cleanup_orphans` finishes the job if that
  * fails. The row is never removed: it is the record that a file existed.
@@ -31,10 +32,31 @@ export interface DocumentSummary {
   readonly batches: ReadonlyArray<{ readonly id: string; readonly status: string; readonly importType: string; readonly createdAt: string }>;
 }
 
-const SELECT = 'id, original_filename, document_kind, mime_type, byte_size, status, page_count, has_text_layer, created_at, deleted_at, import_batches(id, status, import_type, created_at)';
+type Row = Record<string, unknown>;
 
-function toSummary(row: Record<string, unknown>): DocumentSummary {
-  const batches = ((row.import_batches ?? []) as Array<Record<string, unknown>>)
+/**
+ * The imports that rest on each document — the old embedded `import_batches(...)` select, now a
+ * second read joined here (FIRESTORE_DATA_MODEL.md §5). Under the caller's own `import_batches`
+ * policy, as the embed was: a reader without `imports.review` sees a document with no imports.
+ */
+async function batchesByDocument(db: Db, orgId: string, documentIds: readonly string[]): Promise<Map<string, Row[]>> {
+  const out = new Map<string, Row[]>();
+  const ids = [...new Set(documentIds)];
+  for (let i = 0; i < ids.length; i += 30) {
+    const chunk = ids.slice(i, i + 30);
+    const rows = await orgRows<Row>(db, orgId, 'import_batches', (q) => q
+      .where('source_document_id', 'in', chunk)
+      .select('id', 'status', 'import_type', 'created_at', 'source_document_id'));
+    for (const b of rows) {
+      const key = String(b.source_document_id);
+      out.set(key, [...(out.get(key) ?? []), b]);
+    }
+  }
+  return out;
+}
+
+function toSummary(row: Row, batchRows: readonly Row[]): DocumentSummary {
+  const batches = batchRows
     .map((b) => ({ id: b.id as string, status: b.status as string, importType: b.import_type as string, createdAt: b.created_at as string }))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return {
@@ -56,21 +78,41 @@ function toSummary(row: Record<string, unknown>): DocumentSummary {
 export async function listDocuments(ctx: AccessContext, scope: 'current' | 'all' = 'current'): Promise<DocumentSummary[]> {
   assertCan(ctx, 'documents.view');
   if (!ctx.orgId) throw new NotFound();
-  const db: SupabaseClient = ctx.db;
-  let query = db.from('source_documents').select(SELECT).eq('organization_id', ctx.orgId).order('created_at', { ascending: false }).limit(500);
-  if (scope === 'current') query = query.is('deleted_at', null);
-  const { data, error } = await query;
-  if (error) throw toMotionError(error, ctx.requestId);
-  return ((data ?? []) as unknown as Record<string, unknown>[]).map(toSummary);
+  const orgId = ctx.orgId;
+  const rows = await orgRows<Row>(ctx.db, orgId, 'source_documents', (q) => {
+    const query = scope === 'current' ? q.where('deleted_at', '==', null) : q;
+    return query.orderBy('created_at', 'desc').limit(500);
+  });
+  const batches = await batchesByDocument(ctx.db, orgId, rows.map((r) => String(r.id)));
+  return rows.map((r) => toSummary(r, batches.get(String(r.id)) ?? []));
 }
 
 export async function getDocument(ctx: AccessContext, documentId: string): Promise<DocumentSummary> {
   assertCan(ctx, 'documents.view');
   if (!ctx.orgId) throw new NotFound();
-  const { data, error } = await ctx.db.from('source_documents').select(SELECT).eq('organization_id', ctx.orgId).eq('id', documentId).maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
-  if (!data) throw new NotFound();
-  return toSummary(data as unknown as Record<string, unknown>);
+  const row = await orgRowById<Row>(ctx.db, ctx.orgId, 'source_documents', documentId);
+  if (!row) throw new NotFound();
+  const batches = await batchesByDocument(ctx.db, ctx.orgId, [documentId]);
+  return toSummary(row, batches.get(documentId) ?? []);
+}
+
+/**
+ * Where a document's bytes are, for the download route (EVIDENCE_MODEL.md §6 level 4): resolved by
+ * `(organisation, id)` under the caller's own read policy, so another organisation's id is simply
+ * not there. Null for a document that does not exist, cannot be seen, or was deleted.
+ */
+export async function getDocumentObject(
+  ctx: AccessContext, documentId: string,
+): Promise<{ id: string; storageBucket: string; storagePath: string; originalFilename: string } | null> {
+  if (!ctx.orgId) return null;
+  const row = await orgRowById<Row>(ctx.db, ctx.orgId, 'source_documents', documentId);
+  if (!row || row.deleted_at !== null) return null;
+  return {
+    id: String(row.id),
+    storageBucket: String(row.storage_bucket ?? ''),
+    storagePath: String(row.storage_path),
+    originalFilename: String(row.original_filename),
+  };
 }
 
 /** Whether "Delete" may be offered: the function refuses anyway; this keeps the button honest. */

@@ -13,6 +13,7 @@ import { applyScenario } from '../domain/apply';
 import type {
   Assumption, ScenarioBasis, ScenarioCell, ScenarioUnavailable,
 } from '../domain/types';
+import { readRowsIn } from '@/db/app/engine-reads';
 import * as repo from '../data/repository';
 
 /**
@@ -375,12 +376,10 @@ async function viewOf(
     byPeriod.set(value.periodId, metrics);
   }
 
-  const { data } = await ctx.db
-    .from('fiscal_periods').select('id, label, period_start')
-    .eq('organization_id', orgId).in('id', [...byPeriod.keys()]);
+  const data = await readRowsIn(ctx.db, orgId, 'fiscal_periods', 'id', [...byPeriod.keys()]);
   const labels = new Map<string, string>();
   const starts = new Map<string, string>();
-  for (const row of ((data ?? []) as Array<{ id: string; label: string; period_start: string }>)) {
+  for (const row of (data as Array<{ id: string; label: string; period_start: string }>)) {
     labels.set(row.id, row.label);
     starts.set(row.id, row.period_start);
   }

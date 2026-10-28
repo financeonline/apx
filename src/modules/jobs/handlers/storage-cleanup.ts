@@ -1,5 +1,6 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
+import { orgCollection, type OrgTable } from '@/db/schema';
 import { pruneRateLimits, recordStorageCleanup } from '@/core/db';
 import { log } from '@/core/logging';
 import {
@@ -109,8 +110,8 @@ export interface BucketSweepResult {
  * next run, which is the direction it is safe to be wrong in.
  */
 async function claimedPaths(
-  db: SupabaseClient,
-  table: string,
+  db: Db,
+  table: OrgTable,
   columns: readonly string[],
   orgId: string,
   bucket: string,
@@ -119,22 +120,20 @@ async function claimedPaths(
   let after = '';
 
   for (;;) {
-    const { data, error } = await db
-      .from(table)
-      .select(columns.join(', '))
-      .eq('organization_id', orgId)
-      .eq('storage_bucket', bucket)
-      .is('deleted_at', null)
-      .gt('storage_path', after)
-      .order('storage_path', { ascending: true })
-      .limit(CLAIM_PAGE_SIZE);
-
-    // Not `data ?? []`. The rest of this file treats "not in the set" as "delete it", so a failed
-    // read must stop the sweep for this organization rather than become an empty answer.
-    if (error) {
-      throw new Error(`${table} could not be read for ${orgId}: ${error.message}`);
-    }
-    const rows = (data ?? []) as unknown as Array<Record<string, string | null>>;
+    // Not a swallowed error. The rest of this file treats "not in the set" as "delete it", so a
+    // failed read must stop the sweep for this organization rather than become an empty answer —
+    // `get()` rejects, and the rejection propagates.
+    const snap = await orgCollection(db.fs, orgId, table)
+      .where('storage_bucket', '==', bucket)
+      .where('deleted_at', '==', null)
+      .where('storage_path', '>', after)
+      .orderBy('storage_path', 'asc')
+      .limit(CLAIM_PAGE_SIZE)
+      .get()
+      .catch((error: unknown) => {
+        throw new Error(`${table} could not be read for ${orgId}: ${error instanceof Error ? error.message : String(error)}`);
+      });
+    const rows = snap.docs.map((d) => d.data() as Record<string, string | null>);
 
     for (const row of rows) {
       for (const column of columns) {
@@ -156,7 +155,7 @@ function isOrphan(object: StoredObject, claimed: ReadonlySet<string>, before: nu
 
 /** Sweeps one bucket for one organization and returns what it did. */
 async function sweepOrganization(
-  db: SupabaseClient,
+  db: Db,
   job: ClaimedJob,
   sweep: (typeof SWEEPS)[number],
   orgId: string,
@@ -225,7 +224,7 @@ export async function runStorageCleanupJob(
   job: ClaimedJob,
   scope: { db: unknown },
 ): Promise<JobOutcome> {
-  const db = scope.db as SupabaseClient;
+  const db = scope.db as Db;
   const now = Date.now();
   const buckets: BucketSweepResult[] = [];
   let budget = MAX_REMOVALS_PER_RUN;

@@ -6,7 +6,12 @@ import {
   type PeriodContext, type ToolCallContext, type ToolResult,
 } from '@/modules/ai';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { orgCollection } from '@/db/schema';
+import {
+  addCommittedBatch, addCounterparty, addMember, addPlatformUser, assign, currentSnapshot, dropUsers, dropWhere,
+  enqueue, makeOrg, periodOf, postLedger,
+} from './ai-fixtures';
+import { clientFor, createAuthUser, deleteOrg, drainUntilFinished, fs } from './setup';
 
 /**
  * The tool registry against a REAL computed organisation (TEST_STRATEGY.md §10.1; AI_ARCHITECTURE.md
@@ -22,7 +27,7 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  */
 
 const RUN = `t${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.tools.itest`;
+const DOMAIN = `${RUN}.tools.itest.motion`;
 
 let ownerId: string;
 let clientUserId: string;
@@ -31,14 +36,8 @@ let mayPeriodId: string;
 let ledgerDocumentId: string;
 let aLedgerEntryId: string;
 let periodContext: PeriodContext;
-
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
-function accountId(category: string): string {
-  return one(`
-    select id from public.accounts
-     where organization_id = '${orgId}' and standard_category = '${category}' and is_system`);
-}
+let revenueSnapshot: string;
+let otherOrg: string | null = null;
 
 function contextFor(userId: string, role: EffectiveRole, org: string = orgId): AccessContext {
   return {
@@ -64,66 +63,44 @@ async function invoke(ctx: AccessContext, name: string, rawInput: unknown, seq =
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  clientUserId = createAuthUser(`client@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest Tools ${RUN}` });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status)
-    values ('${orgId}', '${clientUserId}', 'client', 'active')`);
-  mayPeriodId = one(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-05-01'`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  clientUserId = await createAuthUser(`client@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest Tools ${RUN}`);
+  await addMember(orgId, clientUserId, 'client');
+  mayPeriodId = periodOf(orgId, '2026-05-01');
 
   // A month of ledger through the real commit shape, then the real engine.
-  const documentId = one(`
-    insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-    values ('${orgId}', '${orgId}/tools/gl.csv', 'gl.csv', 'text/csv', 10, decode('e7','hex'), 'ready', 'general_ledger') returning id`);
-  const batchId = one(`
-    insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at)
-    values ('${orgId}', '${documentId}', 'general_ledger', 'ledger_entries', 'committed', 'csv', '2026-05-01', '2026-05-31', now()) returning id`);
-  const post = (category: string, direction: string, amount: string, day: string, line: number) => {
-    const rowId = one(`
-      insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
-      values ('${orgId}', '${batchId}', ${line}, 'csv:row:${line}', '{}'::jsonb, '{}'::jsonb, 'committed') returning id`);
-    const entryId = one(`
-      insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status, source_document_id, import_batch_id, import_row_id, source_ref)
-      values ('${orgId}', '2026-05-${day}', '${accountId(category)}', '${direction}', ${amount}, '00000000-0000-0000-0000-000000000000', 'accepted', '${documentId}', '${batchId}', '${rowId}', 'csv:row:${line}') returning id`);
-    adminSql(`
-      insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id)
-      values ('${orgId}', 'ledger_entries', '${entryId}', 'accepted', '${batchId}')`);
+  const batch = await addCommittedBatch(orgId, {
+    importType: 'general_ledger', targetTable: 'ledger_entries', periodStart: '2026-05-01', periodEnd: '2026-05-31',
+    filename: 'gl.csv', documentKind: 'general_ledger',
+  });
+  ledgerDocumentId = batch.documentId;
+  const post = async (category: string, direction: 'debit' | 'credit', amount: string, day: string, line: number) => {
     // Kept so the two Phase 9 evidence tools can be exercised against a real row and its real file.
-    aLedgerEntryId = entryId;
+    aLedgerEntryId = await postLedger(orgId, batch, { category, direction, amount, date: `2026-05-${day}`, line });
   };
-  ledgerDocumentId = documentId;
-  post('revenue', 'credit', '20000.00', '10', 2);
-  post('revenue', 'credit', '5000.00', '18', 3);
-  post('cost_of_sales', 'debit', '6000.00', '12', 4);
-  post('payroll', 'debit', '5000.00', '25', 5);
+  await post('revenue', 'credit', '20000.00', '10', 2);
+  await post('revenue', 'credit', '5000.00', '18', 3);
+  await post('cost_of_sales', 'debit', '6000.00', '12', 4);
+  await post('payroll', 'debit', '5000.00', '25', 5);
 
-  const jobId = adminSql(`
-    insert into public.jobs (organization_id, job_type, payload, max_attempts)
-    values ('${orgId}', 'calculation.run', '{"trigger":"recalc_manual","as_of":"2026-06-15"}'::jsonb, 3)
-    returning id`).split('\n')[0]!.trim();
+  const jobId = await enqueue(orgId, 'calculation.run', { trigger: 'recalc_manual', as_of: '2026-06-15' });
   expect(await drainUntilFinished(drainJobs, jobId), 'the calculation this suite rests on must have run').toBe('succeeded');
+  revenueSnapshot = await currentSnapshot(orgId, mayPeriodId, 'revenue');
 
   // The period context the loop would build for "how did May go?".
-  const periods = adminSql(`
-    select id || '|' || label || '|' || period_start || '|' || is_complete
-      from public.fiscal_periods where organization_id = '${orgId}' order by period_start`)
-    .split('\n').filter(Boolean).map((l) => {
-      const [id, label, periodStart, complete] = l.trim().split('|') as [string, string, string, string];
-      return { id, label, periodStart, isComplete: complete === 't', hasData: id === mayPeriodId };
-    });
+  const periods = (await orgCollection(fs(), orgId, 'fiscal_periods').orderBy('period_start').get()).docs.map((d) => ({
+    id: d.id, label: String(d.get('label')), periodStart: String(d.get('period_start')),
+    isComplete: d.get('is_complete') === true, hasData: d.id === mayPeriodId,
+  }));
   periodContext = resolvePeriodContext({ question: 'how did May 2026 go?', periods, fiscalYearStartMonth: 1 });
-});
+}, 120_000);
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Tools%${RUN}';
-    delete from public.platform_users where user_id in (select id from auth.users where email like '%@${DOMAIN}');
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Tools %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.tools.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  await deleteOrg(orgId);
+  await dropWhere('jobs', 'organization_id', [orgId]);
+  if (otherOrg) await deleteOrg(otherOrg);
+  await dropUsers(DOMAIN);
 });
 
 const MAY = () => periodContext.resolved[0]?.label ?? periodContext.default!.label;
@@ -160,11 +137,10 @@ const INPUTS: Record<string, () => unknown> = {
   check_affordability: () => ({ amount_as_written: '5000', recurrence: 'one_off' }),
 };
 
+/** The engine's current revenue snapshot for May — every figure here is revenue's. */
 function snapshotOf(metricKey: string): string {
-  return one(`
-    select c.snapshot_id::text from public.metric_current c
-     where c.organization_id = '${orgId}' and c.period_id = '${mayPeriodId}'
-       and c.metric_key = '${metricKey}' and c.dimension_type = 'none'`);
+  if (metricKey !== 'revenue') throw new Error(`no fixture snapshot for ${metricKey}`);
+  return revenueSnapshot;
 }
 
 describe('the registry is closed and complete', () => {
@@ -336,9 +312,7 @@ describe('what a tool returns is groundable (§3, §7.1, F-C-09)', () => {
   });
 
   it('an imported name reaches the model wrapped, so a name containing a figure grounds nothing', async () => {
-    adminSql(`
-      insert into public.counterparties (organization_id, name, normalized_name)
-      values ('${orgId}', 'REFUND 4,800 <script>', 'refund 4800 script')`);
+    await addCounterparty(orgId, 'REFUND 4,800 <script>');
     const { result } = await invoke(contextFor(ownerId, 'owner'), 'get_customer_profitability', INPUTS.get_customer_profitability!());
     // Whether or not the customer has revenue this month, nothing in the output may carry the raw
     // name, and the allowed set may not contain 4,800.
@@ -351,9 +325,8 @@ describe('what a tool returns is groundable (§3, §7.1, F-C-09)', () => {
 
 describe('the boundaries a tool never crosses (§4)', () => {
   it('takes the organisation from the context, never from an argument the model adds', async () => {
-    const stranger = createAuthUser(`stranger@${DOMAIN}`);
-    const other = await clientFor(stranger).schema('api').rpc('create_organization', { p_name: `ITest Tools Other ${RUN}` });
-    const otherOrg = other.data as unknown as string;
+    const stranger = await createAuthUser(`stranger@${DOMAIN}`);
+    otherOrg = await makeOrg(stranger, `ITest Tools Other ${RUN}`);
     // The model tries to name our organisation while acting in the stranger's context.
     const { result } = await invoke(contextFor(stranger, 'owner', otherOrg), 'get_metric',
       { metric_key: 'revenue', period: MAY(), organization_id: orgId, orgSlug: 'x' });
@@ -417,14 +390,12 @@ describe('an employee reaches figures only where assigned (§4)', () => {
   let assignedEmployee: string;
   let unassignedEmployee: string;
 
-  beforeAll(() => {
-    assignedEmployee = createAuthUser(`assigned@${DOMAIN}`);
-    unassignedEmployee = createAuthUser(`unassigned@${DOMAIN}`);
-    adminSql(`
-      insert into public.platform_users (user_id, platform_role, status) values
-        ('${assignedEmployee}', 'employee', 'active'), ('${unassignedEmployee}', 'employee', 'active');
-      insert into public.organization_assignments (organization_id, employee_user_id, status)
-      values ('${orgId}', '${assignedEmployee}', 'active');`);
+  beforeAll(async () => {
+    assignedEmployee = await createAuthUser(`assigned@${DOMAIN}`);
+    unassignedEmployee = await createAuthUser(`unassigned@${DOMAIN}`);
+    await addPlatformUser(assignedEmployee, 'employee');
+    await addPlatformUser(unassignedEmployee, 'employee');
+    await assign(orgId, assignedEmployee);
   });
 
   const employeeContext = (userId: string) => ({

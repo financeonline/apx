@@ -1,4 +1,4 @@
-import { beforeAll, afterAll, describe, expect, it } from 'vitest';
+import { beforeAll, afterAll, describe, expect, it, vi } from 'vitest';
 import { Decimal } from '@/core/money';
 import {
   loadCampaignDetail, loadCommercialOverview, loadCustomerCommercial, loadMarketing, loadPeriodScope, loadProductDetail,
@@ -6,7 +6,13 @@ import {
 } from '@/modules/dashboard';
 import { listInvoices } from '@/modules/financials';
 import { drainJobs } from '@/modules/jobs';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished, sqlstate } from './setup';
+import { orgRows } from '@/db/rls';
+import { orgCollection, orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, fs, rpc, sqlstate } from './setup';
+import {
+  addMember, addPlatformUser, assign, calculate, dropFixtures, makeOrg, ok, periodFor, rowsOf, seedBatch,
+  seedCounterparty, seedDocument, seedInvoice, drainUntilQuiet as quiet,
+} from './f-fixtures';
 
 /**
  * Phase 14 — Commercial Intelligence (ADR-102).
@@ -18,9 +24,11 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished, sqlstate } fro
  * organisation; nothing here is a second financial truth.
  */
 
+// Every calculation here drains the queue the other suites share, so a run can wait behind theirs.
+vi.setConfig({ testTimeout: 300_000 });
+
 const RUN = `c${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.commercial.itest`;
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+const DOMAIN = `${RUN}.commercial.itest.motion`;
 
 let owner: string; let ownerB: string; let client: string; let empAssigned: string; let empOther: string;
 let orgA: string; let orgB: string;
@@ -29,50 +37,62 @@ let aug: string; let jul: string;
 let invAcmeAug: string; let invBetaAug: string; let purchase: string;
 let consulting: string; let training: string; let insta: string; let google: string; let channel: string;
 
-function counterparty(org: string, name: string, kind: string): string {
-  return one(`insert into public.counterparties (organization_id, name, kind) values ('${org}', '${name}', '${kind}') returning id`);
-}
-function invoice(org: string, cp: string, type: string, number: string, date: string, subtotal: string, tax: string): string {
+const counterparty = (org: string, name: string, kind: string): Promise<string> => seedCounterparty(org, { name, kind });
+function invoice(org: string, cp: string, type: string, number: string, date: string, subtotal: string, tax: string): Promise<string> {
   const total = new Decimal(subtotal).plus(tax).toFixed(2);
-  return one(`insert into public.invoices (organization_id, invoice_type, counterparty_id, invoice_number, issue_date, due_date, period_id, subtotal, tax_amount, total_amount, amount_paid, status, record_status, assurance_level)
-    values ('${org}', '${type}', '${cp}', '${number}', '${date}', '${date}', '00000000-0000-0000-0000-000000000000', ${subtotal}, ${tax}, ${total}, 0, 'open', 'accepted', 'verified') returning id`);
+  return seedInvoice(org, { counterpartyId: cp, type, number, issueDate: date, dueDate: date, subtotal, tax, total });
 }
 async function calc(org: string): Promise<void> {
-  const first = one(`select id from public.fiscal_periods where organization_id = '${org}' order by period_start limit 1`);
-  const jobId = adminSql(`insert into public.jobs (organization_id, job_type, payload, max_attempts) values ('${org}', 'calculation.run', '{"trigger":"banking_edit","period_ids":["${first}"],"as_of":"2026-09-15"}'::jsonb, 3) returning id`).split('\n')[0]!.trim();
-  expect(await drainUntilFinished(drainJobs, jobId)).toBe('succeeded');
+  await calculate(org, drainJobs);
 }
-const api = (u: string) => clientFor(u).schema('api');
-const ok = async <T,>(p: PromiseLike<{ data: T; error: unknown }>): Promise<T> => { const r = await p; expect(r.error, JSON.stringify(r.error)).toBeNull(); return r.data; };
+const api = (u: string) => ({ rpc: (fn: string, args: Record<string, unknown>) => rpc(clientFor(u), fn, args) });
+
+/** The engine's current value of a figure (`metric_current` → its snapshot), or the sum of several. */
+async function figures(org: string, period: string | readonly string[], key: string, where: { dimensionType?: string; dimensionId?: string } = {}): Promise<Decimal[]> {
+  const periods = typeof period === 'string' ? [period] : [...period];
+  const out: Decimal[] = [];
+  for (const p of periods) {
+    let q: FirebaseFirestore.Query = orgCollection(fs(), org, 'metric_current').where('period_id', '==', p).where('metric_key', '==', key);
+    if (where.dimensionType) q = q.where('dimension_type', '==', where.dimensionType);
+    if (where.dimensionId) q = q.where('dimension_id', '==', where.dimensionId);
+    for (const cell of (await q.get()).docs) {
+      const snap = await orgRow(fs(), org, 'metric_snapshots', String(cell.get('snapshot_id'))).get();
+      if (snap.exists && snap.get('value') !== null) out.push(new Decimal(String(snap.get('value'))));
+    }
+  }
+  return out;
+}
+const total = (values: Decimal[]): Decimal => values.reduce((a, v) => a.plus(v), new Decimal(0));
 
 beforeAll(async () => {
-  owner = createAuthUser(`owner@${DOMAIN}`); ownerB = createAuthUser(`owner-b@${DOMAIN}`);
-  client = createAuthUser(`client@${DOMAIN}`); empAssigned = createAuthUser(`emp-a@${DOMAIN}`); empOther = createAuthUser(`emp-o@${DOMAIN}`);
-  adminSql(`insert into public.platform_users (user_id, platform_role, status) values ('${empAssigned}', 'employee', 'active'), ('${empOther}', 'employee', 'active')`);
-  const a = await api(owner).rpc('create_organization', { p_name: `ITest Commercial A ${RUN}` }); if (a.error) throw new Error(a.error.message); orgA = a.data as unknown as string;
-  const b = await api(ownerB).rpc('create_organization', { p_name: `ITest Commercial B ${RUN}` }); if (b.error) throw new Error(b.error.message); orgB = b.data as unknown as string;
-  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${orgA}', '${client}', 'client', 'active');
-            insert into public.organization_assignments (organization_id, employee_user_id, status) values ('${orgA}', '${empAssigned}', 'active');`);
-  acme = counterparty(orgA, 'Acme Ltd', 'customer'); beta = counterparty(orgA, 'Beta plc', 'customer'); supplier = counterparty(orgA, 'Parts Co', 'supplier');
-  acmeB = counterparty(orgB, 'Acme of B', 'customer');
+  owner = await createAuthUser(`owner@${DOMAIN}`); ownerB = await createAuthUser(`owner-b@${DOMAIN}`);
+  client = await createAuthUser(`client@${DOMAIN}`); empAssigned = await createAuthUser(`emp-a@${DOMAIN}`); empOther = await createAuthUser(`emp-o@${DOMAIN}`);
+  await addPlatformUser(empAssigned, 'employee'); await addPlatformUser(empOther, 'employee');
+  orgA = await makeOrg(owner, `ITest Commercial A ${RUN}`);
+  orgB = await makeOrg(ownerB, `ITest Commercial B ${RUN}`);
+  await addMember(orgA, client, 'client');
+  await assign(orgA, empAssigned);
+  acme = await counterparty(orgA, 'Acme Ltd', 'customer'); beta = await counterparty(orgA, 'Beta plc', 'customer'); supplier = await counterparty(orgA, 'Parts Co', 'supplier');
+  acmeB = await counterparty(orgB, 'Acme of B', 'customer');
   // Sales invoices Jun–Aug 2026; acme grows, beta steady. Net of tax.
-  invoice(orgA, acme, 'sales', 'A-001', '2026-06-10', '4000.00', '800.00');
-  invoice(orgA, acme, 'sales', 'A-002', '2026-07-10', '5000.00', '1000.00');
-  invAcmeAug = invoice(orgA, acme, 'sales', 'A-003', '2026-08-10', '6000.00', '1200.00');
-  invoice(orgA, beta, 'sales', 'B-001', '2026-07-12', '2000.00', '400.00');
-  invBetaAug = invoice(orgA, beta, 'sales', 'B-002', '2026-08-12', '2000.00', '400.00');
-  purchase = invoice(orgA, supplier, 'purchase', 'P-001', '2026-08-15', '900.00', '180.00');
-  invoice(orgB, acmeB, 'sales', 'BB-1', '2026-08-03', '700.00', '140.00');
+  await invoice(orgA, acme, 'sales', 'A-001', '2026-06-10', '4000.00', '800.00');
+  await invoice(orgA, acme, 'sales', 'A-002', '2026-07-10', '5000.00', '1000.00');
+  invAcmeAug = await invoice(orgA, acme, 'sales', 'A-003', '2026-08-10', '6000.00', '1200.00');
+  await invoice(orgA, beta, 'sales', 'B-001', '2026-07-12', '2000.00', '400.00');
+  invBetaAug = await invoice(orgA, beta, 'sales', 'B-002', '2026-08-12', '2000.00', '400.00');
+  purchase = await invoice(orgA, supplier, 'purchase', 'P-001', '2026-08-15', '900.00', '180.00');
+  await invoice(orgB, acmeB, 'sales', 'BB-1', '2026-08-03', '700.00', '140.00');
   // Coverage (FE §2.2): the revenue family counts an invoice month only when a committed, FULL sales
   // invoice batch declares a range spanning it. Both organisations get one, as a real import would.
   for (const [org, label] of [[orgA, 'a'], [orgB, 'b']] as const) {
-    const doc = one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-      values ('${org}', '${org}/commercial/${label}.csv', 'sales-${label}.csv', 'text/csv', 10, decode('c${label === 'a' ? '1' : '2'}','hex'), 'ready', 'invoice') returning id`);
-    adminSql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at, invoice_list_kind)
-      values ('${org}', '${doc}', 'sales_invoices', 'invoices', 'committed', 'csv', '2026-06-01', '2026-08-31', now(), 'full')`);
+    const doc = await seedDocument(org, { filename: `sales-${label}.csv`, kind: 'invoice' });
+    await seedBatch(org, {
+      documentId: doc, importType: 'sales_invoices', targetTable: 'invoices', status: 'committed',
+      periodStart: '2026-06-01', periodEnd: '2026-08-31', invoiceListKind: 'full',
+    });
   }
-  aug = one(`select id from public.fiscal_periods where organization_id = '${orgA}' and period_start = '2026-08-01'`);
-  jul = one(`select id from public.fiscal_periods where organization_id = '${orgA}' and period_start = '2026-07-01'`);
+  aug = await periodFor(orgA, '2026-08-01');
+  jul = await periodFor(orgA, '2026-07-01');
   await calc(orgA); await calc(orgB);
 
   // What a person records: two services, a channel, two campaigns, spend, and a pipeline.
@@ -94,22 +114,22 @@ beforeAll(async () => {
   await ok(api(owner).rpc('upsert_opportunity', { p_org: orgA, p_input: { name: 'New enquiry', created_on: '2026-08-25' } }));
 }, 300_000);
 
-afterAll(() => {
-  adminSql(`delete from public.organizations where id in ('${orgA}', '${orgB}');
-            delete from public.platform_users where user_id in (select id from auth.users where email like '%@${DOMAIN}');
-            delete from auth.users where email like '%@${DOMAIN}';`);
-});
+afterAll(async () => {
+  await dropFixtures([orgA, orgB], DOMAIN);
+}, 120_000);
 
-const scopeA = async (u = owner) => (await loadPeriodScope(clientFor(u), orgA, aug))!;
+/**
+ * The August scope, read once per person: `loadPeriodScope` reads every figure pointer of the
+ * organisation, and nothing these tests do changes which months have figures.
+ */
+const scopes = new Map<string, Awaited<ReturnType<typeof loadPeriodScope>>>();
+const scopeA = async (u = owner) => {
+  if (!scopes.has(u)) scopes.set(u, await loadPeriodScope(clientFor(u), orgA, aug));
+  return scopes.get(u)!;
+};
 
 /** Merging enqueues its own recalculation (ADR-031.1); let the queue settle before asserting. */
-async function drainUntilQuiet(org: string): Promise<void> {
-  for (let round = 0; round < 8; round += 1) {
-    const outstanding = one(`select count(*)::text from public.jobs where organization_id = '${org}' and status in ('queued', 'running')`);
-    if (outstanding === '0') return;
-    await drainJobs(20);
-  }
-}
+const drainUntilQuiet = (org: string): Promise<void> => quiet(org, drainJobs, 8);
 
 describe('products come only from lines, and reconcile to the engine', () => {
   it('Σ product revenue + unattributed = the engine’s customer revenue for the month, to the penny', async () => {
@@ -122,13 +142,11 @@ describe('products come only from lines, and reconcile to the engine', () => {
      * Both halves of the identity, now that the invoice basis reports a P&L (ADR-103):
      * Σ lines + unattributed = Σ customer_revenue = the headline `revenue` for the month.
      */
-    const headline = one(`select s.value::text from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-      where c.organization_id = '${orgA}' and c.period_id = '${aug}' and c.metric_key = 'revenue' and c.dimension_type = 'none'`);
-    const customers = one(`select sum(s.value)::text from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-      where c.organization_id = '${orgA}' and c.period_id = '${aug}' and c.metric_key = 'customer_revenue'`);
-    const total = new Decimal(byName.Consulting!.revenueRaw).plus(byName.Training!.revenueRaw).plus(view.unattributed!.amountRaw);
-    expect(total.toFixed(2)).toBe(new Decimal(headline).toFixed(2));
-    expect(new Decimal(customers).toFixed(2)).toBe(new Decimal(headline).toFixed(2));
+    const headline = total(await figures(orgA, aug, 'revenue', { dimensionType: 'none' }));
+    const customers = total(await figures(orgA, aug, 'customer_revenue'));
+    const lines = new Decimal(byName.Consulting!.revenueRaw).plus(byName.Training!.revenueRaw).plus(view.unattributed!.amountRaw);
+    expect(lines.toFixed(2)).toBe(headline.toFixed(2));
+    expect(customers.toFixed(2)).toBe(headline.toFixed(2));
   });
 
   it('contribution is unavailable without a cost line, and appears when a purchase line names the product', async () => {
@@ -146,18 +164,18 @@ describe('products come only from lines, and reconcile to the engine', () => {
   it('lines may not exceed the invoice, may not name another organisation’s product, and follow a rejected invoice out', async () => {
     const tooMuch = await api(owner).rpc('set_invoice_lines', { p_invoice: invBetaAug, p_lines: [{ product_id: consulting, amount: '2000.01' }] });
     expect(sqlstate(tooMuch.error)).toBe('22023');
-    const productB = one(`insert into public.products (organization_id, name) values ('${orgB}', 'B thing') returning id`);
+    const productB = await ok(api(ownerB).rpc('upsert_product', { p_org: orgB, p_input: { name: 'B thing' } })) as string;
     const crossed = await api(owner).rpc('set_invoice_lines', { p_invoice: invBetaAug, p_lines: [{ product_id: productB, amount: '10.00' }] });
     expect(sqlstate(crossed.error)).toBe('P0002');
     // A lined invoice that is later rejected takes its lines out of every figure without deleting them.
-    const extra = invoice(orgA, beta, 'sales', 'B-003', '2026-08-20', '1000.00', '0');
+    const extra = await invoice(orgA, beta, 'sales', 'B-003', '2026-08-20', '1000.00', '0');
     await ok(api(owner).rpc('set_invoice_lines', { p_invoice: extra, p_lines: [{ product_id: consulting, amount: '1000.00' }] }));
     let view = await loadProducts(clientFor(owner), orgA, 'a', await scopeA());
     expect(view.products.find((p) => p.name === 'Consulting')!.revenueRaw).toBe('5000.00');
-    adminSql(`update public.invoices set record_status = 'rejected', rejected_reason = 'test' where id = '${extra}'`);
+    await orgRow(fs(), orgA, 'invoices', extra).update({ record_status: 'rejected', rejected_reason: 'test' });
     view = await loadProducts(clientFor(owner), orgA, 'a', await scopeA());
     expect(view.products.find((p) => p.name === 'Consulting')!.revenueRaw).toBe('4000.00');
-    expect(one(`select count(*) from public.invoice_lines where invoice_id = '${extra}'`)).toBe('1');
+    expect(await rowsOf(orgA, 'invoice_lines', { invoice_id: extra })).toHaveLength(1);
   });
 });
 
@@ -165,10 +183,9 @@ describe('campaigns: attribution only through a won opportunity, CAC and convers
   it('credits Acme’s revenue to Instagram from August, nothing to Search ads, and computes CAC = spend ÷ customers won', async () => {
     const view = await loadMarketing(clientFor(owner), orgA, 'a', await scopeA());
     const byName = Object.fromEntries(view.campaigns.map((c) => [c.name, c]));
-    const acmeAug = one(`select s.value::text from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-      where c.organization_id = '${orgA}' and c.period_id = '${aug}' and c.metric_key = 'customer_revenue' and c.dimension_id = '${acme}'`);
+    const acmeAug = total(await figures(orgA, aug, 'customer_revenue', { dimensionId: acme }));
     expect(byName['Summer reels']).toMatchObject({ attributionStatus: 'attributed_via_won_opportunities', customersWon: 1, spendRaw: '300.00', cac: expect.stringContaining('300'), channelName: 'Instagram' });
-    expect(new Decimal(byName['Summer reels']!.attributedRevenueRaw).toFixed(2)).toBe(new Decimal(acmeAug).toFixed(2));
+    expect(new Decimal(byName['Summer reels']!.attributedRevenueRaw).toFixed(2)).toBe(acmeAug.toFixed(2));
     expect(byName['Search ads']).toMatchObject({ attributionStatus: 'no_won_opportunities', attributedRevenueRaw: '0.00', cac: null, cacNote: expect.stringContaining('No spend recorded') });
     const detail = (await loadCampaignDetail(clientFor(owner), orgA, 'a', await scopeA(), insta))!;
     // July: Acme had revenue, but was not yet won — none of it is the campaign's.
@@ -181,7 +198,7 @@ describe('campaigns: attribution only through a won opportunity, CAC and convers
     expect(sqlstate(noCustomer.error)).toBe('22023');
     const crossed = await api(owner).rpc('upsert_opportunity', { p_org: orgA, p_input: { name: 'Cross', stage: 'won', counterparty_id: acmeB, won_on: '2026-08-01' } });
     expect(sqlstate(crossed.error)).toBe('P0002');
-    const campaignB = one(`insert into public.campaigns (organization_id, name) values ('${orgB}', 'B camp') returning id`);
+    const campaignB = await ok(api(ownerB).rpc('upsert_campaign', { p_org: orgB, p_input: { name: 'B camp' } })) as string;
     const crossedCampaign = await api(owner).rpc('upsert_opportunity', { p_org: orgA, p_input: { name: 'Cross2', campaign_id: campaignB } });
     expect(sqlstate(crossedCampaign.error)).toBe('P0002');
     const sales = await loadSales(clientFor(owner), orgA, 'a', await scopeA());
@@ -223,14 +240,14 @@ describe('the overview and the customer page read the engine, not a second truth
     expect(overview.unattributedRevenue).toBeNull();
 
     // An invoice with no customer would be revenue nobody can attribute — a data-quality state.
-    const orphan = one(`insert into public.counterparties (organization_id, name, kind) values ('${orgA}', 'Cash sales till', 'unknown') returning id`);
-    invoice(orgA, orphan, 'sales', 'A-004', '2026-08-20', '1000.00', '200.00');
+    const orphan = await counterparty(orgA, 'Cash sales till', 'unknown');
+    const orphanInvoice = await invoice(orgA, orphan, 'sales', 'A-004', '2026-08-20', '1000.00', '200.00');
     await calc(orgA);
     const after = await loadCommercialOverview(clientFor(owner), orgA, 'a', await scopeA());
     expect(after.unattributedRevenue?.amount).toContain('1,000');
     expect(after.topCustomers.map((c) => c.name)).not.toContain('Cash sales till');
-    adminSql(`delete from public.invoices where organization_id = '${orgA}' and invoice_number = 'A-004';
-              delete from public.counterparties where id = '${orphan}';`);
+    await orgRow(fs(), orgA, 'invoices', orphanInvoice).delete();
+    await orgRow(fs(), orgA, 'counterparties', orphan).delete();
     await calc(orgA);
   });
 });
@@ -238,8 +255,8 @@ describe('the overview and the customer page read the engine, not a second truth
 describe('a merge moves a customer’s commercial history, it does not lose it (ADR-103)', () => {
   it('keeps product mix, campaign attribution and revenue under the surviving customer', async () => {
     // A duplicate of Acme with its own August invoice, split into lines and won through Search ads.
-    const duplicate = counterparty(orgA, 'ACME Limited', 'customer');
-    const invDup = invoice(orgA, duplicate, 'sales', 'A-DUP', '2026-08-22', '1200.00', '240.00');
+    const duplicate = await counterparty(orgA, 'ACME Limited', 'customer');
+    const invDup = await invoice(orgA, duplicate, 'sales', 'A-DUP', '2026-08-22', '1200.00', '240.00');
     await ok(api(owner).rpc('set_invoice_lines', { p_invoice: invDup, p_lines: [{ product_id: consulting, amount: '1200.00' }] }));
     await ok(api(owner).rpc('upsert_opportunity', { p_org: orgA, p_input: { name: 'Duplicate deal', stage: 'won', counterparty_id: duplicate, campaign_id: google, estimated_value: '1200.00', created_on: '2026-07-25', won_on: '2026-08-02' } }));
     await calc(orgA);
@@ -268,11 +285,9 @@ describe('a merge moves a customer’s commercial history, it does not lose it (
     // No double count: one customer, one campaign credited with their revenue.
     const marketing = await loadMarketing(clientFor(owner), orgA, 'a', await scopeA());
     const credited = marketing.campaigns.reduce((acc, c) => acc.plus(c.attributedRevenueRaw), new Decimal(0));
-    const acmeRevenue = one(`select coalesce(sum(s.value), 0)::text from public.metric_current c
-       join public.metric_snapshots s on s.id = c.snapshot_id
-      where c.organization_id = '${orgA}' and c.metric_key = 'customer_revenue' and c.dimension_id = '${acme}'
-        and c.period_id in (select id from public.fiscal_periods where organization_id = '${orgA}' and period_start >= '2026-08-01')`);
-    expect(credited.toFixed(2)).toBe(new Decimal(acmeRevenue).toFixed(2));
+    const fromAugust = (await rowsOf(orgA, 'fiscal_periods')).filter((p) => String(p.period_start) >= '2026-08-01').map((p) => String(p.id));
+    const acmeRevenue = total(await figures(orgA, fromAugust, 'customer_revenue', { dimensionId: acme }));
+    expect(credited.toFixed(2)).toBe(acmeRevenue.toFixed(2));
 
     const scope = await scopeA();
     const invoices = await listInvoices(clientFor(owner), orgA, { invoiceType: 'sales' }, { limit: 200, offset: 0 });
@@ -291,10 +306,11 @@ describe('a merge moves a customer’s commercial history, it does not lose it (
   });
 
   it('refuses a second merge of the same row, and a merge across organisations', async () => {
-    const a = counterparty(orgA, 'Gamma Ltd', 'customer');
-    const b = counterparty(orgA, 'Gamma Limited', 'customer');
+    const a = await counterparty(orgA, 'Gamma Ltd', 'customer');
+    const b = await counterparty(orgA, 'Gamma Limited', 'customer');
     expect((await api(owner).rpc('merge_counterparties', { p_from: b, p_into: a })).error).toBeNull();
-    expect(sqlstate((await api(owner).rpc('merge_counterparties', { p_from: b, p_into: a })).error)).toBe('40001');
+    // 40001 on PostgreSQL; a CONFLICT either way (`sqlstate` reads every CONFLICT as 23505).
+    expect(sqlstate((await api(owner).rpc('merge_counterparties', { p_from: b, p_into: a })).error)).toBe('23505');
     expect(sqlstate((await api(owner).rpc('merge_counterparties', { p_from: acmeB, p_into: a })).error)).toBe('P0002');
     expect(sqlstate((await api(ownerB).rpc('merge_counterparties', { p_from: a, p_into: acmeB })).error)).toBe('P0002');
     await drainUntilQuiet(orgA);
@@ -316,26 +332,25 @@ describe('roles, assignment and isolation', () => {
       ['set_campaign_spend', { p_org: orgA, p_campaign: insta, p_period: aug, p_amount: 1, p_note: null }],
       ['set_invoice_lines', { p_invoice: invBetaAug, p_lines: [] }],
     ] as const) {
-      expect(sqlstate((await api(client).rpc(name, args as never)).error), `client ${name}`).toBe('42501');
-      expect(sqlstate((await clientFor(empOther).schema('api').rpc(name, args as never)).error), `unassigned ${name}`).toBe('P0002');
+      expect(sqlstate((await api(client).rpc(name, args)).error), `client ${name}`).toBe('42501');
+      expect(sqlstate((await api(empOther).rpc(name, args)).error), `unassigned ${name}`).toBe('P0002');
     }
-    expect(one(`select count(*) from public.products where organization_id = '${orgA}' and name = 'Sneaky'`)).toBe('0');
+    expect(await rowsOf(orgA, 'products', { name: 'Sneaky' })).toHaveLength(0);
   });
 
   it('organisation B sees none of A’s commercial rows, cannot write to them, and cannot use A’s ids', async () => {
     const b = clientFor(ownerB);
-    for (const table of ['products', 'invoice_lines', 'marketing_channels', 'campaigns', 'campaign_spend', 'opportunities']) {
-      const { data } = await b.from(table).select('id').eq('organization_id', orgA);
-      expect(data, table).toEqual([]);
+    for (const table of ['products', 'invoice_lines', 'marketing_channels', 'campaigns', 'campaign_spend', 'opportunities'] as const) {
+      expect(await orgRows(b, orgA, table), table).toEqual([]);
     }
-    expect(sqlstate((await b.schema('api').rpc('upsert_product', { p_org: orgA, p_input: { name: 'From B' } })).error)).toBe('P0002');
-    expect(sqlstate((await b.schema('api').rpc('set_invoice_lines', { p_invoice: invAcmeAug, p_lines: [] })).error)).toBe('P0002');
-    expect(sqlstate((await b.schema('api').rpc('set_campaign_spend', { p_org: orgB, p_campaign: insta, p_period: aug, p_amount: 5, p_note: null })).error)).toBe('P0002');
-    expect(sqlstate((await b.schema('api').rpc('product_period_summary', { p_org: orgA, p_period_ids: [aug] })).error)).toBe('P0002');
+    expect(sqlstate((await rpc(b, 'upsert_product', { p_org: orgA, p_input: { name: 'From B' } })).error)).toBe('P0002');
+    expect(sqlstate((await rpc(b, 'set_invoice_lines', { p_invoice: invAcmeAug, p_lines: [] })).error)).toBe('P0002');
+    expect(sqlstate((await rpc(b, 'set_campaign_spend', { p_org: orgB, p_campaign: insta, p_period: aug, p_amount: 5, p_note: null })).error)).toBe('P0002');
+    expect(sqlstate((await rpc(b, 'product_period_summary', { p_org: orgA, p_period_ids: [aug] })).error)).toBe('P0002');
     expect(await loadProductDetail(b, orgB, 'b', (await loadPeriodScope(b, orgB, null))!, consulting)).toBeNull();
     // A owner cannot attribute an A opportunity to B's customer, nor spend to B's campaign.
-    const campaignB = one(`select id from public.campaigns where organization_id = '${orgB}' limit 1`);
+    const campaignB = String((await rowsOf(orgB, 'campaigns'))[0]!.id);
     expect(sqlstate((await api(owner).rpc('set_campaign_spend', { p_org: orgA, p_campaign: campaignB, p_period: aug, p_amount: 5, p_note: null })).error)).toBe('P0002');
-    expect(one(`select count(*) from public.invoice_lines where organization_id = '${orgA}' and invoice_id = '${invAcmeAug}'`)).toBe('2');
+    expect(await rowsOf(orgA, 'invoice_lines', { invoice_id: invAcmeAug })).toHaveLength(2);
   });
 });

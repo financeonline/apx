@@ -4,7 +4,14 @@ import { generateForecast, hasForecast, loadForecast } from '@/modules/forecast'
 import { getBundle } from '@/modules/evidence';
 import { runTool, snapshotAccess, resolvePeriodContext, type PeriodRow } from '@/modules/ai';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
+import { readRows } from '@/db/app/engine-reads';
+import { periodId } from '@/db/app/shared';
+import { orgRows } from '@/db/rls';
+import { orgCollection } from '@/db/schema';
+import { clientFor, createAuthUser, fs, rpc, serviceClientScoped, sqlstate } from './setup';
+import {
+  removeSeeded, seedAssignment, seedCurrentFigures, seedMember, seedOrg, seedPlatformUser,
+} from '../fixtures/seed';
 
 /**
  * The forecast, end to end (REQ-FC-01/02/05; ADR-099).
@@ -18,13 +25,11 @@ import { adminSql, clientFor, createAuthUser, sqlstate } from './setup';
  */
 
 const RUN = `f${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.forecast.itest`;
+const DOMAIN = `${RUN}.forecast.itest.motion`;
 
 let ownerA: string; let clientA: string; let ownerB: string;
-let empAssigned: string; let empOther: string; let superAdmin: string;
+let empAssigned: string; let empOther: string;
 let orgA: string; let orgB: string;
-
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 
 function contextFor(
   userId: string, role: 'owner' | 'client' | 'employee' | 'super_admin', org: string = orgA,
@@ -38,39 +43,15 @@ function contextFor(
   };
 }
 
+const MONTHS = ['2026-03-01', '2026-04-01', '2026-05-01', '2026-06-01', '2026-07-01', '2026-08-01'];
+
 /** Six complete months of a steady business, written the way the engine writes them. */
-function seedHistory(org: string, monthly: Readonly<Record<string, string>>, months = 6): void {
-  const runId = one(`
-    insert into public.calculation_runs
-           (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-    select '${org}', 'recalc_manual', '1.0.0', p.id, p.id, '2026-08-31', 'succeeded'
-      from public.fiscal_periods p
-     where p.organization_id = '${org}' and p.period_start = '2026-08-01'
-    returning id`);
-
-  for (let i = 0; i < months; i += 1) {
-    const month = 8 - i;
-    const start = `2026-${String(month).padStart(2, '0')}-01`;
-    const periodId = one(`
-      select id from public.fiscal_periods
-       where organization_id = '${org}' and period_start = '${start}'`);
-    adminSql(`update public.fiscal_periods set is_complete = true where id = '${periodId}'`);
-
-    for (const [metricKey, value] of Object.entries(monthly)) {
-      const snapshotId = one(`
-        insert into public.metric_snapshots
-               (organization_id, calculation_run_id, period_id, metric_key, dimension_type,
-                value, unit, currency, basis, assurance_level, data_quality)
-        values ('${org}', '${runId}', '${periodId}', '${metricKey}', 'none',
-                ${value}, 'money', 'GBP', 'ledger', 'verified', '{"completeness": 1, "proxy": false, "warnings": [], "missing": []}'::jsonb)
-        returning id`);
-      adminSql(`
-        insert into public.metric_current
-               (organization_id, period_id, metric_key, dimension_type, snapshot_id, calculation_run_id)
-        values ('${org}', '${periodId}', '${metricKey}', 'none', '${snapshotId}', '${runId}')`);
-    }
-  }
+async function seedHistory(org: string, monthly: Readonly<Record<string, string>>): Promise<void> {
+  await seedCurrentFigures(org, { periodStarts: MONTHS, values: monthly, asOf: '2026-08-31' });
 }
+
+/** Every stored forecast value of an organisation (fixture read, as the server). */
+const forecastValues = async (org: string) => (await orgCollection(fs(), org, 'forecast_values').get()).docs.map((d) => d.data());
 
 const STEADY = {
   revenue: '10000', cost_of_sales: '4000', operating_expenses: '3000',
@@ -79,41 +60,27 @@ const STEADY = {
 };
 
 beforeAll(async () => {
-  ownerA = createAuthUser(`ownerA@${DOMAIN}`);
-  clientA = createAuthUser(`clientA@${DOMAIN}`);
-  ownerB = createAuthUser(`ownerB@${DOMAIN}`);
-  empAssigned = createAuthUser(`emp1@${DOMAIN}`);
-  empOther = createAuthUser(`emp2@${DOMAIN}`);
-  superAdmin = createAuthUser(`sa@${DOMAIN}`);
+  ownerA = await createAuthUser(`ownera@${DOMAIN}`);
+  clientA = await createAuthUser(`clienta@${DOMAIN}`);
+  ownerB = await createAuthUser(`ownerb@${DOMAIN}`);
+  empAssigned = await createAuthUser(`emp1@${DOMAIN}`);
+  empOther = await createAuthUser(`emp2@${DOMAIN}`);
 
-  const a = await clientFor(ownerA).schema('api').rpc('create_organization', { p_name: `ITest Fc A ${RUN}` });
-  if (a.error) throw new Error(`fixture org A failed: ${a.error.message}`);
-  orgA = a.data as unknown as string;
-  const b = await clientFor(ownerB).schema('api').rpc('create_organization', { p_name: `ITest Fc B ${RUN}` });
-  if (b.error) throw new Error(`fixture org B failed: ${b.error.message}`);
-  orgB = b.data as unknown as string;
+  orgA = (await seedOrg({ name: `ITest Fc A ${RUN}`, ownerId: ownerA, around: '2026-09-15' })).orgId;
+  orgB = (await seedOrg({ name: `ITest Fc B ${RUN}`, ownerId: ownerB, around: '2026-09-15' })).orgId;
 
-  adminSql(`
-    insert into public.organization_memberships (organization_id, user_id, role, status)
-    values ('${orgA}', '${clientA}', 'client', 'active');
-    insert into public.platform_users (user_id, platform_role, status)
-    values ('${empAssigned}', 'employee', 'active'), ('${empOther}', 'employee', 'active'),
-           ('${superAdmin}', 'super_admin', 'active');
-    insert into public.organization_assignments
-           (organization_id, employee_user_id, status, starts_at, ends_at, assigned_by)
-    values ('${orgA}', '${empAssigned}', 'active', now() - interval '1 day',
-            now() + interval '30 days', '${superAdmin}');`);
+  await seedMember(orgA, clientA, 'client');
+  await seedPlatformUser(empAssigned);
+  await seedPlatformUser(empOther);
+  await seedAssignment(orgA, empAssigned, ownerA);
 
-  seedHistory(orgA, STEADY);
-  seedHistory(orgB, { ...STEADY, revenue: '99999' });
+  await seedHistory(orgA, STEADY);
+  await seedHistory(orgB, { ...STEADY, revenue: '99999' });
 });
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Fc%${RUN}';
-    delete from public.platform_users where user_id in
-      (select id from auth.users where email like '%@${DOMAIN}');
-    delete from auth.users where email like '%@${DOMAIN}';`);
+afterAll(async () => {
+  for (const uid of [empAssigned, empOther]) if (uid) await fs().collection('platform_users').doc(uid).delete();
+  await removeSeeded([orgA, orgB], `@${DOMAIN}`);
 });
 
 describe('a forecast is made from the engine’s own figures (REQ-FC-01)', () => {
@@ -140,24 +107,33 @@ describe('a forecast is made from the engine’s own figures (REQ-FC-01)', () =>
     expect(value('payables')).toBe('2000.00');
 
     // REQ-FC-05, read back from the database rather than from the object.
-    expect(one(`
-      select count(*) from public.forecast_values
-       where organization_id = '${orgA}' and assurance_level <> 'estimated'`)).toBe('0');
-    // A count, compared as the string the driver returns: a non-zero count is not '0'.
-    expect(one(`
-      select count(*) from public.forecast_values where organization_id = '${orgA}'`))
-      .not.toBe('0');
+    const stored = await forecastValues(orgA);
+    expect(stored.filter((v) => v.assurance_level !== 'estimated')).toHaveLength(0);
+    expect(stored.length).toBeGreaterThan(0);
   });
 
-  it('refuses to store a forecast that claims to be anything but estimated', () => {
-    const runId = one(`select id from public.forecast_runs where organization_id = '${orgA}' limit 1`);
-    const periodId = one(`
-      select period_id from public.forecast_values where forecast_run_id = '${runId}' limit 1`);
-    expect(() => adminSql(`
-      insert into public.forecast_values
-             (organization_id, forecast_run_id, period_id, metric_key, value, assurance_level, derivation)
-      values ('${orgA}', '${runId}', '${periodId}', 'revenue', 1, 'verified', 'baseline')`))
-      .toThrow(/forecast_values_estimated|violates check/);
+  it('stores a forecast as estimated whatever the payload claims, and refuses an unknown derivation', async () => {
+    // The writer sets `assurance_level` itself (forecast_values_estimated); a payload has no say.
+    const period = periodId(orgA, '2026-09-01');
+    const { data: runId, error } = await rpc(serviceClientScoped(orgA), 'finish_forecast', {
+        p_actor: ownerA, p_org: orgA,
+        p_input: { method: 'baseline.v1', config_version: 'forecast.config.v1', horizon_months: 1, periods_used: 0 },
+        p_values: [{ period_id: period, metric_key: 'revenue', value: '1', derivation: 'baseline', assurance_level: 'verified' }],
+      }, { server: true });
+    expect(error).toBeNull();
+    const values = (await orgCollection(fs(), orgA, 'forecast_values').where('forecast_run_id', '==', runId).get()).docs;
+    expect(values.map((d) => d.get('assurance_level'))).toEqual(['estimated']);
+    expect(values.map((d) => d.get('value'))).toEqual(['1.000000']);
+    await fs().recursiveDelete(orgCollection(fs(), orgA, 'forecast_runs').doc(String(runId)));
+    for (const d of values) await d.ref.delete();
+    for (const b of (await orgCollection(fs(), orgA, 'evidence_bundles').where('origin_id', '==', runId).get()).docs) await b.ref.delete();
+
+    const bad = await rpc(serviceClientScoped(orgA), 'finish_forecast', {
+      p_actor: ownerA, p_org: orgA,
+      p_input: { method: 'baseline.v1', config_version: 'forecast.config.v1', horizon_months: 1 },
+      p_values: [{ period_id: period, metric_key: 'revenue', value: '1', derivation: 'guess' }],
+    }, { server: true });
+    expect(sqlstate(bad.error)).toBe('23505');
   });
 
   it('carries the actual beside the forecast, and the change between them (§14)', async () => {
@@ -190,10 +166,8 @@ describe('a forecast is made from the engine’s own figures (REQ-FC-01)', () =>
     const state = await loadForecast(contextFor(ownerA, 'owner'));
     if (!hasForecast(state)) throw new Error('expected a forecast');
     for (const period of state.periods) {
-      expect(one(`
-        select count(*) from public.fiscal_periods
-         where organization_id = '${orgA}' and id = '${period.periodId}'
-           and period_start > '2026-08-01'`), period.periodLabel).toBe('1');
+      const row = (await orgCollection(fs(), orgA, 'fiscal_periods').doc(period.periodId).get()).data();
+      expect(row !== undefined && String(row.period_start) > '2026-08-01', period.periodLabel).toBe(true);
     }
   });
 });
@@ -224,9 +198,7 @@ describe('the forecast’s evidence is its history, never its future (§13)', ()
     const bundle = await getBundle(contextFor(ownerA, 'owner'), state.evidenceBundleId!);
     const snapshot = bundle.items.find((i) => i.itemType === 'metric_snapshot');
     expect(snapshot?.assurance, 'the past was verified').toBe('verified');
-    expect(one(`
-      select distinct assurance_level::text from public.forecast_values
-       where organization_id = '${orgA}'`), 'the forecast is not').toBe('estimated');
+    expect([...new Set((await forecastValues(orgA)).map((v) => v.assurance_level))], 'the forecast is not').toEqual(['estimated']);
   });
 });
 
@@ -240,13 +212,11 @@ describe('the forecast’s evidence is its history, never its future (§13)', ()
  */
 describe('the analyst reads the forecast rather than computing one (§18)', () => {
   const invoke = async (ctx: AccessContext, input: Record<string, unknown> = {}) => {
-    const periods = adminSql(`
-      select id || '|' || label || '|' || period_start || '|' || is_complete
-        from public.fiscal_periods where organization_id = '${ctx.orgId}' order by period_start`)
-      .split('\n').filter(Boolean).map((line) => {
-        const [id, label, periodStart, complete] = line.trim().split('|') as [string, string, string, string];
-        return { id, label, periodStart, isComplete: complete === 'true' || complete === 't', hasData: true };
-      }) as PeriodRow[];
+    const periods = (await orgCollection(fs(), ctx.orgId!, 'fiscal_periods').orderBy('period_start').get()).docs
+      .map((d) => ({
+        id: d.id, label: String(d.get('label')), periodStart: String(d.get('period_start')),
+        isComplete: d.get('is_complete') === true, hasData: true,
+      })) as PeriodRow[];
     const periodContext = resolvePeriodContext({
       question: 'what is the forecast?', periods, fiscalYearStartMonth: 1,
     });
@@ -273,14 +243,10 @@ describe('the analyst reads the forecast rather than computing one (§18)', () =
     const first = data.periods[0]!;
     const revenue = first.metrics.find((m) => m.metric_key === 'revenue')!;
     expect(revenue.forecast.unit, 'a branded money envelope the model cannot restate').toBe('money');
-    expect(revenue.forecast.value).toBe(
-      one(`select value::text from public.forecast_values fv
-             join public.forecast_runs fr on fr.id = fv.forecast_run_id
-            where fv.organization_id = '${orgA}' and fv.metric_key = 'revenue'
-              and fv.period_id = '${
-                one(`select id from public.fiscal_periods where organization_id = '${orgA}' and period_start = '2026-09-01'`)
-              }'
-            order by fr.generated_at desc limit 1`).replace(/0+$/, '').replace(/\.$/, '.00'));
+    const latest = (await readRows(clientFor(ownerA), orgA, 'forecast_runs', (q) => q.orderBy('generated_at', 'desc').limit(1)))[0]!;
+    const storedRevenue = (await forecastValues(orgA)).find((v) => v.forecast_run_id === latest.id
+      && v.metric_key === 'revenue' && v.period_id === periodId(orgA, '2026-09-01'))!;
+    expect(revenue.forecast.value).toBe(String(storedRevenue.value).replace(/0+$/, '').replace(/\.$/, '.00'));
   });
 
   it('offers no way to ask for another organisation’s forecast', async () => {
@@ -312,26 +278,20 @@ describe('a forecast belongs to exactly one organisation (§21)', () => {
   });
 
   it('gives B’s owner nothing of A under RLS, whatever they ask for', async () => {
-    const asB = clientFor(ownerB, { email: `ownerB@${DOMAIN}` });
-    const { data: runs } = await asB.from('forecast_runs').select('id').eq('organization_id', orgA);
-    expect(runs ?? []).toHaveLength(0);
-    const { data: values } = await asB.from('forecast_values').select('id').eq('organization_id', orgA);
-    expect(values ?? []).toHaveLength(0);
+    const asB = clientFor(ownerB, { email: `ownerb@${DOMAIN}` });
+    expect(await orgRows(asB, orgA, 'forecast_runs')).toHaveLength(0);
+    expect(await orgRows(asB, orgA, 'forecast_values')).toHaveLength(0);
   });
 
-  it('refuses a browser any write to either table (ADR-026)', async () => {
-    const asOwner = clientFor(ownerA, { email: `ownerA@${DOMAIN}` });
-    for (const table of ['forecast_runs', 'forecast_values']) {
-      const { error } = await asOwner.from(table).insert({ organization_id: orgA });
-      expect(sqlstate(error), table).toBe('42501');
-    }
+  it('offers a browser no function that writes either table (ADR-026)', async () => {
+    const { API_FUNCTIONS } = await import('@/db/api');
+    expect(Object.keys(API_FUNCTIONS).filter((n) => /forecast/.test(n))).toEqual([]);
   });
 
   it('refuses `api_server.finish_forecast` to a signed-in user', async () => {
-    const { error } = await clientFor(ownerA, { email: `ownerA@${DOMAIN}` })
-      .schema('api_server').rpc('finish_forecast', {
-        p_actor: ownerA, p_org: orgA, p_input: {}, p_values: [],
-      });
+    const { error } = await rpc(clientFor(ownerA, { email: `ownera@${DOMAIN}` }), 'finish_forecast', {
+      p_actor: ownerA, p_org: orgA, p_input: {}, p_values: [],
+    }, { server: true });
     expect(sqlstate(error)).toBe('42501');
   });
 });

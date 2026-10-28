@@ -1,7 +1,7 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { orgRowById, orgRows } from '@/db/rls';
+import type { Db } from '@/db/types';
 import { parseMoney, toMoneyString } from '@/core/money';
-import { toMotionError } from '@/core/errors';
 import { countRowsByStatus, listBatchRows, listBatches } from '../data/repository';
 import type { ImportBatch, ImportRow } from '../domain/types';
 
@@ -106,7 +106,7 @@ export function groupIssues(rows: readonly ImportRow[]): BatchIssueGroup[] {
 }
 
 export async function loadBatchReview(
-  db: SupabaseClient, orgId: string, batchId: string, requestId?: string,
+  db: Db, orgId: string, batchId: string, requestId?: string,
 ): Promise<BatchReview | null> {
   const batches = await listBatches(db, orgId, { limit: 200, offset: 0 }, requestId);
   const batch = batches.find((b) => b.id === batchId);
@@ -215,33 +215,18 @@ interface BatchMeta {
 }
 
 async function loadBatchMeta(
-  db: SupabaseClient, orgId: string, batchId: string, requestId?: string,
+  db: Db, orgId: string, batchId: string, requestId?: string,
 ): Promise<BatchMeta> {
-  const { data, error } = await db
-    .from('import_batches')
-    .select(`batch_issues, required_confirmations, confirmations, source_document_id, statement_opening_balance, statement_closing_balance`)
-    .eq('organization_id', orgId)
-    .eq('id', batchId)
-    .maybeSingle();
-
-  if (error) throw toMotionError(error, requestId);
-
-  const row = data as {
+  const row = await orgRowById<{
     batch_issues?: unknown;
     required_confirmations?: unknown;
     confirmations?: unknown;
     source_document_id?: string | null;
     statement_opening_balance?: number | string | null;
     statement_closing_balance?: number | string | null;
-  } | null;
+  }>(db, orgId, 'import_batches', batchId);
 
-  /*
-   * The filename is fetched separately rather than embedded.
-   *
-   * `import_batches` references `source_documents` on the COMPOSITE key (organization_id, id) per
-   * ADR-044.8, and PostgREST cannot always resolve an embed across one. A second small read is
-   * cheaper than a join that works locally and fails on a different PostgREST version.
-   */
+  /* The filename is a second read: Firestore has no joins (FIRESTORE_DATA_MODEL.md §5). */
   const filename = row?.source_document_id == null
     ? null
     : await loadFilename(db, orgId, row.source_document_id, requestId);
@@ -264,16 +249,10 @@ async function loadBatchMeta(
 }
 
 async function loadFilename(
-  db: SupabaseClient, orgId: string, documentId: string, requestId?: string,
+  db: Db, orgId: string, documentId: string, _requestId?: string,
 ): Promise<string | null> {
-  const { data, error } = await db
-    .from('source_documents')
-    .select('original_filename')
-    .eq('organization_id', orgId)
-    .eq('id', documentId)
-    .maybeSingle();
-  if (error) throw toMotionError(error, requestId);
-  return (data as { original_filename?: string } | null)?.original_filename ?? null;
+  const data = await orgRowById<{ original_filename?: string }>(db, orgId, 'source_documents', documentId);
+  return data?.original_filename ?? null;
 }
 
 export interface ImportHistoryRow {
@@ -284,21 +263,20 @@ export interface ImportHistoryRow {
 
 /** The import history (§13): what was loaded, when, and what became of it. */
 export async function loadImportHistory(
-  db: SupabaseClient, orgId: string, requestId?: string,
+  db: Db, orgId: string, requestId?: string,
 ): Promise<ImportHistoryRow[]> {
   const batches = await listBatches(db, orgId, { limit: 100, offset: 0 }, requestId);
   if (batches.length === 0) return [];
 
-  const { data } = await db
-    .from('source_documents')
-    .select('id, original_filename')
-    .eq('organization_id', orgId)
-    .in('id', batches.map((b) => b.sourceDocumentId).filter((id): id is string => id !== null));
-
-  const names = new Map(
-    ((data ?? []) as Array<{ id: string; original_filename: string }>)
-      .map((row) => [row.id, row.original_filename]),
-  );
+  const ids = [...new Set(batches.map((b) => b.sourceDocumentId).filter((id): id is string => id !== null))];
+  const data: Array<{ id: string; original_filename: string }> = [];
+  for (let i = 0; i < ids.length; i += 30) {
+    const chunk = ids.slice(i, i + 30);
+    data.push(...await orgRows<{ id: string; original_filename: string }>(db, orgId, 'source_documents', (q) => q
+      .where('id', 'in', chunk)
+      .select('id', 'original_filename')));
+  }
+  const names = new Map(data.map((row) => [row.id, row.original_filename]));
 
   return batches.map((batch) => ({
     batch,

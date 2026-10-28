@@ -1,7 +1,7 @@
 /**
  * Bank transaction categorisation (FINANCIAL_ENGINE.md §4.1).
  *
- * Pure. No Supabase, no clock, no randomness: the same transactions, the same saved rules and the
+ * Pure. No database, no clock, no randomness: the same transactions, the same saved rules and the
  * same keyword-rule version must produce byte-identical outcomes, because these outcomes feed the
  * bank-basis P&L proxy (§4.4) and therefore land in `metric_snapshots` (§1.1).
  *

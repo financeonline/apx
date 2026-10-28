@@ -1,13 +1,19 @@
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { Decimal } from '@/core/money';
 import { drainJobs } from '@/modules/jobs';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { ensurePeriods } from '@/db/app/shared';
+import { orgCollection, orgRow } from '@/db/schema';
+import { deleteOrg, drainUntilFinished, fs, serviceClientScoped, rpc } from './setup';
+import { seedBatch, seedCounterparty, seedOrg } from '../fixtures/seed';
+import {
+  bulkWrite, counterpartyRow, currentMoney, deleteJobsOf, invoiceRow, latestJob, seedJob,
+} from '../fixtures/engine-helpers';
 
 /**
- * ADR-120 hardening — PostgREST's `max_rows` (1,000) truncates silently, for a FUNCTION's result as
+ * ADR-120 hardening — PostgREST's `max_rows` (1,000) truncated silently, for a FUNCTION's result as
  * for a table's. An organisation with 1,200 customers produced 1,200 aggregate cells and the engine
- * was handed 1,000 of them: revenue 100,000.00 for a month that sold 120,000.00. Every read on the
- * receivables path now pages; this organisation sits above the cap on each of them.
+ * was handed 1,000 of them: revenue 100,000.00 for a month that sold 120,000.00. The Firestore reads
+ * have no such cap, and this organisation still sits above 1,000 on each of them, so a cap
+ * reintroduced anywhere on the receivables path fails here.
  *
  *   1,200 customers, one sales invoice each: issued 06-05, total 100.00 (no VAT), due 06-20, unpaid
  *   one supplier, created LAST (row 1,201 of counterparties), default category cost_of_sales,
@@ -20,80 +26,70 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
 
 const TAG = `cap${Date.now().toString(36)}`;
 let org: string;
-let june: string;
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`).split('\n')[0]!.trim();
 
-const metric = (key: string): string | null => {
-  const raw = one(`select coalesce(s.value::text, '<null>') from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-    where c.organization_id = '${org}' and c.period_id = '${june}' and c.metric_key = '${key}' and c.dimension_type = 'none'`);
-  return raw === '' || raw === '<null>' ? null : new Decimal(raw).toFixed(2);
-};
+const metric = (key: string): Promise<string | null> => currentMoney(org, '2026-06-01', key);
 
 beforeAll(async () => {
-  const owner = createAuthUser(`owner@${TAG}.itest`);
-  const created = await clientFor(owner).schema('api').rpc('create_organization', { p_name: `Row cap ${TAG}` });
-  if (created.error) throw new Error(created.error.message);
-  org = created.data as unknown as string;
+  org = (await seedOrg({ name: `ITest Row cap ${TAG}`, ownerEmail: `owner@${TAG}.cap.itest.motion` })).orgId;
+  await ensurePeriods(fs(), org, '2026-06-01', '2026-06-30');
 
-  const list = (importType: string) => {
-    const doc = one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-      values ('${org}', '${org}/${importType}.csv', '${importType}.csv', 'text/csv', 10, digest('${org}${importType}', 'sha256'), 'ready', 'invoice') returning id`);
-    adminSql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
-        period_start, period_end, committed_at, invoice_list_kind, confirmations)
-      values ('${org}', '${doc}', '${importType}', 'invoices', 'committed', 'csv', '2026-06-01', '2026-06-30', now(), 'full',
-        '{"IMP-INV-013": {"by": null, "at": "2026-09-01T00:00:00Z", "value": {"opening": "complete"}}}'::jsonb)`); // R-2: a complete export
-  };
-  adminSql(`insert into public.counterparties (organization_id, name, kind)
-              select '${org}', 'Customer ' || lpad(g::text, 4, '0'), 'customer' from generate_series(1, 1200) g`);
-  const supplier = one(`insert into public.counterparties (organization_id, name, kind, default_expense_category)
-    values ('${org}', 'Zeta Supplies', 'supplier', 'cost_of_sales') returning id`);
-  adminSql(`insert into public.invoices (organization_id, invoice_type, counterparty_id, invoice_number, issue_date, due_date, period_id,
-              subtotal, tax_amount, total_amount, amount_paid, status, record_status, assurance_level)
-            select '${org}', 'sales', c.id, 'S' || c.name, '2026-06-05', '2026-06-20', '00000000-0000-0000-0000-000000000000',
-              100, 0, 100, 0, 'open', 'accepted', 'verified'
-              from public.counterparties c where c.organization_id = '${org}' and c.kind = 'customer'`);
-  adminSql(`insert into public.invoices (organization_id, invoice_type, counterparty_id, invoice_number, issue_date, due_date, period_id,
-              subtotal, tax_amount, total_amount, amount_paid, status, record_status, assurance_level)
-            values ('${org}', 'purchase', '${supplier}', 'P1', '2026-06-10', '2026-07-10', '00000000-0000-0000-0000-000000000000',
-              500, 0, 500, 0, 'open', 'accepted', 'verified')`);
-  list('sales_invoices');
-  list('purchase_invoices');
-  june = one(`select id from public.fiscal_periods where organization_id = '${org}' and period_start = '2026-06-01'`);
+  const list = (importType: string) => seedBatch(org, {
+    importType, target: 'invoices', start: '2026-06-01', end: '2026-06-30', listKind: 'full',
+    // R-2: a complete export.
+    confirmations: { 'IMP-INV-013': { by: null, at: '2026-09-01T00:00:00Z', value: { opening: 'complete' } } },
+  });
+  const customers = Array.from({ length: 1200 }, (_, g) =>
+    counterpartyRow(org, { name: `Customer ${String(g + 1).padStart(4, '0')}`, kind: 'customer' }));
+  await bulkWrite(org, 'counterparties', customers);
+  const supplier = await seedCounterparty(org, { name: 'Zeta Supplies', kind: 'supplier', defaultExpenseCategory: 'cost_of_sales' });
+  await bulkWrite(org, 'invoices', customers.map((c) => invoiceRow(org, {
+    type: 'sales', counterpartyId: String(c.id), number: `S${String(c.name)}`, issue: '2026-06-05', due: '2026-06-20',
+    subtotal: '100', tax: '0', total: '100', paid: '0', status: 'open',
+  })));
+  await bulkWrite(org, 'invoices', [invoiceRow(org, {
+    type: 'purchase', counterpartyId: supplier, number: 'P1', issue: '2026-06-10', due: '2026-07-10',
+    subtotal: '500', tax: '0', total: '500', paid: '0', status: 'open',
+  })]);
+  await list('sales_invoices');
+  await list('purchase_invoices');
 
-  const job = one(`insert into public.jobs (organization_id, job_type, payload, max_attempts)
-    values ('${org}', 'calculation.run', '{"trigger":"recalc_manual","as_of":"2026-09-15"}'::jsonb, 3) returning id`);
+  const job = await seedJob(org, 'calculation.run', { trigger: 'recalc_manual', as_of: '2026-09-15' }, { maxAttempts: 3 });
   expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
-  const alerts = one(`select id from public.jobs where organization_id = '${org}' and job_type = 'alerts.evaluate' order by created_at desc limit 1`);
-  expect(await drainUntilFinished(drainJobs, alerts)).toBe('succeeded');
+  const alerts = await latestJob(org, 'alerts.evaluate');
+  expect(await drainUntilFinished(drainJobs, String(alerts?.id))).toBe('succeeded');
 }, 600_000);
 
-afterAll(() => {
-  adminSql(`delete from public.organizations where id = '${org}'; delete from auth.users where email like '%@${TAG}.itest';`);
+afterAll(async () => {
+  if (!org) return;
+  await deleteJobsOf(org);
+  await deleteOrg(org);
 });
 
 describe('reads above PostgREST\'s 1,000-row cap are complete (ADR-120 hardening)', () => {
-  it('the fixture really is above the cap', () => {
-    const cells = Number(one(`select count(*) from app.aggregate_periods('${org}', '2026-06-01', '2026-06-30', now())`));
-    expect(cells).toBeGreaterThan(1000);
+  it('the fixture really is above the cap', async () => {
+    const { data } = await rpc<unknown[]>(serviceClientScoped(org), 'aggregate_periods', {
+      p_org: org, p_from: '2026-06-01', p_to: '2026-06-30', p_aggregated_at: new Date().toISOString(),
+    }, { server: true });
+    expect(data?.length).toBeGreaterThan(1000);
   });
 
-  it('revenue counts every invoice, not the first thousand cells', () => {
-    expect(metric('revenue')).toBe('120000.00');
+  it('revenue counts every invoice, not the first thousand cells', async () => {
+    expect(await metric('revenue')).toBe('120000.00');
   });
 
-  it('receivables age every open invoice', () => {
-    expect(metric('receivables')).toBe('120000.00');
-    expect(metric('receivables_overdue')).toBe('120000.00');
+  it('receivables age every open invoice', async () => {
+    expect(await metric('receivables')).toBe('120000.00');
+    expect(await metric('receivables_overdue')).toBe('120000.00');
   });
 
-  it('a supplier past the thousandth counterparty still categorises its purchases', () => {
-    expect(metric('cost_of_sales')).toBe('500.00');
+  it('a supplier past the thousandth counterparty still categorises its purchases', async () => {
+    expect(await metric('cost_of_sales')).toBe('500.00');
   });
 
-  it('the receivables alert states its facts over the whole population', () => {
-    const summary = JSON.parse(one(`select r.threshold_summary::text from public.alerts a
-      join public.alert_revisions r on r.id = a.current_revision_id and r.organization_id = a.organization_id
-      where a.organization_id = '${org}' and a.rule_key = 'receivables.deterioration'`)) as Record<string, string>;
+  it('the receivables alert states its facts over the whole population', async () => {
+    const alert = (await orgCollection(fs(), org, 'alerts').where('rule_key', '==', 'receivables.deterioration').get()).docs[0]!;
+    const revision = await orgRow(fs(), org, 'alert_revisions', String(alert.get('current_revision_id'))).get();
+    const summary = revision.get('threshold_summary') as Record<string, string>;
     expect(summary.overdue).toBe('120000.00');
     expect(summary.overdue_count).toBe('10'); // the ten largest are named (TOP_OVERDUE_LIMIT)
     expect(summary.top3_share).toBe('0.002500'); // 300 / 120,000

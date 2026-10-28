@@ -1,5 +1,6 @@
 import { expect, test, type Page } from '@playwright/test';
-import { cleanUpOwn, drainQueue, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, drainQueue, onboard, seedUser, signIn, uniqueName } from './fixtures';
+import { addMembership, orgIdBySlug, periodOf } from './firestore';
 
 /**
  * Journey 13 — Banking Intelligence (Phase 13, ADR-101; REQ-BK-01…11).
@@ -37,13 +38,12 @@ function claimsLiveBank(text: string): boolean {
 }
 
 test('an owner adds an account, imports a statement, and reads their banking; a client reads it with no controls', async ({ page }) => {
-  const owner = seedUser('journey13-owner');
-  const client = seedUser('journey13-client');
+  const owner = await seedUser('journey13-owner');
+  const client = await seedUser('journey13-client');
   await signIn(page, owner);
   const slug = await onboard(page, ORG);
-  const orgId = sql(`select id from public.organizations where slug = '${slug}'`).trim();
-  sql(`insert into public.organization_memberships (organization_id, user_id, role, status)
-       values ('${orgId}', '${client.userId}', 'client', 'active')`);
+  const orgId = await orgIdBySlug(slug);
+  await addMembership(orgId, client.userId, 'client');
 
   // ---- 1. Nothing yet: the page asks for an account first, and offers the form. ---------------
   await page.goto(`/app/${slug}/money/banking`);
@@ -76,7 +76,7 @@ test('an owner adds an account, imports a statement, and reads their banking; a 
   await drainQueue(page, slug);
 
   // ---- 3. The Banking page, in the reader's order. ---------------------------------------------
-  const august = sql(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-08-01'`).trim();
+  const august = await periodOf(orgId, '2026-08-01');
   await page.goto(`/app/${slug}/money/banking?period=${august}`);
   await expect(page.getByRole('heading', { name: /^banking/i })).toBeVisible();
   const overview = await mainText(page);

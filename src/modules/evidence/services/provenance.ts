@@ -1,6 +1,8 @@
 import 'server-only';
-import { NotFound, isMotionError, toMotionError } from '@/core/errors';
+import { NotFound, isMotionError } from '@/core/errors';
 import { assertCan, can } from '@/core/permissions';
+import { orgRowById, orgRows } from '@/db/rls';
+import type { OrgTable } from '@/db/schema';
 import type { AccessContext } from '@/modules/tenancy';
 import type { AssuranceLevel } from '../domain/assurance';
 import type { Row } from '../data/rows';
@@ -141,7 +143,7 @@ function str(row: Row, key: string): string | null {
 /**
  * Where one record came from.
  *
- * Read entirely through the caller's own client, so RLS decides what exists: a record id belonging
+ * Read entirely for the caller, through the row policies (`src/db/rls.ts`), so they decide what exists: a record id belonging
  * to another organisation resolves to nothing and is answered `NotFound`, never "forbidden", which
  * would confirm the row exists for somebody (SECURITY_MODEL.md §14). The organisation comes from the
  * request's AccessContext and never from an argument.
@@ -161,15 +163,9 @@ export async function getRecordProvenance(
     `${DATE_COLUMN[kind]}`, `${DESCRIPTION_COLUMN[kind]}`, `${AMOUNT_COLUMN[kind]}`,
   ];
 
-  const { data, error } = await ctx.db
-    .from(table)
-    .select(columns.join(', '))
-    .eq('organization_id', orgId)
-    .eq('id', recordId)
-    .maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
-  if (!data) throw new NotFound();
-  const record = data as unknown as Row;
+  const found = await orgRowById<Row>(ctx.db, orgId, table as OrgTable, recordId);
+  if (!found) throw new NotFound();
+  const record: Row = Object.fromEntries(columns.map((c) => [c, found[c] ?? null]));
 
   const status = str(record, 'record_status');
   const superseded = record.superseded_by !== null && record.superseded_by !== undefined;
@@ -222,23 +218,14 @@ async function loadPeriodLabel(
   ctx: AccessContext, orgId: string, periodId: string | null,
 ): Promise<string | null> {
   if (periodId === null) return null;
-  const { data, error } = await ctx.db
-    .from('fiscal_periods').select('label')
-    .eq('organization_id', orgId).eq('id', periodId).maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
-  return (data as { label?: string } | null)?.label ?? null;
+  return (await orgRowById<{ label?: string }>(ctx.db, orgId, 'fiscal_periods', periodId))?.label ?? null;
 }
 
 async function loadImport(
   ctx: AccessContext, orgId: string, batchId: string | null,
 ): Promise<RecordImport | null> {
   if (batchId === null) return null;
-  const { data, error } = await ctx.db
-    .from('import_batches')
-    .select('id, import_type, status, committed_at, period_start, period_end')
-    .eq('organization_id', orgId).eq('id', batchId).maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
-  const row = data as Row | null;
+  const row = await orgRowById<Row>(ctx.db, orgId, 'import_batches', batchId);
   if (!row) return null;
   return {
     batchId,
@@ -297,11 +284,10 @@ export interface DocumentEvidence {
  * What rests on one file.
  *
  * `documents.view` — the same permission the library and the viewer require, so this adds no reach:
- * a client cannot read `source_documents` under RLS in any case (§10, CD-17).
+ * a client cannot read `source_documents` under its row policy in any case (§10, CD-17).
  *
- * Four indexed reads and no scan: the document by id, its batches through
- * `import_batches_document_lookup (organization_id, source_document_id)`, and the periods those
- * batches declare through `fiscal_periods_org_start_unique`. The row counts are read off the batch
+ * Three reads and no scan: the document by id, its batches by `source_document_id`, and the periods
+ * those batches declare by `period_start`. The row counts are read off the batch
  * where the commit wrote them rather than counted again, which is what keeps this O(batches).
  */
 export async function getDocumentEvidence(
@@ -311,23 +297,12 @@ export async function getDocumentEvidence(
   assertCan(ctx, 'documents.view');
   const orgId = requireOrgId(ctx);
 
-  const { data: docData, error: docError } = await ctx.db
-    .from('source_documents')
-    .select('id, original_filename, document_kind, status, created_at')
-    .eq('organization_id', orgId).eq('id', documentId).maybeSingle();
-  if (docError) throw toMotionError(docError, ctx.requestId);
-  if (!docData) throw new NotFound();
-  const doc = docData as unknown as Row;
+  const doc = await orgRowById<Row>(ctx.db, orgId, 'source_documents', documentId);
+  if (!doc) throw new NotFound();
 
-  const { data: batchData, error: batchError } = await ctx.db
-    .from('import_batches')
-    .select('id, import_type, target_table, status, committed_at, rolled_back_at, row_counts, period_start, period_end, calculation_run_id')
-    .eq('organization_id', orgId)
-    .eq('source_document_id', documentId)
-    .order('created_at', { ascending: false });
-  if (batchError) throw toMotionError(batchError, ctx.requestId);
-
-  const batches = (batchData ?? []) as unknown as Row[];
+  // Newest first, ordered here so the read needs no composite index.
+  const batches = await orgRows<Row>(ctx.db, orgId, 'import_batches', (q) => q.where('source_document_id', '==', documentId));
+  batches.sort((a, b) => (String(a.created_at) < String(b.created_at) ? 1 : String(a.created_at) > String(b.created_at) ? -1 : 0));
   const imports: DocumentImport[] = batches.map((b) => {
     const counts = (b.row_counts ?? {}) as Record<string, unknown>;
     const kind = kindOfTable(str(b, 'target_table'));
@@ -395,16 +370,10 @@ async function loadPeriodsCovered(
   const from = starts.reduce((a, b) => (a < b ? a : b));
   const to = ends.reduce((a, b) => (a > b ? a : b));
 
-  const { data, error } = await ctx.db
-    .from('fiscal_periods')
-    .select('id, label, period_start, period_end')
-    .eq('organization_id', orgId)
-    .lte('period_start', to)
-    .gte('period_end', from)
-    .order('period_start', { ascending: true });
-  if (error) throw toMotionError(error, ctx.requestId);
-
-  const rows = (data ?? []) as unknown as Row[];
+  // One range in the query (Firestore allows one without a composite index); the other bound here.
+  const rows = (await orgRows<Row>(ctx.db, orgId, 'fiscal_periods',
+    (q) => q.where('period_start', '<=', to).orderBy('period_start', 'asc')))
+    .filter((p) => String(p.period_end) >= from);
   // A period counts only when some import's declared range actually overlaps it: the envelope above
   // is one query for many batches, and the envelope can be wider than any single range.
   return rows

@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { seededOrgSlug, sql } from './fixtures';
+import { seededOrgSlug } from './fixtures';
+import { backend, deleteOrganization } from './firestore';
 
 /**
  * Journey 3, the evidence steps (TEST_STRATEGY.md §12 journey 3; IMPLEMENTATION_PLAN.md Phase 10).
@@ -101,16 +102,17 @@ test.describe('from a figure to the rows behind it', () => {
     // A bundle in an organisation this owner has NOTHING to do with — created fresh here rather
     // than picked from "the most recent other org", which in a shared database is whatever a prior
     // test happened to leave behind (and made this assertion depend on history, not on isolation).
-    const other = sql(`
-      with neworg as (
-        insert into public.organizations (slug, name, status)
-        values ('evi-foreign-${Date.now().toString(36)}', 'Evidence Foreign', 'active')
-        returning id),
-      newbundle as (
-        insert into public.evidence_bundles (organization_id, kind, origin_table, created_by_type)
-        select id, 'metric', 'metric_snapshots', 'system' from neworg
-        returning id)
-      select id::text from newbundle`);
+    const { portfolio, schema, setup } = await backend();
+    const foreignOrg = await portfolio.seedOrg('Evidence Foreign', {
+      slug: `evi-foreign-${Date.now().toString(36)}`, periods: false,
+    });
+    const other = schema.newId();
+    // The field set `writeBundle` (src/db/app/engine-evidence.ts) stores, with nothing behind it.
+    await schema.orgRow(setup.fs(), foreignOrg, 'evidence_bundles', other).set({
+      id: other, organization_id: foreignOrg, kind: 'metric', origin_table: 'metric_snapshots',
+      origin_id: null, calculation_run_id: null, created_by_type: 'system', created_by: null,
+      created_at: schema.nowIso(), origin_message_id: null,
+    });
 
     const invented = '00000000-0000-4000-8000-000000000000';
     const answers: string[] = [];
@@ -119,7 +121,7 @@ test.describe('from a figure to the rows behind it', () => {
       answers.push(`${response?.status()} ${(await page.getByRole('heading').first().textContent()) ?? ''}`);
     }
 
-    sql(`delete from public.organizations where slug like 'evi-foreign-%'`);
+    await deleteOrganization(foreignOrg);
 
     expect(answers[0]).toMatch(/^404 .*could not find that page/i);
     expect(answers[1], 'someone else’s bundle reads exactly as an invented one').toBe(answers[0]);

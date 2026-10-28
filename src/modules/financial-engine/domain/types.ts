@@ -1,7 +1,7 @@
 /**
  * The engine's type contract (FINANCIAL_ENGINE.md §1–§5).
  *
- * Every function in `domain/` is a function of typed inputs to typed outputs. No Supabase, no
+ * Every function in `domain/` is a function of typed inputs to typed outputs. No database, no
  * Next.js, no clock, no randomness — "today" is an explicit `asOf` input used only for aging and
  * runway. That is what makes the guarantee in §1.1 checkable: the same accepted records, the same
  * engine version and the same settings must produce byte-identical snapshots.

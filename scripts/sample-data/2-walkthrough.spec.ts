@@ -1,7 +1,7 @@
 import { mkdirSync } from 'node:fs';
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test, type Page } from '@playwright/test';
-import { sql } from '../../e2e/fixtures';
+import { orgIdBySlug, orgRowId } from './firestore';
 
 /**
  * Walks every page of the sample business (loaded by 1-seed) as its owner: each page answers, shows
@@ -49,9 +49,10 @@ test('every page of the sample business, as its owner', async ({ page }) => {
   await signIn(page);
   for (const p of PAGES) await visit(page, `/app/${SLUG}/${p}`, p.replace(/\//g, '_'));
   // A few detail pages, reached the way a person reaches them.
-  const customer = sql(`select c.id from public.counterparties c join public.organizations o on o.id = c.organization_id where o.slug = '${SLUG}' and c.name = 'Acme Cafés Ltd'`).trim();
+  const orgId = await orgIdBySlug(SLUG);
+  const customer = await orgRowId(orgId, 'counterparties', [['name', '==', 'Acme Cafés Ltd']]);
   await visit(page, `/app/${SLUG}/customers/${customer}`, 'customer_acme');
-  const sep = sql(`select p.id from public.fiscal_periods p join public.organizations o on o.id = p.organization_id where o.slug = '${SLUG}' and p.period_start = '2026-09-01'`).trim();
+  const sep = await orgRowId(orgId, 'fiscal_periods', [['period_start', '==', '2026-09-01']]);
   await visit(page, `/app/${SLUG}/evidence?metric=revenue&period=${sep}`, 'evidence_revenue_sep');
   await visit(page, `/app/${SLUG}/reports/monthly/${sep}`, 'report_monthly_sep');
   for (const p of ['portfolio', 'portfolio/alerts', 'portfolio/actions', 'portfolio/analyst', 'portfolio/report']) await visit(page, `/${p}`, p.replace(/\//g, '_'));

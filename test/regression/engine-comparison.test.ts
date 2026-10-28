@@ -6,7 +6,7 @@ import { calculateAndAlert, seedAdr120Orgs } from '../fixtures/adr120-orgs';
 import { seedAuditOrgs, type AuditKey } from '../fixtures/audit-orgs';
 import { seedAudit2Orgs, type Audit2Key } from '../fixtures/audit2-orgs';
 import { engineDump } from '../fixtures/engine-dump';
-import { adminSql } from '../integration/setup';
+import { removeSeeded } from '../fixtures/seed';
 
 /**
  * The engine regression record (ADR-124): the 27-organisation comparison set — the 7 ADR-120
@@ -44,13 +44,12 @@ it('seeds, computes and dumps the 27-organisation comparison set', async () => {
     const dumps: Record<string, unknown> = {};
     for (const [key, id] of Object.entries(orgs)) {
       await calculateAndAlert(id);
-      dumps[key] = engineDump(id);
+      dumps[key] = await engineDump(id);
     }
     mkdirSync(out, { recursive: true });
     writeFileSync(path.join(out, `${label}.json`),
       `${JSON.stringify({ engineVersion: ENGINE_VERSION, label, organisations: dumps }, null, 1)}\n`);
   } finally {
-    adminSql(`delete from public.organizations where id in (${Object.values(orgs).map((id) => `'${id}'`).join(',')});
-      delete from auth.users where email like '%@${tag}.%';`);
+    await removeSeeded(Object.values(orgs), `@${tag}.`);
   }
 }, 3_600_000);

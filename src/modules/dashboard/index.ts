@@ -38,6 +38,7 @@ export {
   loadPeriods,
   loadPeriodsWithData,
   loadPendingBatch,
+  loadOrganizationFacts,
   type PendingBatch,
 } from './data/repository';
 

@@ -5,7 +5,7 @@
  * is an analytical indicator and nothing more — every screen that shows it carries the SOW §9
  * disclaimer, which is exported here so no screen can forget it.
  *
- * `domain/` is pure: no Supabase, no Next.js, no clock, no randomness, and — the property the whole
+ * `domain/` is pure: no database, no Next.js, no clock, no randomness, and — the property the whole
  * design rests on — no `alerts` row and no user status anywhere in its inputs.
  */
 

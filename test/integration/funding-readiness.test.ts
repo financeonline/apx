@@ -5,7 +5,14 @@ import { getFundingView } from '@/modules/funding';
 import { drainJobs } from '@/modules/jobs';
 import { getStoredReport, requestCompose, requestStoredPdf, type FundingReportContent } from '@/modules/reporting';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished, serviceStorage, sqlstate } from './setup';
+import { prepareEnqueue } from '@/db/app/jobs';
+import { periodId } from '@/db/app/shared';
+import { orgRows } from '@/db/rls';
+import { globalRow, orgCollection, uniqueGuard } from '@/db/schema';
+import { clientFor, createAuthUser, drainUntilFinished, fs, rpc, serviceClientScoped, sqlstate } from './setup';
+import {
+  jobsOf, removeSeeded, seedAccepted, seedBatch, seedDocument, seedJob, seedLedgerEntry, seedMember, seedOrg,
+} from '../fixtures/seed';
 
 /**
  * Funding Readiness (Phase 16; ADR-121, ADR-145): the flag's whole lifecycle and its security, against
@@ -15,7 +22,7 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished, serviceStorage
  */
 
 const RUN = `f${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.funding.itest`;
+const DOMAIN = `${RUN}.funding.itest.motion`;
 let ownerId: string;
 let clientId: string;
 let strangerId: string;
@@ -23,63 +30,94 @@ let orgId: string;
 let otherOrgId: string;
 let august: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
 const ctxFor = (userId: string, role: EffectiveRole, org = orgId): AccessContext => ({
   userId, orgId: org, orgSlug: 'fund', effectiveRole: role, permissions: permissionsFor(role), actorType: 'user',
   db: clientFor(userId, { email: `${role}@${DOMAIN}` }), requestId: `itest-${RUN}`, now: () => new Date(), organizationStatus: 'active',
 });
-const setFlag = (on: boolean) => adminSql(`update public.organizations set features = features || jsonb_build_object('funding_readiness', ${on}) where id = '${orgId}'`);
+
+/**
+ * The switch, as `api.set_org_module` throws it: the feature, and on the off→on edge the
+ * `funding_enablement` backfill job in the same transaction (`on conflict do nothing`). That function
+ * needs THE super admin, which this suite cannot create on an emulator other suites share (there is
+ * one super admin), so the fixture does exactly what the function's transaction does.
+ */
+async function setFlag(on: boolean): Promise<void> {
+  const f = fs();
+  await f.runTransaction(async (tx) => {
+    const ref = globalRow(f, 'organizations', orgId);
+    const before = ((await tx.get(ref)).get('features') as Record<string, unknown> | undefined) ?? {};
+    let job: Awaited<ReturnType<typeof prepareEnqueue>> | null = null;
+    if (on && before.funding_readiness !== true) {
+      const key = `funding.assess:${orgId}`;
+      const claim = await uniqueGuard(f, 'global', 'jobs_idempotency_queued', ['funding.assess', key]).read(tx);
+      const holder = claim.owner ? await tx.get(f.collection('jobs').doc(claim.owner)) : null;
+      if (!(holder?.exists && holder.get('status') === 'queued')) {
+        job = await prepareEnqueue(f, {
+          organizationId: orgId, jobType: 'funding.assess', payload: { trigger: 'enablement_backfill' },
+          requestedBy: null, idempotencyKey: key,
+        }, tx);
+      }
+    }
+    tx.update(ref, { features: { ...before, funding_readiness: on } });
+    job?.write(tx);
+  });
+}
+
 /** The newest assessment job created since `since` (any state: the drain may already have run it). */
-const fundingJob = (since = '-infinity') => one(`select coalesce((select id::text from public.jobs where organization_id = '${orgId}'
-  and job_type = 'funding.assess' and created_at > '${since}'::timestamptz order by created_at desc limit 1), '')`);
-const now = () => one(`select now()::text`);
+async function fundingJob(since = ''): Promise<string> {
+  const jobs = (await jobsOf(orgId, { jobType: 'funding.assess' })).filter((j) => String(j.created_at) > since);
+  return jobs[0] ? String(jobs[0].id) : '';
+}
+const now = () => new Date().toISOString();
+/** A real calculation through the shared queue: the drain may run other suites' jobs first. */
+const CALC_TIMEOUT = 240_000;
+const jobPayload = async (id: string) => ((await fs().collection('jobs').doc(id).get()).get('payload') as Record<string, unknown>);
+const assessments = async (where: Array<[string, unknown]> = []) => {
+  let q: FirebaseFirestore.Query = orgCollection(fs(), orgId, 'funding_assessments');
+  for (const [k, v] of where) q = q.where(k, '==', v);
+  return (await q.get()).docs.map((d) => d.data());
+};
+const pointer = async () => (await orgCollection(fs(), orgId, 'funding_current').doc(august).get()).data();
 
 async function calculate(): Promise<string> {
-  const job = adminSql(`insert into public.jobs (organization_id, job_type, payload, max_attempts)
-                        values ('${orgId}', 'calculation.run', '{"trigger":"recalc_manual"}'::jsonb, 3) returning id`).split('\n')[0]!.trim();
+  const job = await seedJob(orgId, 'calculation.run', { trigger: 'recalc_manual' });
   expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
-  return one(`select id from public.calculation_runs where organization_id = '${orgId}' and status = 'succeeded' order by finished_at desc limit 1`);
+  const runs = (await orgCollection(fs(), orgId, 'calculation_runs').where('status', '==', 'succeeded').get()).docs
+    .map((d) => d.data()).sort((a, b) => String(b.finished_at).localeCompare(String(a.finished_at)));
+  return String(runs[0]!.id);
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  clientId = createAuthUser(`client@${DOMAIN}`);
-  strangerId = createAuthUser(`stranger@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest Funding ${RUN}` });
-  if (created.error) throw new Error(created.error.message);
-  orgId = created.data as unknown as string;
-  const other = await clientFor(strangerId).schema('api').rpc('create_organization', { p_name: `ITest Funding Other ${RUN}` });
-  otherOrgId = other.data as unknown as string;
-  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status) values ('${orgId}', '${clientId}', 'client', 'active')`);
-  const account = (c: string) => one(`select id from public.accounts where organization_id = '${orgId}' and standard_category = '${c}' and is_system`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  clientId = await createAuthUser(`client@${DOMAIN}`);
+  strangerId = await createAuthUser(`stranger@${DOMAIN}`);
+  const seeded = await seedOrg({ name: `ITest Funding ${RUN}`, ownerId, around: '2026-09-15' });
+  orgId = seeded.orgId;
+  otherOrgId = (await seedOrg({ name: `ITest Funding Other ${RUN}`, ownerId: strangerId, around: '2026-09-15' })).orgId;
+  await seedMember(orgId, clientId, 'client');
+  const doc = await seedDocument(orgId, 'gl.csv', 'general_ledger');
+  const batch = await seedBatch(orgId, {
+    importType: 'general_ledger', target: 'ledger_entries', start: '2026-08-01', end: '2026-08-31', documentId: doc,
+  });
   for (const [c, d, a] of [['revenue', 'credit', '20000.00'], ['payroll', 'debit', '12000.00']] as const) {
-    const id = one(`insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status)
-                    values ('${orgId}', '2026-08-10', '${account(c)}', '${d}', ${a}, '00000000-0000-0000-0000-000000000000', 'accepted') returning id`);
-    adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event) values ('${orgId}', 'ledger_entries', '${id}', 'accepted')`);
+    const id = await seedLedgerEntry(orgId, { date: '2026-08-10', accountId: seeded.accounts[c]!, direction: d, amount: a });
+    await seedAccepted(orgId, 'ledger_entries', id, null);
   }
-  const doc = one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-                   values ('${orgId}', '${orgId}/f/gl.csv', 'gl.csv', 'text/csv', 10, decode('e5','hex'), 'ready', 'general_ledger') returning id`);
-  adminSql(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at)
-            values ('${orgId}', '${doc}', 'general_ledger', 'ledger_entries', 'committed', 'csv', '2026-08-01', '2026-08-31', now())`);
-  august = one(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-08-01'`);
-});
+  void batch;
+  august = periodId(orgId, '2026-08-01');
+}, 120_000);
 
-afterAll(() => {
-  adminSql(`
-    select set_config('app.purge', 'on', false);
-    delete from public.funding_current where organization_id in (select id from public.organizations where name like 'ITest Funding%${RUN}');
-    delete from public.funding_assessments where organization_id in (select id from public.organizations where name like 'ITest Funding%${RUN}');
-    delete from public.organizations where name like 'ITest Funding%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';`);
+afterAll(async () => {
+  await removeSeeded([orgId, otherOrgId], `@${DOMAIN}`);
 });
 
 describe('switched off (the default)', () => {
   it('a calculation writes no assessment and queues no assessment job', async () => {
     const since = now();
     await calculate();
-    expect(one(`select count(*) from public.funding_assessments where organization_id = '${orgId}'`)).toBe('0');
-    expect(fundingJob(since)).toBe('');
-  });
+    expect(await assessments()).toHaveLength(0);
+    expect(await fundingJob(since)).toBe('');
+  }, CALC_TIMEOUT);
 
   it('the page is NOT FOUND for every role', async () => {
     for (const [id, role] of [[ownerId, 'owner'], [clientId, 'client']] as const) {
@@ -90,14 +128,14 @@ describe('switched off (the default)', () => {
 
 describe('switching it on', () => {
   it('queues the backfill in the same transaction, and assesses every complete month', async () => {
-    setFlag(true);
-    const job = fundingJob();
+    await setFlag(true);
+    const job = await fundingJob();
     expect(job).toMatch(/^[0-9a-f-]{36}$/);
-    expect(one(`select payload ->> 'trigger' from public.jobs where id = '${job}'`)).toBe('enablement_backfill');
+    expect((await jobPayload(job)).trigger).toBe('enablement_backfill');
     expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
-    expect(one(`select trigger from public.funding_assessments a join public.funding_current c on c.assessment_id = a.id
-                 where c.organization_id = '${orgId}' and c.period_id = '${august}'`)).toBe('enablement_backfill');
-  });
+    const current = await pointer();
+    expect((await assessments([['id', current!.assessment_id]]))[0]!.trigger).toBe('enablement_backfill');
+  }, CALC_TIMEOUT);
 
   it('says "Insufficient data" honestly: no cash is unknown cash, no balance sheet is unknown debt', async () => {
     const view = await getFundingView(ctxFor(ownerId, 'owner'), august);
@@ -113,31 +151,30 @@ describe('switching it on', () => {
 
   it('a client may read it; another organisation may not', async () => {
     expect((await getFundingView(ctxFor(clientId, 'client'))).state).toBe('ready');
-    const { data } = await clientFor(strangerId, { email: `owner@${DOMAIN}` }).from('funding_assessments').select('id').eq('organization_id', orgId);
-    expect(data ?? []).toEqual([]);
+    expect(await orgRows(clientFor(strangerId, { email: `owner@${DOMAIN}` }), orgId, 'funding_assessments')).toEqual([]);
   });
 
   it('the next successful calculation re-assesses, citing the new run', async () => {
     const since = now();
     const run = await calculate();
-    const job = fundingJob(since);
-    expect(one(`select payload ->> 'trigger' from public.jobs where id = '${job}'`)).toBe('calculation_run');
+    const job = await fundingJob(since);
+    expect((await jobPayload(job)).trigger).toBe('calculation_run');
     expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
-    expect(one(`select calculation_run_id from public.funding_current where organization_id = '${orgId}' and period_id = '${august}'`)).toBe(run);
+    expect((await pointer())!.calculation_run_id).toBe(run);
     // The earlier assessment is kept, not replaced.
-    expect(Number(one(`select count(*) from public.funding_assessments where organization_id = '${orgId}' and period_id = '${august}'`))).toBe(2);
-  });
+    expect(await assessments([['period_id', august]])).toHaveLength(2);
+  }, CALC_TIMEOUT);
 
   it('the nightly backstop queues an organisation whose latest month has no current assessment', async () => {
-    adminSql(`delete from public.funding_current where organization_id = '${orgId}'`);
+    await fs().recursiveDelete(orgCollection(fs(), orgId, 'funding_current'));
     const since = now();
-    const { error } = await serviceStorage().schema('api_server').rpc('enqueue_funding_backstop', {});
+    const { error } = await rpc(serviceClientScoped(), 'enqueue_funding_backstop', {}, { server: true });
     expect(error).toBeNull();
-    const job = fundingJob(since);
-    expect(one(`select payload ->> 'trigger' from public.jobs where id = '${job}'`)).toBe('nightly_backstop');
+    const job = await fundingJob(since);
+    expect((await jobPayload(job)).trigger).toBe('nightly_backstop');
     expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
-    expect(one(`select count(*) from public.funding_current where organization_id = '${orgId}'`)).not.toBe('0');
-  });
+    expect((await orgCollection(fs(), orgId, 'funding_current').get()).size).toBeGreaterThan(0);
+  }, CALC_TIMEOUT);
 });
 
 let fundingReportId: string;
@@ -146,25 +183,25 @@ describe('the Funding Readiness Report (REQ-RP-05)', () => {
   it('stores the latest month\'s current assessment as it stands, with its disclaimer', async () => {
     const job = await requestCompose(ctxFor(ownerId, 'owner'), 'funding_readiness', null);
     expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
-    fundingReportId = one(`select id from public.reports where organization_id = '${orgId}' and report_kind = 'funding_readiness'`);
+    fundingReportId = String((await orgCollection(fs(), orgId, 'reports').where('report_kind', '==', 'funding_readiness').get()).docs[0]!.id);
     const report = await getStoredReport(ctxFor(ownerId, 'owner'), fundingReportId);
     expect(report).toMatchObject({ kind: 'funding_readiness', contentVersion: 'funding.v1', origin: 'requested', periodId: august });
     const content = report!.content as FundingReportContent;
     // The same row the Funding page shows for the month, not a recomposition.
-    const current = one(`select assessment_id from public.funding_current where organization_id = '${orgId}' and period_id = '${august}'`);
+    const current = (await pointer())!.assessment_id;
     expect(content.assessment.id).toBe(current);
     expect(content.assessment).toMatchObject({ status: 'insufficient_data', score: null, band: null });
     expect(content.assessment.disclaimer).toMatch(/^Funding Readiness is an indicative/);
     expect(content.assessment.factors).toHaveLength(7);
     expect(report!.windowStart).toBe('2026-08-01');
     expect(report!.windowEnd).toBe('2026-08-31');
-  });
+  }, CALC_TIMEOUT);
 
   it('renders its PDF under the report', async () => {
     const job = await requestStoredPdf(ctxFor(ownerId, 'owner'), fundingReportId);
     expect(await drainUntilFinished(drainJobs, job)).toBe('succeeded');
-    expect(one(`select count(*) from public.report_files where organization_id = '${orgId}' and report_id = '${fundingReportId}'`)).toBe('1');
-  });
+    expect((await orgCollection(fs(), orgId, 'report_files').where('report_id', '==', fundingReportId).get()).size).toBe(1);
+  }, CALC_TIMEOUT);
 
   it('a client may read it but not produce one', async () => {
     expect(await getStoredReport(ctxFor(clientId, 'client'), fundingReportId)).not.toBeNull();
@@ -174,43 +211,54 @@ describe('the Funding Readiness Report (REQ-RP-05)', () => {
 
 describe('switching it off again', () => {
   it('hides the Funding Readiness Report and refuses a new one, keeping the stored row', async () => {
-    setFlag(false);
+    await setFlag(false);
     expect(await getStoredReport(ctxFor(ownerId, 'owner'), fundingReportId)).toBeNull();
     await expect(requestCompose(ctxFor(ownerId, 'owner'), 'funding_readiness', null)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    expect(one(`select count(*) from public.reports where id = '${fundingReportId}'`)).toBe('1');
+    expect((await orgCollection(fs(), orgId, 'reports').doc(fundingReportId).get()).exists).toBe(true);
   });
 
   it('hides it at every layer — page, evidence and RLS — and keeps the rows', async () => {
-    const bundle = one(`select b.id from public.evidence_bundles b where b.organization_id = '${orgId}' and b.kind = 'funding_assessment' limit 1`);
+    const bundle = String((await orgCollection(fs(), orgId, 'evidence_bundles').where('kind', '==', 'funding_assessment').get()).docs[0]?.id ?? '');
     expect(bundle).toMatch(/^[0-9a-f-]{36}$/);
-    setFlag(false);
+    await setFlag(false);
     await expect(getFundingView(ctxFor(ownerId, 'owner'))).rejects.toMatchObject({ code: 'NOT_FOUND' });
     await expect(getBundle(ctxFor(ownerId, 'owner'), bundle)).rejects.toMatchObject({ code: 'NOT_FOUND' });
-    const { data } = await ctxFor(ownerId, 'owner').db.from('funding_assessments').select('id').eq('organization_id', orgId);
-    expect(data ?? []).toEqual([]);
-    expect(Number(one(`select count(*) from public.funding_assessments where organization_id = '${orgId}'`))).toBeGreaterThan(0);
+    expect(await orgRows(ctxFor(ownerId, 'owner').db, orgId, 'funding_assessments')).toEqual([]);
+    expect((await assessments()).length).toBeGreaterThan(0);
   });
 
   it('and nothing is calculated while it is off', async () => {
-    const before = one(`select count(*) from public.funding_assessments where organization_id = '${orgId}'`);
+    const before = (await assessments()).length;
     const since = now();
     await calculate();
-    expect(fundingJob(since)).toBe('');
-    expect(one(`select count(*) from public.funding_assessments where organization_id = '${orgId}'`)).toBe(before);
-  });
+    expect(await fundingJob(since)).toBe('');
+    expect(await assessments()).toHaveLength(before);
+  }, CALC_TIMEOUT);
 });
 
 describe('only the server writes, and nothing is edited', () => {
-  it('finish_funding is not callable with a user token, and the table refuses direct writes', async () => {
+  it('finish_funding is not callable with a user handle, and no user function writes an assessment', async () => {
     const owner = ctxFor(ownerId, 'owner').db;
-    const rpc = await owner.schema('api_server').rpc('finish_funding', { p_org: orgId, p_assessments: [], p_trigger: 'calculation_run' });
-    expect(rpc.error).not.toBeNull();
-    const { error } = await owner.from('funding_assessments').insert({ organization_id: orgId });
-    expect(sqlstate(error)).toBe('42501');
+    const call = await rpc(owner, 'finish_funding', { p_org: orgId, p_assessments: [], p_trigger: 'calculation_run' }, { server: true });
+    expect(sqlstate(call.error)).toBe('42501');
+    const { API_FUNCTIONS } = await import('@/db/api');
+    expect(Object.keys(API_FUNCTIONS).filter((n) => /funding/.test(n))).toEqual([]);
   });
 
-  it('an assessment cannot be changed or deleted', () => {
-    expect(() => adminSql(`update public.funding_assessments set overall_status = 'scored' where organization_id = '${orgId}'`)).toThrow(/IMMUTABLE/);
+  it('an assessment is never rewritten: the same month and run, offered again, leaves the first standing', async () => {
+    await setFlag(true);
+    const first = (await assessments([['period_id', august]]))
+      .sort((a, b) => String(b.created_at).localeCompare(String(a.created_at)))[0]!;
+    const again = await rpc(serviceClientScoped(orgId), 'finish_funding', {
+      p_org: orgId, p_trigger: 'nightly_backstop',
+      p_assessments: [{ ...first, overall_status: 'scored', overall_score: 99, band: 'strong', evidence: [] }],
+    }, { server: true });
+    expect(again.error).toBeNull();
+    expect(again.data).toBe(0);
+    const kept = (await assessments([['id', first.id]]))[0]!;
+    expect(kept.overall_status).toBe(first.overall_status);
+    expect(kept.overall_score).toBe(first.overall_score);
+    await setFlag(false);
   });
 
   it('a stranger organisation\'s assessment pages are not found, whatever the id', async () => {

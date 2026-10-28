@@ -65,9 +65,11 @@
  *                  → revenue Jun, Jul NULL (ADR-047.10: an aged-debtors list never defines revenue);
  *                    receivables at 31 Jul 2,000.00 — AR/AP coverage is unchanged (R4)
  */
-import { adminSql, clientFor, createAuthUser } from '../integration/setup';
+import { ensurePeriods } from '@/db/app/shared';
+import { createAuthUser, fs } from '../integration/setup';
 import { acct, bankAccount, counterparty, glBatch, invoiceBatch, type Inv, type GlLine } from './audit-orgs';
 import { COMMITTED_AT } from './adr120-orgs';
+import { seedAccepted, seedBankTransaction, seedBatch, seedDocument, seedImportRow, seedOrg } from './seed';
 
 export const FU1_KEYS = [
   'COVERED', 'ZERO', 'NOTCOVER', 'LATERONLY', 'EARLIERONLY', 'DURING', 'PRECEDENCE', 'CURRENT',
@@ -81,16 +83,14 @@ export async function seedFu1Orgs(tag: string, keys: readonly Fu1Key[]): Promise
   let n = 0;
   let owner = '';
   for (const key of keys) {
-    if (n % 2 === 0) owner = createAuthUser(`fu1-${n}@${tag}.fu1.itest`);
+    if (n % 2 === 0) owner = await createAuthUser(`fu1-${n}@${tag}.fu1.itest`);
     n += 1;
-    const r = await clientFor(owner).schema('api').rpc('create_organization', { p_name: `FU1 ${key} ${tag}` });
-    if (r.error) throw new Error(r.error.message);
-    const org = r.data as unknown as string;
+    const { orgId: org } = await seedOrg({ name: `FU1 ${key} ${tag}`, ownerId: owner });
     out[key] = org;
     // The months the test reads, whatever month the suite happens to run in (create_organization
     // materialises twelve months either side of now(), which drifts).
-    adminSql(`select app.ensure_periods('${org}', '2026-01-01', '2027-08-31')`);
-    seedOne(key, org);
+    await ensurePeriods(fs(), org, '2026-01-01', '2027-08-31');
+    await seedOne(key, org);
   }
   return out;
 }
@@ -109,8 +109,8 @@ function lines(type: Inv['type'], items: readonly Line[], prefix: string): Inv[]
 }
 
 /** A committed FULL SALES list over a declared range. */
-function salesList(org: string, o: { start: string; end: string; committedAt?: string; tag: string; sales: readonly Line[] }): void {
-  invoiceBatch(org, {
+async function salesList(org: string, o: { start: string; end: string; committedAt?: string; tag: string; sales: readonly Line[] }): Promise<void> {
+  await invoiceBatch(org, {
     importType: 'sales_invoices', start: o.start, end: o.end, listKind: 'full', committedAt: o.committedAt ?? COMMITTED_AT,
     tag: o.tag, invoices: lines('sales', o.sales, o.tag),
   });
@@ -131,45 +131,39 @@ interface CategorisedMove { readonly date: string; readonly amount: string; read
  * The category is set on INSERT, so the category history the evidence resolver reads opens with it
  * (a later UPDATE would leave the first interval uncategorised).
  */
-function categorisedStatement(org: string, bank: string, o: {
+async function categorisedStatement(org: string, bank: string, o: {
   start: string; end: string; opening: string; closing: string; moves: readonly CategorisedMove[]; tag: string;
-}): void {
-  const values = o.moves.map((m) => `('${m.date}'::date, ${m.amount}::numeric, ${m.category === null ? 'null::uuid' : `'${acct(org, m.category)}'::uuid`})`).join(',');
-  adminSql(`do $$ declare v_doc uuid; v_b uuid; v_row uuid; v_id uuid; r record; n int := 0; begin
-    insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-      values ('${org}', '${org}/fu1/${o.tag}-' || gen_random_uuid(), '${o.tag}.csv', 'text/csv', 10, digest(gen_random_uuid()::text, 'sha256'), 'ready', 'bank_statement') returning id into v_doc;
-    insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
-        period_start, period_end, committed_at, bank_account_id, statement_opening_balance, statement_closing_balance)
-      values ('${org}', v_doc, 'bank_statement', 'bank_transactions', 'committed', 'csv', '${o.start}', '${o.end}',
-        '${COMMITTED_AT}'::timestamptz, '${bank}', ${o.opening}, ${o.closing}) returning id into v_b;
-    for r in select * from (values ${values}) v(d, a, c) loop
-      n := n + 1;
-      insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
-        values ('${org}', v_b, n, 'r' || n, '{}'::jsonb, '{}'::jsonb, 'committed') returning id into v_row;
-      insert into public.bank_transactions (organization_id, bank_account_id, transaction_date, amount, currency, description_raw,
-          description_normalized, period_id, category_account_id, category_source, record_status, assurance_level, duplicate_reviewed,
-          source_document_id, import_batch_id, import_row_id, source_ref, is_transfer, transfer_kind)
-        values ('${org}', '${bank}', r.d, r.a, 'GBP', 'fu1 ' || n || ' ' || v_b, 'fu1 ' || n || ' ' || v_b,
-          '00000000-0000-0000-0000-000000000000', r.c,
-          (case when r.c is null then 'none' else 'user' end)::public.category_source_enum,
-          'accepted', 'verified', true, v_doc, v_b, v_row, 'b' || n, false, 'none') returning id into v_id;
-      insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id)
-        values ('${org}', 'bank_transactions', v_id, 'accepted', v_b);
-    end loop;
-  end $$;`);
+}): Promise<void> {
+  const documentId = await seedDocument(org, `${o.tag}.csv`, 'bank_statement');
+  const b = await seedBatch(org, {
+    importType: 'bank_statement', target: 'bank_transactions', start: o.start, end: o.end, committedAt: COMMITTED_AT,
+    bankAccountId: bank, statementOpening: o.opening, statementClosing: o.closing, documentId,
+  });
+  let n = 0;
+  for (const m of o.moves) {
+    n += 1;
+    const row = await seedImportRow(org, b);
+    const category = m.category === null ? null : await acct(org, m.category);
+    const id = await seedBankTransaction(org, {
+      bankAccountId: bank, date: m.date, amount: m.amount, description: `fu1 ${n} ${b}`,
+      categoryAccountId: category, categorySource: category === null ? 'none' : 'user',
+      documentId, batchId: b, importRowId: row, sourceRef: `b${n}`,
+    });
+    await seedAccepted(org, 'bank_transactions', id, b);
+  }
 }
 
 /** The NOTCOVER shape, shared with STALE. */
-function juneOnly(org: string, tag: string): void {
-  const c = counterparty(org, 'June Only Ltd', 'customer');
-  salesList(org, { start: '2026-06-01', end: '2026-06-30', tag, sales: [{ issue: '2026-06-10', amount: '1000', party: c }] });
+async function juneOnly(org: string, tag: string): Promise<void> {
+  const c = await counterparty(org, 'June Only Ltd', 'customer');
+  await salesList(org, { start: '2026-06-01', end: '2026-06-30', tag, sales: [{ issue: '2026-06-10', amount: '1000', party: c }] });
 }
 
-function seedOne(key: Fu1Key, org: string): void {
+async function seedOne(key: Fu1Key, org: string): Promise<void> {
   switch (key) {
     case 'COVERED': {
-      const c = counterparty(org, 'Covered Ltd', 'customer');
-      salesList(org, { start: '2026-06-01', end: '2026-08-31', tag: 'cov', sales: [
+      const c = await counterparty(org, 'Covered Ltd', 'customer');
+      await salesList(org, { start: '2026-06-01', end: '2026-08-31', tag: 'cov', sales: [
         { issue: '2026-06-10', amount: '1000', party: c },
         { issue: '2026-07-10', amount: '2000', party: c },
         { issue: '2026-08-10', amount: '1500', party: c },
@@ -177,33 +171,33 @@ function seedOne(key: Fu1Key, org: string): void {
       break;
     }
     case 'ZERO': {
-      const c = counterparty(org, 'Zero Ltd', 'customer');
-      salesList(org, { start: '2026-06-01', end: '2026-08-31', tag: 'zero', sales: [
+      const c = await counterparty(org, 'Zero Ltd', 'customer');
+      await salesList(org, { start: '2026-06-01', end: '2026-08-31', tag: 'zero', sales: [
         { issue: '2026-06-10', amount: '1000', party: c },
         { issue: '2026-08-10', amount: '1500', party: c },
       ] });
       break;
     }
     case 'NOTCOVER':
-      juneOnly(org, 'nc');
+      await juneOnly(org, 'nc');
       break;
     case 'STALE':
-      juneOnly(org, 'stale');
+      await juneOnly(org, 'stale');
       break;
     case 'LATERONLY': {
-      const c = counterparty(org, 'Later Ltd', 'customer');
-      salesList(org, { start: '2026-08-01', end: '2026-08-31', tag: 'later', sales: [{ issue: '2026-08-10', amount: '1500', party: c }] });
+      const c = await counterparty(org, 'Later Ltd', 'customer');
+      await salesList(org, { start: '2026-08-01', end: '2026-08-31', tag: 'later', sales: [{ issue: '2026-08-10', amount: '1500', party: c }] });
       break;
     }
     case 'EARLIERONLY': {
-      const c = counterparty(org, 'Earlier Ltd', 'customer');
-      salesList(org, { start: '2026-06-01', end: '2026-06-30', committedAt: '2026-06-05T09:00:00Z', tag: 'earlier',
+      const c = await counterparty(org, 'Earlier Ltd', 'customer');
+      await salesList(org, { start: '2026-06-01', end: '2026-06-30', committedAt: '2026-06-05T09:00:00Z', tag: 'earlier',
         sales: [{ issue: '2026-06-03', amount: '1000', party: c }] });
       break;
     }
     case 'DURING': {
-      const c = counterparty(org, 'During Ltd', 'customer');
-      salesList(org, { start: '2026-06-01', end: '2026-08-03', committedAt: '2026-08-03T12:00:00Z', tag: 'during', sales: [
+      const c = await counterparty(org, 'During Ltd', 'customer');
+      await salesList(org, { start: '2026-06-01', end: '2026-08-03', committedAt: '2026-08-03T12:00:00Z', tag: 'during', sales: [
         { issue: '2026-06-10', amount: '1000', party: c },
         { issue: '2026-07-10', amount: '2000', party: c },
         { issue: '2026-08-02', amount: '300', party: c },
@@ -211,11 +205,11 @@ function seedOne(key: Fu1Key, org: string): void {
       break;
     }
     case 'PRECEDENCE': {
-      glBatch(org, { start: '2026-06-01', end: '2026-08-31', tag: 'prec-gl', lines: revenueLines([
+      await glBatch(org, { start: '2026-06-01', end: '2026-08-31', tag: 'prec-gl', lines: revenueLines([
         ['2026-06-05', '5000'], ['2026-07-05', '6000'], ['2026-08-05', '7000'],
       ], 'receivables') });
-      const c = counterparty(org, 'Precedence Ltd', 'customer');
-      salesList(org, { start: '2026-05-01', end: '2026-08-31', tag: 'prec', sales: [
+      const c = await counterparty(org, 'Precedence Ltd', 'customer');
+      await salesList(org, { start: '2026-05-01', end: '2026-08-31', tag: 'prec', sales: [
         { issue: '2026-05-10', amount: '800', party: c },
         { issue: '2026-06-10', amount: '1000', party: c },
         { issue: '2026-07-10', amount: '2000', party: c },
@@ -224,8 +218,8 @@ function seedOne(key: Fu1Key, org: string): void {
       break;
     }
     case 'CURRENT': {
-      const c = counterparty(org, 'Current Ltd', 'customer');
-      salesList(org, { start: '2026-06-01', end: '2026-09-10', committedAt: '2026-09-10T10:00:00Z', tag: 'cur', sales: [
+      const c = await counterparty(org, 'Current Ltd', 'customer');
+      await salesList(org, { start: '2026-06-01', end: '2026-09-10', committedAt: '2026-09-10T10:00:00Z', tag: 'cur', sales: [
         { issue: '2026-06-10', amount: '1000', party: c },
         { issue: '2026-07-10', amount: '1200', party: c },
         { issue: '2026-08-10', amount: '1500', party: c },
@@ -234,34 +228,34 @@ function seedOne(key: Fu1Key, org: string): void {
       break;
     }
     case 'BANKINV': {
-      const c = counterparty(org, 'BankInv Ltd', 'customer');
-      salesList(org, { start: '2026-06-01', end: '2026-07-31', tag: 'bi', sales: [
+      const c = await counterparty(org, 'BankInv Ltd', 'customer');
+      await salesList(org, { start: '2026-06-01', end: '2026-07-31', tag: 'bi', sales: [
         { issue: '2026-06-10', amount: '1000', party: c },
         { issue: '2026-07-10', amount: '2000', party: c },
       ] });
-      const bank = bankAccount(org, '1000', '2026-05-31');
-      categorisedStatement(org, bank, { start: '2026-06-01', end: '2026-06-30', opening: '1000', closing: '900', tag: 'bi-jun',
+      const bank = await bankAccount(org, '1000', '2026-05-31');
+      await categorisedStatement(org, bank, { start: '2026-06-01', end: '2026-06-30', opening: '1000', closing: '900', tag: 'bi-jun',
         moves: [{ date: '2026-06-20', amount: '-100', category: null }] });
-      categorisedStatement(org, bank, { start: '2026-07-01', end: '2026-07-31', opening: '900', closing: '800', tag: 'bi-jul',
+      await categorisedStatement(org, bank, { start: '2026-07-01', end: '2026-07-31', opening: '900', closing: '800', tag: 'bi-jul',
         moves: [{ date: '2026-07-20', amount: '-100', category: null }] });
-      categorisedStatement(org, bank, { start: '2026-08-01', end: '2026-08-31', opening: '800', closing: '3800', tag: 'bi-aug',
+      await categorisedStatement(org, bank, { start: '2026-08-01', end: '2026-08-31', opening: '800', closing: '3800', tag: 'bi-aug',
         moves: [{ date: '2026-08-12', amount: '3000', category: 'revenue' }] });
       break;
     }
     case 'EMPTY':
       break;
     case 'GAPS': {
-      const c = counterparty(org, 'Gaps Ltd', 'customer');
-      salesList(org, { start: '2026-06-01', end: '2026-06-30', tag: 'gaps-jun', sales: [{ issue: '2026-06-10', amount: '1000', party: c }] });
-      salesList(org, { start: '2026-08-01', end: '2026-08-31', tag: 'gaps-aug', sales: [{ issue: '2026-08-10', amount: '1500', party: c }] });
+      const c = await counterparty(org, 'Gaps Ltd', 'customer');
+      await salesList(org, { start: '2026-06-01', end: '2026-06-30', tag: 'gaps-jun', sales: [{ issue: '2026-06-10', amount: '1000', party: c }] });
+      await salesList(org, { start: '2026-08-01', end: '2026-08-31', tag: 'gaps-aug', sales: [{ issue: '2026-08-10', amount: '1500', party: c }] });
       break;
     }
     case 'HISTORYFIRST': {
-      glBatch(org, { start: '2026-01-01', end: '2026-03-31', tag: 'hf-gl', lines: revenueLines([
+      await glBatch(org, { start: '2026-01-01', end: '2026-03-31', tag: 'hf-gl', lines: revenueLines([
         ['2026-01-15', '1000'], ['2026-02-15', '1000'], ['2026-03-15', '1000'],
       ], 'cash') });
-      const c = counterparty(org, 'History Ltd', 'customer');
-      salesList(org, { start: '2026-06-01', end: '2026-08-31', tag: 'hf', sales: [
+      const c = await counterparty(org, 'History Ltd', 'customer');
+      await salesList(org, { start: '2026-06-01', end: '2026-08-31', tag: 'hf', sales: [
         { issue: '2026-06-10', amount: '1000', party: c },
         { issue: '2026-07-10', amount: '2000', party: c },
         { issue: '2026-08-10', amount: '1500', party: c },
@@ -269,9 +263,9 @@ function seedOne(key: Fu1Key, org: string): void {
       break;
     }
     case 'CUSTOMER': {
-      const acme = counterparty(org, 'Acme Ltd', 'customer');
-      const beta = counterparty(org, 'Beta plc', 'customer');
-      salesList(org, { start: '2026-06-01', end: '2026-07-31', tag: 'cust', sales: [
+      const acme = await counterparty(org, 'Acme Ltd', 'customer');
+      const beta = await counterparty(org, 'Beta plc', 'customer');
+      await salesList(org, { start: '2026-06-01', end: '2026-07-31', tag: 'cust', sales: [
         { issue: '2026-06-10', amount: '500', party: acme },
         { issue: '2026-07-05', amount: '3000', party: acme },
         { issue: '2026-07-12', amount: '1000', party: beta },
@@ -279,14 +273,14 @@ function seedOne(key: Fu1Key, org: string): void {
       break;
     }
     case 'PURCHONLY': {
-      const s = counterparty(org, 'Parts Co', 'supplier', 'operating_expense');
-      invoiceBatch(org, { importType: 'purchase_invoices', start: '2026-06-01', end: '2026-08-31', listKind: 'full', tag: 'po',
+      const s = await counterparty(org, 'Parts Co', 'supplier', 'operating_expense');
+      await invoiceBatch(org, { importType: 'purchase_invoices', start: '2026-06-01', end: '2026-08-31', listKind: 'full', tag: 'po',
         invoices: lines('purchase', [{ issue: '2026-07-10', amount: '600', party: s }], 'po') });
       break;
     }
     case 'OPENITEMS': {
-      const c = counterparty(org, 'Open Items Ltd', 'customer');
-      invoiceBatch(org, { importType: 'sales_invoices', start: '2026-07-01', end: '2026-07-31', listKind: 'open_items',
+      const c = await counterparty(org, 'Open Items Ltd', 'customer');
+      await invoiceBatch(org, { importType: 'sales_invoices', start: '2026-07-01', end: '2026-07-31', listKind: 'open_items',
         committedAt: '2026-08-05T09:00:00Z', tag: 'oi', invoices: [
           { type: 'sales', party: c, number: 'OI-1', issue: '2026-06-20', due: '2026-07-20', subtotal: '2000', tax: '0', total: '2000',
             paid: '0', paidDate: null, status: 'open' },

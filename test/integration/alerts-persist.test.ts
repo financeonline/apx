@@ -1,9 +1,16 @@
 import { beforeAll, afterAll, beforeEach, describe, expect, it } from 'vitest';
-import { adminSql, clientFor, createAuthUser, serverSession, sqlstate } from './setup';
+import { ensurePeriods, periodId } from '@/db/app/shared';
+import { auth } from '@/db/firestore';
+import { orgRows } from '@/db/rls';
+import { newId, nowIso, orgCollection, orgRow } from '@/db/schema';
+import {
+  clientFor, createAuthUser, deleteOrg, fs, rpc, serviceClientScoped, sqlstate,
+} from './setup';
+import { addMember, assignEmployee, auditEvents, createOrgFixture, deletePlatformUser } from './r-fixtures';
 
 /**
- * The alert engine's SQL surface (FINANCIAL_ENGINE.md §8.1/§8.3; ADR-018, ADR-034, ADR-036,
- * ADR-047.2).
+ * The alert engine's write surface (FINANCIAL_ENGINE.md §8.1/§8.3; ADR-018, ADR-034, ADR-036,
+ * ADR-047.2), on the Firestore emulator.
  *
  * What is under test is what a PERSON would notice if it were wrong:
  *   - an alert arrives with a title, an explanation, a next step and an evidence bundle with items;
@@ -16,46 +23,36 @@ import { adminSql, clientFor, createAuthUser, serverSession, sqlstate } from './
  */
 
 const RUN = `a${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.alerts.itest`;
+const DOMAIN = `${RUN}.alerts.itest.motion`;
 
 let ownerId: string;
 let clientUserId: string;
 let assignedEmployeeId: string;
 let strangerEmployeeId: string;
+let strangerId: string;
 let orgId: string;
 let periodMar: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
-
-function serverRpc(fn: string, args: Record<string, unknown>): string {
-  const params = Object.entries(args)
-    .map(([k, v]) => `${k} => ${v === null ? 'null'
-      : typeof v === 'number' ? String(v)
-      : `'${String(v).replace(/'/g, "''")}'`}`)
-    .join(', ');
-  const output = adminSql(`
-    ${serverSession(args.p_org as string | undefined)}
-    select api_server.${fn}(${params})::text`);
-  return output.split('\n').map((line) => line.trim()).filter(Boolean).pop() ?? '';
+/** A calculation run as the engine leaves one; `persist_alerts` refuses a run that does not exist. */
+async function startRun(): Promise<string> {
+  const id = newId();
+  const now = nowIso();
+  await orgRow(fs(), orgId, 'calculation_runs', id).set({
+    id, organization_id: orgId, job_id: null, trigger: 'recalc_manual', trigger_ref_id: null,
+    engine_version: '1.0.0', period_from: periodMar, period_to: periodMar, as_of: '2026-06-15', as_of_ts: now,
+    status: 'running', failure_reason: null, stale: false, input_fingerprint: null, chunks: [],
+    progress: {}, started_at: now, finished_at: null, duration_ms: null, error: null, stats: {},
+    created_at: now, updated_at: now,
+  });
+  return id;
 }
 
-/** The fingerprint column is `bytea`, so a fixture value has to be hexadecimal, not a label. */
-function startRun(fingerprint: string): string {
-  return (JSON.parse(serverRpc('start_calculation_run', {
-    p_org: orgId, p_trigger: 'recalc_manual', p_trigger_ref: null,
-    p_engine_version: '1.0.0', p_period_from: periodMar, p_period_to: periodMar,
-    p_as_of: '2026-06-15', p_fingerprint: fingerprint, p_job: null, p_periods_total: 1,
-  })) as { runId: string }).runId;
-}
-
-function persist(runId: string, changes: unknown[]): Record<string, number> {
-  const output = adminSql(`
-    ${serverSession(orgId)}
-    select api_server.persist_alerts(
-      '${orgId}', '${runId}',
-      '${JSON.stringify(changes).replace(/'/g, "''")}'::jsonb)::text`);
-  const last = output.split('\n').map((l) => l.trim()).filter(Boolean).pop() ?? '{}';
-  return JSON.parse(last) as Record<string, number>;
+async function persist(runId: string, changes: unknown[]): Promise<Record<string, number>> {
+  const { data, error } = await rpc<Record<string, number>>(serviceClientScoped(orgId), 'persist_alerts', {
+    p_org: orgId, p_run: runId, p_changes: changes,
+  }, { server: true });
+  if (error) throw error;
+  return data!;
 }
 
 const DEDUPE = 'concentration.customer|state|counterparty|-';
@@ -96,143 +93,139 @@ function insertChange(overrides: Record<string, unknown> = {}) {
   };
 }
 
-function alertId(): string {
-  return one(`select id::text from public.alerts
-               where organization_id = '${orgId}' and dedupe_key = '${DEDUPE}'`);
+const alerts = async () => (await orgCollection(fs(), orgId, 'alerts').get()).docs.map((d) => d.data());
+const revisions = async (alertId?: string) => {
+  let q: FirebaseFirestore.Query = orgCollection(fs(), orgId, 'alert_revisions');
+  if (alertId) q = q.where('alert_id', '==', alertId);
+  return (await q.get()).docs.map((d) => d.data()).sort((a, b) => a.revision_no - b.revision_no);
+};
+const alertDoc = async (id: string) => (await orgRow(fs(), orgId, 'alerts', id).get()).data()!;
+
+async function alertId(): Promise<string> {
+  const snap = await orgCollection(fs(), orgId, 'alerts').where('dedupe_key', '==', DEDUPE).get();
+  return snap.docs[0]!.id;
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  clientUserId = createAuthUser(`client@${DOMAIN}`);
-  assignedEmployeeId = createAuthUser(`assigned@${DOMAIN}`);
-  strangerEmployeeId = createAuthUser(`unassigned@${DOMAIN}`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  clientUserId = await createAuthUser(`client@${DOMAIN}`);
+  assignedEmployeeId = await createAuthUser(`assigned@${DOMAIN}`);
+  strangerEmployeeId = await createAuthUser(`unassigned@${DOMAIN}`);
+  strangerId = await createAuthUser(`stranger@${DOMAIN}`);
 
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', {
-    p_name: `ITest Alerts ${RUN}`,
-  });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-
-  adminSql(`insert into public.organization_memberships (organization_id, user_id, role, status)
-            values ('${orgId}', '${clientUserId}', 'client', 'active')`);
+  orgId = (await createOrgFixture({ name: `ITest Alerts ${RUN}`, ownerId })).id;
+  await addMember(orgId, clientUserId, 'client');
 
   // A platform employee ASSIGNED to this organisation, and one who is not (RBAC §3.5: a platform
   // user is never also a member, so both reach the organisation only through an assignment).
-  adminSql(`
-    insert into public.platform_users (user_id, platform_role, status) values
-      ('${assignedEmployeeId}', 'employee', 'active'), ('${strangerEmployeeId}', 'employee', 'active');
-    insert into public.organization_assignments (organization_id, employee_user_id, status)
-    values ('${orgId}', '${assignedEmployeeId}', 'active');`);
+  await assignEmployee(orgId, assignedEmployeeId);
+  await fs().collection('platform_users').doc(strangerEmployeeId).set({
+    user_id: strangerEmployeeId, platform_role: 'employee', status: 'active', granted_by: null, notes: null,
+    created_at: nowIso(), updated_at: nowIso(),
+  });
 
-  periodMar = one(`select id from public.fiscal_periods
-                    where organization_id = '${orgId}' and period_start = '2026-03-01'`);
+  await ensurePeriods(fs(), orgId, '2026-03-01', '2026-03-01');
+  periodMar = periodId(orgId, '2026-03-01');
 });
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Alerts%${RUN}';
-    delete from public.platform_users where user_id in (select id from auth.users where email like '%@${DOMAIN}');
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Alerts %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.alerts.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  await deleteOrg(orgId);
+  for (const uid of [ownerId, clientUserId, assignedEmployeeId, strangerEmployeeId, strangerId]) {
+    await deletePlatformUser(uid);
+    await fs().collection('profiles').doc(uid).delete();
+    await auth().deleteUser(uid).catch(() => undefined);
+  }
+  const events = await fs().collection('audit_events').where('organization_id', '==', orgId).get();
+  for (const d of events.docs) await d.ref.delete();
 });
 
-beforeEach(() => {
-  adminSql(`
-    begin;
-    set local app.purge = 'on';
-    delete from public.alert_revisions where organization_id = '${orgId}';
-    delete from public.alerts where organization_id = '${orgId}';
-    delete from public.evidence_items where organization_id = '${orgId}';
-    delete from public.evidence_bundles where organization_id = '${orgId}';
-    delete from public.audit_events where organization_id = '${orgId}';
-    delete from public.calculation_runs where organization_id = '${orgId}';
-    commit;`);
+/** Each test starts from no alerts: the organisation's alert-side collections and guards are cleared. */
+beforeEach(async () => {
+  for (const table of ['alert_revisions', 'alerts', 'evidence_items', 'evidence_bundles', 'calculation_runs'] as const) {
+    await fs().recursiveDelete(orgCollection(fs(), orgId, table));
+  }
+  const guards = await fs().collection('organizations').doc(orgId).collection('_unique').get();
+  for (const g of guards.docs) {
+    if (g.id.startsWith('alert_dedupe__') || g.id.startsWith('alert_revisions_no_unique__')) await g.ref.delete();
+  }
+  const events = await fs().collection('audit_events').where('organization_id', '==', orgId).get();
+  for (const d of events.docs) await d.ref.delete();
 });
 
 describe('an alert arrives complete', () => {
-  it('writes the row, a first revision and a non-empty evidence bundle', () => {
-    const run = startRun('0001');
-    expect(persist(run, [insertChange()])).toMatchObject({ inserted: 1 });
+  it('writes the row, a first revision and a non-empty evidence bundle', async () => {
+    const run = await startRun();
+    expect(await persist(run, [insertChange()])).toMatchObject({ inserted: 1 });
 
-    const row = one(`select a.title || '|' || a.status || '|' || a.severity || '|' || a.key_kind
-                       from public.alerts a where a.organization_id = '${orgId}'`);
-    expect(row).toBe('Acme Ltd is a large share of revenue|open|medium|state');
+    const [a] = await alerts();
+    expect(`${a!.title}|${a!.status}|${a!.severity}|${a!.key_kind}`)
+      .toBe('Acme Ltd is a large share of revenue|open|medium|state');
 
-    expect(one(`select revision_no::text from public.alert_revisions
-                 where organization_id = '${orgId}'`)).toBe('1');
+    expect((await revisions()).map((r) => r.revision_no)).toEqual([1]);
 
     // §8: every fired alert has a bundle with at least one item.
-    expect(one(`select count(*)::text from public.evidence_items i
-                  join public.evidence_bundles b
-                    on b.organization_id = i.organization_id and b.id = i.bundle_id
-                 where b.organization_id = '${orgId}' and b.kind = 'alert'`)).toBe('1');
+    const bundles = (await orgCollection(fs(), orgId, 'evidence_bundles').where('kind', '==', 'alert').get()).docs;
+    expect(bundles).toHaveLength(1);
+    const items = await orgCollection(fs(), orgId, 'evidence_items').where('bundle_id', '==', bundles[0]!.id).get();
+    expect(items.size).toBe(1);
+    expect(items.docs[0]!.get('descriptor_hash'), 'bytea is lowercase hex').toBe('a'.repeat(64));
 
     // The alert's bundle is reached through its current revision — there is no second pointer.
-    expect(one(`select (r.evidence_bundle_id is not null)::text
-                  from public.alerts a
-                  join public.alert_revisions r
-                    on r.organization_id = a.organization_id and r.id = a.current_revision_id
-                 where a.organization_id = '${orgId}'`)).toBe('true');
+    const current = (await orgRow(fs(), orgId, 'alert_revisions', a!.current_revision_id).get()).data()!;
+    expect(current.evidence_bundle_id).not.toBeNull();
   });
 
-  it('audits the creation and the run', () => {
-    const run = startRun('0002');
-    persist(run, [insertChange()]);
-    const actions = one(`select string_agg(distinct action, ',' order by action)
-                           from public.audit_events where organization_id = '${orgId}'`);
+  it('audits the creation and the run', async () => {
+    const run = await startRun();
+    await persist(run, [insertChange()]);
+    const actions = new Set((await auditEvents(orgId)).map((e) => e.action));
     expect(actions).toContain('alert.created');
     expect(actions).toContain('alerts.evaluated');
   });
 });
 
 describe('re-running on unchanged data (dedupe)', () => {
-  it('touches, and writes neither a second alert nor a revision', () => {
-    const first = startRun('0003');
-    persist(first, [insertChange()]);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
-    const id = alertId();
+  it('touches, and writes neither a second alert nor a revision', async () => {
+    const first = await startRun();
+    await persist(first, [insertChange()]);
+    const id = await alertId();
 
-    const second = startRun('0004');
-    expect(persist(second, [{ kind: 'touch', alert_id: id, period_id: periodMar }]))
+    const second = await startRun();
+    expect(await persist(second, [{ kind: 'touch', alert_id: id, period_id: periodMar }]))
       .toMatchObject({ touched: 1, inserted: 0, revised: 0 });
 
-    expect(one(`select count(*)::text from public.alerts where organization_id = '${orgId}'`)).toBe('1');
-    expect(one(`select count(*)::text from public.alert_revisions where organization_id = '${orgId}'`)).toBe('1');
-    expect(one(`select count(*)::text from public.audit_events
-                 where organization_id = '${orgId}' and action = 'alert.reevaluated'`)).toBe('0');
+    expect(await alerts()).toHaveLength(1);
+    expect(await revisions()).toHaveLength(1);
+    expect(await auditEvents(orgId, 'alert.reevaluated')).toHaveLength(0);
   });
 
-  it('refuses to duplicate a row even when handed the same insert twice (ADR-018)', () => {
-    const run = startRun('0005');
-    persist(run, [insertChange()]);
-    persist(run, [insertChange()]);
-    expect(one(`select count(*)::text from public.alerts where organization_id = '${orgId}'`)).toBe('1');
+  it('refuses to duplicate a row even when handed the same insert twice (ADR-018)', async () => {
+    const run = await startRun();
+    await persist(run, [insertChange()]);
+    expect(await persist(run, [insertChange()])).toMatchObject({ inserted: 0 });
+    expect(await alerts()).toHaveLength(1);
   });
 
-  it('preserves an acknowledgement across an unchanged re-run', () => {
-    const first = startRun('0006');
-    persist(first, [insertChange()]);
-    const id = alertId();
-    adminSql(`update public.alerts set status = 'acknowledged'
-               where organization_id = '${orgId}' and id = '${id}'`);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
+  it('preserves an acknowledgement across an unchanged re-run', async () => {
+    const first = await startRun();
+    await persist(first, [insertChange()]);
+    const id = await alertId();
+    await orgRow(fs(), orgId, 'alerts', id).update({ status: 'acknowledged' });
 
-    const second = startRun('0007');
-    persist(second, [{ kind: 'touch', alert_id: id, period_id: periodMar }]);
-    expect(one(`select status::text from public.alerts where id = '${id}'`)).toBe('acknowledged');
+    const second = await startRun();
+    await persist(second, [{ kind: 'touch', alert_id: id, period_id: periodMar }]);
+    expect((await alertDoc(id)).status).toBe('acknowledged');
   });
 });
 
 describe('revisions (F-C-16)', () => {
-  it('writes a new revision, repoints the alert and keeps the old text readable', () => {
-    const first = startRun('0008');
-    persist(first, [insertChange()]);
-    const id = alertId();
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
+  it('writes a new revision, repoints the alert and keeps the old text readable', async () => {
+    const first = await startRun();
+    await persist(first, [insertChange()]);
+    const id = await alertId();
 
-    const second = startRun('0009');
-    persist(second, [{
+    const second = await startRun();
+    await persist(second, [{
       kind: 'revision',
       alert_id: id,
       rule_version: 'alerts.rules.v1',
@@ -256,197 +249,167 @@ describe('revisions (F-C-16)', () => {
       }],
     }]);
 
-    expect(one(`select string_agg(revision_no::text || ':' || severity::text, ',' order by revision_no)
-                  from public.alert_revisions where alert_id = '${id}'`)).toBe('1:medium,2:high');
+    const revs = await revisions(id);
+    expect(revs.map((r) => `${r.revision_no}:${r.severity}`).join(',')).toBe('1:medium,2:high');
 
     // The alert now says the new thing, and points at the new revision.
-    expect(one(`select a.severity::text || '|' || r.revision_no::text
-                  from public.alerts a
-                  join public.alert_revisions r
-                    on r.organization_id = a.organization_id and r.id = a.current_revision_id
-                 where a.id = '${id}'`)).toBe('high|2');
+    const a = await alertDoc(id);
+    const current = revs.find((r) => r.id === a.current_revision_id)!;
+    expect(`${a.severity}|${current.revision_no}`).toBe('high|2');
 
     // The old revision still resolves to what it said, with its own bundle (ADR-034).
-    expect(one(`select explanation from public.alert_revisions
-                 where alert_id = '${id}' and revision_no = 1`))
-      .toBe('Acme Ltd makes up 55.0% of revenue this period.');
-    expect(one(`select count(distinct evidence_bundle_id)::text
-                  from public.alert_revisions where alert_id = '${id}'`)).toBe('2');
+    expect(revs[0]!.explanation).toBe('Acme Ltd makes up 55.0% of revenue this period.');
+    expect(new Set(revs.map((r) => r.evidence_bundle_id)).size).toBe(2);
 
-    expect(one(`select count(*)::text from public.audit_events
-                 where organization_id = '${orgId}' and action = 'alert.reevaluated'`)).toBe('1');
+    expect(await auditEvents(orgId, 'alert.reevaluated')).toHaveLength(1);
   });
 
-  it('a severity increase re-opens an acknowledged alert', () => {
-    const first = startRun('000a');
-    persist(first, [insertChange()]);
-    const id = alertId();
-    adminSql(`update public.alerts set status = 'acknowledged'
-               where organization_id = '${orgId}' and id = '${id}'`);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
+  it('a severity increase re-opens an acknowledged alert', async () => {
+    const first = await startRun();
+    await persist(first, [insertChange()]);
+    const id = await alertId();
+    await orgRow(fs(), orgId, 'alerts', id).update({ status: 'acknowledged' });
 
-    const second = startRun('000b');
-    persist(second, [{
+    const second = await startRun();
+    await persist(second, [{
       kind: 'revision', alert_id: id, rule_version: 'alerts.rules.v1', severity: 'high',
       period_id: periodMar, title: 't', explanation: 'e', recommended_next_step: 'n',
       threshold_summary: {}, status: 'open', status_reason_code: 'severity_increased',
       reopened: false, evidence: [],
     }]);
 
-    expect(one(`select status::text || '|' || status_reason_code::text
-                  from public.alerts where id = '${id}'`)).toBe('open|severity_increased');
+    const a = await alertDoc(id);
+    expect(`${a.status}|${a.status_reason_code}`).toBe('open|severity_increased');
     // The engine changed it, so no user is recorded as having done so.
-    expect(one(`select (status_changed_by is null)::text from public.alerts where id = '${id}'`))
-      .toBe('true');
+    expect(a.status_changed_by).toBeNull();
   });
 
-  it('a re-open keeps first_seen_at and stamps reopened_at (R2-B-02)', () => {
-    const first = startRun('000c');
-    persist(first, [insertChange()]);
-    const id = alertId();
-    const firstSeen = one(`select first_seen_at::text from public.alerts where id = '${id}'`);
-    adminSql(`update public.alerts set status = 'resolved', status_reason_code = 'condition_cleared'
-               where organization_id = '${orgId}' and id = '${id}'`);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
+  it('a re-open keeps first_seen_at and stamps reopened_at (R2-B-02)', async () => {
+    const first = await startRun();
+    await persist(first, [insertChange()]);
+    const id = await alertId();
+    const firstSeen = (await alertDoc(id)).first_seen_at;
+    await orgRow(fs(), orgId, 'alerts', id).update({ status: 'resolved', status_reason_code: 'condition_cleared' });
 
-    const second = startRun('000d');
-    persist(second, [{
+    const second = await startRun();
+    await persist(second, [{
       kind: 'revision', alert_id: id, rule_version: 'alerts.rules.v1', severity: 'medium',
       period_id: periodMar, title: 't', explanation: 'e', recommended_next_step: 'n',
       threshold_summary: {}, status: 'open', status_reason_code: 'condition_returned',
       reopened: true, evidence: [],
     }]);
 
-    expect(one(`select status::text || '|' || status_reason_code::text
-                  from public.alerts where id = '${id}'`)).toBe('open|condition_returned');
-    expect(one(`select first_seen_at::text from public.alerts where id = '${id}'`)).toBe(firstSeen);
-    expect(one(`select (reopened_at is not null)::text from public.alerts where id = '${id}'`))
-      .toBe('true');
+    const a = await alertDoc(id);
+    expect(`${a.status}|${a.status_reason_code}`).toBe('open|condition_returned');
+    expect(a.first_seen_at).toBe(firstSeen);
+    expect(a.reopened_at).not.toBeNull();
   });
 });
 
 describe('auto-resolve', () => {
-  it('resolves an open alert whose condition cleared, and audits it', () => {
-    const first = startRun('000e');
-    persist(first, [insertChange()]);
-    const id = alertId();
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
+  it('resolves an open alert whose condition cleared, and audits it', async () => {
+    const first = await startRun();
+    await persist(first, [insertChange()]);
+    const id = await alertId();
 
-    const second = startRun('000f');
-    expect(persist(second, [{
+    const second = await startRun();
+    expect(await persist(second, [{
       kind: 'resolve', alert_id: id, status_reason_code: 'condition_cleared',
     }])).toMatchObject({ resolved: 1 });
 
-    expect(one(`select status::text || '|' || status_reason_code::text
-                  from public.alerts where id = '${id}'`)).toBe('resolved|condition_cleared');
+    const a = await alertDoc(id);
+    expect(`${a.status}|${a.status_reason_code}`).toBe('resolved|condition_cleared');
+    expect((await auditEvents(orgId, 'alert.status_changed')).some((e) => e.target_id === id)).toBe(true);
   });
 
-  it('leaves a dismissed alert dismissed', () => {
-    const first = startRun('0010');
-    persist(first, [insertChange()]);
-    const id = alertId();
-    adminSql(`update public.alerts set status = 'dismissed', dismissed_at = now()
-               where organization_id = '${orgId}' and id = '${id}'`);
-    serverRpc('finish_calculation_run', { p_org: orgId, p_run: first, p_status: 'succeeded' });
+  it('leaves a dismissed alert dismissed', async () => {
+    const first = await startRun();
+    await persist(first, [insertChange()]);
+    const id = await alertId();
+    await orgRow(fs(), orgId, 'alerts', id).update({ status: 'dismissed', dismissed_at: nowIso() });
 
-    const second = startRun('0011');
-    expect(persist(second, [{
+    const second = await startRun();
+    expect(await persist(second, [{
       kind: 'resolve', alert_id: id, status_reason_code: 'condition_cleared',
     }])).toMatchObject({ resolved: 0 });
-    expect(one(`select status::text from public.alerts where id = '${id}'`)).toBe('dismissed');
+    expect((await alertDoc(id)).status).toBe('dismissed');
   });
 });
 
-describe('the revision history is immutable (ADR-046.1)', () => {
-  it('refuses an update or a delete of a revision', () => {
-    const run = startRun('0012');
-    persist(run, [insertChange()]);
-    expect(() => adminSql(`update public.alert_revisions set explanation = 'tampered'
-                            where organization_id = '${orgId}'`)).toThrow(/IMMUTABLE/);
-    expect(() => adminSql(`delete from public.alert_revisions
-                            where organization_id = '${orgId}'`)).toThrow(/IMMUTABLE/);
-  });
-
-  it('refuses to tamper with an evidence bundle', () => {
-    const run = startRun('0013');
-    persist(run, [insertChange()]);
-    expect(() => adminSql(`update public.evidence_items set label = 'tampered'
-                            where organization_id = '${orgId}'`)).toThrow(/IMMUTABLE/);
-  });
-});
+/*
+ * The revision history and evidence bundles are immutable (ADR-046.1). On PostgreSQL a trigger
+ * refused an UPDATE or DELETE issued by anyone; on Firestore there is no writer to refuse — no
+ * `api.*` or `api_server.*` function updates or deletes a revision, a bundle or an item, and the
+ * browser cannot reach Firestore at all (firebase/firestore.rules). The trigger tests are dropped
+ * as assertions about PostgreSQL; the revision tests above show history is appended, never rewritten.
+ */
 
 describe('the surface is unreachable from a browser (ADR-043)', () => {
-  it('api_server.persist_alerts cannot be executed with a user JWT', async () => {
-    const run = startRun('0014');
-    const { error } = await clientFor(ownerId).schema('api_server').rpc('persist_alerts', {
+  it('api_server.persist_alerts cannot be executed with a user handle', async () => {
+    const run = await startRun();
+    const { error } = await rpc(clientFor(ownerId), 'persist_alerts', {
       p_org: orgId, p_run: run, p_changes: [],
-    });
-    expect(error).not.toBeNull();
+    }, { server: true });
+    expect(sqlstate(error)).toBe('42501');
   });
 
-  it('no authenticated user can write an alert directly', async () => {
-    const db = clientFor(ownerId);
-    for (const table of ['alerts', 'alert_revisions'] as const) {
-      const { error } = await db.from(table).insert({ organization_id: orgId });
-      expect(error, `${table}`).not.toBeNull();
-      expect(sqlstate(error)).toBe('42501');
-    }
+  it('nor by the server scoped to another organisation (ADR-090)', async () => {
+    const run = await startRun();
+    const { error } = await rpc(serviceClientScoped(newId()), 'persist_alerts', {
+      p_org: orgId, p_run: run, p_changes: [insertChange()],
+    }, { server: true });
+    expect(sqlstate(error)).toBe('42501');
+    expect(await alerts()).toHaveLength(0);
   });
 
-  it('refuses a change kind it does not recognise', () => {
-    const run = startRun('0015');
-    expect(() => persist(run, [{ kind: 'delete_everything' }])).toThrow(/unknown change kind/);
+  it('refuses a change kind it does not recognise, before writing anything', async () => {
+    const run = await startRun();
+    await expect(persist(run, [insertChange(), { kind: 'delete_everything' }])).rejects.toThrow(/unknown change kind/);
+    expect(await alerts()).toHaveLength(0);
   });
 });
 
 describe('who may change an alert’s status (RBAC §2.1)', () => {
   it('a client may acknowledge and nothing else', async () => {
-    const run = startRun('0016');
-    persist(run, [insertChange()]);
-    const id = alertId();
+    const run = await startRun();
+    await persist(run, [insertChange()]);
+    const id = await alertId();
 
     const db = clientFor(clientUserId, { email: `client@${DOMAIN}` });
-    const acknowledged = await db.schema('api').rpc('set_alert_status', {
+    const acknowledged = await rpc(db, 'set_alert_status', {
       p_alert: id, p_status: 'acknowledged', p_reason: null,
     });
     expect(acknowledged.error).toBeNull();
-    expect(one(`select status::text from public.alerts where id = '${id}'`)).toBe('acknowledged');
+    expect((await alertDoc(id)).status).toBe('acknowledged');
 
     for (const status of ['resolved', 'dismissed'] as const) {
-      const denied = await db.schema('api').rpc('set_alert_status', {
-        p_alert: id, p_status: status, p_reason: null,
-      });
+      const denied = await rpc(db, 'set_alert_status', { p_alert: id, p_status: status, p_reason: null });
       expect(sqlstate(denied.error), status).toBe('42501');
     }
-    expect(one(`select status::text from public.alerts where id = '${id}'`)).toBe('acknowledged');
+    expect((await alertDoc(id)).status).toBe('acknowledged');
   });
 
   it('an owner may dismiss, and the cooldown clock starts', async () => {
-    const run = startRun('0017');
-    persist(run, [insertChange()]);
-    const id = alertId();
+    const run = await startRun();
+    await persist(run, [insertChange()]);
+    const id = await alertId();
 
-    const { error } = await clientFor(ownerId).schema('api').rpc('set_alert_status', {
+    const { error } = await rpc(clientFor(ownerId), 'set_alert_status', {
       p_alert: id, p_status: 'dismissed', p_reason: 'known and accepted',
     });
     expect(error).toBeNull();
-    expect(one(`select status::text || '|' || (dismissed_at is not null)::text
-                  from public.alerts where id = '${id}'`)).toBe('dismissed|true');
+    const a = await alertDoc(id);
+    expect(`${a.status}|${a.dismissed_at !== null}`).toBe('dismissed|true');
   });
 });
 
 describe('one tenant never sees another’s alerts', () => {
   it('reads its own and none of anyone else’s', async () => {
-    const run = startRun('0018');
-    persist(run, [insertChange()]);
+    const run = await startRun();
+    await persist(run, [insertChange()]);
 
-    const mine = await clientFor(ownerId).from('alerts').select('id').eq('organization_id', orgId);
-    expect(mine.error).toBeNull();
-    expect(mine.data).toHaveLength(1);
-
-    const stranger = createAuthUser(`stranger@${DOMAIN}`);
-    const theirs = await clientFor(stranger).from('alerts').select('id').eq('organization_id', orgId);
-    expect(theirs.data ?? []).toHaveLength(0);
+    expect(await orgRows(clientFor(ownerId), orgId, 'alerts')).toHaveLength(1);
+    expect(await orgRows(clientFor(strangerId), orgId, 'alerts')).toHaveLength(0);
   });
 });
 
@@ -454,64 +417,49 @@ describe('one tenant never sees another’s alerts', () => {
  * A platform employee reaches an organisation's alerts only through an assignment (Phase 7 brief;
  * RBAC_MATRIX.md §2.1, §3.5; SECURITY_MODEL.md §4; ADR-044.1).
  *
- * The alerts policy is `organization_id in (select app.accessible_org_ids())`, and an employee's
- * accessible set IS their active assignments — so this holds by construction rather than by
- * a rule written twice. It is asserted here because "by construction" has been wrong before: the
- * feedback queue's policies named owner/admin/super_admin and silently locked out the very employee
- * the matrix sends to review it (ADR-082). A financial alert is exactly the kind of row where that
- * mistake is expensive in both directions.
+ * The alerts policy admits the organisations the caller can reach, and an employee's reachable set
+ * IS their active assignments — so this holds by construction rather than by a rule written twice.
+ * It is asserted here because "by construction" has been wrong before (ADR-082).
  */
 describe('a platform employee sees only the organisations assigned to them', () => {
-  beforeEach(() => {
-    const run = startRun('e7');
-    persist(run, [insertChange()]);
+  beforeEach(async () => {
+    const run = await startRun();
+    await persist(run, [insertChange()]);
   });
 
   it('the assigned employee reads the organisation’s alerts and their revisions', async () => {
     const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}` });
-    const alerts = await employee.from('alerts').select('id, rule_key, severity').eq('organization_id', orgId);
-    expect(alerts.error).toBeNull();
-    expect(alerts.data).toHaveLength(1);
-    expect((alerts.data as Array<{ rule_key: string }>)[0]!.rule_key).toBe('concentration.customer');
+    const rows = await orgRows(employee, orgId, 'alerts');
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.rule_key).toBe('concentration.customer');
 
     // The evidence behind it is reachable too, or the alert is a claim they cannot check.
-    const revisions = await employee.from('alert_revisions').select('id').eq('organization_id', orgId);
-    expect(revisions.error).toBeNull();
-    expect((revisions.data ?? []).length).toBeGreaterThan(0);
+    expect((await orgRows(employee, orgId, 'alert_revisions')).length).toBeGreaterThan(0);
   });
 
   it('an employee with no assignment to this organisation reads nothing', async () => {
     const stranger = clientFor(strangerEmployeeId, { email: `unassigned@${DOMAIN}` });
-    const alerts = await stranger.from('alerts').select('id').eq('organization_id', orgId);
-    expect(alerts.error).toBeNull();
-    expect(alerts.data ?? []).toHaveLength(0);
-    const revisions = await stranger.from('alert_revisions').select('id').eq('organization_id', orgId);
-    expect(revisions.data ?? []).toHaveLength(0);
+    expect(await orgRows(stranger, orgId, 'alerts')).toHaveLength(0);
+    expect(await orgRows(stranger, orgId, 'alert_revisions')).toHaveLength(0);
   });
 
   it('the assigned employee may act on an alert; the unassigned one is refused', async () => {
-    const id = alertId();
+    const id = await alertId();
     const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}` });
-    const acted = await employee.schema('api').rpc('set_alert_status', {
-      p_alert: id, p_status: 'acknowledged', p_reason: null,
-    });
+    const acted = await rpc(employee, 'set_alert_status', { p_alert: id, p_status: 'acknowledged', p_reason: null });
     expect(acted.error, JSON.stringify(acted.error)).toBeNull();
 
     const stranger = clientFor(strangerEmployeeId, { email: `unassigned@${DOMAIN}` });
-    const refused = await stranger.schema('api').rpc('set_alert_status', {
-      p_alert: id, p_status: 'resolved', p_reason: null,
-    });
+    const refused = await rpc(stranger, 'set_alert_status', { p_alert: id, p_status: 'resolved', p_reason: null });
     // NOT_FOUND, never a denial: a stranger learns nothing about whether the alert exists (§14).
     expect(sqlstate(refused.error)).toBe('P0002');
   });
 
   it('the assignment is what grants it: revoking the assignment closes the door', async () => {
-    adminSql(`update public.organization_assignments set status = 'revoked'
-               where organization_id = '${orgId}' and employee_user_id = '${assignedEmployeeId}'`);
+    const ref = orgRow(fs(), orgId, 'organization_assignments', assignedEmployeeId);
+    await ref.update({ status: 'revoked' });
     const employee = clientFor(assignedEmployeeId, { email: `assigned@${DOMAIN}` });
-    const alerts = await employee.from('alerts').select('id').eq('organization_id', orgId);
-    expect(alerts.data ?? []).toHaveLength(0);
-    adminSql(`update public.organization_assignments set status = 'active'
-               where organization_id = '${orgId}' and employee_user_id = '${assignedEmployeeId}'`);
+    expect(await orgRows(employee, orgId, 'alerts')).toHaveLength(0);
+    await ref.update({ status: 'active' });
   });
 });

@@ -53,6 +53,9 @@ export {
 export {
   listAccounts,
   listCounterparties,
+  listHeldCounterparties,
+  loadBaseCurrency,
+  type HeldCounterparty,
   listInvoices,
   listLedgerEntries,
   listPeriodBalances,

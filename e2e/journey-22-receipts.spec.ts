@@ -1,6 +1,7 @@
 import AxeBuilder from '@axe-core/playwright';
 import { expect, test } from '@playwright/test';
-import { cleanUpOwn, onboard, seedUser, signIn, sql, uniqueName } from './fixtures';
+import { cleanUpOwn, onboard, seedUser, signIn, uniqueName } from './fixtures';
+import { auditEvents, enableFeatures, orgIdBySlug } from './firestore';
 
 /**
  * Journey 22 — a receipt photo (SOW §8; ADR-150). A photo uploaded as Receipts is stored and WAITS:
@@ -17,7 +18,7 @@ test.afterAll(() => cleanUpOwn([ORG], ['j22-owner']));
 const JPEG = Buffer.from([0xff, 0xd8, 0xff, 0xe0, 0x00, 0x10, 0x4a, 0x46, 0x49, 0x46, 0x00, 0x01, ...new Array(300).fill(9), 0xff, 0xd9]);
 
 test('a receipt photo is stored, waits, and is read only when a reviewer asks', async ({ page }) => {
-  await signIn(page, seedUser('j22-owner'));
+  await signIn(page, await seedUser('j22-owner'));
   const slug = await onboard(page, ORG);
 
   await page.goto(`/app/${slug}/data/imports/new`);
@@ -33,11 +34,13 @@ test('a receipt photo is stored, waits, and is read only when a reviewer asks', 
   await expect(page.getByText('These receipts are stored and waiting to be read.')).toBeVisible();
   await expect(page.getByText('APX could not read this file.')).toHaveCount(0);
   await expect(page.getByText(/AI reading of documents is switched off/)).toBeVisible();
-  const orgId = sql(`select id from public.organizations where slug = '${slug}'`);
-  expect(sql(`select count(*) from public.audit_events where organization_id = '${orgId}' and action = 'document.sent_to_ai'`)).toBe('0');
+  const orgId = await orgIdBySlug(slug);
+  const sentToAi = async (): Promise<number> =>
+    (await auditEvents(orgId)).filter((a) => a.action === 'document.sent_to_ai').length;
+  expect(await sentToAi()).toBe(0);
 
   // Switched on (the platform admin's switch), the reviewer chooses the account and consents.
-  sql(`update public.organizations set features = features || '{"ai_pdf_extraction": true}'::jsonb where id = '${orgId}'`);
+  await enableFeatures(orgId, { ai_pdf_extraction: true });
   await page.reload();
   await expect(page.getByRole('heading', { name: 'Read these receipts with AI' })).toBeVisible();
   const account = page.getByLabel('Expense account these receipts belong to');

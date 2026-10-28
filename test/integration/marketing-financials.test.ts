@@ -8,7 +8,12 @@ import { withOrgScope } from '@/core/db';
  * and `motion/no-deep-module-import` (correctly) refuses `@/modules/marketing/services/financials`.
  */
 import { loadMarketingFinancials } from '../../src/modules/marketing/services/financials';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { ensurePeriods, periodId } from '@/db/app/shared';
+import { orgRow } from '@/db/schema';
+import { clientFor, createAuthUser, fs, rpc } from './setup';
+import {
+  dropFixtures, ok, parkQueuedJobs, rowsOf, seedAccount, seedCounterparty, seedInvoice, writeRun as writeEngineRun,
+} from './f-fixtures';
 
 /**
  * Section 03 of the Marketing report (ADR-170) against the database: what `loadMarketingFinancials`
@@ -20,14 +25,13 @@ import { adminSql, clientFor, createAuthUser } from './setup';
  * figures must not be counted. A second organisation carries enormous figures for the same months, so
  * any query that forgot to name the organisation would show at once.
  *
- * The snapshots are written exactly as a run writes them (`metric_current` → `metric_snapshots`), in
- * one statement per organisation, as `money-pages.test.ts` does one at a time; the job queue is not
- * drained, so nothing else on a shared local instance is touched. The fixtures are run-unique and only
- * they are removed.
+ * The snapshots are written exactly as a run writes them (`metric_current` → `metric_snapshots`); the
+ * job queue is not drained, so nothing else on the shared emulator is touched. The fixtures are
+ * run-unique and only they are removed.
  */
 
 const SUITE = randomUUID().slice(0, 8);
-const EMAIL_DOMAIN = 'mktfin.test';
+const EMAIL_DOMAIN = `${SUITE}.mktfin.itest.motion`;
 const NAME = `Mktfin ${SUITE}`;
 
 let orgId: string;
@@ -35,7 +39,7 @@ let otherOrgId: string;
 const period = new Map<string, string>(); // 'YYYY-MM' → period id (orgId)
 const account = new Map<string, string>();
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+const orgs: string[] = [];
 
 /** Eighteen complete months, Oct 2024 – Mar 2026, then April 2026 in progress. */
 const COMPLETE: string[] = [];
@@ -58,27 +62,11 @@ interface Snap {
 }
 
 /** One calculation run and every snapshot and pointer in it, as the engine writes them. */
-function writeRun(org: string, periods: ReadonlyMap<string, string>, snaps: readonly Snap[]): void {
-  const first = periods.get(snaps[0]!.ym)!;
-  const quality = JSON.stringify({ completeness: 1, proxy: false, warnings: [], missing: [] });
-  const rows = snaps.map((s) => `('${periods.get(s.ym)}'::uuid, '${s.key}', '${s.dimensionType ?? 'none'}'::metric_dimension_enum, `
-    + `${s.dimensionId ? `'${s.dimensionId}'::uuid` : 'null::uuid'}, ${s.dimensionKey ? `'${s.dimensionKey}'` : 'null::text'}, `
-    + `${s.value === null ? 'null::numeric' : `${s.value}::numeric`}, '${JSON.stringify(s.components ?? {})}'::jsonb)`).join(',\n');
-  adminSql(`
-    with run as (
-      insert into public.calculation_runs (organization_id, trigger, engine_version, period_from, period_to, as_of, status)
-      values ('${org}', 'recalc_manual', '1.0.0', '${first}', '${first}', '2026-10-01', 'succeeded') returning id
-    ), v (period_id, metric_key, dimension_type, dimension_id, dimension_key, value, components) as (values ${rows}),
-    snaps as (
-      insert into public.metric_snapshots (organization_id, calculation_run_id, period_id, metric_key, dimension_type, dimension_id,
-                                           dimension_key, value, unit, currency, basis, assurance_level, data_quality, components)
-      select '${org}', run.id, v.period_id, v.metric_key, v.dimension_type, v.dimension_id, v.dimension_key, v.value,
-             'money', 'GBP', 'ledger', 'verified', '${quality}'::jsonb, v.components
-        from run, v
-      returning id, period_id, metric_key, dimension_type, dimension_id, dimension_key, calculation_run_id
-    )
-    insert into public.metric_current (organization_id, period_id, metric_key, dimension_type, dimension_id, dimension_key, snapshot_id, calculation_run_id)
-    select '${org}', period_id, metric_key, dimension_type, dimension_id, dimension_key, id, calculation_run_id from snaps`);
+async function writeRun(org: string, periods: ReadonlyMap<string, string>, snaps: readonly Snap[]): Promise<void> {
+  await writeEngineRun(org, snaps.map((s) => ({
+    periodId: periods.get(s.ym)!, key: s.key, value: s.value, dimensionType: s.dimensionType ?? 'none',
+    dimensionId: s.dimensionId ?? null, dimensionKey: s.dimensionKey ?? null, components: s.components ?? {},
+  })));
 }
 
 /**
@@ -109,80 +97,73 @@ function statement(ym: string): Snap[] {
   return snaps;
 }
 
-function cleanup(): void {
-  adminSql(`
-    select set_config('app.purge', 'on', false);
-    delete from public.organizations where name like '${NAME}%';
-    delete from public.organizations where name like 'Mktfin %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%-${SUITE}@${EMAIL_DOMAIN}';
-    delete from auth.users where email like '%@${EMAIL_DOMAIN}' and created_at < now() - interval '1 hour';`);
-}
-
 async function createOrg(ownerId: string, name: string): Promise<string> {
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: name, p_fiscal_year_start_month: 10 });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  const id = created.data as unknown as string;
-  adminSql(`select app.ensure_periods('${id}', '2024-10-01', '2026-04-01')`);
+  const id = await ok(rpc<string>(clientFor(ownerId), 'create_organization', { p_name: name, p_fiscal_year_start_month: 10 }));
+  orgs.push(id);
+  // The snapshots here are written by hand: no real calculation may run for this organisation.
+  await parkQueuedJobs(id);
+  await ensurePeriods(fs(), id, '2024-10-01', '2026-04-01');
   return id;
 }
 
 beforeAll(async () => {
-  cleanup();
-  const ownerId = createAuthUser(`owner-${SUITE}@${EMAIL_DOMAIN}`);
+  const ownerId = await createAuthUser(`owner-${SUITE}@${EMAIL_DOMAIN}`);
   orgId = await createOrg(ownerId, NAME);
   otherOrgId = await createOrg(ownerId, `${NAME} other`);
 
-  for (const ym of [...COMPLETE, IN_PROGRESS]) {
-    period.set(ym, one(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '${ym}-01'`));
+  for (const ym of [...COMPLETE, IN_PROGRESS]) period.set(ym, periodId(orgId, `${ym}-01`));
+  for (const org of [orgId, otherOrgId]) {
+    for (const p of await rowsOf(org, 'fiscal_periods')) {
+      await orgRow(fs(), org, 'fiscal_periods', String(p.id)).update({ is_complete: String(p.period_start) < '2026-04-01' });
+    }
   }
-  adminSql(`update public.fiscal_periods set is_complete = (period_start < '2026-04-01') where organization_id in ('${orgId}', '${otherOrgId}')`);
 
   for (const [name, category] of [
     ['Freight', 'cost_of_sales'], ['Rent', 'operating_expense'], ['Advertising', 'marketing'], ['Wages', 'payroll'], ['Corporation tax', 'tax_expense'],
   ] as const) {
-    account.set(name, one(`insert into public.accounts (organization_id, name, account_type, standard_category, source, mapping_confidence)
-      values ('${orgId}', '${name}', 'expense', '${category}', 'imported', 'confirmed') returning id`));
+    account.set(name, await seedAccount(orgId, { name, category, accountType: 'expense' }));
   }
 
   // April is in progress: its figures exist and must not be counted.
-  writeRun(orgId, period, [...COMPLETE.flatMap(statement), { ym: IN_PROGRESS, key: 'revenue', value: '999999' }]);
+  await writeRun(orgId, period, [...COMPLETE.flatMap(statement), { ym: IN_PROGRESS, key: 'revenue', value: '999999' }]);
 
   // Another organisation, the same months, figures nobody could mistake.
-  const otherPeriods = new Map(COMPLETE.map((ym) => [ym, one(`select id from public.fiscal_periods where organization_id = '${otherOrgId}' and period_start = '${ym}-01'`)]));
-  writeRun(otherOrgId, otherPeriods, COMPLETE.flatMap((ym) => (['revenue', 'cost_of_sales', 'operating_expenses', 'net_profit'] as const)
+  const otherPeriods = new Map(COMPLETE.map((ym) => [ym, periodId(otherOrgId, `${ym}-01`)]));
+  await writeRun(otherOrgId, otherPeriods, COMPLETE.flatMap((ym) => (['revenue', 'cost_of_sales', 'operating_expenses', 'net_profit'] as const)
     .map((key) => ({ ym, key, value: '7777777' }))));
 
   // Campaign spend is recorded too, but the accounts show marketing, so it must not be added.
-  const campaign = one(`insert into public.campaigns (organization_id, name) values ('${orgId}', 'Autumn') returning id`);
-  adminSql(`insert into public.campaign_spend (organization_id, campaign_id, period_id, amount, currency)
-            values ('${orgId}', '${campaign}', '${period.get('2025-11')}', 999.00, 'GBP')`);
+  const owner = clientFor(ownerId);
+  const campaign = await ok(rpc<string>(owner, 'upsert_campaign', { p_org: orgId, p_input: { name: 'Autumn' } }));
+  await ok(rpc(owner, 'set_campaign_spend', { p_org: orgId, p_campaign: campaign, p_period: period.get('2025-11'), p_amount: '999.00', p_note: null }));
 
   // Products, attributed by invoice lines (ADR-102).
-  const customer = one(`insert into public.counterparties (organization_id, name, kind) values ('${orgId}', 'Shopper', 'customer') returning id`);
-  const handbags = one(`insert into public.products (organization_id, name) values ('${orgId}', 'Handbags') returning id`);
-  const wallets = one(`insert into public.products (organization_id, name) values ('${orgId}', 'Wallets') returning id`);
-  const invoice = (type: string, number: string, date: string, total: string, status = 'open') => one(`
-    insert into public.invoices (organization_id, invoice_type, counterparty_id, invoice_number, issue_date, due_date, period_id,
-                                 subtotal, tax_amount, total_amount, amount_paid, status, record_status, assurance_level)
-    values ('${orgId}', '${type}', '${customer}', '${number}', '${date}', '${date}', '00000000-0000-0000-0000-000000000000',
-            ${total}, 0, ${total}, 0, '${status}', 'accepted', 'verified') returning id`);
-  const line = (invoiceId: string, product: string, amount: string) => adminSql(`
-    insert into public.invoice_lines (organization_id, invoice_id, product_id, amount) values ('${orgId}', '${invoiceId}', '${product}', ${amount})`);
+  const customer = await seedCounterparty(orgId, { name: 'Shopper', kind: 'customer' });
+  const handbags = await ok(rpc<string>(owner, 'upsert_product', { p_org: orgId, p_input: { name: 'Handbags' } }));
+  const wallets = await ok(rpc<string>(owner, 'upsert_product', { p_org: orgId, p_input: { name: 'Wallets' } }));
+  const invoice = (type: string, number: string, date: string, total: string, status = 'open') => seedInvoice(orgId, {
+    counterpartyId: customer, type, number, issueDate: date, dueDate: date, subtotal: total, tax: '0', total, status,
+  });
+  const lines = async (invoiceId: string, items: Array<[string, string]>) => {
+    // Lines are written by `api.set_invoice_lines`, which accepts any current, accepted invoice —
+    // a void one included — so every invoice here is lined the same way.
+    await ok(rpc(owner, 'set_invoice_lines', { p_invoice: invoiceId, p_lines: items.map(([product_id, amount]) => ({ product_id, amount })) }));
+  };
 
-  const nov24 = invoice('sales', 'S-1', '2024-11-10', '1200.00');
-  line(nov24, handbags, '1000.00');
-  line(nov24, wallets, '200.00');
+  await lines(await invoice('sales', 'S-1', '2024-11-10', '1200.00'), [[handbags, '1000.00'], [wallets, '200.00']]);
   // June 2025 is outside the like-for-like months (Oct–Mar), so it is not in the previous column.
-  line(invoice('sales', 'S-2', '2025-06-10', '5000.00'), handbags, '5000.00');
-  line(invoice('sales', 'S-3', '2025-11-10', '1500.00'), handbags, '1500.00');
-  line(invoice('sales', 'S-4', '2025-12-10', '300.00'), wallets, '300.00');
-  line(invoice('sales_credit_note', 'C-1', '2025-12-20', '50.00'), wallets, '50.00');
+  await lines(await invoice('sales', 'S-2', '2025-06-10', '5000.00'), [[handbags, '5000.00']]);
+  await lines(await invoice('sales', 'S-3', '2025-11-10', '1500.00'), [[handbags, '1500.00']]);
+  await lines(await invoice('sales', 'S-4', '2025-12-10', '300.00'), [[wallets, '300.00']]);
+  await lines(await invoice('sales_credit_note', 'C-1', '2025-12-20', '50.00'), [[wallets, '50.00']]);
   // A void invoice counts for nothing; neither does one in the month still in progress.
-  line(invoice('sales', 'S-5', '2026-01-10', '7777.00', 'void'), handbags, '7777.00');
-  line(invoice('sales', 'S-6', '2026-04-10', '8888.00'), handbags, '8888.00');
-});
+  await lines(await invoice('sales', 'S-5', '2026-01-10', '7777.00', 'void'), [[handbags, '7777.00']]);
+  await lines(await invoice('sales', 'S-6', '2026-04-10', '8888.00'), [[handbags, '8888.00']]);
+}, 120_000);
 
-afterAll(() => cleanup());
+afterAll(async () => {
+  await dropFixtures(orgs, EMAIL_DOMAIN);
+}, 60_000);
 
 describe('loadMarketingFinancials, on the job\'s scoped service client', () => {
   it('adds the engine\'s months into October-start financial years, leaving out the month in progress', async () => {
@@ -236,7 +217,7 @@ describe('loadMarketingFinancials, on the job\'s scoped service client', () => {
   });
 
   it('is null for an organisation with no figures', async () => {
-    const ownerId = createAuthUser(`empty-${SUITE}@${EMAIL_DOMAIN}`);
+    const ownerId = await createAuthUser(`empty-${SUITE}@${EMAIL_DOMAIN}`);
     const empty = await createOrg(ownerId, `${NAME} empty`);
     expect(await withOrgScope(empty, (scope) => loadMarketingFinancials(scope.db, empty))).toBeNull();
   });

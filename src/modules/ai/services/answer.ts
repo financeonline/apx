@@ -17,6 +17,7 @@ import { applyKinds, buildGroundingContext, degrade } from '../domain/turn-conte
 import { judge, validate, type Verdict } from '../domain/verdict';
 import { untrusted, userQuestion } from '../domain/untrusted';
 import { findConversation, loadHistory } from './conversations';
+import { organisationOf } from './organisation';
 import { ContextChanged, runTool, snapshotAccess } from './run-tool';
 import { moduleOn } from '@/modules/tenancy';
 import { toolModule } from '../domain/tool-modules';
@@ -365,22 +366,6 @@ function labelFor(ref: EvidenceRef, context: GroundingContext): string {
 // -----------------------------------------------------------------------------------------------
 // Small helpers
 // -----------------------------------------------------------------------------------------------
-
-/**
- * The three organisation facts the prompt and period resolution need, on the caller's own client:
- * the `organizations` SELECT policy admits every member, so no wider client is needed.
- */
-async function organisationOf(ctx: AccessContext, orgId: string): Promise<{ name: string; baseCurrency: string; fiscalYearStartMonth: number }> {
-  const { data, error } = await ctx.db
-    .from('organizations').select('name, base_currency, fiscal_year_start_month').eq('id', orgId).maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
-  const row = data as { name?: string; base_currency?: string; fiscal_year_start_month?: number } | null;
-  return {
-    name: row?.name ?? 'this organisation',
-    baseCurrency: row?.base_currency ?? 'GBP',
-    fiscalYearStartMonth: Number(row?.fiscal_year_start_month ?? 1),
-  };
-}
 
 function titleOf(message: string): string {
   return message.replace(/\s+/g, ' ').trim().slice(0, 80);

@@ -205,7 +205,8 @@ describe('generateInvestmentNarrative', () => {
     // no server key), the default transport refuses before any network call.
     vi.stubEnv('MOTION_AI_OFFLINE', '0');
     vi.stubEnv('OPENAI_API_KEY', '');
-    vi.stubEnv('NEXT_PUBLIC_SUPABASE_URL', '');
+    vi.stubEnv('FIRESTORE_EMULATOR_HOST', '');
+    vi.stubEnv('FIREBASE_SERVICE_ACCOUNT', '');
     const spy = vi.spyOn(console, 'warn').mockImplementation(() => {});
     await expect(generateInvestmentNarrative(base)).rejects.toThrow(INVESTMENT_NO_OPENAI_KEY);
     spy.mockRestore();

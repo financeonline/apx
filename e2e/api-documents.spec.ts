@@ -1,5 +1,6 @@
 import { expect, test } from '@playwright/test';
-import { seededOrgSlug, sql } from './fixtures';
+import { seededOrgSlug } from './fixtures';
+import { auditEvents, newestFirst, orgIdBySlug, orgRows } from './firestore';
 
 /** The document library (ROUTE_ARCHITECTURE.md §127–128; ADR-087). */
 test.describe('documents', () => {
@@ -17,8 +18,10 @@ test.describe('documents', () => {
     await expect(page.getByText(/imports from this file/i)).toBeVisible();
     await expect(page.getByRole('link', { name: /download gl-may\.csv/i })).toBeVisible({ timeout: 15_000 });
 
-    const documentId = sql(`select d.id from public.source_documents d join public.organizations o on o.id = d.organization_id where o.slug = '${slug}' and d.original_filename = 'gl-may.csv' order by d.created_at desc limit 1`);
-    expect(sql(`select count(*) from public.audit_events a join public.organizations o on o.id = a.organization_id where o.slug = '${slug}' and a.action = 'document.downloaded' and a.target_id = '${documentId}'`)).not.toBe('0');
+    const orgId = await orgIdBySlug(slug);
+    const documentId = newestFirst(await orgRows(orgId, 'source_documents', (d) => d.original_filename === 'gl-may.csv'))[0]?.id;
+    const downloads = (await auditEvents(orgId)).filter((a) => a.action === 'document.downloaded' && a.target_id === documentId);
+    expect(downloads.length).not.toBe(0);
   });
 
   test('an invented document is 404', async ({ page }) => {

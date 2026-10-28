@@ -6,7 +6,12 @@ import { startImport } from '@/modules/imports';
 import type { AccessContext } from '@/modules/tenancy';
 import { calculateAndAlert } from '../fixtures/adr120-orgs';
 import { glBatch, type GlLine } from '../fixtures/audit-orgs';
-import { adminSql, clientFor, createAuthUser } from './setup';
+import { periodId } from '@/db/app/shared';
+import { globalCollection, orgCollection, orgRow } from '@/db/schema';
+import { jsonbText } from '../fixtures/engine-dump';
+import { currentFigure } from '../fixtures/engine-reads';
+import { removeSeeded, seedMember, seedOrg } from '../fixtures/seed';
+import { clientFor, createAuthUser, fs, rpc } from './setup';
 
 /**
  * H-2 (Step 0E) end to end on a real database: trial balances and P&L reports UPLOADED through the
@@ -21,19 +26,19 @@ import { adminSql, clientFor, createAuthUser } from './setup';
 
 const RUN = `t${Date.now().toString(36)}`;
 const DOMAIN = `${RUN}.balancepnl.itest`;
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`).split('\n')[0]?.trim() ?? '';
 let owner: string;
 const ownerDb = () => clientFor(owner, { email: `owner@${DOMAIN}` });
 
+const created: string[] = [];
+
 async function org(label: string): Promise<string> {
-  // `create_organization` is throttled per user: a separate creator per organisation, then the shared
-  // user joins as admin (ownership is sole; admin holds imports.review), so one token reads them all.
-  const creator = createAuthUser(`${label.toLowerCase()}-creator@${DOMAIN}`);
-  const r = await clientFor(creator).schema('api').rpc('create_organization', { p_name: `ITest BalancePnl ${label} ${RUN}` });
-  if (r.error) throw new Error(r.error.message);
-  const id = r.data as unknown as string;
-  adminSql(`set local app.bootstrap = 'on';
-    insert into public.organization_memberships (organization_id, user_id, role) values ('${id}', '${owner}', 'admin');`);
+  // A separate creator per organisation (as `create_organization`'s per-person throttle required),
+  // then the shared user joins as admin (ownership is sole; admin holds imports.review), so one
+  // token reads them all.
+  const creator = await createAuthUser(`${label.toLowerCase()}-creator@${DOMAIN}`);
+  const { orgId: id } = await seedOrg({ name: `ITest BalancePnl ${label} ${RUN}`, ownerId: creator });
+  created.push(id);
+  await seedMember(id, owner, 'admin');
   return id;
 }
 
@@ -53,36 +58,36 @@ async function upload(o: string, importType: 'trial_balance' | 'pnl_report', ym:
  */
 async function commit(o: string, batchId: string, basis: 'movement' | 'cumulative', sign: 'natural' | 'reporting',
   completeness: 'complete' | 'partial' = 'complete') {
-  const required = adminSql(`select coalesce(string_agg(c, ','), '') from public.import_batches b, unnest(b.required_confirmations) c
-     where b.organization_id = '${o}' and b.id = '${batchId}'`).split(',').filter(Boolean);
+  const batch = (await orgRow(fs(), o, 'import_batches', batchId).get()).data()!;
+  const required = (batch.required_confirmations as string[] | undefined) ?? [];
   for (const code of required) {
-    const [start, end] = adminSql(`select period_start || ',' || period_end from public.import_batches where id = '${batchId}'`).split(',');
+    const [start, end] = [String(batch.period_start), String(batch.period_end)];
     const value = code === 'IMP-RANGE-015' ? { period_start: start, period_end: end }
       : code === 'IMP-TB-012' ? { balance_basis: basis }
       : code === 'IMP-TB-013' ? { balance_sign: sign }
       : code === 'IMP-TB-016' ? { report_complete: completeness }
       : { answer: 'yes' };
-    const { error } = await ownerDb().schema('api').rpc('record_batch_confirmation', { p_batch: batchId, p_code: code, p_value: value });
+    const { error } = await rpc(ownerDb(), 'record_batch_confirmation', { p_batch: batchId, p_code: code, p_value: value });
     expect(error, `${code}: ${error?.message}`).toBeNull();
   }
-  const { error } = await ownerDb().schema('api').rpc('commit_import_batch', { p_batch: batchId });
+  const { error } = await rpc(ownerDb(), 'commit_import_batch', { p_batch: batchId });
   expect(error, error?.message).toBeNull();
 }
 
-function metric(o: string, ym: string, key: string): string {
-  return one(`select coalesce(s.value::numeric(16, 2)::text, 'NULL') || '|' || s.assurance_level || '|' || s.basis || '|'
-      || coalesce((s.data_quality -> 'missing')::text, '[]')
-    from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id and s.organization_id = c.organization_id
-    join public.fiscal_periods p on p.id = c.period_id and p.organization_id = c.organization_id
-   where c.organization_id = '${o}' and c.metric_key = '${key}' and c.dimension_type = 'none' and p.period_start = '${ym}-01'`);
+/** `value::numeric(16,2)::text | assurance | basis | data_quality->'missing'` of a headline figure ('' when none). */
+async function metric(o: string, ym: string, key: string): Promise<string> {
+  const f = await currentFigure(o, `${ym}-01`, key);
+  if (!f) return '';
+  const missing = f.dataQuality.missing;
+  return `${f.value === null ? 'NULL' : new Decimal(f.value).toFixed(2)}|${f.assurance}|${f.basis}|${missing == null ? '[]' : jsonbText(missing)}`;
 }
-const valueOf = (o: string, ym: string, key: string) => metric(o, ym, key).split('|')[0];
-function total(o: string, ym: string): number | null {
-  const s = one(`select coalesce(h.score::text, 'NULL') from public.health_current hc
-    join public.health_scores h on h.id = hc.health_score_id and h.organization_id = hc.organization_id
-    join public.fiscal_periods p on p.id = hc.period_id and p.organization_id = hc.organization_id
-   where hc.organization_id = '${o}' and p.period_start = '${ym}-01'`);
-  return s === '' || s === 'NULL' ? null : Number(s);
+const valueOf = async (o: string, ym: string, key: string) => (await metric(o, ym, key)).split('|')[0];
+async function total(o: string, ym: string): Promise<number | null> {
+  const hc = await orgRow(fs(), o, 'health_current', periodId(o, `${ym}-01`)).get();
+  if (!hc.exists) return null;
+  const h = await orgRow(fs(), o, 'health_scores', String(hc.get('health_score_id'))).get();
+  const score = h.exists ? h.get('score') : null;
+  return score === null || score === undefined ? null : Number(score);
 }
 const ctxFor = (o: string): AccessContext => ({
   userId: owner, orgId: o, orgSlug: 'x', effectiveRole: 'owner', permissions: permissionsFor('owner'), actorType: 'user',
@@ -94,7 +99,7 @@ let dc: string; let cum: string; let pnl: string; let mixed: string; let zero: s
 let cumTampered: string; let mixedPartial: string; let cashOnly: string; let cashOnlyComplete: string; let expOnly: string; let partCum: string; let dcPartial: string;
 
 beforeAll(async () => {
-  owner = createAuthUser(`owner@${DOMAIN}`);
+  owner = await createAuthUser(`owner@${DOMAIN}`);
 
   // A movement trial balance in DEBIT / CREDIT columns, June–August. It balances (IMP-TB-011 refuses
   // one that does not): the month's profit sits in Cash.
@@ -161,7 +166,7 @@ beforeAll(async () => {
       { date: `${ym}-05`, category: 'cash', direction: 'debit', amount: amt },
       { date: `${ym}-05`, category: 'revenue', direction: 'credit', amount: amt },
     ];
-    glBatch(mixed, { start: `${ym}-01`, end: END[ym]!, lines, tag: `bp-gl-${ym}` });
+    await glBatch(mixed, { start: `${ym}-01`, end: END[ym]!, lines, tag: `bp-gl-${ym}` });
   }
   const m = await upload(mixed, 'trial_balance', '2026-07', 'Account,Debit,Credit\nRevenue,,5000.00\nOperating Expenses,800.00,\nCash,4200.00,\n');
   await commit(mixed, m.batchId, 'movement', 'natural');
@@ -171,7 +176,7 @@ beforeAll(async () => {
   mixedPartial = await org('MIXEDP');
   for (const ym of ['2026-06', '2026-07', '2026-08'] as const) {
     const amt = { '2026-06': '1000', '2026-07': '1100', '2026-08': '1210' }[ym];
-    glBatch(mixedPartial, { start: `${ym}-01`, end: END[ym]!, tag: `bpp-gl-${ym}`, lines: [
+    await glBatch(mixedPartial, { start: `${ym}-01`, end: END[ym]!, tag: `bpp-gl-${ym}`, lines: [
       { date: `${ym}-05`, category: 'cash', direction: 'debit', amount: amt },
       { date: `${ym}-05`, category: 'revenue', direction: 'credit', amount: amt },
     ] });
@@ -185,97 +190,101 @@ beforeAll(async () => {
   await commit(zero, z.batchId, 'movement', 'reporting');
 
   for (const o of [dc, cum, cumTampered, pnl, mixed, zero, dcPartial, partCum, cashOnly, cashOnlyComplete, expOnly, mixedPartial]) await calculateAndAlert(o);
-}, 900_000);
+}, 2_400_000);
 
-afterAll(() => {
-  adminSql(`delete from public.organizations where name like 'ITest BalancePnl %${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';`);
-});
+afterAll(async () => {
+  await removeSeeded(created, `@${DOMAIN}`);
+}, 600_000);
+
+/** `name=closing/debit/credit` of each balance row of a month, by account name ('-' for a NULL total). */
+async function balanceRows(o: string, start: string, withTotals: boolean): Promise<string[]> {
+  const rows = (await orgCollection(fs(), o, 'period_balances').where('period_start', '==', start).get()).docs.map((d) => d.data());
+  const names = new Map((await orgCollection(fs(), o, 'accounts').get()).docs.map((d) => [d.id, String(d.get('name'))]));
+  return rows.map((b) => ({ name: names.get(String(b.account_id)) ?? '', b }))
+    .sort((x, y) => (x.name < y.name ? -1 : x.name > y.name ? 1 : 0))
+    .map(({ name, b }) => (withTotals
+      ? `${name}=${b.closing_balance}/${b.debit_total ?? '-'}/${b.credit_total ?? '-'}`
+      : `${name}=${b.closing_balance}`));
+}
 
 describe('stored as natural-sign closing balances', () => {
-  it('a Debit / Credit trial balance stores debit − credit and keeps both totals', () => {
-    expect(adminSql(`select a.name || '=' || b.closing_balance || '/' || coalesce(b.debit_total::text, '-') || '/' || coalesce(b.credit_total::text, '-')
-        from public.period_balances b join public.accounts a on a.id = b.account_id
-       where b.organization_id = '${dc}' and b.period_start = '2026-07-01' order by a.name`).split('\n'))
+  it('a Debit / Credit trial balance stores debit − credit and keeps both totals', async () => {
+    expect(await balanceRows(dc, '2026-07-01', true))
       .toEqual(['Cash=360.00/360.00/-', 'Cost of Sales=440.00/440.00/-', 'Operating Expenses=300.00/300.00/-', 'Revenue=-1100.00/-/1100.00']);
   });
 
-  it('a reporting-sign P&L report is stored in natural sign (income negated at commit)', () => {
-    expect(adminSql(`select a.name || '=' || b.closing_balance from public.period_balances b join public.accounts a on a.id = b.account_id
-       where b.organization_id = '${pnl}' order by a.name`).split('\n'))
+  it('a reporting-sign P&L report is stored in natural sign (income negated at commit)', async () => {
+    expect(await balanceRows(pnl, '2026-07-01', false))
       .toEqual(['Cost of Sales=440.00', 'Operating Expenses=300.00', 'Revenue=-1100.00']);
   });
 
   it('a row with no figure is an error before commit, never a stored zero', async () => {
     const o = await org('BLANK');
     const res = await upload(o, 'trial_balance', '2026-08', 'Account,Debit,Credit\nRevenue,,\nOperating Expenses,300.00,\n');
-    const rows = adminSql(`select row_number || ':' || status from public.import_rows where batch_id = '${res.batchId}' and row_number > 1 order by row_number`).split('\n');
+    const rows = (await orgCollection(fs(), o, 'import_rows').where('batch_id', '==', res.batchId).get()).docs.map((d) => d.data())
+      .filter((r) => Number(r.row_number) > 1).sort((x, y) => Number(x.row_number) - Number(y.row_number))
+      .map((r) => `${r.row_number}:${r.status}`);
     expect(rows[0]).toBe('2:error');
     expect(rows[1]).toMatch(/^3:(valid|warning)$/);
-  });
+  }, 900_000);
 });
 
 describe('revenue, profit and margins', () => {
-  it('Debit / Credit movement: 1,000 / 1,100 / 1,210; net 300 / 360 / 426; August margins 0.60 and 0.352', () => {
-    expect(['2026-06', '2026-07', '2026-08'].map((ym) => valueOf(dc, ym, 'revenue'))).toEqual(['1000.00', '1100.00', '1210.00']);
-    expect(['2026-06', '2026-07', '2026-08'].map((ym) => valueOf(dc, ym, 'net_profit'))).toEqual(['300.00', '360.00', '426.00']);
-    expect(new Decimal(one(`select s.value from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id
-      join public.fiscal_periods p on p.id = c.period_id where c.organization_id = '${dc}' and c.metric_key = 'gross_margin'
-      and c.dimension_type = 'none' and p.period_start = '2026-08-01'`)).toFixed(4)).toBe('0.6000');
-    expect(metric(dc, '2026-08', 'revenue')).toBe('1210.00|verified|period_balances|[]');
+  it('Debit / Credit movement: 1,000 / 1,100 / 1,210; net 300 / 360 / 426; August margins 0.60 and 0.352', async () => {
+    expect(await Promise.all(['2026-06', '2026-07', '2026-08'].map((ym) => valueOf(dc, ym, 'revenue')))).toEqual(['1000.00', '1100.00', '1210.00']);
+    expect(await Promise.all(['2026-06', '2026-07', '2026-08'].map((ym) => valueOf(dc, ym, 'net_profit')))).toEqual(['300.00', '360.00', '426.00']);
+    expect(new Decimal((await currentFigure(dc, '2026-08-01', 'gross_margin'))!.value!).toFixed(4)).toBe('0.6000');
+    expect(await metric(dc, '2026-08', 'revenue')).toBe('1210.00|verified|period_balances|[]');
   });
 
-  it('cumulative: NULL no_prior_trial_balance / 1,100 / 1,210', () => {
-    expect(['2026-06', '2026-07', '2026-08'].map((ym) => valueOf(cum, ym, 'revenue'))).toEqual(['NULL', '1100.00', '1210.00']);
-    expect(metric(cum, '2026-06', 'revenue')).toContain('no_prior_trial_balance');
-    expect(valueOf(cum, '2026-08', 'net_profit')).toBe('426.00');
+  it('cumulative: NULL no_prior_trial_balance / 1,100 / 1,210', async () => {
+    expect(await Promise.all(['2026-06', '2026-07', '2026-08'].map((ym) => valueOf(cum, ym, 'revenue')))).toEqual(['NULL', '1100.00', '1210.00']);
+    expect(await metric(cum, '2026-06', 'revenue')).toContain('no_prior_trial_balance');
+    expect(await valueOf(cum, '2026-08', 'net_profit')).toBe('426.00');
   });
 
-  it('P&L report: 1,100 revenue, 440 cost of sales, 360 net profit', () => {
-    expect([valueOf(pnl, '2026-07', 'revenue'), valueOf(pnl, '2026-07', 'cost_of_sales'), valueOf(pnl, '2026-07', 'net_profit')])
+  it('P&L report: 1,100 revenue, 440 cost of sales, 360 net profit', async () => {
+    expect([await valueOf(pnl, '2026-07', 'revenue'), await valueOf(pnl, '2026-07', 'cost_of_sales'), await valueOf(pnl, '2026-07', 'net_profit')])
       .toEqual(['1100.00', '440.00', '360.00']);
   });
 
-  it('a stated zero revenue is a verified 0.00', () => {
-    expect(metric(zero, '2026-08', 'revenue')).toBe('0.00|verified|period_balances|[]');
+  it('a stated zero revenue is a verified 0.00', async () => {
+    expect(await metric(zero, '2026-08', 'revenue')).toBe('0.00|verified|period_balances|[]');
   });
 
-  it('ledger beside a July trial balance: July from the trial balance (§2.3), June and August from the ledger', () => {
-    expect(metric(mixed, '2026-07', 'revenue')).toBe('5000.00|verified|period_balances|[]');
+  it('ledger beside a July trial balance: July from the trial balance (§2.3), June and August from the ledger', async () => {
+    expect(await metric(mixed, '2026-07', 'revenue')).toBe('5000.00|verified|period_balances|[]');
     // Ledger-basis P&L is `calculated` (coverage.ts assuranceFor; FINANCIAL_ENGINE §2.3); a trial balance's is `verified`.
-    expect(metric(mixed, '2026-06', 'revenue').split('|').slice(0, 3)).toEqual(['1000.00', 'calculated', 'ledger']);
-    expect(metric(mixed, '2026-08', 'revenue').split('|').slice(0, 3)).toEqual(['1210.00', 'calculated', 'ledger']);
+    expect((await metric(mixed, '2026-06', 'revenue')).split('|').slice(0, 3)).toEqual(['1000.00', 'calculated', 'ledger']);
+    expect((await metric(mixed, '2026-08', 'revenue')).split('|').slice(0, 3)).toEqual(['1210.00', 'calculated', 'ledger']);
   });
 });
 
 describe('Health and evidence', () => {
-  it('Health on the Debit / Credit trial balance (no bank): NULL / 87 / 87, banking excluded', () => {
-    expect(['2026-06', '2026-07', '2026-08'].map((ym) => total(dc, ym))).toEqual([null, 87, 87]);
+  it('Health on the Debit / Credit trial balance (no bank): NULL / 87 / 87, banking excluded', async () => {
+    expect(await Promise.all(['2026-06', '2026-07', '2026-08'].map((ym) => total(dc, ym)))).toEqual([null, 87, 87]);
   });
 
   it('every movement-basis P&L drill-down totals its figure', async () => {
-    const rows = adminSql(`select c.metric_key || '|' || coalesce(s.value::text, 'NULL') || '|' || coalesce(s.evidence_query::text, 'null')
-        from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id and s.organization_id = c.organization_id
-        join public.fiscal_periods p on p.id = c.period_id and p.organization_id = c.organization_id
-       where c.organization_id = '${dc}' and p.period_start = '2026-07-01' and c.dimension_type = 'none'
-         and c.metric_key in ('revenue', 'cost_of_sales', 'operating_expenses')`).split('\n');
-    for (const row of rows) {
-      const [key, value, query] = row.split('|') as [string, string, string];
-      const parsed = JSON.parse(query) as { kind: string; descriptor: Record<string, unknown> };
+    const rows = [];
+    for (const key of ['revenue', 'cost_of_sales', 'operating_expenses']) {
+      const f = await currentFigure(dc, '2026-07-01', key);
+      if (f) rows.push(f);
+    }
+    for (const f of rows) {
+      const [key, value] = [f.metricKey, f.value ?? 'NULL'];
+      const parsed = f.evidenceQuery as { kind: string; descriptor: Record<string, unknown> };
       expect(parsed.kind, key).toBe('leaf');
       const sel = await resolveDescriptor(ctxFor(dc), parsed.descriptor as never);
       expect(new Decimal(sel.total!).toFixed(2), key).toBe(new Decimal(value).toFixed(2));
     }
   });
 
-  const snapshotOf = (o: string, ym: string, key: string) => one(`select s.id from public.metric_current c
-    join public.metric_snapshots s on s.id = c.snapshot_id and s.organization_id = c.organization_id
-    join public.fiscal_periods p on p.id = c.period_id and p.organization_id = c.organization_id
-   where c.organization_id = '${o}' and c.metric_key = '${key}' and c.dimension_type = 'none' and p.period_start = '${ym}-01'`);
+  const snapshotOf = async (o: string, ym: string, key: string) => (await currentFigure(o, `${ym}-01`, key))?.snapshotId ?? '';
 
   it('a cumulative month traces to BOTH periods\' records and the subtraction: Σ(Aug) − Σ(Jul) = the figure', async () => {
     for (const key of ['revenue', 'cost_of_sales', 'operating_expenses']) {
-      const query = JSON.parse(one(`select s.evidence_query::text from public.metric_snapshots s where s.id = '${snapshotOf(cum, '2026-08', key)}'`)) as {
+      const query = (await currentFigure(cum, '2026-08-01', key))!.evidenceQuery as unknown as {
         kind: string; terms: Array<{ sign: number; descriptor: Record<string, unknown> | null; period_id: string }>;
       };
       expect(query.kind, key).toBe('difference');
@@ -286,12 +295,12 @@ describe('Health and evidence', () => {
         expect(sel.count, `${key} rows`).toBeGreaterThan(0);
         total = total.plus(new Decimal(sel.total!).times(term.sign));
       }
-      expect(total.toFixed(2), key).toBe(new Decimal(valueOf(cum, '2026-08', key)!).toFixed(2));
+      expect(total.toFixed(2), key).toBe(new Decimal((await valueOf(cum, '2026-08', key))!).toFixed(2));
     }
   });
 
   it('the evidence drawer opens a cumulative figure: formula, both periods, both totals', async () => {
-    const bundle = await buildBundleForMetric(ctxFor(cum), snapshotOf(cum, '2026-08', 'revenue'));
+    const bundle = await buildBundleForMetric(ctxFor(cum), await snapshotOf(cum, '2026-08', 'revenue'));
     const view = await loadEvidenceDrawer(ctxFor(cum), bundle);
     expect(view.metric!.difference).not.toBeNull();
     expect(view.metric!.difference!.terms.map((t) => [t.name, t.sign, new Decimal(t.total!).toFixed(2), t.unavailable]))
@@ -301,7 +310,7 @@ describe('Health and evidence', () => {
   });
 
   it('N-2: each side reconciles to its OWN expected value, then 3,310 − 2,100 = 1,210 reconciles to the figure', async () => {
-    const view = await loadEvidenceDrawer(ctxFor(cum), await buildBundleForMetric(ctxFor(cum), snapshotOf(cum, '2026-08', 'revenue')));
+    const view = await loadEvidenceDrawer(ctxFor(cum), await buildBundleForMetric(ctxFor(cum), await snapshotOf(cum, '2026-08', 'revenue')));
     const d = view.metric!.difference!;
     expect(d.terms.map((t) => [new Decimal(t.expected!).toFixed(2), t.reconciles])).toEqual([['3310.00', true], ['2100.00', true]]);
     expect([new Decimal(d.recordsResult!).toFixed(2), d.formulaReconciles, d.arithmeticReconciles, d.reconciles]).toEqual(['1210.00', true, true, true]);
@@ -318,7 +327,7 @@ describe('Health and evidence', () => {
   });
 
   it('N-2: net profit — every cumulative component shows its subtraction and reconciles; no block is a false alarm', async () => {
-    const view = await loadEvidenceDrawer(ctxFor(cum), await buildBundleForMetric(ctxFor(cum), snapshotOf(cum, '2026-08', 'net_profit')));
+    const view = await loadEvidenceDrawer(ctxFor(cum), await buildBundleForMetric(ctxFor(cum), await snapshotOf(cum, '2026-08', 'net_profit')));
     // Revenue and cost of sales sit under operating profit → gross profit; the subtractions reach them.
     const byLabel = new Map(view.subtractions.map((x) => [x.label, x.difference]));
     for (const [label, current, prior] of [['Revenue', '3310.00', '2100.00'], ['Cost of sales', '1324.00', '840.00'], ['Operating expenses', '900.00', '600.00']] as const) {
@@ -335,11 +344,11 @@ describe('Health and evidence', () => {
 
   it('N-2: a July row changed after the calculation is detected on that side, and the formula no longer reconciles', async () => {
     // Simulated corruption: the stored July revenue row is altered behind the engine's back.
-    adminSql(`set session_replication_role = replica;
-      update public.period_balances b set closing_balance = -2000 from public.accounts a
-       where a.id = b.account_id and a.organization_id = b.organization_id and b.organization_id = '${cumTampered}'
-         and a.name = 'Revenue' and b.period_start = '2026-07-01';`);
-    const view = await loadEvidenceDrawer(ctxFor(cumTampered), await buildBundleForMetric(ctxFor(cumTampered), snapshotOf(cumTampered, '2026-08', 'revenue')));
+    const revenueAccounts = new Set((await orgCollection(fs(), cumTampered, 'accounts').where('name', '==', 'Revenue').get()).docs.map((d) => d.id));
+    for (const b of (await orgCollection(fs(), cumTampered, 'period_balances').where('period_start', '==', '2026-07-01').get()).docs) {
+      if (revenueAccounts.has(String(b.get('account_id')))) await b.ref.update({ closing_balance: '-2000.00' });
+    }
+    const view = await loadEvidenceDrawer(ctxFor(cumTampered), await buildBundleForMetric(ctxFor(cumTampered), await snapshotOf(cumTampered, '2026-08', 'revenue')));
     const d = view.metric!.difference!;
     expect(d.terms.map((t) => t.reconciles)).toEqual([true, false]);
     expect(new Decimal(d.recordsResult!).toFixed(2)).toBe('1310.00');
@@ -349,13 +358,13 @@ describe('Health and evidence', () => {
     expect(priorBlock.reconciles).toBe(false);
     expect(priorBlock.reconciliation).toContain('does not match');
     // …and it propagates to net profit's revenue component.
-    const np = await loadEvidenceDrawer(ctxFor(cumTampered), await buildBundleForMetric(ctxFor(cumTampered), snapshotOf(cumTampered, '2026-08', 'net_profit')));
+    const np = await loadEvidenceDrawer(ctxFor(cumTampered), await buildBundleForMetric(ctxFor(cumTampered), await snapshotOf(cumTampered, '2026-08', 'net_profit')));
     expect(np.subtractions.find((x) => x.label.toLowerCase() === 'revenue')!.difference.reconciles).toBe(false);
     expect(np.records.filter((b) => b.reconciles === false)).toHaveLength(1);
   });
 
   it('with no prior month, the drawer states which side is missing and why', async () => {
-    const bundle = await buildBundleForMetric(ctxFor(cum), snapshotOf(cum, '2026-06', 'revenue'));
+    const bundle = await buildBundleForMetric(ctxFor(cum), await snapshotOf(cum, '2026-06', 'revenue'));
     const view = await loadEvidenceDrawer(ctxFor(cum), bundle);
     expect(view.metric!.difference!.terms[1]).toMatchObject({ name: 'prior_year_to_date', total: null, unavailable: 'no_prior_trial_balance' });
     expect(view.metric!.difference!.terms[0]!.total).not.toBeNull();
@@ -367,61 +376,62 @@ describe('Health and evidence', () => {
  * Each case is its own test reading its own organisation, so one failure cannot hide another.
  */
 describe('N-1 · completeness is attested, never inferred', () => {
-  it('the attestation is stored with who and when, and audited', () => {
-    const row = one(`select (b.confirmations -> 'IMP-TB-016' -> 'value' ->> 'report_complete') || '|' || ((b.confirmations -> 'IMP-TB-016' ->> 'by') is not null)::text
-      from public.import_batches b where b.organization_id = '${cashOnlyComplete}' and b.import_type = 'trial_balance'`);
-    expect(row).toBe('complete|true');
-    expect(one(`select count(*) from public.audit_events where organization_id = '${cashOnlyComplete}' and action = 'import.confirmed'
-      and after ->> 'code' = 'IMP-TB-016' and after -> 'value' ->> 'report_complete' = 'complete'`)).not.toBe('0');
+  it('the attestation is stored with who and when, and audited', async () => {
+    const batch = (await orgCollection(fs(), cashOnlyComplete, 'import_batches').where('import_type', '==', 'trial_balance').get()).docs[0]!.data();
+    const answer = (batch.confirmations as Record<string, { by?: unknown; value?: Record<string, unknown> }>)['IMP-TB-016'];
+    expect(`${String(answer?.value?.report_complete)}|${String(answer?.by != null)}`).toBe('complete|true');
+    const events = (await globalCollection(fs(), 'audit_events').where('organization_id', '==', cashOnlyComplete)
+      .where('action', '==', 'import.confirmed').get()).docs.map((d) => d.data())
+      .filter((e) => (e.after as { code?: string } | null)?.code === 'IMP-TB-016'
+        && ((e.after as { value?: { report_complete?: string } }).value?.report_complete === 'complete'));
+    expect(events.length).not.toBe(0);
   });
 
   it('the answer must be complete or partial: a bare yes or a blank is refused, never stored as an attestation', async () => {
     const o = await org('ASK');
     const res = await upload(o, 'trial_balance', '2026-07', 'Account,Debit,Credit\nCash,500.00,\nEquity,,500.00\n');
     for (const value of [{ answer: 'yes' }, { report_complete: '' }, { report_complete: 'yes' }]) {
-      const { error } = await ownerDb().schema('api').rpc('record_batch_confirmation', { p_batch: res.batchId, p_code: 'IMP-TB-016', p_value: value });
-      expect(error?.message, JSON.stringify(value)).toContain('VALIDATION');
+      const { error } = await rpc(ownerDb(), 'record_batch_confirmation', { p_batch: res.batchId, p_code: 'IMP-TB-016', p_value: value });
+      expect(error?.code, JSON.stringify(value)).toBe('VALIDATION');
     }
-    expect(one(`select coalesce(confirmations ? 'IMP-TB-016', false)::text from public.import_batches where id = '${res.batchId}'`)).toBe('false');
-  });
+    const confirmations = ((await orgRow(fs(), o, 'import_batches', res.batchId).get()).get('confirmations') ?? {}) as Record<string, unknown>;
+    expect(String('IMP-TB-016' in confirmations)).toBe('false');
+  }, 900_000);
 
-  it('balancing, NOT attested: stated lines stand (revenue 1,100); operating expenses and net profit NULL category_not_in_report', () => {
-    expect(valueOf(dcPartial, '2026-07', 'revenue')).toBe('1100.00');
-    const opex = metric(dcPartial, '2026-07', 'operating_expenses').split('|');
+  it('balancing, NOT attested: stated lines stand (revenue 1,100); operating expenses and net profit NULL category_not_in_report', async () => {
+    expect(await valueOf(dcPartial, '2026-07', 'revenue')).toBe('1100.00');
+    const opex = (await metric(dcPartial, '2026-07', 'operating_expenses')).split('|');
     expect([opex[0], opex[2]]).toEqual(['NULL', 'period_balances']);
     expect(opex[3]).toContain('category_not_in_report');
-    expect(valueOf(dcPartial, '2026-07', 'net_profit')).toBe('NULL');
+    expect(await valueOf(dcPartial, '2026-07', 'net_profit')).toBe('NULL');
   });
 
-  it('cash-only trial balance, not attested: revenue NULL category_not_in_report — never a verified 0.00', () => {
-    const m = metric(cashOnly, '2026-07', 'revenue');
+  it('cash-only trial balance, not attested: revenue NULL category_not_in_report — never a verified 0.00', async () => {
+    const m = await metric(cashOnly, '2026-07', 'revenue');
     expect(m.split('|')[0]).toBe('NULL');
     expect(m).toContain('category_not_in_report');
   });
 
-  it('cash-only trial balance, attested complete and balancing: revenue and net profit a verified 0.00', () => {
-    expect(metric(cashOnlyComplete, '2026-07', 'revenue')).toBe('0.00|verified|period_balances|[]');
-    expect(valueOf(cashOnlyComplete, '2026-07', 'net_profit')).toBe('0.00');
+  it('cash-only trial balance, attested complete and balancing: revenue and net profit a verified 0.00', async () => {
+    expect(await metric(cashOnlyComplete, '2026-07', 'revenue')).toBe('0.00|verified|period_balances|[]');
+    expect(await valueOf(cashOnlyComplete, '2026-07', 'net_profit')).toBe('0.00');
   });
 
-  it('expenses-only P&L report, not attested: cost of sales 400; revenue NULL, not 0', () => {
-    expect(valueOf(expOnly, '2026-07', 'cost_of_sales')).toBe('400.00');
-    expect(metric(expOnly, '2026-07', 'revenue')).toContain('category_not_in_report');
-    expect(valueOf(expOnly, '2026-07', 'revenue')).toBe('NULL');
+  it('expenses-only P&L report, not attested: cost of sales 400; revenue NULL, not 0', async () => {
+    expect(await valueOf(expOnly, '2026-07', 'cost_of_sales')).toBe('400.00');
+    expect(await metric(expOnly, '2026-07', 'revenue')).toContain('category_not_in_report');
+    expect(await valueOf(expOnly, '2026-07', 'revenue')).toBe('NULL');
   });
 
-  it('partial cumulative: August revenue 3,310 − 2,100 = 1,210; its missing Operating Expenses line is NULL, not −600', () => {
-    expect(valueOf(partCum, '2026-08', 'revenue')).toBe('1210.00');
-    expect(valueOf(partCum, '2026-08', 'operating_expenses')).toBe('NULL');
-    expect(valueOf(partCum, '2026-08', 'net_profit')).toBe('NULL');
+  it('partial cumulative: August revenue 3,310 − 2,100 = 1,210; its missing Operating Expenses line is NULL, not −600', async () => {
+    expect(await valueOf(partCum, '2026-08', 'revenue')).toBe('1210.00');
+    expect(await valueOf(partCum, '2026-08', 'operating_expenses')).toBe('NULL');
+    expect(await valueOf(partCum, '2026-08', 'net_profit')).toBe('NULL');
   });
 
-  it('ledger beside an UNATTESTED July report: July is the ledger\'s 1,100 (calculated), never 5,000 nor 6,100', () => {
-    expect(metric(mixedPartial, '2026-07', 'revenue').split('|').slice(0, 3)).toEqual(['1100.00', 'calculated', 'ledger']);
-    expect(one(`select (s.data_quality -> 'warnings')::text from public.metric_current c
-      join public.metric_snapshots s on s.id = c.snapshot_id and s.organization_id = c.organization_id
-      join public.fiscal_periods p on p.id = c.period_id and p.organization_id = c.organization_id
-     where c.organization_id = '${mixedPartial}' and c.metric_key = 'revenue' and c.dimension_type = 'none' and p.period_start = '2026-07-01'`))
+  it('ledger beside an UNATTESTED July report: July is the ledger\'s 1,100 (calculated), never 5,000 nor 6,100', async () => {
+    expect((await metric(mixedPartial, '2026-07', 'revenue')).split('|').slice(0, 3)).toEqual(['1100.00', 'calculated', 'ledger']);
+    expect(jsonbText((await currentFigure(mixedPartial, '2026-07-01', 'revenue'))?.dataQuality.warnings ?? null))
       .toContain('balance_report_incomplete');
   });
 });

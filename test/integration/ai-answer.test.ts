@@ -7,7 +7,11 @@ import {
   type ModelCall, type ModelResponse, type ModelTransport, type SubmitAnswer,
 } from '@/modules/ai';
 import type { AccessContext } from '@/modules/tenancy';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup';
+import { orgCollection, orgRow } from '@/db/schema';
+import {
+  addCommittedBatch, currentSnapshot, dropUsers, dropWhere, enqueue, makeOrg, periodOf, postLedger, setOrgQuota,
+} from './ai-fixtures';
+import { clientFor, createAuthUser, deleteOrg, drainUntilFinished, fs } from './setup';
 
 /**
  * The analyst turn, end to end, against a real computed organisation and a SCRIPTED model
@@ -23,14 +27,15 @@ import { adminSql, clientFor, createAuthUser, drainUntilFinished } from './setup
  */
 
 const RUN = `an${Date.now().toString(36)}`;
-const DOMAIN = `${RUN}.answer.itest`;
+const DOMAIN = `${RUN}.answer.itest.motion`;
 
 let ownerId: string;
 let orgId: string;
 let mayPeriodId: string;
 let revenueSnapshot: string;
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`);
+/** The stored assistant message of a turn, as the server wrote it. */
+const message = async (id: string) => (await orgRow(fs(), orgId, 'ai_messages', id).get()).data()!;
 
 function contextFor(userId: string, role: 'owner' | 'client' = 'owner'): AccessContext {
   return {
@@ -74,42 +79,25 @@ function submission(over: Partial<SubmitAnswer>): SubmitAnswer {
 }
 
 beforeAll(async () => {
-  ownerId = createAuthUser(`owner@${DOMAIN}`);
-  const created = await clientFor(ownerId).schema('api').rpc('create_organization', { p_name: `ITest Answer ${RUN}` });
-  if (created.error) throw new Error(`fixture org failed: ${created.error.message}`);
-  orgId = created.data as unknown as string;
-  mayPeriodId = one(`select id from public.fiscal_periods where organization_id = '${orgId}' and period_start = '2026-05-01'`);
+  ownerId = await createAuthUser(`owner@${DOMAIN}`);
+  orgId = await makeOrg(ownerId, `ITest Answer ${RUN}`);
+  mayPeriodId = periodOf(orgId, '2026-05-01');
 
-  const revenueAccount = one(`select id from public.accounts where organization_id = '${orgId}' and standard_category = 'revenue' and is_system`);
-  const documentId = one(`
-    insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-    values ('${orgId}', '${orgId}/answer/gl.csv', 'gl.csv', 'text/csv', 10, decode('e9','hex'), 'ready', 'general_ledger') returning id`);
-  const batchId = one(`
-    insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method, period_start, period_end, committed_at)
-    values ('${orgId}', '${documentId}', 'general_ledger', 'ledger_entries', 'committed', 'csv', '2026-05-01', '2026-05-31', now()) returning id`);
-  const rowId = one(`
-    insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
-    values ('${orgId}', '${batchId}', 2, 'csv:row:2', '{}'::jsonb, '{}'::jsonb, 'committed') returning id`);
-  const entryId = one(`
-    insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status, source_document_id, import_batch_id, import_row_id, source_ref)
-    values ('${orgId}', '2026-05-10', '${revenueAccount}', 'credit', 20000.00, '00000000-0000-0000-0000-000000000000', 'accepted', '${documentId}', '${batchId}', '${rowId}', 'csv:row:2') returning id`);
-  adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id) values ('${orgId}', 'ledger_entries', '${entryId}', 'accepted', '${batchId}')`);
+  const batch = await addCommittedBatch(orgId, {
+    importType: 'general_ledger', targetTable: 'ledger_entries', periodStart: '2026-05-01', periodEnd: '2026-05-31',
+    filename: 'gl.csv', documentKind: 'general_ledger',
+  });
+  await postLedger(orgId, batch, { category: 'revenue', direction: 'credit', amount: '20000.00', date: '2026-05-10', line: 2 });
 
-  const jobId = adminSql(`
-    insert into public.jobs (organization_id, job_type, payload, max_attempts)
-    values ('${orgId}', 'calculation.run', '{"trigger":"recalc_manual","as_of":"2026-06-15"}'::jsonb, 3) returning id`).split('\n')[0]!.trim();
+  const jobId = await enqueue(orgId, 'calculation.run', { trigger: 'recalc_manual', as_of: '2026-06-15' });
   expect(await drainUntilFinished(drainJobs, jobId)).toBe('succeeded');
-  revenueSnapshot = one(`
-    select c.snapshot_id::text from public.metric_current c
-     where c.organization_id = '${orgId}' and c.period_id = '${mayPeriodId}' and c.metric_key = 'revenue' and c.dimension_type = 'none'`);
-});
+  revenueSnapshot = await currentSnapshot(orgId, mayPeriodId, 'revenue');
+}, 120_000);
 
-afterAll(() => {
-  adminSql(`
-    delete from public.organizations where name like 'ITest Answer%${RUN}';
-    delete from auth.users where email like '%@${DOMAIN}';
-    delete from public.organizations where name like 'ITest Answer %' and created_at < now() - interval '1 hour';
-    delete from auth.users where email like '%.answer.itest' and created_at < now() - interval '1 hour';`);
+afterAll(async () => {
+  await deleteOrg(orgId);
+  await dropWhere('jobs', 'organization_id', [orgId]);
+  await dropUsers(DOMAIN);
 });
 
 async function turn(transport: ModelTransport, message = 'How was revenue in May 2026?', ctx = contextFor(ownerId)) {
@@ -156,12 +144,10 @@ describe('a grounded answer (§2 happy path)', () => {
 
     const { out, statuses } = await turn(transport);
     // On failure, surface the server's own reason and the tool's record rather than the outcome.
-    const diagnostics = () => adminSql(`
-      select 'report=' || coalesce(m.grounding_report::text, '-') || ' || tool=' || coalesce(
-        (select t.tool_name || ' ok=' || (t.error is null) || ' err=' || coalesce(t.error, '-') || ' summary=' || coalesce(t.output_summary::text, '-')
-           from public.ai_tool_calls t where t.message_id = m.id limit 1), '-')
-        from public.ai_messages m where m.id = '${out.messageId}'`);
-    expect(out.groundingStatus, diagnostics()).toBe('passed');
+    const stored = await message(out.messageId);
+    const calls = await orgCollection(fs(), orgId, 'ai_tool_calls').where('message_id', '==', out.messageId).get();
+    const diagnostics = `report=${JSON.stringify(stored.grounding_report)} || tool=${JSON.stringify(calls.docs[0]?.data() ?? null)}`;
+    expect(out.groundingStatus, diagnostics).toBe('passed');
     expect(statuses).toEqual(['get_metric']);
     expect(out.toolCalls).toBe(1);
     expect(out.evidenceBundleId).toMatch(/^[0-9a-f-]{36}$/);
@@ -169,10 +155,10 @@ describe('a grounded answer (§2 happy path)', () => {
     expect(revenueDisplay).toMatch(/^£/);
 
     // Persisted by the server: the assistant row, the tool call, the bundle citing the snapshot.
-    const row = adminSql(`select grounding_status || '|' || input_tokens || '|' || output_tokens from public.ai_messages where id = '${out.messageId}'`);
-    expect(row).toBe('passed|300|100');
-    expect(adminSql(`select count(*) from public.ai_tool_calls where message_id = '${out.messageId}' and authorized`)).toBe('1');
-    expect(adminSql(`select ref_id::text from public.evidence_items where bundle_id = '${out.evidenceBundleId}' and item_type = 'metric_snapshot'`)).toBe(revenueSnapshot);
+    expect(`${stored.grounding_status}|${stored.input_tokens}|${stored.output_tokens}`).toBe('passed|300|100');
+    expect(calls.docs.filter((d) => d.get('authorized') === true)).toHaveLength(1);
+    const items = await orgCollection(fs(), orgId, 'evidence_items').where('bundle_id', '==', out.evidenceBundleId).get();
+    expect(items.docs.filter((d) => d.get('item_type') === 'metric_snapshot').map((d) => d.get('ref_id'))).toEqual([revenueSnapshot]);
   });
 
   it('the forced final call carries tool_choice = submit_answer once the budget is spent, and text blocks are never stored', async () => {
@@ -184,8 +170,9 @@ describe('a grounded answer (§2 happy path)', () => {
     expect(out.groundingStatus).toBe('not_applicable');
     expect(transport.calls[1]!.toolChoice).toEqual({ type: 'tool', name: SUBMIT_ANSWER_TOOL });
     // F-C-08: the text block's figure is nowhere.
-    expect(adminSql(`select coalesce(content, 'NULL') from public.ai_messages where id = '${out.messageId}'`)).toBe('NULL');
-    expect(adminSql(`select structured_response::text from public.ai_messages where id = '${out.messageId}'`)).not.toContain('999,999');
+    const stored = await message(out.messageId);
+    expect(stored.content).toBeNull();
+    expect(JSON.stringify(stored.structured_response)).not.toContain('999,999');
   });
 });
 
@@ -233,9 +220,9 @@ describe('grounding failure degrades by removal, never by caveat (§7.8, F-C-14,
     // revenue snapshot, which no surviving statement cites either — so it goes.
     expect(out.answer?.recommended_actions).toEqual([]);
     // The removed text lives only in the report.
-    const report = adminSql(`select grounding_report::text from public.ai_messages where id = '${out.messageId}'`);
-    expect(report).toContain('9,999');
-    expect(adminSql(`select structured_response::text from public.ai_messages where id = '${out.messageId}'`)).not.toContain('9,999');
+    const stored = await message(out.messageId);
+    expect(JSON.stringify(stored.grounding_report)).toContain('9,999');
+    expect(JSON.stringify(stored.structured_response)).not.toContain('9,999');
   });
 });
 
@@ -246,7 +233,7 @@ describe('failure is honest (§7.8, §10.2)', () => {
     expect(out.groundingStatus).toBe('failed');
     expect(out.answer).toBeNull();
     expect(out.evidenceBundleId).toBeNull();
-    expect(adminSql(`select grounding_report ->> 'reason' from public.ai_messages where id = '${out.messageId}'`)).toMatch(/model_error|upstream/);
+    expect(String((await message(out.messageId)).grounding_report?.reason)).toMatch(/model_error|upstream/);
     expect(FALLBACK_MESSAGE).toMatch(/unavailable/);
   });
 
@@ -260,16 +247,16 @@ describe('failure is honest (§7.8, §10.2)', () => {
     ]);
     const { out } = await turn(transport);
     expect(out.groundingStatus).toBe('failed');
-    expect(adminSql(`select grounding_report ->> 'reason' from public.ai_messages where id = '${out.messageId}'`)).toBe('inadmissible_after_retry');
+    expect((await message(out.messageId)).grounding_report?.reason).toBe('inadmissible_after_retry');
   });
 
   it('the quota is charged before any model call, and an exhausted organisation never reaches the model', async () => {
-    adminSql(`insert into public.platform_org_settings (organization_id, ai_quota_daily) values ('${orgId}', 0) on conflict (organization_id) do update set ai_quota_daily = 0`);
+    await setOrgQuota(orgId, { ai_quota_daily: 0 });
     let modelCalled = false;
     const transport: ModelTransport = async () => { modelCalled = true; throw new Error('should not be called'); };
     await expect(turn(transport)).rejects.toBeInstanceOf(QuotaExceeded);
     expect(modelCalled).toBe(false);
-    adminSql(`delete from public.platform_org_settings where organization_id = '${orgId}'`);
+    await setOrgQuota(orgId, null);
   });
 });
 

@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { commitImportBatch } from '@/modules/imports';
 import type { ClaimedJob, JobOutcome } from '../domain/types';
 
@@ -23,6 +23,6 @@ export async function commitLargeBatchJob(
     return { status: 'failed', error: 'import.commit_large needs the batch it is committing' };
   }
 
-  const result = await commitImportBatch(scope.db as SupabaseClient, batchId);
+  const result = await commitImportBatch(scope.db as Db, batchId);
   return { status: 'succeeded', result: { ...result } };
 }

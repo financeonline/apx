@@ -1,5 +1,7 @@
 import 'server-only';
-import { NotFound, toMotionError } from '@/core/errors';
+import { NotFound } from '@/core/errors';
+import { orgRowById } from '@/db/rls';
+import type { OrgTable } from '@/db/schema';
 import { assertCan, can } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
 import { ITEM_TYPE_TABLE, LIFECYCLE_TABLES, isPinnedItemType } from '../data/bundles';
@@ -92,17 +94,9 @@ export async function getDocumentReference(
     throw new NotFound();
   }
 
-  const { data, error } = await ctx.db
-    .from(recordRef.table)
-    .select('id, source_document_id, source_ref, import_row_id')
-    .eq('organization_id', orgId)
-    .eq('id', recordRef.id)
-    .maybeSingle();
-  if (error) throw toMotionError(error);
-
-  const record = data as {
+  const record = await orgRowById<{
     source_document_id?: string | null; source_ref?: string | null; import_row_id?: string | null;
-  } | null;
+  }>(ctx.db, orgId, recordRef.table as OrgTable, recordRef.id);
   const documentId = record?.source_document_id ?? null;
   if (documentId === null) {
     /*
@@ -118,14 +112,8 @@ export async function getDocumentReference(
   let sourceRef = record?.source_ref ?? null;
   let page: number | null = null;
   if (record?.import_row_id) {
-    const { data: rowData, error: rowError } = await ctx.db
-      .from('import_rows')
-      .select('source_ref, source_page')
-      .eq('organization_id', orgId)
-      .eq('id', record.import_row_id)
-      .maybeSingle();
-    if (rowError) throw toMotionError(rowError);
-    const importRow = rowData as { source_ref?: string | null; source_page?: number | null } | null;
+    const importRow = await orgRowById<{ source_ref?: string | null; source_page?: number | null }>(
+      ctx.db, orgId, 'import_rows', record.import_row_id);
     if (importRow?.source_ref) sourceRef = importRow.source_ref;
     page = importRow?.source_page ?? null;
   }
@@ -136,7 +124,7 @@ export async function getDocumentReference(
     /*
      * §10 and CD-17: the client role stops here. The panel says "Source documents are available to
      * owners and admins" (UX_ARCHITECTURE.md §376), and nothing about the file travels with it —
-     * `source_documents` is not readable to a client under RLS in any case, so naming the file here
+     * `source_documents` is not readable to a client under its row policy in any case, so naming the file here
      * would mean reaching past the boundary to render a caption.
      *
      * The line reference is kept. It comes from `import_rows`, which a client may read, and it is
@@ -155,16 +143,9 @@ export async function getDocumentReference(
     };
   }
 
-  const { data: docData, error: docError } = await ctx.db
-    .from('source_documents')
-    .select('id, original_filename, mime_type, page_count')
-    .eq('organization_id', orgId)
-    .eq('id', documentId)
-    .maybeSingle();
-  if (docError) throw toMotionError(docError);
-  const document = docData as {
+  const document = await orgRowById<{
     id: string; original_filename: string; mime_type: string; page_count: number | null;
-  } | null;
+  }>(ctx.db, orgId, 'source_documents', documentId);
   if (document === null) throw new NotFound();
 
   return {

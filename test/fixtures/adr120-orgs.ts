@@ -17,8 +17,16 @@
  *            first statement's own opening balance (CD-06) with nothing typed on the account
  */
 import { expect } from 'vitest';
+import { periodId as derivedPeriodId } from '@/db/app/shared';
+import { orgCollection, orgRow } from '@/db/schema';
 import { drainJobs } from '@/modules/jobs';
-import { adminSql, clientFor, createAuthUser, drainUntilFinished } from '../integration/setup';
+import { createAuthUser, fs } from '../integration/setup';
+import { Decimal } from '@/core/money/decimal';
+import { metricValueText } from './engine-dump';
+import {
+  jobsOf, seedAccepted, seedBankAccount, seedBankTransaction, seedBatch, seedCounterparty, seedDocument, seedImportRow,
+  seedInvoice, seedJob, seedLedgerEntry, seedOrg, seedPeriodBalance,
+} from './seed';
 
 export const AS_OF = '2026-09-15';
 /**
@@ -35,69 +43,65 @@ export const MONTHS = [
 
 export type FixtureKey = 'BANK' | 'INVBANK' | 'INVONLY' | 'LEDGER' | 'TB' | 'EMPTY' | 'HISTORY';
 
-const one = (sql: string): string => adminSql(`with q as (${sql}) select * from q`).split('\n')[0]!.trim();
-
-function account(org: string, category: string): string {
-  return one(`select id from public.accounts where organization_id = '${org}' and standard_category = '${category}'
-               order by is_system desc, id limit 1`);
+async function account(org: string, category: string): Promise<string> {
+  const snap = await orgCollection(fs(), org, 'accounts').where('standard_category', '==', category).get();
+  const rows = snap.docs.map((d) => d.data()).sort((a, b) =>
+    Number(b.is_system === true) - Number(a.is_system === true) || String(a.id).localeCompare(String(b.id)));
+  return String(rows[0]?.id ?? '');
 }
 
-function document(org: string, tag: string, kind: string): string {
-  return one(`insert into public.source_documents (organization_id, storage_path, original_filename, mime_type, byte_size, sha256, status, document_kind)
-    values ('${org}', '${org}/adr120/${tag}.csv', '${tag}.csv', 'text/csv', 10, digest('${org}${tag}', 'sha256'), 'ready', '${kind}') returning id`);
-}
+const document = (org: string, tag: string, kind: string): Promise<string> => seedDocument(org, `${tag}.csv`, kind);
+
+/** The reviewer's IMP-INV-013 answer, as a real commit stores it. */
+const openingComplete = (): Record<string, unknown> =>
+  ({ 'IMP-INV-013': { by: null, at: new Date().toISOString(), value: { opening: 'complete' } } });
 
 function batch(org: string, doc: string, o: {
   importType: string; target: string; start: string; end: string;
   bankAccount?: string; listKind?: 'full' | 'open_items'; balanceBasis?: 'cumulative' | 'movement';
-}): string {
+}): Promise<string> {
   // R-2: the fixtures' invoice lists are complete exports, confirmed to hold every invoice unpaid at their start.
-  const confirmations = o.target === 'invoices' ? `jsonb_build_object('IMP-INV-013', jsonb_build_object('by', null, 'at', now(), 'value', jsonb_build_object('opening', 'complete')))` : `'{}'::jsonb`;
-  return one(`insert into public.import_batches (organization_id, source_document_id, import_type, target_table, status, extraction_method,
-      period_start, period_end, committed_at, bank_account_id, invoice_list_kind, balance_basis, confirmations)
-    values ('${org}', '${doc}', '${o.importType}', '${o.target}', 'committed', 'csv', '${o.start}', '${o.end}', '${COMMITTED_AT}',
-      ${o.bankAccount ? `'${o.bankAccount}'` : 'null'}, ${o.listKind ? `'${o.listKind}'` : 'null'},
-      ${o.balanceBasis ? `'${o.balanceBasis}'` : 'null'}, ${confirmations}) returning id`);
+  return seedBatch(org, {
+    importType: o.importType, target: o.target, start: o.start, end: o.end, committedAt: COMMITTED_AT, documentId: doc,
+    bankAccountId: o.bankAccount ?? null, listKind: o.listKind ?? null, balanceBasis: o.balanceBasis ?? null,
+    confirmations: o.target === 'invoices' ? openingComplete() : {},
+  });
 }
 
 let rowNumber = 0;
-function importRow(org: string, batchId: string): string {
+async function importRow(org: string, batchId: string): Promise<string> {
   rowNumber += 1;
-  return one(`insert into public.import_rows (organization_id, batch_id, row_number, source_ref, raw_data, mapped_data, status)
-    values ('${org}', '${batchId}', ${rowNumber}, 'r${rowNumber}', '{}'::jsonb, '{}'::jsonb, 'committed') returning id`);
+  return seedImportRow(org, batchId);
 }
 
-function accepted(org: string, table: string, id: string, batchId: string): void {
-  adminSql(`insert into public.record_status_events (organization_id, record_table, record_id, event, import_batch_id)
-    values ('${org}', '${table}', '${id}', 'accepted', '${batchId}')`);
-}
+const accepted = (org: string, table: string, id: string, batchId: string): Promise<void> => seedAccepted(org, table, id, batchId);
 
 /**
  * A current account with statements for June–August; `moves[m]` are that month's signed amounts.
  * `openingBalance` is typed on the account (dated 05-31); `statementOpening`, when given, is printed
  * on the JUNE statement instead — the first source CD-06 names.
  */
-function bankStatements(
+async function bankStatements(
   org: string, openingBalance: string | null, moves: readonly (readonly string[])[], statementOpening: string | null = null,
-): string {
-  const bank = one(`insert into public.bank_accounts (organization_id, name, bank_name, account_type, opening_balance, opening_balance_date, is_active)
-    values ('${org}', 'Main', 'Test Bank', 'current', ${openingBalance ?? 'null'}, ${openingBalance === null ? 'null' : `'2026-05-31'`}, true) returning id`);
-  MONTHS.forEach((month, m) => {
-    const doc = document(org, `bank-${month.key}`, 'bank_statement');
-    const b = batch(org, doc, { importType: 'bank_statement', target: 'bank_transactions', start: month.start, end: month.end, bankAccount: bank });
-    if (m === 0 && statementOpening !== null) {
-      adminSql(`update public.import_batches set statement_opening_balance = ${statementOpening} where id = '${b}'`);
-    }
-    (moves[m] ?? []).forEach((amount, i) => {
-      const row = importRow(org, b);
-      const id = one(`insert into public.bank_transactions (organization_id, bank_account_id, transaction_date, amount, currency, description_raw,
-          description_normalized, period_id, category_source, record_status, assurance_level, duplicate_reviewed, source_document_id,
-          import_batch_id, import_row_id, source_ref, is_transfer, transfer_kind)
-        values ('${org}', '${bank}', '${month.start.slice(0, 8)}${String(10 + i).padStart(2, '0')}', ${amount}, 'GBP', 'mv ${m}-${i}', 'mv ${m}-${i}',
-          '00000000-0000-0000-0000-000000000000', 'none', 'accepted', 'verified', true, '${doc}', '${b}', '${row}', 'b${m}-${i}', false, 'none') returning id`);
-      accepted(org, 'bank_transactions', id, b);
-    });
+): Promise<string> {
+  const bank = await seedBankAccount(org, {
+    name: 'Main', accountType: 'current', openingBalance, openingBalanceDate: openingBalance === null ? null : '2026-05-31',
   });
+  for (const [m, month] of MONTHS.entries()) {
+    const doc = await document(org, `bank-${month.key}`, 'bank_statement');
+    const b = await batch(org, doc, { importType: 'bank_statement', target: 'bank_transactions', start: month.start, end: month.end, bankAccount: bank });
+    if (m === 0 && statementOpening !== null) {
+      await orgRow(fs(), org, 'import_batches', b).update({ statement_opening_balance: new Decimal(statementOpening).toFixed(2) });
+    }
+    for (const [i, amount] of (moves[m] ?? []).entries()) {
+      const row = await importRow(org, b);
+      const id = await seedBankTransaction(org, {
+        bankAccountId: bank, date: `${month.start.slice(0, 8)}${String(10 + i).padStart(2, '0')}`, amount,
+        description: `mv ${m}-${i}`, documentId: doc, batchId: b, importRowId: row, sourceRef: `b${m}-${i}`,
+      });
+      await accepted(org, 'bank_transactions', id, b);
+    }
+  }
   return bank;
 }
 
@@ -119,18 +123,17 @@ interface InvoiceSeed {
  * A committed full invoice list and its rows, each with the `accepted` lifecycle event a real commit
  * writes — the evidence resolver reconstructs what a run saw from those events (EVIDENCE_MODEL.md §3).
  */
-function invoiceList(org: string, importType: 'sales_invoices' | 'purchase_invoices', rows: readonly InvoiceSeed[]): void {
-  const doc = document(org, importType, 'invoice');
-  const b = batch(org, doc, { importType, target: 'invoices', start: '2026-06-01', end: '2026-08-31', listKind: 'full' });
+async function invoiceList(org: string, importType: 'sales_invoices' | 'purchase_invoices', rows: readonly InvoiceSeed[]): Promise<void> {
+  const doc = await document(org, importType, 'invoice');
+  const b = await batch(org, doc, { importType, target: 'invoices', start: '2026-06-01', end: '2026-08-31', listKind: 'full' });
   for (const r of rows) {
-    const row = importRow(org, b);
-    const id = one(`insert into public.invoices (organization_id, invoice_type, counterparty_id, invoice_number, issue_date, due_date, period_id,
-        subtotal, tax_amount, total_amount, amount_paid, paid_date, status, record_status, assurance_level,
-        source_document_id, import_batch_id, import_row_id, source_ref)
-      values ('${org}', '${r.type}', '${r.party}', '${r.number}', '${r.issue}', ${r.due ? `'${r.due}'` : 'null'},
-        '00000000-0000-0000-0000-000000000000', ${r.subtotal}, ${r.tax}, ${r.total}, ${r.paid}, ${r.paidDate ? `'${r.paidDate}'` : 'null'},
-        '${r.status}', 'accepted', 'verified', '${doc}', '${b}', '${row}', 'inv${rowNumber}') returning id`);
-    accepted(org, 'invoices', id, b);
+    const row = await importRow(org, b);
+    const id = await seedInvoice(org, {
+      type: r.type, counterpartyId: r.party, number: r.number, issue: r.issue, due: r.due, subtotal: r.subtotal,
+      tax: r.tax, total: r.total, paid: r.paid, paidDate: r.paidDate, status: r.status,
+      documentId: doc, batchId: b, importRowId: row, sourceRef: `inv${rowNumber}`,
+    });
+    await accepted(org, 'invoices', id, b);
   }
 }
 
@@ -152,10 +155,10 @@ function invoiceList(org: string, importType: 'sales_invoices' | 'purchase_invoi
  * payables     Jun 30: P1 600 · Jul 31: 0 (a stated zero) · Aug 31: P2 900, overdue 900
  * receivables_days Aug: 4,400 / (1,200 + 2,400 + 3,600 − 600) × 91.25 = 4,400 / 6,600 × 91.25 = 60.83 → 61
  */
-function invoiceSet(org: string, withPurchases: boolean): void {
-  const acme = one(`insert into public.counterparties (organization_id, name, kind) values ('${org}', 'Acme Ltd', 'customer') returning id`);
-  const beta = one(`insert into public.counterparties (organization_id, name, kind) values ('${org}', 'Beta plc', 'customer') returning id`);
-  invoiceList(org, 'sales_invoices', [
+async function invoiceSet(org: string, withPurchases: boolean): Promise<void> {
+  const acme = await seedCounterparty(org, { name: 'Acme Ltd', kind: 'customer' });
+  const beta = await seedCounterparty(org, { name: 'Beta plc', kind: 'customer' });
+  await invoiceList(org, 'sales_invoices', [
     { type: 'sales', party: acme, number: 'S1', issue: '2026-06-05', due: '2026-07-05', subtotal: '1000', tax: '200', total: '1200', paid: '1200', paidDate: '2026-07-01', status: 'paid' },
     { type: 'sales', party: beta, number: 'S2', issue: '2026-07-10', due: '2026-08-09', subtotal: '2000', tax: '400', total: '2400', paid: '0', paidDate: null, status: 'open' },
     { type: 'sales', party: acme, number: 'S3', issue: '2026-08-03', due: '2026-09-02', subtotal: '3000', tax: '600', total: '3600', paid: '1000', paidDate: null, status: 'partially_paid' },
@@ -163,9 +166,8 @@ function invoiceSet(org: string, withPurchases: boolean): void {
     { type: 'sales', party: beta, number: 'V1', issue: '2026-08-12', due: '2026-08-12', subtotal: '9999', tax: '0', total: '9999', paid: '0', paidDate: null, status: 'void' },
   ]);
   if (withPurchases) {
-    const parts = one(`insert into public.counterparties (organization_id, name, kind, default_expense_category)
-      values ('${org}', 'Parts Co', 'supplier', 'cost_of_sales') returning id`);
-    invoiceList(org, 'purchase_invoices', [
+    const parts = await seedCounterparty(org, { name: 'Parts Co', kind: 'supplier', defaultExpenseCategory: 'cost_of_sales' });
+    await invoiceList(org, 'purchase_invoices', [
       { type: 'purchase', party: parts, number: 'P1', issue: '2026-06-12', due: '2026-07-12', subtotal: '500', tax: '100', total: '600', paid: '600', paidDate: '2026-07-10', status: 'paid' },
       { type: 'purchase', party: parts, number: 'P2', issue: '2026-08-15', due: '2026-08-25', subtotal: '750', tax: '150', total: '900', paid: '0', paidDate: null, status: 'open' },
     ]);
@@ -183,36 +185,37 @@ function invoiceSet(org: string, withPurchases: boolean): void {
  *   receivables Jun 5,000 + 4,000 − 3,000 = 6,000.00 · Jul + 3,000 − 2,500 = 6,500.00 · Aug + 2,000 − 6,000 = 2,500.00
  *   payables    Jun 2,000 + 1,000 − 800   = 2,200.00 · Jul 2,400.00 · Aug 2,600.00
  */
-function ledgerOrg(org: string): void {
-  const docs = MONTHS.map((month) => {
-    const doc = document(org, `gl-${month.key}`, 'general_ledger');
-    return { doc, batch: batch(org, doc, { importType: 'general_ledger', target: 'ledger_entries', start: month.start, end: month.end }) };
-  });
-  const post = (m: number, day: string, category: string, direction: 'debit' | 'credit', amount: string, opening = false) => {
+async function ledgerOrg(org: string): Promise<void> {
+  const docs: Array<{ doc: string; batch: string }> = [];
+  for (const month of MONTHS) {
+    const doc = await document(org, `gl-${month.key}`, 'general_ledger');
+    docs.push({ doc, batch: await batch(org, doc, { importType: 'general_ledger', target: 'ledger_entries', start: month.start, end: month.end }) });
+  }
+  const post = async (m: number, day: string, category: string, direction: 'debit' | 'credit', amount: string, opening = false) => {
     const { doc, batch: b } = docs[m]!;
-    const row = importRow(org, b);
-    const id = one(`insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status,
-        source_document_id, import_batch_id, import_row_id, source_ref, is_opening_balance)
-      values ('${org}', '${MONTHS[m]!.start.slice(0, 8)}${day}', '${account(org, category)}', '${direction}', ${amount},
-        '00000000-0000-0000-0000-000000000000', 'accepted', '${doc}', '${b}', '${row}', 'gl${rowNumber}', ${opening}) returning id`);
-    accepted(org, 'ledger_entries', id, b);
+    const row = await importRow(org, b);
+    const id = await seedLedgerEntry(org, {
+      date: `${MONTHS[m]!.start.slice(0, 8)}${day}`, accountId: await account(org, category), direction, amount,
+      documentId: doc, batchId: b, importRowId: row, sourceRef: `gl${rowNumber}`, isOpeningBalance: opening,
+    });
+    await accepted(org, 'ledger_entries', id, b);
   };
-  post(0, '01', 'receivables', 'debit', '5000', true);
-  post(0, '01', 'payables', 'credit', '2000', true);
-  post(0, '01', 'equity', 'credit', '3000', true);
+  await post(0, '01', 'receivables', 'debit', '5000', true);
+  await post(0, '01', 'payables', 'credit', '2000', true);
+  await post(0, '01', 'equity', 'credit', '3000', true);
   const sales = ['4000', '3000', '2000'];
   const receipts = ['3000', '2500', '6000'];
-  MONTHS.forEach((month, m) => {
+  for (const [m, month] of MONTHS.entries()) {
     const last = month.end.slice(8, 10);
-    post(m, '05', 'receivables', 'debit', sales[m]!);
-    post(m, '05', 'revenue', 'credit', sales[m]!);
-    post(m, '15', 'cash', 'debit', receipts[m]!);
-    post(m, '15', 'receivables', 'credit', receipts[m]!);
-    post(m, '20', 'cost_of_sales', 'debit', '1000');
-    post(m, '20', 'payables', 'credit', '1000');
-    post(m, last, 'payables', 'debit', '800');
-    post(m, last, 'cash', 'credit', '800');
-  });
+    await post(m, '05', 'receivables', 'debit', sales[m]!);
+    await post(m, '05', 'revenue', 'credit', sales[m]!);
+    await post(m, '15', 'cash', 'debit', receipts[m]!);
+    await post(m, '15', 'receivables', 'credit', receipts[m]!);
+    await post(m, '20', 'cost_of_sales', 'debit', '1000');
+    await post(m, '20', 'payables', 'credit', '1000');
+    await post(m, last, 'payables', 'debit', '800');
+    await post(m, last, 'cash', 'credit', '800');
+  }
 }
 
 /**
@@ -227,7 +230,7 @@ function ledgerOrg(org: string): void {
  *   receivables  7,000.00 / 8,000.00 / 9,000.00   (balance basis, no aging)
  *   payables     3,000.00 / 0.00 / 4,000.00
  */
-function trialBalanceOrg(org: string): void {
+async function trialBalanceOrg(org: string): Promise<void> {
   const lines: Record<string, readonly (string | null)[]> = {
     receivables: ['7000', '8000', '9000'],
     payables: ['-3000', null, '-4000'],
@@ -236,32 +239,30 @@ function trialBalanceOrg(org: string): void {
     revenue: ['-6000', '-12000', '-18000'],
     cost_of_sales: ['2000', '4000', '6000'],
   };
-  MONTHS.forEach((month, m) => {
-    const doc = document(org, `tb-${month.key}`, 'trial_balance');
-    const b = batch(org, doc, { importType: 'trial_balance', target: 'period_balances', start: month.start, end: month.end, balanceBasis: 'cumulative' });
+  for (const [m, month] of MONTHS.entries()) {
+    const doc = await document(org, `tb-${month.key}`, 'trial_balance');
+    const b = await batch(org, doc, { importType: 'trial_balance', target: 'period_balances', start: month.start, end: month.end, balanceBasis: 'cumulative' });
     for (const [category, values] of Object.entries(lines)) {
       const value = values[m];
       if (value === null || value === undefined) continue;
-      const row = importRow(org, b);
-      const id = one(`insert into public.period_balances (organization_id, period_start, period_id, account_id, closing_balance,
-          balance_kind, balance_basis, source_document_id, import_batch_id, import_row_id, source_ref, record_status)
-        values ('${org}', '${month.start}', '00000000-0000-0000-0000-000000000000', '${account(org, category)}', ${value},
-          'trial_balance', 'cumulative', '${doc}', '${b}', '${row}', 'tb${rowNumber}', 'accepted') returning id`);
-      accepted(org, 'period_balances', id, b);
+      const row = await importRow(org, b);
+      const id = await seedPeriodBalance(org, {
+        periodStart: month.start, accountId: await account(org, category), closing: value, kind: 'trial_balance',
+        basis: 'cumulative', documentId: doc, batchId: b, importRowId: row, sourceRef: `tb${rowNumber}`,
+      });
+      await accepted(org, 'period_balances', id, b);
     }
-  });
+  }
 }
 
 export async function seedAdr120Orgs(tag: string): Promise<Record<FixtureKey, string>> {
-  const owners = [createAuthUser(`owner-a@${tag}.adr120.itest`), createAuthUser(`owner-b@${tag}.adr120.itest`),
-    createAuthUser(`owner-c@${tag}.adr120.itest`), createAuthUser(`owner-d@${tag}.adr120.itest`)];
+  const owners = [await createAuthUser(`owner-a@${tag}.adr120.itest`), await createAuthUser(`owner-b@${tag}.adr120.itest`),
+    await createAuthUser(`owner-c@${tag}.adr120.itest`), await createAuthUser(`owner-d@${tag}.adr120.itest`)];
   let n = 0;
   const create = async (name: string): Promise<string> => {
-    // `create_organization` is throttled per person, so the six organisations take three owners.
+    // Two organisations per owner, as `create_organization`'s per-person throttle required.
     const owner = owners[Math.floor(n++ / 2)]!;
-    const r = await clientFor(owner).schema('api').rpc('create_organization', { p_name: `ADR120 ${name} ${tag}` });
-    if (r.error) throw new Error(r.error.message);
-    return r.data as unknown as string;
+    return (await seedOrg({ name: `ADR120 ${name} ${tag}`, ownerId: owner })).orgId;
   };
   const orgs = {
     BANK: await create('Bank'), INVBANK: await create('InvBank'), INVONLY: await create('InvOnly'),
@@ -274,24 +275,24 @@ export async function seedAdr120Orgs(tag: string): Promise<Record<FixtureKey, st
    *   opening/closing  Jun 20,000 → 17,000 · Jul 17,000 → 14,000 · Aug 14,000 → 11,000
    *   runway Aug = 11,000 / mean burn 3,000 = 3.7 months (three months of history)
    */
-  bankStatements(orgs.BANK, '20000', [['2000', '-5000'], ['2000', '-5000'], ['2000', '-5000']]);
+  await bankStatements(orgs.BANK, '20000', [['2000', '-5000'], ['2000', '-5000'], ['2000', '-5000']]);
 
   // INVBANK — the invoice set plus a statement: opening 5,000; Jun +800 −600, Jul +1,200 −700, Aug −900.
   //   closing Jun 5,200 · Jul 5,700 · Aug 4,800
   //   working_capital Aug = 4,800 + 4,400 − 900 = 8,300.00 (no trial balance: inventory etc. unknown)
-  invoiceSet(orgs.INVBANK, true);
-  bankStatements(orgs.INVBANK, '5000', [['800', '-600'], ['1200', '-700'], ['-900']]);
+  await invoiceSet(orgs.INVBANK, true);
+  await bankStatements(orgs.INVBANK, '5000', [['800', '-600'], ['1200', '-700'], ['-900']]);
 
-  invoiceSet(orgs.INVONLY, false);
+  await invoiceSet(orgs.INVONLY, false);
 
   // LEDGER — plus a statement so cash is known: opening 10,000; Jun +3,000 −800, Jul +2,500 −800, Aug +6,000 −800.
-  ledgerOrg(orgs.LEDGER);
-  bankStatements(orgs.LEDGER, '10000', [['3000', '-800'], ['2500', '-800'], ['6000', '-800']]);
+  await ledgerOrg(orgs.LEDGER);
+  await bankStatements(orgs.LEDGER, '10000', [['3000', '-800'], ['2500', '-800'], ['6000', '-800']]);
 
   // TB — plus a statement: opening 3,000; Jun +500, Jul −200, Aug +100.  closing 3,500 / 3,300 / 3,400
   //   working_capital Aug = 3,400 + 9,000 + 2,000 (inventory) − 4,000 = 10,400.00; loan is not a WC term
-  trialBalanceOrg(orgs.TB);
-  bankStatements(orgs.TB, '3000', [['500'], ['-200'], ['100']]);
+  await trialBalanceOrg(orgs.TB);
+  await bankStatements(orgs.TB, '3000', [['500'], ['-200'], ['100']]);
 
   /*
    * HISTORY — a GL for March–August (sales 1,000 a month through the bank) and statements only from
@@ -299,43 +300,59 @@ export async function seedAdr120Orgs(tag: string): Promise<Record<FixtureKey, st
    *   Mar–May: no statement and no opening → cash unknown (NULL no_opening_cash), never 0
    *   Jun: opens at the statement's 8,000.00 (verified) → +1,500 → 9,500.00; Jul → 10,000.00; Aug → 10,300.00
    */
-  historyOrg(orgs.HISTORY);
-  bankStatements(orgs.HISTORY, null, [['1500'], ['500'], ['300']], '8000');
+  await historyOrg(orgs.HISTORY);
+  await bankStatements(orgs.HISTORY, null, [['1500'], ['500'], ['300']], '8000');
 
   return orgs;
 }
 
-function historyOrg(org: string): void {
+async function historyOrg(org: string): Promise<void> {
   const months = [
     { key: 'mar', start: '2026-03-01', end: '2026-03-31' }, { key: 'apr', start: '2026-04-01', end: '2026-04-30' },
     { key: 'may', start: '2026-05-01', end: '2026-05-31' }, ...MONTHS,
   ];
   for (const month of months) {
-    const doc = document(org, `hgl-${month.key}`, 'general_ledger');
-    const b = batch(org, doc, { importType: 'general_ledger', target: 'ledger_entries', start: month.start, end: month.end });
+    const doc = await document(org, `hgl-${month.key}`, 'general_ledger');
+    const b = await batch(org, doc, { importType: 'general_ledger', target: 'ledger_entries', start: month.start, end: month.end });
     for (const [category, direction] of [['cash', 'debit'], ['revenue', 'credit']] as const) {
-      const row = importRow(org, b);
-      const id = one(`insert into public.ledger_entries (organization_id, entry_date, account_id, direction, amount, period_id, record_status,
-          source_document_id, import_batch_id, import_row_id, source_ref)
-        values ('${org}', '${month.end}', '${account(org, category)}', '${direction}', 1000,
-          '00000000-0000-0000-0000-000000000000', 'accepted', '${doc}', '${b}', '${row}', 'h${rowNumber}') returning id`);
-      accepted(org, 'ledger_entries', id, b);
+      const row = await importRow(org, b);
+      const id = await seedLedgerEntry(org, {
+        date: month.end, accountId: await account(org, category), direction, amount: '1000',
+        documentId: doc, batchId: b, importRowId: row, sourceRef: `h${rowNumber}`,
+      });
+      await accepted(org, 'ledger_entries', id, b);
     }
+  }
+}
+
+/**
+ * Drains the queue until ONE job is terminal and returns its status. The queue is shared by every
+ * suite on the emulators, so another file's worker may hold this job `running` for a while: wait for
+ * it (up to `ms`) rather than give up after a fixed number of drains, as `drainUntilFinished` does.
+ */
+export async function untilFinished(jobId: string, ms = 600_000): Promise<string> {
+  const deadline = Date.now() + ms;
+  for (;;) {
+    const s = String((await fs().collection('jobs').doc(jobId).get()).get('status') ?? '');
+    if (s === 'succeeded' || s === 'failed' || s === 'dead' || s === 'cancelled' || s === '' || Date.now() > deadline) return s;
+    // Another suite's job this drain happens to claim may be deleted under it by that suite's
+    // teardown; that is not this job's outcome, which is read from its own document above.
+    const claimed = await drainJobs(3).then((r) => r.claimed, () => 1);
+    if (claimed === 0) await new Promise((resolve) => setTimeout(resolve, 500));
   }
 }
 
 /** One real calculation, then the alert pass it enqueues — both through the queue. */
 export async function calculateAndAlert(org: string): Promise<void> {
-  const jobId = one(`insert into public.jobs (organization_id, job_type, payload, max_attempts)
-    values ('${org}', 'calculation.run', '{"trigger":"recalc_manual","as_of":"${AS_OF}"}'::jsonb, 3) returning id`);
-  expect(await drainUntilFinished(drainJobs, jobId), `the calculation for ${org} must succeed`).toBe('succeeded');
-  const alertJob = one(`select id from public.jobs where organization_id = '${org}' and job_type = 'alerts.evaluate'
-    order by created_at desc limit 1`);
-  if (alertJob !== '') expect(await drainUntilFinished(drainJobs, alertJob)).toBe('succeeded');
+  const jobId = await seedJob(org, 'calculation.run', { trigger: 'recalc_manual', as_of: AS_OF }, 3);
+  expect(await untilFinished(jobId), `the calculation for ${org} must succeed`).toBe('succeeded');
+  const alertJob = (await jobsOf(org, { jobType: 'alerts.evaluate' }))[0];
+  if (alertJob) expect(await untilFinished(String(alertJob.id))).toBe('succeeded');
 }
 
+/** The fiscal period starting `start`: its id is derived, so no read is needed (FIRESTORE_DATA_MODEL.md §3). */
 export function periodId(org: string, start: string): string {
-  return one(`select id from public.fiscal_periods where organization_id = '${org}' and period_start = '${start}'`);
+  return derivedPeriodId(org, start);
 }
 
 export interface Headline {
@@ -346,34 +363,38 @@ export interface Headline {
   readonly snapshotId: string;
 }
 
+/** The current snapshots of `key` in the period starting `start` (every dimension, or one type). */
+export async function currentSnapshots(
+  org: string, start: string, key: string, dimensionType: string | null = 'none',
+): Promise<Array<Record<string, unknown>>> {
+  let q: FirebaseFirestore.Query = orgCollection(fs(), org, 'metric_current')
+    .where('period_id', '==', derivedPeriodId(org, start)).where('metric_key', '==', key);
+  if (dimensionType !== null) q = q.where('dimension_type', '==', dimensionType);
+  const pointers = await q.get();
+  if (pointers.empty) return [];
+  const snaps = await fs().getAll(...pointers.docs.map((p) => orgRow(fs(), org, 'metric_snapshots', String(p.get('snapshot_id')))));
+  return snaps.filter((s) => s.exists).map((s) => s.data()!);
+}
+
 /** The current headline snapshot of `key` in the period starting `start`, or undefined when none was written. */
-export function headline(org: string, start: string, key: string): Headline | undefined {
-  const raw = one(`select json_build_object('value', s.value::text, 'basis', s.basis, 'missing', s.data_quality->'missing',
-      'warnings', s.data_quality->'warnings', 'snapshotId', s.id)::text
-    from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id and s.organization_id = c.organization_id
-    join public.fiscal_periods p on p.id = c.period_id and p.organization_id = c.organization_id
-    where c.organization_id = '${org}' and p.period_start = '${start}' and c.metric_key = '${key}' and c.dimension_type = 'none'`);
-  if (raw === '') return undefined;
-  const parsed = JSON.parse(raw) as { value: string | null; basis: string; missing: string[] | null; warnings: string[] | null; snapshotId: string };
-  return { ...parsed, missing: parsed.missing ?? [], warnings: parsed.warnings ?? [] };
+export async function headline(org: string, start: string, key: string): Promise<Headline | undefined> {
+  const s = (await currentSnapshots(org, start, key))[0];
+  if (!s) return undefined;
+  const dq = (s.data_quality ?? {}) as { missing?: string[] | null; warnings?: string[] | null };
+  return {
+    value: metricValueText(s.value), basis: String(s.basis), missing: dq.missing ?? [], warnings: dq.warnings ?? [],
+    snapshotId: String(s.id),
+  };
 }
 
 /** Everything the regression audit compares: headline figures, health breakdowns and alerts, per fixture. */
-export function dumpOrg(org: string): unknown {
-  const metrics = adminSql(`select p.period_start || '|' || c.metric_key || '|' || coalesce(s.value::text, 'NULL') || '|' ||
-      coalesce((s.data_quality->'missing')::text, '[]')
-    from public.metric_current c join public.metric_snapshots s on s.id = c.snapshot_id and s.organization_id = c.organization_id
-    join public.fiscal_periods p on p.id = c.period_id and p.organization_id = c.organization_id
-    where c.organization_id = '${org}' and c.dimension_type = 'none' order by 1`).split('\n').filter(Boolean).map((l) => l.trim());
-  const health = adminSql(`select json_build_object('period', p.period_start, 'score', h.score, 'used', h.dimensions_used,
-      'dimensions', (select json_agg(json_build_object('key', d->>'key', 'score', d->'score', 'included', d->'included',
-        'exclusion', d->'exclusion_reason', 'rules', (select json_agg(json_build_object('rule', r->>'rule', 'result', r->>'result', 'points', r->'points'))
-          from jsonb_array_elements(d->'rules') r))) from jsonb_array_elements(h.breakdown) d))::text
-    from public.health_current hc join public.health_scores h on h.id = hc.health_score_id and h.organization_id = hc.organization_id
-    join public.fiscal_periods p on p.id = hc.period_id and p.organization_id = hc.organization_id
-    where hc.organization_id = '${org}' order by p.period_start`).split('\n').filter(Boolean).map((l) => JSON.parse(l) as unknown);
-  const alerts = adminSql(`select a.rule_key || '|' || coalesce(a.subject_type::text, '-') || '|' || a.status || '|' || a.severity || '|' || p.period_start
-    from public.alerts a join public.fiscal_periods p on p.id = a.period_id and p.organization_id = a.organization_id
-    where a.organization_id = '${org}' order by 1`).split('\n').filter(Boolean).map((l) => l.trim());
-  return { metrics, health, alerts };
+export async function dumpOrg(org: string): Promise<unknown> {
+  const { engineDump } = await import('./engine-dump');
+  const full = await engineDump(org);
+  const metrics = full.metrics.map((line) => {
+    const [period, key, value, , , , missing] = line.split('|');
+    return `${period}|${key}|${value}|${missing!.slice(2)}`;
+  });
+  const alerts = full.alerts.map((line) => line.split('|').slice(0, 5).join('|'));
+  return { metrics, health: full.health, alerts };
 }

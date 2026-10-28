@@ -53,7 +53,9 @@
  *   STALE        seeded like SALESONLY; the test then plants what engine 4.0.0 wrote (July net profit
  *                2,000 = revenue) and the engine-upgrade sweep recomputes it to NULL
  */
-import { adminSql, clientFor, createAuthUser } from '../integration/setup';
+import { ensurePeriods } from '@/db/app/shared';
+import { createAuthUser, fs } from '../integration/setup';
+import { seedOrg } from './seed';
 import { counterparty, invoiceBatch, type Inv } from './audit-orgs';
 import { COMMITTED_AT } from './adr120-orgs';
 
@@ -66,16 +68,14 @@ export async function seedFu12Orgs(tag: string, keys: readonly Fu12Key[]): Promi
   let n = 0;
   let owner = '';
   for (const key of keys) {
-    if (n % 2 === 0) owner = createAuthUser(`fu12-${n}@${tag}.fu12.itest`);
+    if (n % 2 === 0) owner = await createAuthUser(`fu12-${n}@${tag}.fu12.itest`);
     n += 1;
-    const r = await clientFor(owner).schema('api').rpc('create_organization', { p_name: `FU12 ${key} ${tag}` });
-    if (r.error) throw new Error(r.error.message);
-    const org = r.data as unknown as string;
+    const { orgId: org } = await seedOrg({ name: `FU12 ${key} ${tag}`, ownerId: owner });
     out[key] = org;
     // The months the test reads, whatever month the suite happens to run in (create_organization
     // materialises twelve months either side of now(), which drifts).
-    adminSql(`select app.ensure_periods('${org}', '2026-01-01', '2027-08-31')`);
-    seedOne(key, org);
+    await ensurePeriods(fs(), org, '2026-01-01', '2027-08-31');
+    await seedOne(key, org);
   }
   return out;
 }
@@ -103,44 +103,44 @@ interface ListOptions {
 }
 
 /** A committed FULL SALES list over a declared range. */
-function salesList(org: string, o: ListOptions): void {
-  invoiceBatch(org, {
+async function salesList(org: string, o: ListOptions): Promise<void> {
+  await invoiceBatch(org, {
     importType: 'sales_invoices', start: o.start, end: o.end, listKind: o.listKind ?? 'full', committedAt: o.committedAt ?? COMMITTED_AT,
     tag: o.tag, invoices: lines('sales', o.items, o.tag),
   });
 }
 
 /** A committed PURCHASE list (full unless stated) over a declared range. */
-function purchaseList(org: string, o: ListOptions): void {
-  invoiceBatch(org, {
+async function purchaseList(org: string, o: ListOptions): Promise<void> {
+  await invoiceBatch(org, {
     importType: 'purchase_invoices', start: o.start, end: o.end, listKind: o.listKind ?? 'full', committedAt: o.committedAt ?? COMMITTED_AT,
     tag: o.tag, invoices: lines('purchase', o.items, o.tag),
   });
 }
 
 /** 2,000 of sales on the 10th of June, July and August, under one full list 1 Jun – 31 Aug. */
-function summerSales(org: string, name: string, tag: string): void {
-  const c = counterparty(org, name, 'customer');
-  salesList(org, { start: '2026-06-01', end: '2026-08-31', tag, items: [
+async function summerSales(org: string, name: string, tag: string): Promise<void> {
+  const c = await counterparty(org, name, 'customer');
+  await salesList(org, { start: '2026-06-01', end: '2026-08-31', tag, items: [
     { issue: '2026-06-10', amount: '2000', party: c },
     { issue: '2026-07-10', amount: '2000', party: c },
     { issue: '2026-08-10', amount: '2000', party: c },
   ] });
 }
 
-function seedOne(key: Fu12Key, org: string): void {
+async function seedOne(key: Fu12Key, org: string): Promise<void> {
   switch (key) {
     case 'SALESONLY':
-      summerSales(org, 'Sales Only Ltd', 'so');
+      await summerSales(org, 'Sales Only Ltd', 'so');
       break;
     case 'STALE':
-      summerSales(org, 'Stale Ltd', 'stale');
+      await summerSales(org, 'Stale Ltd', 'stale');
       break;
     case 'BOTH': {
-      summerSales(org, 'Both Ltd', 'both-s');
-      const stock = counterparty(org, 'Stock Co', 'supplier', 'cost_of_sales');
-      const office = counterparty(org, 'Office Co', 'supplier', 'operating_expense');
-      purchaseList(org, { start: '2026-06-01', end: '2026-08-31', tag: 'both-p', items: [
+      await summerSales(org, 'Both Ltd', 'both-s');
+      const stock = await counterparty(org, 'Stock Co', 'supplier', 'cost_of_sales');
+      const office = await counterparty(org, 'Office Co', 'supplier', 'operating_expense');
+      await purchaseList(org, { start: '2026-06-01', end: '2026-08-31', tag: 'both-p', items: [
         { issue: '2026-06-12', amount: '800', party: stock },
         { issue: '2026-06-15', amount: '300', party: office },
         { issue: '2026-07-12', amount: '800', party: stock },
@@ -151,33 +151,33 @@ function seedOne(key: Fu12Key, org: string): void {
       break;
     }
     case 'PURCHSHORT': {
-      summerSales(org, 'Short Ltd', 'ps-s');
-      const stock = counterparty(org, 'Stock Co', 'supplier', 'cost_of_sales');
-      purchaseList(org, { start: '2026-06-01', end: '2026-07-20', committedAt: '2026-07-20T12:00:00Z', tag: 'ps-p', items: [
+      await summerSales(org, 'Short Ltd', 'ps-s');
+      const stock = await counterparty(org, 'Stock Co', 'supplier', 'cost_of_sales');
+      await purchaseList(org, { start: '2026-06-01', end: '2026-07-20', committedAt: '2026-07-20T12:00:00Z', tag: 'ps-p', items: [
         { issue: '2026-06-12', amount: '800', party: stock },
         { issue: '2026-07-10', amount: '800', party: stock },
       ] });
       break;
     }
     case 'ZEROCOST': {
-      summerSales(org, 'Zero Cost Ltd', 'zc-s');
-      const stock = counterparty(org, 'Stock Co', 'supplier', 'cost_of_sales');
-      purchaseList(org, { start: '2026-06-01', end: '2026-08-31', tag: 'zc-p', items: [
+      await summerSales(org, 'Zero Cost Ltd', 'zc-s');
+      const stock = await counterparty(org, 'Stock Co', 'supplier', 'cost_of_sales');
+      await purchaseList(org, { start: '2026-06-01', end: '2026-08-31', tag: 'zc-p', items: [
         { issue: '2026-06-12', amount: '800', party: stock },
         { issue: '2026-08-12', amount: '800', party: stock },
       ] });
       break;
     }
     case 'CURRENTCOST': {
-      const c = counterparty(org, 'Current Cost Ltd', 'customer');
-      salesList(org, { start: '2026-06-01', end: '2026-09-10', committedAt: '2026-09-10T10:00:00Z', tag: 'cc-s', items: [
+      const c = await counterparty(org, 'Current Cost Ltd', 'customer');
+      await salesList(org, { start: '2026-06-01', end: '2026-09-10', committedAt: '2026-09-10T10:00:00Z', tag: 'cc-s', items: [
         { issue: '2026-06-10', amount: '1000', party: c },
         { issue: '2026-07-10', amount: '1200', party: c },
         { issue: '2026-08-10', amount: '1500', party: c },
         { issue: '2026-09-05', amount: '700', party: c },
       ] });
-      const stock = counterparty(org, 'Stock Co', 'supplier', 'cost_of_sales');
-      purchaseList(org, { start: '2026-06-01', end: '2026-09-10', committedAt: '2026-09-10T10:00:00Z', tag: 'cc-p', items: [
+      const stock = await counterparty(org, 'Stock Co', 'supplier', 'cost_of_sales');
+      await purchaseList(org, { start: '2026-06-01', end: '2026-09-10', committedAt: '2026-09-10T10:00:00Z', tag: 'cc-p', items: [
         { issue: '2026-06-12', amount: '400', party: stock },
         { issue: '2026-07-12', amount: '500', party: stock },
         { issue: '2026-08-12', amount: '600', party: stock },
@@ -186,17 +186,17 @@ function seedOne(key: Fu12Key, org: string): void {
       break;
     }
     case 'SUPPLIERS': {
-      summerSales(org, 'Supplied Ltd', 'sup-s');
-      const anchor = counterparty(org, 'Anchor Supplies', 'supplier', 'cost_of_sales');
-      const bolt = counterparty(org, 'Bolt Services', 'supplier', 'operating_expense');
-      purchaseList(org, { start: '2026-06-01', end: '2026-07-31', tag: 'sup-p', items: [
+      await summerSales(org, 'Supplied Ltd', 'sup-s');
+      const anchor = await counterparty(org, 'Anchor Supplies', 'supplier', 'cost_of_sales');
+      const bolt = await counterparty(org, 'Bolt Services', 'supplier', 'operating_expense');
+      await purchaseList(org, { start: '2026-06-01', end: '2026-07-31', tag: 'sup-p', items: [
         { issue: '2026-06-12', amount: '600', party: anchor },
         { issue: '2026-06-15', amount: '200', party: bolt },
         { issue: '2026-07-12', amount: '300', party: anchor },
         { issue: '2026-07-15', amount: '100', party: bolt },
       ] });
       // An aged-creditors list as at 31 August: it says what is owed, never what August cost.
-      purchaseList(org, { start: '2026-08-01', end: '2026-08-31', listKind: 'open_items', tag: 'sup-oi', items: [
+      await purchaseList(org, { start: '2026-08-01', end: '2026-08-31', listKind: 'open_items', tag: 'sup-oi', items: [
         { issue: '2026-08-12', amount: '500', party: anchor },
       ] });
       break;

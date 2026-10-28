@@ -1,5 +1,5 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import { failInvestmentReport, finishInvestmentReport, startInvestmentReport } from '@/core/db/server-rpc';
 import { UpstreamError, ValidationError } from '@/core/errors';
 import { log } from '@/core/logging';
@@ -58,7 +58,7 @@ export function noProfitFailure(yearLabel: string): string {
 }
 
 export interface InvestmentReportDeps {
-  readonly loadBase: (db: SupabaseClient, orgId: string) => Promise<InvestmentBase | null>;
+  readonly loadBase: (db: Db, orgId: string) => Promise<InvestmentBase | null>;
   readonly buildFigures: (base: InvestmentBase, options?: { surplus?: string | null }) => InvestmentFigures | null;
   readonly generateNarrative: typeof generateInvestmentNarrative;
   readonly now: () => Date;
@@ -88,7 +88,7 @@ function isTimeout(cause: unknown): boolean {
  * attempt in flight for the organisation (there is at most one). `deps` is the test seam.
  */
 export async function runInvestmentReport(
-  scoped: SupabaseClient,
+  scoped: Db,
   orgId: string,
   reportId?: string,
   deps: Partial<InvestmentReportDeps> = {},

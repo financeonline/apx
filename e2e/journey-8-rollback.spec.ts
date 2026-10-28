@@ -1,7 +1,8 @@
 import { expect, test } from '@playwright/test';
 import {
-  GL_CSV, cleanUpOwn, drainQueue, importLedger, onboard, seedUser, signIn, sql, uniqueName,
+  GL_CSV, cleanUpOwn, drainQueue, importLedger, onboard, seedUser, signIn, uniqueName,
 } from './fixtures';
+import { auditEvents, orgIdByName, orgRows } from './firestore';
 
 /**
  * Journey 8 — roll back an import (TEST_STRATEGY.md §12).
@@ -19,7 +20,7 @@ const ORG_NAME = uniqueName('Rollback Ltd');
 test.afterAll(() => cleanUpOwn([ORG_NAME], ['journey8-owner']));
 
 test('an owner rolls back an import and the figures go with it', async ({ page }) => {
-  const owner = seedUser('journey8-owner');
+  const owner = await seedUser('journey8-owner');
   const orgName = ORG_NAME;
 
   await signIn(page, owner);
@@ -28,11 +29,10 @@ test('an owner rolls back an import and the figures go with it', async ({ page }
   await drainQueue(page, slug);
 
   // ---- The figures exist ----------------------------------------------------------------------
-  const before = sql(`
-    select count(*)::text from public.ledger_entries l
-      join public.organizations o on o.id = l.organization_id
-     where o.name = '${orgName}' and l.record_status = 'accepted'`);
-  expect(Number(before), 'the import put rows in the ledger').toBe(5);
+  const orgId = await orgIdByName(orgName);
+  const accepted = async (): Promise<number> =>
+    (await orgRows(orgId, 'ledger_entries', (l) => l.record_status === 'accepted')).length;
+  expect(await accepted(), 'the import put rows in the ledger').toBe(5);
 
   await page.goto(`/app/${slug}/home`);
   await expect(page.getByText('£40,000').first()).toBeVisible({ timeout: 30_000 });
@@ -53,28 +53,19 @@ test('an owner rolls back an import and the figures go with it', async ({ page }
   await expect(page.getByText(/^Removed$/).first()).toBeVisible({ timeout: 30_000 });
 
   // ---- Nothing of it is left in the figures ----------------------------------------------------
-  const after = sql(`
-    select count(*)::text from public.ledger_entries l
-      join public.organizations o on o.id = l.organization_id
-     where o.name = '${orgName}' and l.record_status = 'accepted'`);
-  expect(after, 'the rolled-back rows leave the accepted set').toBe('0');
+  expect(await accepted(), 'the rolled-back rows leave the accepted set').toBe(0);
 
-  const status = sql(`
-    select b.status::text || '|' || coalesce(b.rolled_back_reason, '-')
-      from public.import_batches b
-      join public.organizations o on o.id = b.organization_id
-     where o.name = '${orgName}'`);
+  const status = (await orgRows(orgId, 'import_batches'))
+    .map((b) => `${String(b.status)}|${b.rolled_back_reason == null ? '-' : String(b.rolled_back_reason)}`)
+    .join('\n');
   expect(status, 'the batch says it was rolled back, and why').toBe('rolled_back|Wrong month');
 
   /*
    * §12: the reason is not decoration. A rollback removes rows other figures were computed from,
    * and six months later the only account of why will be this sentence.
    */
-  const audited = sql(`
-    select count(*)::text from public.audit_events a
-      join public.organizations o on o.id = a.organization_id
-     where o.name = '${orgName}' and a.action like 'import.%'`);
-  expect(Number(audited)).toBeGreaterThan(0);
+  const audited = (await auditEvents(orgId)).filter((a) => String(a.action).startsWith('import.')).length;
+  expect(audited).toBeGreaterThan(0);
 
   // ---- And the dashboard goes back to asking for data ------------------------------------------
   await drainQueue(page, slug);

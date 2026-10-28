@@ -1,15 +1,18 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createServerClient } from '@supabase/ssr';
-import { SESSION_ONLY_COOKIE, safeNextPath, sessionVisitEnded } from '@/core/routing';
+import { SESSION_COOKIE, verifySession } from '@/core/db/user-client';
+import { db as firestore } from '@/db/firestore';
+import { globalRow } from '@/db/schema';
+import { SESSION_ALIVE_COOKIE, SESSION_ONLY_COOKIE, safeNextPath, sessionVisitEnded } from '@/core/routing';
 
 /**
  * Route-family gatekeeper (ROUTE_ARCHITECTURE.md §8).
  *
- * What middleware does: refresh the session cookie, classify the path, and decide which of the
- * three families the request may enter. What it deliberately does NOT do: resolve organisation
- * access. That needs the database and must return a uniform 404, so it happens in
- * `app/[orgSlug]/layout.tsx` through `getAccessContext()` (§8.7). Middleware never widens access —
- * every rule below is also enforced by RLS and by the `api.*` functions.
+ * What the proxy does (Next 16's `proxy.ts`, formerly `middleware.ts`; Node.js runtime): verify the
+ * `__session` cookie, classify the path, and decide which of the three families the request may
+ * enter. What it deliberately does NOT do: resolve organisation access. That must return a uniform
+ * 404, so it happens in `app/[orgSlug]/layout.tsx` through `getAccessContext()` (§8.7). The proxy
+ * never widens access — every rule below is also enforced by `src/db/rls.ts` and the `api.*`
+ * functions.
  *
  * A user who may not enter a family gets 404, never 403: a 403 would confirm the family exists for
  * somebody (SECURITY_MODEL.md §14).
@@ -22,7 +25,10 @@ const PUBLIC_PREFIXES = [
   '/reset-password',
   '/invite',
   '/legal',
+  // Firebase's email-action handler (password reset, email confirmation).
   '/auth/callback',
+  // Where the sign-in form hands over the ID token; it verifies the token itself.
+  '/auth/session',
   '/api/health',
   /*
    * The cron routes authenticate themselves — a constant-time compare of `CRON_SECRET`, 404
@@ -57,43 +63,21 @@ interface PlatformRoleRow {
   status: string;
 }
 
-interface ProfileRow {
-  disabled: boolean;
+/** Clears every cookie a session consists of. */
+function clearSession(response: NextResponse): void {
+  for (const name of [SESSION_COOKIE, SESSION_ONLY_COOKIE, SESSION_ALIVE_COOKIE]) {
+    response.cookies.set(name, '', { path: '/', maxAge: 0 });
+  }
 }
 
-export async function middleware(request: NextRequest) {
+export async function proxy(request: NextRequest) {
   const requestId = crypto.randomUUID();
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-request-id', requestId);
 
-  let response = NextResponse.next({ request: { headers: requestHeaders } });
-
-  const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-  if (!supabaseUrl || !supabaseAnonKey) {
-    // Without Supabase configured nothing can be authorised, so nothing is served: the comment here
-    // used to say "fail closed" above a `return response` that let every request through to the
-    // layouts (PRODUCTION_AUDIT.md L1; ADR-075). 503, and the request id, and nothing else.
-    return new NextResponse('Service unavailable', {
-      status: 503,
-      headers: { 'x-request-id': requestId, 'retry-after': '60' },
-    });
-  }
-
-  const supabase = createServerClient(supabaseUrl, supabaseAnonKey, {
-    cookies: {
-      getAll() {
-        return request.cookies.getAll();
-      },
-      setAll(cookiesToSet) {
-        for (const { name, value } of cookiesToSet) request.cookies.set(name, value);
-        response = NextResponse.next({ request: { headers: requestHeaders } });
-        for (const { name, value, options } of cookiesToSet) {
-          response.cookies.set(name, value, options);
-        }
-      },
-    },
-  });
+  const response = NextResponse.next({ request: { headers: requestHeaders } });
+  /** Set when this request ends the session: every response below then clears its cookies. */
+  let endSession = false;
 
   /** Every early return must carry the refreshed cookies and the request id forward. */
   const finish = (target?: URL, rewrite = false): NextResponse => {
@@ -105,6 +89,7 @@ export async function middleware(request: NextRequest) {
     if (target) {
       for (const cookie of response.cookies.getAll()) outgoing.cookies.set(cookie);
     }
+    if (endSession) clearSession(outgoing);
     outgoing.headers.set('x-request-id', requestId);
     return outgoing;
   };
@@ -115,16 +100,18 @@ export async function middleware(request: NextRequest) {
   // The health check is public and must not depend on Auth being reachable.
   if (url.pathname === '/api/health') return finish();
 
-  // 1. Refresh the session (this is what writes the rotated cookies through setAll above).
-  let {
-    data: { user },
-  } = await supabase.auth.getUser();
+  // 1. The session: the `__session` cookie, verified with revocation checked. Anything invalid,
+  //    expired or revoked is no session; a stale cookie is cleared rather than re-verified forever.
+  const token = request.cookies.get(SESSION_COOKIE)?.value;
+  const actor = await verifySession(token);
+  let user = actor.kind === 'user' ? { id: actor.userId } : null;
+  // (Not on `/auth/session`, which is about to set a new one.)
+  if (token && !user && url.pathname !== '/auth/session') endSession = true;
 
   // 1a. "Keep me signed in" was left unticked and this is a later visit: end the session here,
   //     then treat the request as signed out (ADR-169).
   if (user && sessionVisitEnded(request.cookies)) {
-    await supabase.auth.signOut({ scope: 'local' });
-    response.cookies.set(SESSION_ONLY_COOKIE, '', { path: '/', maxAge: 0 });
+    endSession = true;
     user = null;
   }
 
@@ -143,6 +130,7 @@ export async function middleware(request: NextRequest) {
         { status: 401 },
       );
       for (const cookie of response.cookies.getAll()) denied.cookies.set(cookie);
+      if (endSession) clearSession(denied);
       denied.headers.set('x-request-id', requestId);
       return denied;
     }
@@ -159,18 +147,17 @@ export async function middleware(request: NextRequest) {
   // Public pages other than `/` need no further checks; skip the two round trips.
   if (family === 'public' && url.pathname !== '/') return finish();
 
-  // 3. One pass for the two facts every later rule needs (§8.4, §8.5).
-  const [profileResult, platformResult] = await Promise.all([
-    supabase.schema('api').rpc('my_profile'),
-    supabase.schema('api').rpc('my_platform_role'),
+  // 3. One pass for the two facts every later rule needs (§8.4, §8.5), read directly as the server.
+  const fs = firestore();
+  const [profileSnap, platformSnap] = await Promise.all([
+    globalRow(fs, 'profiles', user.id).get(),
+    globalRow(fs, 'platform_users', user.id).get(),
   ]);
-
-  const profile = (profileResult.data as ProfileRow[] | null)?.[0];
-  const platform = (platformResult.data as PlatformRoleRow[] | null)?.[0];
+  const platform = platformSnap.exists ? (platformSnap.data() as PlatformRoleRow) : undefined;
 
   // 4. A disabled account is signed out on its next request, whatever it was asking for.
-  if (profile?.disabled) {
-    await supabase.auth.signOut();
+  if (profileSnap.exists && profileSnap.get('disabled_at')) {
+    endSession = true;
     const signIn = new URL('/sign-in', url.origin);
     signIn.searchParams.set('error', 'disabled');
     return finish(signIn);
@@ -189,7 +176,7 @@ export async function middleware(request: NextRequest) {
    * `/portfolio` is the Command Centre for every adviser-capable role, member or platform account
    * (ADR-112). Which organisations, if any, a session may advise needs the database, so the
    * portfolio layout decides and renders the uniform 404 for a caller with none — a client-only
-   * member, a stranger, an unassigned employee. Middleware keeps only the session checks above.
+   * member, a stranger, an unassigned employee. The proxy keeps only the session checks above.
    */
 
   // 6. `/` with a session goes to the family the account belongs to. A stale or foreign
@@ -213,8 +200,8 @@ export async function middleware(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Everything except Next's own static output and file requests. Middleware must see every
-     * page and route handler so the session cookie is refreshed on each of them. `ocr/` is the
+     * Everything except Next's own static output and file requests. The proxy must see every
+     * page and route handler so a revoked or ended session is cleared on each of them. `ocr/` is the
      * in-browser OCR engine and language file (ADR-175): static, public, and several MB each.
      */
     '/((?!_next/static|_next/image|ocr/|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webm|ico|woff2?)$).*)',

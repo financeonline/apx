@@ -1,5 +1,6 @@
 import 'server-only';
-import { NotFound, toMotionError } from '@/core/errors';
+import { NotFound } from '@/core/errors';
+import { readOrganization, readRows, readRowsIn } from '@/db/app/engine-reads';
 import { assertCan } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
 import type { FactorResult, ImprovementAction } from '../domain/types';
@@ -37,9 +38,8 @@ export interface FundingView {
 
 export async function fundingEnabled(ctx: AccessContext): Promise<boolean> {
   if (!ctx.orgId) return false;
-  const { data, error } = await ctx.db.from('organizations').select('features').eq('id', ctx.orgId).maybeSingle();
-  if (error) throw toMotionError(error, ctx.requestId);
-  return (data as { features?: Record<string, unknown> } | null)?.features?.funding_readiness === true;
+  const org = await readOrganization(ctx.db, ctx.orgId);
+  return (org?.features as Record<string, unknown> | undefined)?.funding_readiness === true;
 }
 
 export async function getFundingView(ctx: AccessContext, periodId?: string): Promise<FundingView> {
@@ -47,34 +47,29 @@ export async function getFundingView(ctx: AccessContext, periodId?: string): Pro
   const orgId = ctx.orgId;
   if (!orgId || !(await fundingEnabled(ctx))) throw new NotFound();
 
-  const { data: current, error } = await ctx.db.from('funding_current')
-    .select('period_id, assessment_id, fiscal_periods!funding_current_period_fk!inner(label, period_start)')
-    .eq('organization_id', orgId);
-  if (error) throw toMotionError(error, ctx.requestId);
-  const rows = ((current ?? []) as Array<{ period_id: string; assessment_id: string; fiscal_periods: { label: string; period_start: string } | { label: string; period_start: string }[] }>)
-    .map((r) => {
-      const p = Array.isArray(r.fiscal_periods) ? r.fiscal_periods[0]! : r.fiscal_periods;
-      return { periodId: r.period_id, assessmentId: r.assessment_id, label: p.label, start: p.period_start };
-    })
-    .sort((a, b) => b.start.localeCompare(a.start));
+  // `fiscal_periods!inner`: a pointer whose period the caller cannot read is dropped.
+  const current = await readRows(ctx.db, orgId, 'funding_current');
+  const periods = await readRowsIn(ctx.db, orgId, 'fiscal_periods', 'id', current.map((r) => r.period_id as string));
+  const periodById = new Map(periods.map((p) => [String(p.id), p]));
+  const rows = current.flatMap((r) => {
+    const p = periodById.get(String(r.period_id));
+    return p ? [{ periodId: String(r.period_id), assessmentId: String(r.assessment_id), label: String(p.label), start: String(p.period_start) }] : [];
+  }).sort((a, b) => b.start.localeCompare(a.start));
 
   if (rows.length === 0) {
-    const { count } = await ctx.db.from('fiscal_periods').select('id', { count: 'exact', head: true })
-      .eq('organization_id', orgId).eq('is_complete', true);
-    return { state: (count ?? 0) > 0 ? 'preparing' : 'no_eligible_period', months: [], assessment: null };
+    const complete = await readRows(ctx.db, orgId, 'fiscal_periods', (q) => q.where('is_complete', '==', true).limit(1));
+    return { state: complete.length > 0 ? 'preparing' : 'no_eligible_period', months: [], assessment: null };
   }
 
   const chosen = periodId === undefined ? rows[0]! : rows.find((r) => r.periodId === periodId);
   if (chosen === undefined) throw new NotFound();
 
-  const [{ data: row, error: rowError }, { data: bundle }] = await Promise.all([
-    ctx.db.from('funding_assessments')
-      .select('id, period_id, overall_status, overall_score, band, data_coverage_percent, factors_used, breakdown, rules_version, engine_version, calculation_run_id, created_at, disclaimer')
-      .eq('organization_id', orgId).eq('id', chosen.assessmentId).maybeSingle(),
-    ctx.db.from('evidence_bundles').select('id').eq('organization_id', orgId)
-      .eq('origin_table', 'funding_assessments').eq('origin_id', chosen.assessmentId).maybeSingle(),
+  const [assessments, bundles] = await Promise.all([
+    readRows(ctx.db, orgId, 'funding_assessments', (q) => q.where('id', '==', chosen.assessmentId)),
+    readRows(ctx.db, orgId, 'evidence_bundles', (q) => q.where('origin_id', '==', chosen.assessmentId)),
   ]);
-  if (rowError) throw toMotionError(rowError, ctx.requestId);
+  const row = assessments[0] ?? null;
+  const bundle = bundles.find((b) => b.origin_table === 'funding_assessments') ?? null;
   if (row === null) throw new NotFound();
   const r = row as {
     id: string; period_id: string; overall_status: 'scored' | 'insufficient_data'; overall_score: number | null; band: string | null;

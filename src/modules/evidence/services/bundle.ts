@@ -1,6 +1,7 @@
 import 'server-only';
 import { InternalError, NotFound, ValidationError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
+import { readCtx } from '@/db/rls';
 import type { AccessContext } from '@/modules/tenancy';
 import { isAssuranceLevel, minAssurance, type AssuranceLevel } from '../domain/assurance';
 import { descriptorHash } from '../domain/canonical';
@@ -105,8 +106,9 @@ function assuranceOf(row: Row): AssuranceLevel {
 }
 
 /**
- * `descriptor_hash` comes back from PostgREST as a `bytea` hex literal (`\x…`). The contract form
- * is lower-case hex without the prefix (§3), so the prefix is stripped rather than re-derived —
+ * `descriptor_hash` is stored as lower-case hex (a `bytea` once, which PostgREST returned as a
+ * `\x…` literal; a row carried over in that form is still read). The contract form is lower-case
+ * hex without the prefix (§3), so a prefix is stripped rather than the hash re-derived —
  * re-hashing here would hide a descriptor whose stored hash had drifted from its stored JSON.
  */
 function hashHex(value: unknown): string | undefined {
@@ -184,7 +186,7 @@ export async function getBundle(ctx: AccessContext, bundleId: string): Promise<E
   assertCan(ctx, 'financials.view');
   const orgId = requireOrgId(ctx);
 
-  // RLS already applies §8.9 (an ai_response bundle is readable only by the asker or by
+  // The bundle policy already applies §8.9 (an ai_response bundle is readable only by the asker or by
   // owner/admin), so a bundle the caller may not see simply is not returned.
   const bundle = await fetchBundle(ctx.db, orgId, bundleId);
   if (bundle === null) throw new NotFound();
@@ -192,8 +194,9 @@ export async function getBundle(ctx: AccessContext, bundleId: string): Promise<E
 
   // Phase 16 (§10, U-5): a Funding Readiness bundle is NOT FOUND while the feature is off.
   if (String(bundle.kind) === 'funding_assessment') {
-    const { data: org } = await ctx.db.from('organizations').select('features').eq('id', orgId).maybeSingle();
-    if ((org as { features?: Record<string, unknown> } | null)?.features?.funding_readiness !== true) throw new NotFound();
+    const read = await readCtx(ctx.db, orgId);
+    const features = read && read.role ? await read.features() : {};
+    if (features.funding_readiness !== true) throw new NotFound();
   }
 
   const itemRows = await fetchBundleItems(ctx.db, orgId, bundleId);

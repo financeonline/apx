@@ -1,44 +1,45 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { createCallbackClient } from '@/core/db/user-client';
 import { safeNextPath } from '@/core/routing';
+import { applyEmailVerification } from '@/modules/tenancy';
 
 /**
- * PKCE code exchange (SECURITY_MODEL.md §3).
+ * Firebase Authentication's email-action handler (SECURITY_MODEL.md §3). The Firebase project's
+ * "Customize action URL" points here, so every emailed link lands on APX rather than on Firebase's
+ * hosted page:
  *
- * ROUTE_ARCHITECTURE.md §8.4a: a magic-link exchange is REFUSED for a platform account. Platform
- * users sign in with their password, so the session carries the recent sign-in the sensitive
- * super-admin actions need (ADR-161).
+ *  - `mode=resetPassword`: on to `/reset-password` with the one-time code, where the person chooses
+ *    the new password (`confirmPasswordReset` in the browser);
+ *  - `mode=verifyEmail`: the code is applied here, then on to sign in;
+ *  - anything else, or no code: sign in, with the error the page explains.
+ *
+ * There is no session exchange any more: email and password sign-in hands the ID token to
+ * `/auth/session` directly (the Supabase PKCE exchange this route did is gone).
  */
 export async function GET(request: NextRequest) {
   const url = new URL(request.url);
-  const code = url.searchParams.get('code');
-  // Judged by the one rule (ADR-069): parsed as the browser will parse it, kept only on our origin.
-  // `startsWith('/') && !startsWith('//')` let `/\evil.com` through (PRODUCTION_AUDIT.md H2).
-  const next = safeNextPath(url.searchParams.get('next'), url.origin);
+  const mode = url.searchParams.get('mode');
+  const code = url.searchParams.get('oobCode');
+  if (!code) return NextResponse.redirect(new URL('/sign-in?error=missing_code', url.origin));
 
-  if (!code) {
-    return NextResponse.redirect(new URL('/sign-in?error=missing_code', url.origin));
+  if (mode === 'resetPassword') {
+    const target = new URL('/reset-password', url.origin);
+    target.searchParams.set('oobCode', code);
+    return NextResponse.redirect(target);
   }
-
-  const response = NextResponse.redirect(new URL(next, url.origin));
-  const supabase = createCallbackClient(
-    () => request.cookies.getAll(),
-    (name, value, options) => response.cookies.set(name, value, options),
-  );
-
-  const { error } = await supabase.auth.exchangeCodeForSession(code);
-  if (error) {
-    return NextResponse.redirect(new URL('/sign-in?error=exchange_failed', url.origin));
+  if (mode === 'verifyEmail') {
+    const ok = await applyEmailVerification(code);
+    const target = new URL(ok ? '/sign-in?verified=1' : '/sign-in?error=exchange_failed', url.origin);
+    // The sign-up form asked for `/sign-in?next=…` as the continue URL; the target is judged by the
+    // one rule (ADR-069) before it is passed on.
+    const continueUrl = url.searchParams.get('continueUrl');
+    let wanted: string | null = null;
+    try {
+      wanted = continueUrl ? new URL(continueUrl).searchParams.get('next') : null;
+    } catch {
+      wanted = null;
+    }
+    if (ok && wanted) target.searchParams.set('next', safeNextPath(wanted, url.origin));
+    return NextResponse.redirect(target);
   }
-
-  // Refuse the magic-link path for platform accounts.
-  const { data } = await supabase.schema('api').rpc('my_platform_role');
-  const platform = (data as Array<{ status: string }> | null)?.[0];
-  const amr = url.searchParams.get('type');
-  if (platform?.status === 'active' && amr === 'magiclink') {
-    await supabase.auth.signOut();
-    return NextResponse.redirect(new URL('/sign-in?error=platform_password_required', url.origin));
-  }
-
-  return response;
+  return NextResponse.redirect(new URL('/sign-in?error=exchange_failed', url.origin));
 }

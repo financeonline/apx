@@ -1,64 +1,82 @@
 import 'server-only';
-import type { SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
+import type { Query } from 'firebase-admin/firestore';
+import { orgQuery, orgRows } from '@/db/rls';
+import type { OrgTable } from '@/db/schema';
+import type { Db } from '@/db/types';
+import { organizationDoc } from '@/modules/tenancy';
 
-/** Reads for the departmental overview (ADR-143). Counts and latest rows only; nothing is written. */
+/**
+ * Reads for the departmental overview (ADR-143). Counts and latest rows only; nothing is written.
+ * Every read is the caller's, through the read policies in `src/db/rls.ts` (a table they may not
+ * read counts as empty, as RLS made it).
+ */
 
-async function count(query: PromiseLike<{ count: number | null; error: unknown }>): Promise<number> {
-  const { count: n, error } = await query;
-  if (error) throw toMotionError(error);
-  return n ?? 0;
+/** `select count(*)` under the caller's policy: an aggregate query when the policy is a plain filter. */
+async function count(db: Db, orgId: string, table: OrgTable, refine: (q: Query) => Query): Promise<number> {
+  const scoped = await orgQuery(db, orgId, table);
+  if (!scoped) return 0;
+  if (scoped.keep) return (await orgRows(db, orgId, table, refine)).length;
+  const snap = await refine(scoped.query).count().get();
+  return snap.data().count;
 }
 
-export async function alertCounts(db: SupabaseClient, orgId: string): Promise<Record<'critical' | 'high' | 'other', number>> {
-  const base = () => db.from('alerts').select('id', { count: 'exact', head: true })
-    .eq('organization_id', orgId).in('status', ['open', 'acknowledged']);
+export async function alertCounts(db: Db, orgId: string): Promise<Record<'critical' | 'high' | 'other', number>> {
+  const base = (q: Query) => q.where('status', 'in', ['open', 'acknowledged']);
   const [critical, high, all] = await Promise.all([
-    count(base().eq('severity', 'critical')),
-    count(base().eq('severity', 'high')),
-    count(base()),
+    count(db, orgId, 'alerts', (q) => base(q).where('severity', '==', 'critical')),
+    count(db, orgId, 'alerts', (q) => base(q).where('severity', '==', 'high')),
+    count(db, orgId, 'alerts', base),
   ]);
   return { critical, high, other: Math.max(0, all - critical - high) };
 }
 
-export async function bankFacts(db: SupabaseClient, orgId: string): Promise<{ accounts: number; statementsReach: string | null }> {
-  const accounts = await count(db.from('bank_accounts').select('id', { count: 'exact', head: true })
-    .eq('organization_id', orgId).eq('is_active', true));
-  const { data, error } = await db.from('import_batches').select('period_end')
-    .eq('organization_id', orgId).eq('import_type', 'bank_statement').eq('status', 'committed')
-    .not('period_end', 'is', null).order('period_end', { ascending: false }).limit(1);
-  if (error) throw toMotionError(error);
-  return { accounts, statementsReach: (data?.[0] as { period_end?: string } | undefined)?.period_end ?? null };
+export async function bankFacts(db: Db, orgId: string): Promise<{ accounts: number; statementsReach: string | null }> {
+  const accounts = await count(db, orgId, 'bank_accounts', (q) => q.where('is_active', '==', true));
+  // The latest committed statement's end; computed here rather than ordered in the query, so no
+  // composite index is needed (a company has tens of statements, not thousands).
+  const batches = await orgRows<{ period_end: string | null }>(db, orgId, 'import_batches', (q) => q
+    .where('import_type', '==', 'bank_statement').where('status', '==', 'committed'));
+  const reach = batches.map((b) => b.period_end).filter((d): d is string => typeof d === 'string').sort().at(-1) ?? null;
+  return { accounts, statementsReach: reach };
 }
 
-export async function latestRun(db: SupabaseClient, orgId: string): Promise<{
+export async function latestRun(db: Db, orgId: string): Promise<{
   status: string; finishedAt: string | null; engineVersion: string | null; asOf: string | null;
 } | null> {
-  const { data, error } = await db.from('calculation_runs').select('status, finished_at, engine_version, as_of, started_at')
-    .eq('organization_id', orgId).order('started_at', { ascending: false }).limit(1);
-  if (error) throw toMotionError(error);
-  const row = data?.[0] as { status: string; finished_at: string | null; engine_version: string | null; as_of: string | null } | undefined;
-  return row === undefined ? null : { status: row.status, finishedAt: row.finished_at, engineVersion: row.engine_version, asOf: row.as_of };
+  const rows = await orgRows<{ status: string; finished_at: string | null; engine_version: string | null; as_of: string | null }>(
+    db, orgId, 'calculation_runs', (q) => q.orderBy('started_at', 'desc').limit(1),
+  );
+  const row = rows[0];
+  return row === undefined ? null : {
+    status: row.status, finishedAt: row.finished_at ?? null, engineVersion: row.engine_version ?? null, asOf: row.as_of ?? null,
+  };
 }
 
-export async function importCounts(db: SupabaseClient, orgId: string): Promise<{ awaitingReview: number; failed: number }> {
+export async function importCounts(db: Db, orgId: string): Promise<{ awaitingReview: number; failed: number }> {
   const [awaitingReview, failed] = await Promise.all([
-    count(db.from('import_batches').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('status', 'awaiting_review')),
-    count(db.from('import_batches').select('id', { count: 'exact', head: true }).eq('organization_id', orgId).eq('status', 'failed')),
+    count(db, orgId, 'import_batches', (q) => q.where('status', '==', 'awaiting_review')),
+    count(db, orgId, 'import_batches', (q) => q.where('status', '==', 'failed')),
   ]);
   return { awaitingReview, failed };
 }
 
-export async function organisationFeatures(db: SupabaseClient, orgId: string): Promise<Record<string, boolean>> {
-  const { data, error } = await db.from('organizations').select('features').eq('id', orgId).maybeSingle();
-  if (error) throw toMotionError(error);
-  const features = ((data as { features?: Record<string, unknown> } | null)?.features ?? {});
+export async function organisationFeatures(db: Db, orgId: string): Promise<Record<string, boolean>> {
+  const org = await organizationDoc(db, orgId);
+  const features = (org?.features as Record<string, unknown> | undefined) ?? {};
   return Object.fromEntries(Object.entries(features).map(([k, v]) => [k, v === true]));
 }
 
-export async function budgetMonths(db: SupabaseClient, orgId: string): Promise<number> {
-  const { data, error } = await db.from('budget_lines').select('period_id')
-    .eq('organization_id', orgId).eq('record_status', 'accepted').is('superseded_by', null).limit(5000);
-  if (error) throw toMotionError(error);
-  return new Set(((data ?? []) as Array<{ period_id: string }>).map((r) => r.period_id)).size;
+export async function budgetMonths(db: Db, orgId: string): Promise<number> {
+  const rows = await orgRows<{ period_id: string }>(db, orgId, 'budget_lines', (q) => q
+    .where('record_status', '==', 'accepted').where('superseded_by', '==', null).limit(5000));
+  return new Set(rows.map((r) => r.period_id)).size;
+}
+
+/** The organisation's timezone and currency, as the caller may read them. */
+export async function organisationBasics(db: Db, orgId: string): Promise<{ timezone: string; currency: string }> {
+  const org = await organizationDoc(db, orgId);
+  return {
+    timezone: (org?.timezone as string | undefined) ?? 'Europe/London',
+    currency: (org?.base_currency as string | undefined) ?? 'GBP',
+  };
 }
