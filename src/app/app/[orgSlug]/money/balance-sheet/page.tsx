@@ -48,28 +48,41 @@ export default async function BalanceSheetPage({
       <PeriodHeading
         eyebrow="Money"
         title="Balance sheet"
-        description="What the business owns and what it owes on borrowing at the month end, from your trial balance or balance sheet."
+        description="What does the business own, and how much has it borrowed? As at the last day of the month, from the trial balance or balance sheet you uploaded."
         scope={scope}
         hrefFor={(id) => `/app/${orgSlug}/money/balance-sheet?period=${id}`}
       />
 
       <div className="flex flex-col gap-6">
         <Card>
-          <CardHeader title="Assets" description="Fixed assets are held for the long term; current assets turn into cash within a year." icon={<Building2 />} />
+          <CardHeader
+            title="What the business owns"
+            description="Fixed assets are things kept for years, such as equipment or vehicles. Current assets are cash, stock and money owed to you — things that turn into cash within a year."
+            icon={<Building2 />}
+          />
           <CardBody className="px-0 py-0">
             <FigureTable rows={view.assets} caption={`Assets at the end of ${scope.period.label}`} comparisonLabel={comparison} />
           </CardBody>
         </Card>
 
         <Card>
-          <CardHeader title="Borrowing" description="As your accounts are categorised: loans, and long-term liabilities." icon={<Landmark />} tint="pink" />
+          <CardHeader
+            title="What the business has borrowed"
+            description="Loans, and other debts due after more than a year (long-term borrowing), as your accounts are categorised."
+            icon={<Landmark />}
+            tint="pink"
+          />
           <CardBody className="px-0 py-0">
             <FigureTable rows={view.borrowing} caption={`Borrowing at the end of ${scope.period.label}`} comparisonLabel={comparison} />
           </CardBody>
         </Card>
 
         <Card>
-          <CardHeader title="Secured and unsecured loans" description="As you marked each loan account. APX never guesses it from a name." icon={<ShieldCheck />} />
+          <CardHeader
+            title="Secured and unsecured loans"
+            description="A secured loan is backed by something the lender can take if it is not repaid, such as property. Each loan is marked by you — APX never guesses it from a name."
+            icon={<ShieldCheck />}
+          />
           <CardBody className="px-0 py-0">
             <FigureTable rows={view.security} caption={`Loans by security at the end of ${scope.period.label}`} comparisonLabel={comparison} />
           </CardBody>
@@ -79,9 +92,9 @@ export default async function BalanceSheetPage({
           <Banner tone="info" title="Some loans are not marked secured or unsecured yet">
             {can(ctx, 'financials.edit') ? (
               <>
-                Mark each loan account on{' '}
-                <Link href={`/app/${orgSlug}/data/accounts`} className="text-accent underline underline-offset-2">Accounts</Link>{' '}
-                and the split above updates.
+                Open{' '}
+                <Link href={`/app/${orgSlug}/data/accounts`} className="text-accent underline underline-offset-2">Accounts</Link>,
+                mark each loan as secured or unsecured, and the split above updates.
               </>
             ) : 'Someone who can edit the accounts can mark each loan secured or unsecured.'}
           </Banner>

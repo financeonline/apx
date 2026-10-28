@@ -64,7 +64,7 @@ export default async function YourAccessPage({ params }: { params: Promise<{ org
           />
           <CardBody>
             {held.length === 0 ? (
-              <p className="text-sm text-ink-muted">Nothing that can be switched on for a person is on for you yet.</p>
+              <p className="text-sm text-ink-muted">None of the extra areas have been switched on for you yet. Use the form below to ask for them.</p>
             ) : (
               <ul className="grid gap-2 md:grid-cols-2">
                 {held.map((p) => (

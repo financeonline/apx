@@ -99,7 +99,7 @@ export function CompanyProfileForm({ orgSlug, profile, limits }: {
                   defaultValue={row.label} placeholder="Instagram" />
               </div>
               <div className="min-w-0 flex-1 basis-48 space-y-1.5">
-                <label htmlFor={`social_url_${row.key}`} className="text-xs text-ink-muted">Address</label>
+                <label htmlFor={`social_url_${row.key}`} className="text-xs text-ink-muted">Web address</label>
                 <Input id={`social_url_${row.key}`} name="social_url" inputMode="url" maxLength={limits.linkUrl}
                   defaultValue={row.url} placeholder="https://instagram.com/yourbrand" />
               </div>

@@ -110,6 +110,9 @@ export function evaluateRecurringAmountChanged(ctx: RuleContext): readonly RuleO
         deviation: toRatioString(deviation),
         tolerance: toRatioString(band),
         cadence: group.cadence,
+        // Recorded so the copy can tell money coming in from money going out: "check with the
+        // provider" is the wrong advice about a customer whose payment changed. Not a threshold.
+        direction: group.direction,
       },
       snapshotIds: [],
       recordIds: [],

@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import { Field, Select } from '@/components/ui/field';
 import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 import { Button } from '@/components/ui/button';
+import { formatDate } from '@/components/labels';
 import type { TransferCandidateView } from '@/modules/dashboard';
 import { categoriseTransactionAction, pairTransferAction } from '../../actions';
 
@@ -75,7 +76,7 @@ export function TransferControls({
               <span>
                 <span className="font-mono tabular-nums">{candidate.amount}</span>{' '}
                 <span className="text-ink">{candidate.description}</span>{' '}
-                <span className="text-ink-muted">· {candidate.accountName} · {candidate.date}</span>
+                <span className="text-ink-muted">· {candidate.accountName} · {formatDate(candidate.date)}</span>
                 <span className="block text-xs text-ink-faint">Marking it makes this {candidate.meaning}.</span>
               </span>
               <Button type="submit" tone="secondary">This is the other half</Button>

@@ -15,10 +15,10 @@ import { reasonText, severityLabel, severityTone } from './alert-presentation';
  *
  * Two variants and no others (§5): `compact` for Home's top-risks band, `full` for Insights.
  *
- * The whole card opens the alert's own page, where its history is (owner, 2026-10-14): "History"
- * stays its one link, stretched over the card (`ui/clickable-card`), and "Why?", the status controls
- * and the severity badge's tooltip sit above it. On that page itself the card is not a link to itself
- * (`linked={false}`).
+ * The whole card opens the alert's own page, where its history is (owner, 2026-10-14): "See its
+ * history" stays its one link, stretched over the card (`ui/clickable-card`), and "Why?", the status
+ * controls and the severity badge's tooltip sit above it. On that page itself the card is not a link
+ * to itself (`linked={false}`), and shows no history link at all — the history is below it.
  */
 export type AlertCardVariant = 'compact' | 'full';
 
@@ -84,14 +84,11 @@ export function AlertCard({
               Why? <ChevronRight aria-hidden="true" className="size-4" />
             </Link>
           ) : null}
+          {/* Not on the alert's own page: there it would be a link to the page the reader is on. */}
           {alert.detailHref && linked ? (
             <CardLink href={alert.detailHref} className={`${PILL} group-hover:border-accent group-hover:bg-accent-soft`}>
-              History <ChevronRight aria-hidden="true" className="size-4" />
+              See its history <ChevronRight aria-hidden="true" className="size-4" />
             </CardLink>
-          ) : alert.detailHref ? (
-            <Link href={alert.detailHref} className={PILL}>
-              History <ChevronRight aria-hidden="true" className="size-4" />
-            </Link>
           ) : null}
           {actions ? <div className={ABOVE_CARD_LINK}>{actions}</div> : null}
         </div>

@@ -174,7 +174,7 @@ function blockingReasonFor(
   unconfirmedPages: readonly number[] = [],
 ): string | null {
   if (batch.status === 'committed') return 'This file has already been imported.';
-  if (batch.status === 'rolled_back') return 'This import was rolled back.';
+  if (batch.status === 'rolled_back') return 'This import was removed from your figures.';
   if (batch.status === 'failed') return 'This file could not be read all the way through.';
   if (batch.status === 'validating') return 'Still checking the file.';
 

@@ -3,8 +3,9 @@
  * ADR-145). An indicative, explainable readiness assessment. It is not a lending decision.
  */
 export {
-  CASH_FAMILY, FACTOR_KEYS, FACTOR_NAMES, FACTOR_WEIGHTS, FUNDING_DISCLAIMER, FUNDING_RULES_VERSION,
-  READINESS_BANDS, RULES as FUNDING_RULES, readinessBand, type FactorKey,
+  CASH_FAMILY, FACTOR_KEYS, FACTOR_NAMES, FACTOR_WEIGHTS, FLAT_RULE_DESCRIPTIONS, FUNDING_DISCLAIMER,
+  FUNDING_RULES_VERSION, NOT_SCORED_LABEL, READINESS_BANDS, RULES as FUNDING_RULES, readinessBand, ruleDescription,
+  type FactorKey,
 } from './domain/config';
 export { assessFundingReadiness } from './domain/assess';
 export type {

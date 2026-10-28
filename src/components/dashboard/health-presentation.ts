@@ -1,7 +1,11 @@
 import type { BadgeTone } from '@/components/ui/surfaces';
+import { tryParseDecimal } from '@/core/money';
+import { isMetricKey, metricDefinition } from '@/modules/financial-engine';
+import { METRIC_LABELS, labelFor } from '@/modules/financials';
 import {
   BANDS, HEALTH_DISCLAIMER, PROXY_CAP_NOTE, bandLabel,
   type DimensionBreakdown, type ExclusionReason, type HealthBand, type HealthDimensionKey,
+  type MetricReference,
 } from '@/modules/health';
 
 /**
@@ -108,6 +112,141 @@ export const RULE_LABELS: Readonly<Record<string, string>> = {
   R4: 'Overdue share of what you owe suppliers',
   R5: 'Months with complete figures, of the last six',
 };
+
+/**
+ * A rule's result, in words (presentation only — the band itself is the engine's).
+ *
+ * The config states a band the way the rule compares it: "0.20 to 0.35", "> 0.85", ">= 1.1". A
+ * business owner reads a share as a percentage and an operator as a word, so the panel prints "20%
+ * to 35%", "more than 85%" and "at least 1.1×". Nothing here changes which band a value fell in.
+ *
+ * `percent` rules compare a share, a margin or a growth rate; `times` a multiple; `count` a number of
+ * things. A result this does not recognise is printed as it is, rather than guessed at.
+ */
+const RESULT_SCALE: Readonly<Record<string, 'percent' | 'times' | 'count'>> = {
+  P1: 'percent', P2: 'percent', P4: 'percent',
+  G1: 'percent', G2: 'percent', G3: 'percent',
+  K1: 'percent', Q1: 'percent', Q2: 'percent',
+  B2: 'times', C4: 'times', M1: 'times', R1: 'times',
+  K3: 'count', B3: 'count', R5: 'count',
+};
+
+/** Results that read better rewritten whole than translated piece by piece. */
+const RESULT_PHRASES: Readonly<Record<string, Readonly<Record<string, string>>>> = {
+  // P3 and K2 compare two percentages, so their difference is in percentage points, not per cent.
+  P3: {
+    '>= +0.02': 'up 2 percentage points or more',
+    'between -0.02 and +0.02': 'within 2 percentage points',
+    '<= -0.02': 'down 2 percentage points or more',
+  },
+  K2: {
+    '<= 0': 'costs grew no faster than sales',
+    '0 to +0.10': 'costs grew up to 10 points faster than sales',
+    '> +0.10': 'costs grew more than 10 points faster than sales',
+  },
+  C1: { '> 0': 'above zero', '<= 0': 'zero or below' },
+  C2: { 'cash generative': 'cash is growing, so it is not running down' },
+  B4: { full: 'all of it', partial: 'only part of it' },
+  K3: { '0': 'none' },
+  B3: { '0': 'none' },
+  R5: { '6': 'all 6' },
+};
+
+const OPERATOR_WORDS: Readonly<Record<string, string>> = {
+  '>=': 'at least', '>': 'more than', '<=': 'at most', '<': 'less than',
+};
+
+/** "0.20" → "20%", "+0.05" → "+5%", "-0.05" → "−5%"; anything that is not a number is left alone. */
+function scaledNumber(token: string, scale: 'percent' | 'times' | 'count' | undefined): string {
+  if (scale === 'percent') {
+    const parsed = tryParseDecimal(token);
+    if (parsed === null) return token;
+    const value = parsed.abs().times(100).toDecimalPlaces(1).toString();
+    const sign = parsed.isNegative() ? '−' : token.startsWith('+') ? '+' : '';
+    return `${sign}${value}%`;
+  }
+  if (scale === 'times') return token.replace(/^([0-9.]+)x?$/, '$1×');
+  return token.replace(/^-/, '−');
+}
+
+/** G2 measures how much sales vary month to month, so its percentage needs saying what of. */
+const RESULT_PREFIX: Readonly<Record<string, string>> = { G2: 'sales vary by ' };
+
+export function resultText(rule: string, result: string): string {
+  const phrase = RESULT_PHRASES[rule]?.[result];
+  if (phrase !== undefined) return phrase;
+  // C3 counts months whose net cash movement was positive: "positive in 2 of 3".
+  const months = /^positive in (\d+) of (\d+)$/.exec(result);
+  if (rule === 'C3' && months) return `cash grew in ${months[1]} of the last ${months[2]} months`;
+  if (rule === 'C3' && /^negative in all (\d+)$/.test(result)) {
+    return `cash fell in each of the last ${result.replace(/^negative in all /, '')} months`;
+  }
+
+  const scale = RESULT_SCALE[rule];
+  const n = (token: string) => scaledNumber(token, scale);
+  let text = result;
+  const compared = /^(>=|<=|>|<)\s*(\S+)(.*)$/.exec(result);
+  const between = /^between (\S+) and (\S+)$/.exec(result);
+  const range = /^(\S+) to (\S+)(.*)$/.exec(result);
+  const counted = /^(\d+)-(\d+)$/.exec(result);
+  if (compared) text = `${OPERATOR_WORDS[compared[1]!]} ${n(compared[2]!)}${compared[3]}`;
+  else if (between) text = `between ${n(between[1]!)} and ${n(between[2]!)}`;
+  else if (range) text = `${n(range[1]!)} to ${n(range[2]!)}${range[3]}`;
+  else if (counted && scale === 'count') text = `${counted[1]} to ${counted[2]}`;
+  // "above 4.0x" and the like: the multiplication sign, wherever a multiple is written.
+  if (scale === 'times') text = text.replace(/(\d)x\b/g, '$1×');
+  return `${RESULT_PREFIX[rule] ?? ''}${text}`;
+}
+
+/**
+ * The name of a figure a dimension rested on, never its key.
+ *
+ * The plain §8.1 label when there is one; otherwise the engine's own definition label; and for a
+ * composed variance key ("net_profit.variance.prev_period"), the figure's name and what it was
+ * compared with. Only a key the engine does not know at all falls back to its words.
+ */
+const VARIANCE_COMPARISONS: Readonly<Record<string, string>> = {
+  prev_period: 'change on last month',
+  trailing_3m_avg: 'change on the 3-month average',
+  same_period_last_year: 'change on the same month last year',
+};
+
+function baseFigureLabel(key: string): string {
+  const plain = METRIC_LABELS[key]?.plain;
+  if (plain !== undefined) return plain;
+  if (isMetricKey(key)) return metricDefinition(key).label;
+  return labelFor(key).plain;
+}
+
+export function figureLabel(key: string): string {
+  const variance = /^(.+)\.variance\.([a-z0-9_]+)$/.exec(key);
+  if (variance) {
+    return `${baseFigureLabel(variance[1]!)} — ${VARIANCE_COMPARISONS[variance[2]!] ?? 'change'}`;
+  }
+  return baseFigureLabel(key);
+}
+
+/**
+ * The pinned figures, one entry per figure name.
+ *
+ * A dimension can rest on the same figure several times — Marketing reads "sales from this
+ * customer" once per customer and month — and five identical links side by side told a reader
+ * nothing. They are listed once, with a numbered link to each; the evidence each opens names its
+ * month and customer.
+ */
+export function figureGroups(
+  metrics: readonly MetricReference[],
+): readonly { readonly label: string; readonly snapshotIds: readonly string[] }[] {
+  const groups = new Map<string, string[]>();
+  for (const metric of metrics) {
+    if (metric.snapshot_id === null) continue;
+    const label = figureLabel(metric.metric_key);
+    const ids = groups.get(label) ?? [];
+    if (!ids.includes(metric.snapshot_id)) ids.push(metric.snapshot_id);
+    groups.set(label, ids);
+  }
+  return [...groups].map(([label, snapshotIds]) => ({ label, snapshotIds }));
+}
 
 /** Why a rule did not run. A skipped rule shows this instead of a score, never a silent zero. */
 export const SKIP_TEXT: Readonly<Record<string, string>> = {

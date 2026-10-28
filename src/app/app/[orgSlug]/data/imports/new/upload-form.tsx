@@ -25,15 +25,15 @@ const isDocument = (f: File) => /\.(pdf|jpe?g|png)$/i.test(f.name) || /^(applica
  *  answer (`IMPORT_TYPE_SPECS`), passed in by the page, so the two cannot drift again. */
 export const IMPORT_TYPES: ReadonlyArray<{ value: string; label: string; hint: string }> = [
   { value: 'bank_statement', label: 'Bank statement', hint: 'A list of transactions from your bank' },
-  { value: 'general_ledger', label: 'General ledger', hint: 'Every journal entry, from your accounting system' },
-  { value: 'trial_balance', label: 'Trial balance', hint: 'Account balances at a point in time' },
-  { value: 'pnl_report', label: 'Profit and loss report', hint: 'A summary by category' },
+  { value: 'general_ledger', label: 'General ledger', hint: 'Every transaction, account by account, exported from your bookkeeping software' },
+  { value: 'trial_balance', label: 'Trial balance', hint: 'The balance of every account, exported from your bookkeeping software' },
+  { value: 'pnl_report', label: 'Profit and loss report', hint: 'Income and costs for the period, line by line' },
   { value: 'balance_sheet', label: 'Balance sheet', hint: 'What the business owns and owes at a date' },
-  { value: 'sales_invoices', label: 'Sales invoices', hint: 'What your customers owe you' },
-  { value: 'purchase_invoices', label: 'Purchase invoices', hint: 'What you owe your suppliers' },
+  { value: 'sales_invoices', label: 'Sales invoices', hint: 'Invoices you sent to customers — a list, or one invoice as a photo or PDF' },
+  { value: 'purchase_invoices', label: 'Purchase invoices', hint: 'Bills from your suppliers — a list, or one bill as a photo or PDF' },
   { value: 'sales_report', label: 'Sales report', hint: 'A sales report with one line per invoice' },
   { value: 'purchase_report', label: 'Purchase report', hint: 'A purchase report with one line per invoice' },
-  { value: 'receipts', label: 'Receipts', hint: 'A list of receipts, each against an expense account' },
+  { value: 'receipts', label: 'Receipts', hint: 'Receipts for things the business paid for' },
   { value: 'budget', label: 'Budget', hint: 'What you plan to earn and spend, by month and account' },
 ];
 
@@ -124,7 +124,12 @@ export function UploadForm({
         </div>
         {readsInvoice ? (
           <p className="-mt-3 text-xs text-ink-muted">One invoice covers only its own date, so APX never takes it for all of that month&apos;s invoices.</p>
-        ) : null}
+        ) : (
+          <p className="-mt-3 text-xs text-ink-muted">
+            The first and last day the file is meant to cover — for example 1 January to 31 March. Use the whole
+            period even if the last transaction is earlier.
+          </p>
+        )}
 
         {/*
           A PDF is always kept as a source document; only a bank statement's figures are read from one

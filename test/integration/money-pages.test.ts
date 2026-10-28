@@ -685,7 +685,7 @@ describe('the chart of accounts puts the rows that need a decision first', () =>
     const view = await loadAccountsPage(clientFor(ownerId), orgId);
     expect(view.unmappedCount).toBeGreaterThan(0);
     expect(view.rows[0]?.account.id).toBe(importedAccount);
-    expect(view.rows[0]?.confidenceLabel).toBe('Not mapped');
+    expect(view.rows[0]?.confidenceLabel).toBe('No category yet');
     expect(view.rows[0]?.needsAttention).toBe(true);
   });
 });

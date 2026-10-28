@@ -3148,3 +3148,19 @@ Decision:
 3. **Landing.** Everyone lands on Home (`landingSection` returns `home`): every resolving role holds `dashboard.view`, so nobody lands on a refusal, and Departments stays one click away. The Departments page still sends a reader without `financials.view` to Home.
 
 Consequences: e2e journeys now wait for `/home` after onboarding and sign-in. Components: `src/components/dashboard/lobby.tsx`.
+
+### ADR-177 · The client pass: every page in plain words for an owner
+
+Status: **built locally on 2026-10-28 on the owner's instruction. Not reviewed, merged or deployed.**
+
+Context: the owner: "go through each and every page, every section, and every department … make it easier to use for the clients … I don't want it to be too complicated for the client to understand the app." Every company page (55, as the sample company's owner) was captured and read as an owner with no accounting training.
+
+Decision — presentation only; no figure, gate, route or calculation changed:
+1. **Words.** Each page says in a line what it answers ("Did the business make money in Sep 2026?"); jargon is replaced or explained beside the term (receivables, accrual, reconciliation, mapping, commit/roll back → import/remove, engine, snapshot); rule codes and IDs move to tooltips or "Technical details" toggles; long notes fold behind "More detail" toggles.
+2. **Names agree everywhere.** `labelFor` never returns a raw key (new plain labels for customer/supplier concentration, spending by account/type, interest and tax; a humanised fallback); forecast and What-if use the same names as Home (Sales, Profit, Cash, You owe); alert families have plain names at the source (`catalogue.ts`); Funding areas are renamed (read by key, so older assessments show the new names); the Customers › Marketing tab is "Campaigns".
+3. **Numbers read right.** A change is shown in the figure's unit — margins in points, collection periods in days — never as money (`changeFrom`); a fully paid invoice reads "Paid", not "Over 90 days late"; dates read "24 Sep 2026" everywhere (never ISO, never "Sept"); the runway says why it has no figure.
+4. **Less noise.** The routine "Calculated" badge is no longer drawn (`StatusBadgeView`); the badges that ask for care — Estimate, Partial data, Please check — stand out. The Action Centre's seven equal tabs are four plus a small "Only show" row; alert filters are three plus "How serious".
+5. **Alerts.** Titles quote and capitalise the payee; money in and money out get different next steps (the recurring rule now records `direction`); every button says what it does; alerts are re-worded on display from their stored figures (`displayCopyFor`), while the stored words stay what exports and AI answers quote.
+6. **Help where people start.** The upload page says what to bring and in what order and what happens next; the AI Analyst page says what it can and cannot answer and how the daily allowance works; Reports says which report to read first; the health page and evidence pages explain how to read them.
+
+Consequences: some e2e and unit expectations changed with the copy (journeys 8, 11, 12, 19, 21, evidence-provenance; unit tests for labels, analyst, clickable card). The e2e suite was not run in this pass.

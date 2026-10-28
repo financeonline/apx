@@ -8,6 +8,7 @@ import {
 } from '@/modules/evidence';
 import { getAccessContext } from '@/modules/tenancy';
 import { Badge, Card, CardBody, CardHeader, PageHeader } from '@/components/ui/surfaces';
+import { formatDate } from '@/components/labels';
 import { requirePermission } from '@/app/_lib/authz';
 import { DocumentPanel } from '../../../[bundleId]/document-panel';
 
@@ -55,7 +56,7 @@ export default async function RecordProvenancePage({
       <PageHeader
         eyebrow={record.kindLabel}
         title={record.description ?? record.kindLabel}
-        description={record.periodLabel ? `Recorded in ${record.periodLabel}` : undefined}
+        description={`${record.periodLabel ? `Recorded in ${record.periodLabel}. ` : ''}One line from your records: what it is, whether it counts in your figures, and the file it came from.`}
       />
 
       <Card>
@@ -113,16 +114,16 @@ export default async function RecordProvenancePage({
         <CardBody>
           {record.importedBy === null ? (
             <p className="text-sm text-ink-muted">
-              No import produced this record. Rows restored by rolling an import back, rows created by
-              merging two customers, and figures entered by hand all reach the ledger without a file
-              behind them.
+              This record did not come from an upload. That is normal for rows brought back when an
+              upload was undone, rows made by merging two customers, and figures typed in by hand —
+              none of them has a file behind it.
             </p>
           ) : (
             <div className="flex flex-col gap-3">
               <dl className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                 <Field
                   label="Added"
-                  value={record.importedBy.committedAt ? formatDate(record.importedBy.committedAt) : 'Not yet committed'}
+                  value={record.importedBy.committedAt ? formatDate(record.importedBy.committedAt) : 'Not added yet'}
                 />
                 <Field
                   label="Covering"
@@ -200,8 +201,4 @@ function whereInFile(sourceRef: string | null): string | null {
   if (parsed.sheet !== null) parts.push(`sheet ${parsed.sheet}`);
   if (parsed.row !== null) parts.push(`line ${parsed.row}`);
   return parts.length === 0 ? null : parts.join(', ');
-}
-
-function formatDate(iso: string): string {
-  return new Date(iso).toLocaleDateString('en-GB', { day: 'numeric', month: 'short', year: 'numeric' });
 }

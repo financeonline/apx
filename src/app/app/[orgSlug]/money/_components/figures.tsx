@@ -49,14 +49,24 @@ export function FigureRow({
   changeLabel?: string;
 }) {
   const notComputable = row.status.kind === 'not_available';
+  const shown = label ?? row.label;
+  /*
+   * The accountant's term is a help only when it says something the plain name does not. A raw
+   * metric key (a figure the vocabulary has no entry for, e.g. `expense_by_category`) or a repeat of
+   * the plain name ("Loans — Loans") is noise to a reader and to a screen reader alike, so neither
+   * is announced.
+   */
+  const technical = row.technicalLabel !== row.metricKey && row.technicalLabel !== shown
+    ? row.technicalLabel
+    : null;
 
   return (
     <TR>
       <TD className="max-sm:font-medium">
-        <span title={[row.technicalLabel, row.basisText].filter(Boolean).join(' · ')}>
-          {label ?? row.label}
+        <span title={[technical, row.basisText].filter(Boolean).join(' · ')}>
+          {shown}
         </span>
-        <span className="sr-only"> — {row.technicalLabel}</span>
+        {technical ? <span className="sr-only"> — {technical}</span> : null}
       </TD>
       <TD className="text-right" label="Amount">
         <span
@@ -74,7 +84,7 @@ export function FigureRow({
       <TD className="whitespace-nowrap text-right text-sm">
         {/* Exactly one badge per number (§8.1); the dash on the value is the badge when NULL. */}
         {notComputable ? null : <StatusBadgeView status={row.status} size="sm" />}{' '}
-        <WhyLink row={row} />
+        <WhyLink row={row} label={shown} />
       </TD>
     </TR>
   );
@@ -93,7 +103,16 @@ function ChangeCell({ row }: { row: MetricCardView }) {
 }
 
 /** The "Why?" affordance every number carries (§4). Always visible, never hover-only (§10). */
-export function WhyLink({ row, className = '' }: { row: MetricCardView; className?: string }) {
+export function WhyLink({
+  row,
+  label,
+  className = '',
+}: {
+  row: MetricCardView;
+  /** The name the row is shown under, when the page names it differently from the figure. */
+  label?: string;
+  className?: string;
+}) {
   return (
     <Link
       href={row.whyHref}
@@ -103,7 +122,7 @@ export function WhyLink({ row, className = '' }: { row: MetricCardView; classNam
       <ChevronRight aria-hidden="true" className="size-4" />
       <span className="sr-only">
         {' '}
-        See the evidence behind {row.label} for {row.period.label}
+        See the evidence behind {label ?? row.label} for {row.period.label}
       </span>
     </Link>
   );

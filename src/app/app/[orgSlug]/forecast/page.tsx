@@ -91,20 +91,25 @@ export default async function ForecastPage({
   }
 
   const first = state.periods[0];
+  const last = state.periods[state.periods.length - 1];
 
   return (
     <>
+      {/* The one line under the title says what the page is and that it is an estimate. */}
       <PageHeader
         eyebrow="Forecast"
         title="What is expected"
-        description={first === undefined ? undefined : `For ${first.periodLabel}`}
+        description={first === undefined || last === undefined ? undefined
+          : first === last
+            ? `Our best estimate for ${first.periodLabel}, from your own finished months.`
+            : `Our best estimate for ${first.periodLabel} to ${last.periodLabel}, from your own finished months.`}
       />
 
       {state.stale ? (
         <div className="mt-6">
           <Banner tone="warn" title="Your figures have changed since this was worked out">
-            This forecast rests on an earlier calculation. Work it out again to use the latest
-            figures.
+            This forecast was worked out before your latest figures came in. Press &ldquo;Work it
+            out again&rdquo; at the bottom of this page to bring it up to date.
           </Banner>
         </div>
       ) : null}
@@ -145,7 +150,7 @@ export default async function ForecastPage({
         {basisSentence(state.periodsUsed)}
         {state.basis === null ? null : (
           <>
-            {' '}
+            {' How far to rely on it: '}
             <span className="text-ink">{BASIS_LABEL[state.basis]}</span>
             {' — '}
             {BASIS_TEXT[state.basis].split('—')[1]?.trim()}
@@ -155,7 +160,12 @@ export default async function ForecastPage({
 
       {state.periods.length <= 1 ? null : (
         <Card className="mt-6">
-          <CardHeader title="The months ahead" icon={<CalendarRange />} tint="pink" />
+          <CardHeader
+            title="The months ahead"
+            description="The same estimate, month by month."
+            icon={<CalendarRange />}
+            tint="pink"
+          />
           <CardBody>
             <div className="flex flex-col gap-4">
               {state.periods.map((period) => (
@@ -227,7 +237,8 @@ function ForecastFigure({ metric }: { metric: ForecastMetricView }) {
           </span>
           {metric.change === null ? null : (
             <>
-              {' · '}
+              {/* A bare "−£3,991" left the reader guessing what it was the difference between. */}
+              {' · difference: '}
               <span className="tabular-nums">
                 {formatMoney(metric.change, { currency, signDisplay: 'always' })}
               </span>

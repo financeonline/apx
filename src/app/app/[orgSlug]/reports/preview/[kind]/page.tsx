@@ -5,6 +5,7 @@ import { getAccessContext } from '@/modules/tenancy';
 import { Banner, PageHeader } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
 import { BriefView } from '../../_components/brief-view';
+import { REPORT_PURPOSE } from '../../_components/report-guide';
 
 export const dynamic = 'force-dynamic';
 
@@ -31,11 +32,11 @@ export default async function BriefPreviewPage({ params }: { params: Promise<{ o
       <PageHeader
         eyebrow={content.organisationName}
         title={`${KIND_LABELS[kind]} — ${daily ? 'today so far' : 'this week so far'}`}
-        description={windowLabel(content.window.start, content.window.end)}
+        description={`${windowLabel(content.window.start, content.window.end)}. ${REPORT_PURPOSE[kind]}`}
       />
       <Banner tone="info" title={daily ? 'This day is not over' : 'This week is not over'}>
         These figures will change as the {daily ? 'day' : 'week'} goes on and more data arrives. The finished
-        {daily ? ' brief is produced shortly after midnight' : ' report is produced early on Monday'}, and kept.
+        {daily ? ' brief is made shortly after midnight' : ' report is made early on Monday'}, and kept on the Reports page.
       </Banner>
       {/* A readable measure on a very wide screen. */}
       <div className="mt-8 max-w-5xl">

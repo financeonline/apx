@@ -32,6 +32,8 @@ export function LedgerBookPage({
   view: LedgerBookView;
 }) {
   const comparison = view.scope.previous?.label ?? 'the previous month';
+  // The other side of the invoice, named for who it is rather than a generic "Name".
+  const party = route === 'receivables' ? 'Customer' : 'Supplier';
 
   return (
     <>
@@ -59,7 +61,10 @@ export function LedgerBookPage({
           <CardHeader
             title="Unpaid invoices"
             description={
-              view.truncated ? 'The first 200 unpaid invoices are shown.' : 'Latest due date first.'
+              // The list comes oldest due date first (the repository's order), so the most overdue lead.
+              view.truncated
+                ? 'The first 200 unpaid invoices are shown, the longest overdue first.'
+                : 'The longest overdue first, so you can see who to chase.'
             }
             icon={<FileText />}
             tint="pink"
@@ -70,12 +75,12 @@ export function LedgerBookPage({
             ) : (
               <TableWrap stack>
                 <caption className="sr-only">Unpaid invoices with how late each one is</caption>
-                <THead columns={['Invoice', 'Name', 'Issued', 'Due', 'Aging', 'Outstanding']} />
+                <THead columns={['Invoice', party, 'Issued', 'Due', 'How late', 'Still unpaid']} />
                 <TBody>
                   {view.invoices.map((invoice) => (
                     <TR key={invoice.id}>
                       <TD className="tabular max-sm:font-medium">{invoice.number}</TD>
-                      <TD label="Name">
+                      <TD label={party}>
                         <Link
                           href={`/app/${orgSlug}/customers/${invoice.counterpartyId}`}
                           className="underline underline-offset-2"
@@ -87,8 +92,8 @@ export function LedgerBookPage({
                       <TD className="whitespace-nowrap tabular" label="Due">
                         {invoice.dueDate ? formatDate(invoice.dueDate) : '—'}
                       </TD>
-                      <TD className="whitespace-nowrap" label="Aging">{invoice.bucketLabel}</TD>
-                      <TD className="whitespace-nowrap text-right tabular" label="Outstanding">{invoice.balanceDue}</TD>
+                      <TD className="whitespace-nowrap" label="How late">{invoice.bucketLabel}</TD>
+                      <TD className="whitespace-nowrap text-right tabular" label="Still unpaid">{invoice.balanceDue}</TD>
                     </TR>
                   ))}
                 </TBody>

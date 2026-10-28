@@ -504,7 +504,7 @@ function WorkspaceStatus({
           </Link>
         </p>
       ) : null}
-      {compliance ? <ArrowLink href={`${base}/data/imports`} className="mt-4">Data capture</ArrowLink> : null}
+      {compliance ? <ArrowLink href={`${base}/data/imports`} className="mt-4">Add or check your data</ArrowLink> : null}
     </section>
   );
 }

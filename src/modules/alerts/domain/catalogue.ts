@@ -18,7 +18,13 @@ import {
 export interface RuleDefinition {
   readonly key: AlertRuleKey;
   readonly klass: AlertRuleClass;
-  /** The §8.2 family, for grouping in the interface. */
+  /**
+   * The family, for grouping in the interface and the line under every alert's title.
+   *
+   * §8.2 names the families in the engine's words ("Significant period variance"); these are the
+   * owner's words for the same groups, because this is the label Home, Insights, an alert's own page
+   * and the monthly report all print. One name per family, here, so those pages cannot disagree.
+   */
   readonly family: string;
   /** `alerts.metric_key`, or NULL for the record-level rules that are about a row, not a figure. */
   readonly metricKey: string | null;
@@ -46,43 +52,43 @@ function rule(
 
 export const RULES: Readonly<Record<AlertRuleKey, RuleDefinition>> = {
   'expense.spike_category': rule(
-    'expense.spike_category', 'event', 'Expense spike', 'expense_by_category', 'standard_category'),
+    'expense.spike_category', 'event', 'Spending jumped', 'expense_by_category', 'standard_category'),
   'expense.spike_account': rule(
-    'expense.spike_account', 'event', 'Expense spike', 'expense_by_account', 'account',
+    'expense.spike_account', 'event', 'Spending jumped', 'expense_by_account', 'account',
     ['expense.spike_category']),
-  'revenue.decline': rule('revenue.decline', 'event', 'Revenue decline', 'revenue', 'none'),
+  'revenue.decline': rule('revenue.decline', 'event', 'Sales fell', 'revenue', 'none'),
   'margin.deterioration': rule(
-    'margin.deterioration', 'event', 'Margin deterioration', 'gross_margin', 'none'),
-  'cash.decline': rule('cash.decline', 'event', 'Cash deterioration', 'closing_cash', 'none'),
+    'margin.deterioration', 'event', 'Keeping less of each sale', 'gross_margin', 'none'),
+  'cash.decline': rule('cash.decline', 'event', 'Cash is falling', 'closing_cash', 'none'),
   'cash.runway_low': rule(
-    'cash.runway_low', 'state', 'Cash deterioration', 'cash_runway_months', 'none'),
+    'cash.runway_low', 'state', 'Cash is falling', 'cash_runway_months', 'none'),
   'receivables.deterioration': rule(
-    'receivables.deterioration', 'state', 'Receivables deterioration', 'receivables_overdue', 'none'),
+    'receivables.deterioration', 'state', 'Customers paying late', 'receivables_overdue', 'none'),
   'payables.deterioration': rule(
-    'payables.deterioration', 'state', 'Payables deterioration', 'payables_overdue', 'none'),
+    'payables.deterioration', 'state', 'Bills paid late', 'payables_overdue', 'none'),
   'concentration.customer': rule(
-    'concentration.customer', 'state', 'Customer concentration',
+    'concentration.customer', 'state', 'Relying on one customer',
     'customer_concentration_top1', 'counterparty'),
   'concentration.supplier': rule(
-    'concentration.supplier', 'state', 'Supplier concentration',
+    'concentration.supplier', 'state', 'Relying on one supplier',
     'supplier_concentration_top1', 'counterparty'),
   'recurring.amount_changed': rule(
-    'recurring.amount_changed', 'state', 'Recurring-payment anomaly', null, 'recurring_group'),
+    'recurring.amount_changed', 'state', 'A regular payment changed', null, 'recurring_group'),
   'recurring.missed': rule(
-    'recurring.missed', 'state', 'Recurring-payment anomaly', null, 'recurring_group'),
+    'recurring.missed', 'state', 'A regular payment changed', null, 'recurring_group'),
   'recurring.inflow_missed': rule(
-    'recurring.inflow_missed', 'state', 'Recurring-payment anomaly', null, 'recurring_group'),
+    'recurring.inflow_missed', 'state', 'A regular payment changed', null, 'recurring_group'),
   'recurring.new': rule(
-    'recurring.new', 'state', 'Recurring-payment anomaly', null, 'recurring_group'),
+    'recurring.new', 'state', 'A regular payment changed', null, 'recurring_group'),
   'duplicate.transaction': rule(
-    'duplicate.transaction', 'event', 'Duplicate transaction', null, 'bank_transaction'),
+    'duplicate.transaction', 'event', 'Possible double payment', null, 'bank_transaction'),
   'bank.unusual_transaction': rule(
-    'bank.unusual_transaction', 'event', 'Unusual bank transaction', null, 'bank_transaction'),
+    'bank.unusual_transaction', 'event', 'Unusually large payment', null, 'bank_transaction'),
   'deviation.large_transaction': rule(
-    'deviation.large_transaction', 'event', 'Large transaction deviation',
+    'deviation.large_transaction', 'event', 'Unusually large entry',
     'expense_by_account', 'none'),
   'variance.significant': rule(
-    'variance.significant', 'event', 'Significant period variance', null, 'none',
+    'variance.significant', 'event', 'Big change from last month', null, 'none',
     ['revenue.decline', 'expense.spike_category', 'expense.spike_account',
       'cash.decline', 'cash.runway_low', 'margin.deterioration']),
 };

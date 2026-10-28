@@ -139,8 +139,9 @@ export function quotaNotice(
 /** The small line under the question box. */
 export function remainingLine(remainingToday: number | null): string | null {
   if (remainingToday === null) return null;
-  if (remainingToday === 1) return '1 question left today';
-  return `${remainingToday} questions left today`;
+  // The allowance belongs to the business, not the person asking, so the line says so.
+  if (remainingToday === 1) return '1 question left today for your business';
+  return `${remainingToday} questions left today for your business`;
 }
 
 // -----------------------------------------------------------------------------------------------

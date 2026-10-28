@@ -42,8 +42,8 @@ export const INTERIM_STATUS_LABELS = {
 
 /** The interim figures are not the monthly engine's; every report that shows them says so. */
 export const INTERIM_DISCLAIMER =
-  'Day and week figures are interim: they count the records imported so far, by their own dates, and '
-  + 'will change as more statements and invoices arrive. Monthly figures come from the monthly calculation.';
+  'Day and week figures are early figures: they count only the statements and invoices added so far, '
+  + 'and will change as more arrive. The month section uses the finished monthly figures.';
 
 export const SEVERITY_LABELS = {
   critical: 'Critical', high: 'High', medium: 'Medium', low: 'Low', info: 'Info',

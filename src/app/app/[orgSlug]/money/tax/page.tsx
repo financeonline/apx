@@ -51,7 +51,7 @@ export default async function TaxPage({
       <PageHeader
         eyebrow="Money"
         title="Tax"
-        description="Your VAT return and Corporation Tax, worked out from your own records. Indicative — check before you file."
+        description="How much tax should you expect to pay, and when? Your VAT return and Corporation Tax, worked out from your own records. These are estimates — check them before you file."
       />
       <div className="flex flex-col gap-6">
         <VatSection vat={vat} orgSlug={orgSlug} canSet={canSet} />
@@ -209,10 +209,10 @@ function CorporationTaxSection({ ct, orgSlug, canSet }: { ct: CorporationTaxView
               { label: 'Tax already booked in your accounts', value: <span className="font-mono tabular-nums">{money(ct.bookedTax ?? '0')}</span> },
               { label: 'Estimated tax', value: <span className="font-mono text-lg tabular-nums text-ink">{money(e.estimatedTax)}</span> },
               { label: 'How it was worked out', value: e.band },
-              ...(e.marginalRelief === null ? [] : [{ label: 'Marginal relief', value: <span className="font-mono tabular-nums">{money(e.marginalRelief)}</span> }]),
-              ...(e.effectiveRate === null ? [] : [{ label: 'Effective rate', value: formatPercent(e.effectiveRate) }]),
+              ...(e.marginalRelief === null ? [] : [{ label: 'Marginal relief (a reduction for profits between the two limits)', value: <span className="font-mono tabular-nums">{money(e.marginalRelief)}</span> }]),
+              ...(e.effectiveRate === null ? [] : [{ label: 'Effective rate (the tax as a share of profit)', value: formatPercent(e.effectiveRate) }]),
               {
-                label: isUae ? 'Threshold' : 'Limits for this period',
+                label: isUae ? 'Threshold' : 'Profit limits for this period (lower and upper)',
                 value: e.thresholds.upper === null ? money(e.thresholds.lower) : `${money(e.thresholds.lower)} and ${money(e.thresholds.upper)}`,
               },
               { label: isUae ? 'Return and payment due' : 'Payment due', value: <span className="inline-flex items-center gap-1.5"><CalendarClock aria-hidden="true" className="size-4 text-accent" />{longDate(e.dueDate)}</span> },

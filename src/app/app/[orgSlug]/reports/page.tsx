@@ -13,11 +13,13 @@ import {
 import { fundingEnabled } from '@/modules/funding';
 import { getAccessContext, moduleOn } from '@/modules/tenancy';
 import { ReportsBeforeFirstMonthEmpty } from '@/components/dashboard';
+import { formatDate } from '@/components/labels';
 import { Badge, Card, CardBody, IconBadge, PageHeader, type IconTint } from '@/components/ui/surfaces';
 import { ABOVE_CARD_LINK, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { requirePermission } from '@/app/_lib/authz';
 import { ComposeForm } from './_components/report-controls';
 import { summaryPdfHref } from './_components/summary-view';
+import { REPORT_PURPOSE, originLabel } from './_components/report-guide';
 
 export const dynamic = 'force-dynamic';
 
@@ -29,6 +31,10 @@ export const dynamic = 'force-dynamic';
  * instead, because a stored report says the period was reported on. The Funding Readiness Report
  * follows the Funding Readiness feature (Phase 16, ADR-145): while it is switched off the section
  * says so rather than hiding it, and the database hides any earlier such report (`reports_select`).
+ *
+ * The Monthly Management Report comes first, with a short "which report?" guide above everything:
+ * it is the one an owner should read, and six equal-weight cards did not say so (client-friendliness
+ * pass, 2026-10-28).
  */
 
 /** The row's main link, as the reference's outlined "Open ›" button (ADR-155). */
@@ -57,7 +63,7 @@ function StoredList({ orgSlug, reports, empty }: { orgSlug: string; reports: rea
             {windowLabel(report.windowStart, report.windowEnd)}
           </CardLink>
           <span className="flex flex-wrap items-center gap-2 text-ink-muted">
-            {report.origin === 'scheduled' ? 'Produced on schedule' : 'Produced on request'}
+            {originLabel(report.origin)}
             {report.versions > 1 ? <Badge>{report.versions} versions</Badge> : null}
           </span>
         </li>
@@ -67,10 +73,11 @@ function StoredList({ orgSlug, reports, empty }: { orgSlug: string; reports: rea
 }
 
 function Section({
-  title, description, icon, tint, children,
-}: { title: string; description: string; icon: ReactNode; tint: IconTint; children: ReactNode }) {
+  id, title, description, icon, tint, children,
+}: { id: string; title: string; description: string; icon: ReactNode; tint: IconTint; children: ReactNode }) {
   return (
-    <Card>
+    // `scroll-mt` keeps a section's heading clear of the top bar when the guide jumps to it.
+    <Card id={id} className="scroll-mt-20">
       <CardBody>
         {/* header/hgroup, not divs: the section stays the innermost div holding its heading. */}
         <header className="flex min-w-0 items-start gap-3.5">
@@ -125,60 +132,64 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
   const weeks = Array.from({ length: WEEKS_OFFERED }, (_, i) => addDays(windows.lastWeekStart, -7 * i))
     .map((start) => ({ value: start, label: windowLabel(start, addDays(start, 6)) }));
 
+  // The guide lists only the reports this reader is shown below, in the same order.
+  const guide: { id: string; name: string; when: string }[] = [
+    readsFullMonthly
+      ? { id: 'monthly', name: 'Monthly Management Report', when: 'the main report: how last month went. Start here.' }
+      : { id: 'monthly', name: SUMMARY_EDITION_TITLE, when: 'the headline figures for each finished month.' },
+    ...(seesInternal ? [
+      { id: 'daily', name: KIND_LABELS.daily_brief, when: 'a quick look at one day.' },
+      { id: 'weekly', name: KIND_LABELS.weekly_intelligence, when: 'last week compared with the week before.' },
+      { id: 'adviser', name: KIND_LABELS.adviser, when: 'to send to your accountant or adviser.' },
+    ] : []),
+    ...(showsCustom ? [{ id: 'custom', name: KIND_LABELS.custom_ai, when: 'your own questions, answered by the AI Analyst.' }] : []),
+    { id: 'funding', name: KIND_LABELS.funding_readiness, when: 'before you talk to a lender.' },
+  ];
+
   return (
     <>
       <PageHeader
         eyebrow="Reports"
         title="Reports"
-        description="Briefs and reports from the figures APX has already calculated. Nothing here is recalculated for the page."
+        description="Reports on your business, made from the figures APX has already worked out. Not sure where to start? Read the latest Monthly Management Report."
       />
 
       {/* A readable width on a very wide screen: a row's details stay near its title. */}
       <div className="flex max-w-5xl flex-col gap-6">
-        {seesInternal ? (<>
-        <Section
-          title={KIND_LABELS.daily_brief}
-          icon={<CalendarDays />}
-          tint="violet"
-          description="Key movements, risks, opportunities and actions for one day — with what needs attention today."
-        >
-          <Link href={`/app/${orgSlug}/reports/preview/daily_brief`} className={SOFT_PILL}>
-            Today so far
-          </Link>
-          <StoredList orgSlug={orgSlug} reports={of('daily_brief', DAYS_OFFERED)}
-            empty="No brief yet. Each day's brief is produced shortly after midnight once APX has figures." />
-          {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="daily_brief" label="Produce a brief" windows={days} /> : null}
-        </Section>
-
-        <Section
-          title={KIND_LABELS.weekly_intelligence}
-          icon={<CalendarRange />}
-          tint="pink"
-          description="Financial changes, their causes and unresolved issues for a Monday-to-Sunday week, compared with the week before."
-        >
-          <Link href={`/app/${orgSlug}/reports/preview/weekly_intelligence`} className={SOFT_PILL}>
-            This week so far
-          </Link>
-          <StoredList orgSlug={orgSlug} reports={of('weekly_intelligence', WEEKS_OFFERED)}
-            empty="No weekly report yet. Each week's report is produced early on Monday." />
-          {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="weekly_intelligence" label="Produce a weekly report" windows={weeks} /> : null}
-        </Section>
-        </>) : null}
+        <Card>
+          <CardBody>
+            <h2 className="font-serif text-lg text-ink">Which report do I need?</h2>
+            <ul className="mt-3 flex flex-col gap-2 text-sm">
+              {guide.map((item) => (
+                <li key={item.id} className="text-ink-muted">
+                  <a href={`#${item.id}`} className="font-medium text-accent underline underline-offset-2 pointer-coarse:inline-flex pointer-coarse:min-h-10 pointer-coarse:items-center">
+                    {item.name}
+                  </a>
+                  {' '}— {item.when}
+                </li>
+              ))}
+            </ul>
+          </CardBody>
+        </Card>
 
         {readsFullMonthly ? (
-        <Section title="Monthly Management Report" icon={<FileText />} tint="violet" description="One report a month, from the figures APX has already calculated.">
+        <Section id="monthly" title="Monthly Management Report" icon={<FileText />} tint="violet" description={REPORT_PURPOSE.monthly}>
           {monthly.length === 0 ? (
             <ReportsBeforeFirstMonthEmpty addDataHref={can(ctx, 'imports.create') ? `/app/${orgSlug}/data/imports/new` : undefined} />
           ) : (
             <ul className="flex flex-col divide-y divide-line">
-              {monthly.map((report) => (
+              {monthly.map((report, index) => (
                 <li key={report.periodId} className={`${ROW} flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm`}>
                   <div className="min-w-0">
-                    <p className="font-medium text-ink">{report.periodLabel}</p>
+                    <p className="flex flex-wrap items-center gap-2 font-medium text-ink">
+                      {report.periodLabel}
+                      {/* The list is newest first: the top row is the one to read. */}
+                      {index === 0 ? <Badge tone="accent">Latest</Badge> : null}
+                    </p>
                     <p className="mt-1 text-ink-muted">
                       {report.file === null
-                        ? 'Ready to read on screen. A PDF can be produced from the report.'
-                        : `PDF produced ${report.file.createdAt.slice(0, 10)}`}
+                        ? 'Read it on screen, or make a PDF to print or send.'
+                        : `Read it on screen. A PDF was made on ${formatDate(report.file.createdAt)}.`}
                     </p>
                   </div>
                   {/* The link text is the monthly report's since ADR-024; journeys and screen readers rely on it. */}
@@ -194,6 +205,7 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
         </Section>
         ) : (
         <Section
+          id="monthly"
           title={SUMMARY_EDITION_TITLE}
           icon={<FileText />}
           tint="violet"
@@ -229,39 +241,85 @@ export default async function ReportsPage({ params }: { params: Promise<{ orgSlu
         </Section>
         )}
 
-        {seesInternal ? (
+        {seesInternal ? (<>
         <Section
+          id="daily"
+          title={KIND_LABELS.daily_brief}
+          icon={<CalendarDays />}
+          tint="violet"
+          description={REPORT_PURPOSE.daily_brief}
+        >
+          <Link href={`/app/${orgSlug}/reports/preview/daily_brief`} className={SOFT_PILL}>
+            Today so far
+          </Link>
+          <StoredList orgSlug={orgSlug} reports={of('daily_brief', DAYS_OFFERED)}
+            empty="No brief yet. Each day's brief is made shortly after midnight once APX has figures." />
+          {canGenerate ? (
+            <div className="flex flex-col gap-1">
+              <p className="text-xs text-ink-faint">Missing a day, or added data since? Choose the day and make its brief again.</p>
+              <ComposeForm orgSlug={orgSlug} kind="daily_brief" label="Produce a brief" windows={days} />
+            </div>
+          ) : null}
+        </Section>
+
+        <Section
+          id="weekly"
+          title={KIND_LABELS.weekly_intelligence}
+          icon={<CalendarRange />}
+          tint="pink"
+          description={REPORT_PURPOSE.weekly_intelligence}
+        >
+          <Link href={`/app/${orgSlug}/reports/preview/weekly_intelligence`} className={SOFT_PILL}>
+            This week so far
+          </Link>
+          <StoredList orgSlug={orgSlug} reports={of('weekly_intelligence', WEEKS_OFFERED)}
+            empty="No weekly report yet. Each week's report is made early on Monday." />
+          {canGenerate ? (
+            <div className="flex flex-col gap-1">
+              <p className="text-xs text-ink-faint">Missing a week, or added data since? Choose the week and make its report again.</p>
+              <ComposeForm orgSlug={orgSlug} kind="weekly_intelligence" label="Produce a weekly report" windows={weeks} />
+            </div>
+          ) : null}
+        </Section>
+
+        <Section
+          id="adviser"
           title={KIND_LABELS.adviser}
           icon={<Building2 />}
           tint="pink"
-          description="Adviser-ready intelligence on this business: the latest month, health area by area, what stands open, what was done, and how far the data goes."
+          description={REPORT_PURPOSE.adviser}
         >
           <StoredList orgSlug={orgSlug} reports={of('adviser', 6)} empty="No Accountant/CFO Report yet." />
           {canGenerate ? <ComposeForm orgSlug={orgSlug} kind="adviser" label="Produce one now" /> : null}
         </Section>
-        ) : null}
+        </>) : null}
 
         {showsCustom ? (
         <Section
+          id="custom"
           title={KIND_LABELS.custom_ai}
           icon={<Sparkles />}
           tint="violet"
-          description="Choose a month, the areas to look at and up to five questions; the AI Analyst answers each under its usual checks. Your custom reports are visible to you only."
+          description={REPORT_PURPOSE.custom_ai}
         >
           <StoredList orgSlug={orgSlug} reports={of('custom_ai', 10)} empty="You have no custom reports yet." />
           {canAsk ? (
-            <Link href={`/app/${orgSlug}/reports/custom/new`} className={SOFT_PILL}>
-              Create a custom report
-            </Link>
+            <div className="flex flex-col gap-1">
+              <Link href={`/app/${orgSlug}/reports/custom/new`} className={SOFT_PILL}>
+                Create a custom report
+              </Link>
+              <p className="text-xs text-ink-faint">Each question you add uses one of today&apos;s AI Analyst questions.</p>
+            </div>
           ) : null}
         </Section>
         ) : null}
 
         <Section
+          id="funding"
           title={KIND_LABELS.funding_readiness}
           icon={<HandCoins />}
           tint="pink"
-          description="The latest month's indicative Funding Readiness assessment, as it stood when the report was produced. Not a lending decision."
+          description={REPORT_PURPOSE.funding_readiness}
         >
           {funding ? (
             <>

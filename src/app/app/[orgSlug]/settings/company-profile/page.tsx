@@ -43,7 +43,7 @@ export default async function CompanyProfilePage({ params }: { params: Promise<{
             icon={<Store />}
             tint="violet"
             title="About the business"
-            description="Say what the company sells or its industry, at least, before the first report is written."
+            description="Fill in at least what the company sells or its industry before the first Marketing report is written. The more you add, the more specific the report."
           />
           <CardBody>
             <CompanyProfileForm orgSlug={orgSlug} profile={profile} limits={PROFILE_LIMITS} />

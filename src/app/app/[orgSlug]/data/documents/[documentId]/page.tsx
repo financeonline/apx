@@ -11,6 +11,7 @@ import { formatDateTime } from '@/components/labels';
 import { DocumentViewer } from '@/components/dashboard/document-viewer';
 import { DeleteDocumentControl } from '../delete-control';
 import { DOCUMENT_KIND_LABELS, DOCUMENT_STATUS_LABELS, DOCUMENT_STATUS_TONES, formatBytes } from '../presentation';
+import { importStatusLabel, importTypeLabel } from '../../imports/labels';
 
 export const dynamic = 'force-dynamic';
 
@@ -54,16 +55,16 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
             <CardHeader icon={<FileText />} tint="violet" title="About this file" />
             <CardBody>
               <DetailList items={[
-                { label: 'Status', value: <Badge tone={DOCUMENT_STATUS_TONES[document.status] ?? 'neutral'}>{DOCUMENT_STATUS_LABELS[document.status] ?? document.status}</Badge> },
+                { label: 'File check', value: <Badge tone={DOCUMENT_STATUS_TONES[document.status] ?? 'neutral'}>{DOCUMENT_STATUS_LABELS[document.status] ?? document.status}</Badge> },
                 { label: 'Size', value: formatBytes(document.byteSize) },
                 { label: 'Pages', value: document.pageCount ?? '—' },
-                { label: 'Text layer', value: document.hasTextLayer === null ? '—' : document.hasTextLayer ? 'yes' : 'no (scanned)' },
+                { label: 'Readable text', value: document.hasTextLayer === null ? '—' : document.hasTextLayer ? 'Yes' : 'No — a scan or photo' },
               ]} />
               {can(ctx, 'imports.review') && deletable(document) ? <div className="mt-4"><DeleteDocumentControl orgSlug={orgSlug} documentId={document.id} filename={document.filename} /></div> : null}
             </CardBody>
           </Card>
           <Card>
-            <CardHeader icon={<Layers />} tint="pink" title="What rests on this file" />
+            <CardHeader icon={<Layers />} tint="pink" title="What this file feeds" />
             <CardBody>
               {/*
                 * The other end of the evidence chain (EVIDENCE_MODEL.md §1, ADR-096). A reader who
@@ -73,8 +74,8 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
                 */}
               {evidence.recordsCommitted === 0 ? (
                 <p className="text-sm text-ink-muted">
-                  Nothing rests on this file yet. Its records reach the figures when an import from it
-                  is committed.
+                  Nothing from this file is in your figures yet. It will be once an import from it is
+                  reviewed and imported.
                 </p>
               ) : (
                 <div className="flex flex-col gap-3 text-sm">
@@ -106,8 +107,8 @@ export default async function DocumentPage({ params }: { params: Promise<{ orgSl
                 <ul className="flex flex-col gap-2 text-sm">
                   {document.batches.map((b) => (
                     <li key={b.id} className="flex flex-wrap items-baseline gap-x-2">
-                      <Link href={`/app/${orgSlug}/data/imports/${b.id}`} className="underline">{b.importType.replace(/_/g, ' ')}</Link>
-                      <span className="text-ink-muted">{b.status.replace('_', ' ')} · {formatDateTime(b.createdAt)}</span>
+                      <Link href={`/app/${orgSlug}/data/imports/${b.id}`} className="underline">{importTypeLabel(b.importType)}</Link>
+                      <span className="text-ink-muted">{importStatusLabel(b.status)} · {formatDateTime(b.createdAt)}</span>
                     </li>
                   ))}
                 </ul>

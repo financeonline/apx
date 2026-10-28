@@ -90,13 +90,15 @@ export default async function BankingPage({
       <PeriodHeading
         eyebrow="Money"
         title="Banking"
-        description={view.source.sentence}
+        description="What moved through your bank accounts this month, and is anything worth a closer look?"
         scope={scope}
         hrefFor={(id) => `/app/${orgSlug}/money/banking?period=${id}`}
       />
 
       <div className="flex flex-col gap-6">
+        {/* The source sentence leads the banner, so the page still says plainly where its figures come from. */}
         <Banner tone="info" title="Based on imported statements" >
+          {view.source.sentence}{' '}
           {view.source.lastStatement
             ? <>Last statement imported {formatDate(view.source.lastStatement.committedAt)}, covering to {formatDate(view.source.lastStatement.coveringTo)}{view.source.lastStatement.accountName ? ` (${view.source.lastStatement.accountName})` : ''}. Nothing updates on its own: upload the next statement when you have it.</>
             : <>No statement has been imported yet.</>}
@@ -225,7 +227,7 @@ export default async function BankingPage({
         </details>
 
         <details className="panel rounded-card" data-testid="banking-liquidity">
-          <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 font-serif text-lg text-ink"><IconBadge tint="pink" size="sm"><Gauge /></IconBadge>How liquid are we?</summary>
+          <summary className="flex cursor-pointer items-center gap-3 px-5 py-4 font-serif text-lg text-ink"><IconBadge tint="pink" size="sm"><Gauge /></IconBadge>How long will the cash last?</summary>
           <div className="border-t border-line px-5 py-5">
             <DetailList items={[
               { label: 'Cash available', value: view.liquidity.cashAvailable ? <span className="tabular">{view.liquidity.cashAvailable.value} <StatusBadgeView status={view.liquidity.cashAvailable.status} size="sm" /> <WhyLink row={view.liquidity.cashAvailable} /></span> : <span className="text-ink-muted">Not available — an opening balance is needed</span> },
@@ -317,9 +319,9 @@ function AccountCard({ account }: { account: BankAccountCardView }) {
         {account.freshness
           ? `Statement covering to ${formatDate(account.freshness.coveringTo)}, added ${formatDate(account.freshness.committedAt)}.`
           : 'No statement covers this month.'}
-        {account.needsOpeningBalance ? ' Opening balance not entered yet.' : ''}
+        {account.needsOpeningBalance ? ' Opening balance not entered yet — add it on the Cash page.' : ''}
       </p>
-      <p className="mt-2 text-sm"><CardLink href={account.href} className="text-ink-muted after:rounded-2xl hover:text-ink group-hover:text-ink">See transactions ({account.rowCount}{account.uncategorisedCount > 0 ? `, ${account.uncategorisedCount} uncategorised` : ''})</CardLink></p>
+      <p className="mt-2 text-sm"><CardLink href={account.href} className="text-ink-muted after:rounded-2xl hover:text-ink group-hover:text-ink">See transactions ({account.rowCount}{account.uncategorisedCount > 0 ? `, ${account.uncategorisedCount} need a category` : ''})</CardLink></p>
     </li>
   );
 }

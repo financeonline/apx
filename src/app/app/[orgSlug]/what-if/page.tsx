@@ -105,7 +105,7 @@ export default async function WhatIfPage({
       <PageHeader
         eyebrow="What if"
         title="What if things change?"
-        description={`Against what APX expects for ${months.map((m) => m.label).join(', ')}.`}
+        description={`Try a change, such as a price rise, a new hire or a loan, and see how it would move what APX expects for ${months.map((m) => m.label).join(', ')}. These are estimates, not results.`}
       />
 
       <AffordabilityCard orgSlug={orgSlug} months={months} asked={asked} check={affordability} />

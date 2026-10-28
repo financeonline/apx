@@ -20,7 +20,11 @@ export function TaxForm(props: {
   return (
     <form action={action} className="flex flex-col gap-5">
       <input type="hidden" name="org_slug" value={props.orgSlug} />
-      <Field label="VAT quarters end in" htmlFor="vat_quarter_end_month">
+      <Field
+        label="VAT quarters end in"
+        htmlFor="vat_quarter_end_month"
+        hint="The months your VAT returns run to — shown on your VAT registration or past returns."
+      >
         <Select
           id="vat_quarter_end_month"
           name="vat_quarter_end_month"
@@ -36,7 +40,7 @@ export function TaxForm(props: {
       <Field
         label="VAT scheme"
         htmlFor="vat_scheme"
-        hint="The Flat Rate Scheme's return is not calculated by APX."
+        hint="Standard: VAT counts when an invoice is issued. Cash accounting: VAT counts when money is paid or received. APX does not calculate the Flat Rate Scheme's return."
       >
         <Select id="vat_scheme" name="vat_scheme" defaultValue={props.vatScheme}>
           <option value="standard">Standard (invoice basis)</option>
@@ -47,7 +51,7 @@ export function TaxForm(props: {
       <Field
         label="Associated companies"
         htmlFor="ct_associated_companies"
-        hint="Companies under common control. They share the UK Corporation Tax limits."
+        hint="Other companies controlled by the same people as this one — often 0. They share the UK Corporation Tax limits, which can change the rate this company pays."
       >
         <Input
           id="ct_associated_companies"

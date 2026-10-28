@@ -5,6 +5,7 @@ import {
 } from '@/modules/reporting';
 import { Building2, ClipboardCheck, Database, HeartPulse, TriangleAlert } from 'lucide-react';
 import { Card, CardBody, IconBadge } from '@/components/ui/surfaces';
+import { formatDate } from '@/components/labels';
 import { ActionList, AlertList, MonthSection } from './brief-view';
 
 /** The Accountant/CFO Report on screen (Phase 17, REQ-RP-04). Renders the stored content only. */
@@ -19,7 +20,7 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
             <h2 className="min-w-0 font-serif text-lg text-ink">Needs attention</h2>
           </div>
           {content.attention.length === 0 ? (
-            <p className="mt-3 text-sm text-ink-muted">Nothing in the Command Centre&apos;s rules flags this client.</p>
+            <p className="mt-3 text-sm text-ink-muted">No warning signs are flagged for this business.</p>
           ) : (
             <ul className="mt-3 flex list-disc flex-col gap-1 pl-5 text-sm text-ink">
               {content.attention.map((reason) => <li key={reason}>{reason}</li>)}
@@ -53,7 +54,7 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
           </dl>
           {content.trend.length === 0 ? null : (
             <p className="mt-4 text-sm text-ink-muted">
-              Scores: {content.trend.map((p) => `${p.periodLabel} ${p.score ?? '—'}`).join(' · ')}
+              Health score by month: {content.trend.map((p) => `${p.periodLabel} ${p.score ?? '—'}`).join(' · ')}
             </p>
           )}
           <p className="mt-3 text-xs text-ink-faint">{content.disclaimer}</p>
@@ -93,7 +94,7 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
                 <li key={action.id} className="flex flex-wrap justify-between gap-2">
                   <Link href={resolveHref(action.href, orgSlug)} className="min-w-0 text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline">{action.title}</Link>
                   <span className="text-ink-muted">
-                    {action.at?.slice(0, 10)}
+                    {action.at === null || action.at === undefined ? '' : formatDate(action.at)}
                     {action.outcomeValue === null ? '' : ` · outcome ${formatMoney(action.outcomeValue, { currency: action.outcomeCurrency ?? content.currency })}`}
                   </span>
                 </li>
@@ -110,12 +111,12 @@ export function AdviserView({ content, orgSlug }: { content: AdviserContent; org
             <h2 className="min-w-0 font-serif text-lg text-ink">How far the data goes</h2>
           </div>
           <p className="mt-2 text-sm text-ink">
-            {content.dataQuality.dataRefreshedAt === null ? 'No data has been added yet.' : `Data last added ${content.dataQuality.dataRefreshedAt.slice(0, 10)}.`}
+            {content.dataQuality.dataRefreshedAt === null ? 'No data has been added yet.' : `Data last added ${formatDate(content.dataQuality.dataRefreshedAt)}.`}
           </p>
           <ul className="mt-2 flex flex-col gap-1 text-sm text-ink-muted">
             {content.dataQuality.bankAccounts.map((account) => (
               <li key={account.name} className="[overflow-wrap:anywhere]">
-                {account.name}: {account.latestDate === null ? 'no transactions imported' : `statements reach ${account.latestDate}`}
+                {account.name}: {account.latestDate === null ? 'no transactions imported' : `statements reach ${formatDate(account.latestDate)}`}
               </li>
             ))}
           </ul>

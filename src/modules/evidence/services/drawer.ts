@@ -4,6 +4,7 @@ import { formatMoney, parseDecimalOrNull } from '@/core/money';
 import { assertCan } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
 import { metricDefinition, isMetricKey, type MetricUnit } from '@/modules/financial-engine';
+import { labelFor } from '@/modules/financials';
 import type { AssuranceLevel } from '../domain/assurance';
 import { parseQueryDescriptor } from '../domain/descriptor';
 import { descriptorHash } from '../domain/canonical';
@@ -38,6 +39,13 @@ export interface DrawerComponent {
   readonly unit: MetricUnit | null;
   readonly currency: string | null;
   readonly leaf: boolean;
+  /**
+   * The month this figure is for. A bundle can cite the same figure for several months (a health
+   * score's "sales from this customer", month by month), and a list of identical names is only
+   * readable with the month beside each: "Revenue by customer, Jul 2026".
+   */
+  readonly periodId: string | null;
+  readonly periodLabel: string | null;
   /** N-2: a component that is itself a cumulative month (net profit's revenue, say) shows its subtraction. */
   readonly difference: DrawerDifference | null;
 }
@@ -273,12 +281,29 @@ function str(row: Row, key: string): string | null {
   return value === null || value === undefined ? null : String(value);
 }
 
+/** What a composed variance key compares with, by its suffix (`VARIANCE_SUFFIXES`). */
+const VARIANCE_COMPARISONS: Readonly<Record<string, string>> = {
+  prev_period: 'change on last month',
+  trailing_3m_avg: 'change on the 3-month average',
+  same_period_last_year: 'change on the same month last year',
+};
+
+/**
+ * A figure's name, in the accountant's register the drawer uses (§8.1) — never its key.
+ *
+ * A variance key ("revenue.variance.prev_period") is composed, not declared, so it is named by the
+ * figure it is about and what it was compared with: "Revenue — change on last month". A key the
+ * engine does not declare at all is put into words. Neither throws: a drawer must not go down over a
+ * caption. Mirrors `figureLabel` in components/dashboard/health-presentation, which uses the plain
+ * register; the evidence module may not depend on components, so the two are kept side by side.
+ */
 function metricLabelOf(metricKey: string): { label: string; description: string | null } {
-  if (!isMetricKey(metricKey)) {
-    // A variance key ("revenue.variance.prev_period") is composed, not declared. Naming it by its
-    // key is honest; throwing would take down a drawer over a caption.
-    return { label: metricKey, description: null };
+  const variance = /^(.+)\.variance\.([a-z0-9_]+)$/.exec(metricKey);
+  if (variance) {
+    const base = metricLabelOf(variance[1]!).label;
+    return { label: `${base} — ${VARIANCE_COMPARISONS[variance[2]!] ?? 'change'}`, description: null };
   }
+  if (!isMetricKey(metricKey)) return { label: labelFor(metricKey).technical, description: null };
   const definition = metricDefinition(metricKey);
   return { label: definition.label, description: definition.description };
 }
@@ -446,6 +471,13 @@ export async function loadEvidenceDrawer(
   const components: DrawerComponent[] = [];
   const relatedFigures: DrawerComponent[] = [];
   const snapshotById = new Map<string, Row>();
+  // One lookup per month, not per figure: a score's bundle can cite twenty figures from six months.
+  const periodLabels = new Map<string, string | null>();
+  const periodLabelFor = async (periodId: string | null): Promise<string | null> => {
+    if (periodId === null) return null;
+    if (!periodLabels.has(periodId)) periodLabels.set(periodId, await periodLabelOf(ctx, orgId, periodId));
+    return periodLabels.get(periodId) ?? null;
+  };
   for (const item of snapshotItems.slice(1)) {
     if (item.ref === undefined) continue;
     const row = await fetchMetricSnapshot(ctx.db, orgId, item.ref.id);
@@ -460,6 +492,8 @@ export async function loadEvidenceDrawer(
       unit: str(row, 'unit') as MetricUnit | null,
       currency: str(row, 'currency'),
       leaf: (row.evidence_query as { kind?: string } | null)?.kind === 'leaf',
+      periodId: str(row, 'period_id'),
+      periodLabel: await periodLabelFor(str(row, 'period_id')),
       difference: declared.has(String(row.id)) ? await differenceOf(ctx, orgId, row) : null,
     };
     (declared.has(String(row.id)) ? components : relatedFigures).push(view);

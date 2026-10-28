@@ -240,9 +240,13 @@ describe('plain language (§8.1)', () => {
 
   it('never renders a raw metric key for anything Home shows', () => {
     for (const key of ['revenue', 'gross_profit', 'operating_profit', 'closing_cash',
-                       'receivables', 'payables', 'cash_inflows', 'cash_outflows']) {
+                       'receivables', 'payables', 'cash_inflows', 'cash_outflows',
+                       'customer_concentration_top5', 'revenue_concentration_hhi', 'customer_revenue',
+                       'customer_revenue_share', 'customer_contribution', 'supplier_concentration_top5', 'supplier_spend']) {
       expect(labelFor(key).plain, key).not.toBe(key);
     }
+    // A key without an entry still reads as words.
+    expect(labelFor('some_new_metric').plain).toBe('Some new metric');
   });
 
   it('describes the source in plain words, for the tooltip and never as a badge', () => {

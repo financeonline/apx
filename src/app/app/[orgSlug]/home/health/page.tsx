@@ -60,6 +60,7 @@ export default async function HealthPage({ params }: { params: Promise<{ orgSlug
         </Card>
       ) : (
         <div className="space-y-6">
+          <HowToRead withLinks={can(ctx, 'financials.view')} />
           {/*
             The panel links each dimension's figures to their evidence, which is detail
             (`financials.view`). Without it (a 3rd party, ADR-172) the arithmetic is shown in full and
@@ -101,8 +102,34 @@ function Header({ orgSlug }: { orgSlug: string }) {
       <PageHeader
         eyebrow="Home"
         title="Your health score, explained"
-        description="Every area we scored, every check inside it, and the points each one contributed."
+        description="Why your score is what it is: each area of the business we looked at, the checks inside it, and how many points each check gave or took away."
       />
     </>
+  );
+}
+
+/**
+ * The reading instructions, once, above the arithmetic.
+ *
+ * The panel below prints every rule so the score can be checked with a calculator; an owner meeting
+ * it cold needs to be told how the rows add up first (the baseline of 50, points up or down, areas
+ * weighted), or the tables read as a wall of thresholds. Words only — no figure here is computed.
+ */
+function HowToRead({ withLinks }: { withLinks: boolean }) {
+  return (
+    <Card>
+      <CardBody>
+        <h2 className="text-base text-ink">How to read this page</h2>
+        <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-ink-muted">
+          <li>Every area starts at 50 points.</li>
+          <li>Each check then adds points when that part of your figures looks good, or takes points away when it needs a look.</li>
+          <li>Your overall score blends the areas. The share shown under each area&apos;s score is how much it counts towards the total.</li>
+          <li>
+            Under each area, &ldquo;What needs a look&rdquo; is the place to start.
+            {withLinks ? <> The links under &ldquo;The figures this used&rdquo; open the numbers behind it.</> : null}
+          </li>
+        </ul>
+      </CardBody>
+    </Card>
   );
 }

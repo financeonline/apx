@@ -22,6 +22,41 @@ import { Button } from '@/components/ui/shadcn';
  * take quickly and regret immediately, and the undo is what makes acting on the list feel safe
  * rather than final.
  */
+
+/**
+ * What each button does, in a sentence (client-friendliness pass, 2026-10-28).
+ *
+ * "Resolve" and "Dismiss" read as the same thing to an owner, and they are not: a resolved alert
+ * comes back if the problem does, and a dismissed one stays quiet for ninety days unless it gets
+ * worse (`modules/alerts/domain/lifecycle.ts`, FINANCIAL_ENGINE.md §8.1). The sentences follow
+ * that file; if the lifecycle changes, these change with it.
+ */
+const STATUS_ACTION_HINTS: Readonly<Record<AlertStatus, string>> = {
+  open: 'Put it back on the list as not yet seen.',
+  acknowledged: 'Keeps it on the list, marked as seen. It comes back to the top only if it gets worse.',
+  resolved: 'You have dealt with it. It comes back if the problem returns.',
+  dismissed: 'It does not apply to you. It stays hidden for 90 days unless it gets worse.',
+};
+
+/** The key to the buttons, said once above the list rather than on every card. */
+export function AlertButtonsGuide({ role }: { role: EffectiveRole }) {
+  const statuses = allowedStatuses(role);
+  if (statuses.length === 0) return null;
+  return (
+    <details className="mt-2 text-sm text-ink-muted">
+      <summary className="cursor-pointer text-accent">What do the buttons on an alert do?</summary>
+      <dl className="mt-2 grid gap-1.5">
+        {statuses.map((status) => (
+          <div key={status}>
+            <dt className="inline font-medium text-ink">{STATUS_ACTION_LABELS[status]}</dt>
+            <dd className="inline"> — {STATUS_ACTION_HINTS[status]}</dd>
+          </div>
+        ))}
+      </dl>
+    </details>
+  );
+}
+
 export function AlertActions({
   orgSlug,
   alertId,
@@ -73,6 +108,7 @@ export function AlertActions({
             disabled={pending}
             variant="secondary"
             className="px-2 py-1 text-sm"
+            title={STATUS_ACTION_HINTS[next]}
           >
             {STATUS_ACTION_LABELS[next]}
           </Button>

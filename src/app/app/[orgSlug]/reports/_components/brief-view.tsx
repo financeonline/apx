@@ -8,6 +8,7 @@ import {
 import type { ReactNode } from 'react';
 import { Bell, ChartColumn, ClipboardCheck, Lightbulb, TrendingUp, TriangleAlert } from 'lucide-react';
 import { Badge, Card, CardBody, IconBadge, type IconTint } from '@/components/ui/surfaces';
+import { formatDate, formatDateTime } from '@/components/labels';
 
 /**
  * A Daily Executive Brief or Weekly Intelligence Report on screen (Phase 17).
@@ -30,6 +31,25 @@ function Section({
       </CardBody>
     </Card>
   );
+}
+
+/**
+ * A movement's name as an owner reads it. The two spending families arrive with their raw metric key
+ * as the label, and a category as its key ("expense_by_category · cost_of_sales"), in reports already
+ * stored as well as new ones; this names them in words. Every other label is shown as it was stored.
+ */
+const FAMILY_NAMES: Readonly<Record<string, string>> = {
+  expense_by_account: 'Spending by account',
+  expense_by_category: 'Spending by type',
+};
+
+function movementName(m: { readonly label: string; readonly dimensionLabel: string | null }): string {
+  const family = FAMILY_NAMES[m.label] ?? m.label;
+  if (m.dimensionLabel === null) return family;
+  const dimension = /^[a-z0-9_]+$/.test(m.dimensionLabel)
+    ? `${m.dimensionLabel.charAt(0).toUpperCase()}${m.dimensionLabel.slice(1).replace(/_/g, ' ')}`
+    : m.dimensionLabel;
+  return `${family}: ${dimension}`;
 }
 
 function More({ list }: { list: Capped<unknown> }) {
@@ -74,7 +94,7 @@ export function ActionList({ list, orgSlug, empty }: { list: Capped<BriefActionL
               {action.title}
             </Link>
             <span className="text-ink-muted">
-              {REPORT_PRIORITY_LABELS[action.priority]} · {action.dueDate === null ? 'no date set' : `due ${action.dueDate}`}
+              {REPORT_PRIORITY_LABELS[action.priority]} · {action.dueDate === null ? 'no due date' : `due ${formatDate(action.dueDate)}`}
               {action.assigned ? '' : ' · not assigned'}
             </span>
           </li>
@@ -114,7 +134,7 @@ function FigureRow({ row, currency, orgSlug, period }: { row: BriefComparisonRow
                   href={`/app/${encodeURIComponent(orgSlug)}/evidence/record/${record.kind}/${record.id}`}
                   className="min-w-0 text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline"
                 >
-                  {record.date} · {record.label}
+                  {formatDate(record.date)} · {record.label}
                 </Link>
                 <span className="text-ink-muted">{formatMoney(record.amount, { currency, showMinorUnits: true })}</span>
               </li>
@@ -154,7 +174,7 @@ export function MonthSection({ month, orgSlug, title }: { month: BriefMonth; org
           </div>
         ))}
       </dl>
-      {[['Biggest adverse movements', month.adverse], ['Biggest favourable movements', month.favourable]].map(([heading, list]) => {
+      {[['Biggest changes for the worse', month.adverse], ['Biggest changes for the better', month.favourable]].map(([heading, list]) => {
         const movements = list as BriefMonth['adverse'];
         if (movements.length === 0) return null;
         return (
@@ -164,9 +184,9 @@ export function MonthSection({ month, orgSlug, title }: { month: BriefMonth; org
               {movements.map((m) => (
                 <li key={`${m.label}|${m.dimensionLabel ?? ''}`} className="flex flex-wrap justify-between gap-2">
                   <Link href={resolveHref(m.href, orgSlug)} className="min-w-0 text-ink underline-offset-2 [overflow-wrap:anywhere] hover:underline">
-                    {m.label}{m.dimensionLabel === null ? '' : ` · ${m.dimensionLabel}`}
+                    {movementName(m)}
                   </Link>
-                  <span className="text-ink-muted">{m.change}{m.percent === null ? '' : ` (${m.percent})`} · {m.comparison} → {m.current}</span>
+                  <span className="text-ink-muted">{m.change}{m.percent === null ? '' : ` (${m.percent})`} · from {m.comparison} to {m.current}</span>
                 </li>
               ))}
             </ul>
@@ -228,7 +248,7 @@ export function BriefView({ content, orgSlug }: { content: BriefContent; orgSlug
               {(content.latestMonth?.favourable ?? []).map((m) => (
                 <li key={`${m.label}|${m.dimensionLabel ?? ''}`}>
                   <Link href={resolveHref(m.href, orgSlug)} className="text-ink underline-offset-2 hover:underline">
-                    {m.label}{m.dimensionLabel === null ? '' : ` · ${m.dimensionLabel}`}: {m.change}
+                    {movementName(m)}: {m.change}
                   </Link>
                   <span className="text-ink-muted"> in {content.latestMonth?.label}</span>
                 </li>
@@ -249,7 +269,7 @@ export function BriefView({ content, orgSlug }: { content: BriefContent; orgSlug
         <div className="mt-2"><ActionList list={content.attention.overdueActions} orgSlug={orgSlug} empty="Nothing is overdue." /></div>
         <h3 className="mt-6 text-sm font-medium text-ink">Due in the next 7 days</h3>
         <div className="mt-2"><ActionList list={content.attention.dueSoonActions} orgSlug={orgSlug} empty="Nothing falls due." /></div>
-        <p className="mt-4 text-xs text-ink-faint">As at {content.composedAt.slice(0, 16).replace('T', ' ')} UTC, when this was produced.</p>
+        <p className="mt-4 text-xs text-ink-faint">As at {formatDateTime(content.composedAt)} UTC, when this was made.</p>
       </Section>
 
       <Section title="Actions" icon={<ClipboardCheck />} tint="violet">
@@ -265,9 +285,9 @@ export function BriefView({ content, orgSlug }: { content: BriefContent; orgSlug
       )}
 
       <p className="text-xs text-ink-faint">
-        {daily ? 'Daily Executive Brief' : 'Weekly Intelligence Report'} for {windowLabel(content.window.start, content.window.end)},
-        {' '}by {content.timezone} days.
-        {content.dataRefreshedAt === null ? '' : ` Data last added ${content.dataRefreshedAt.slice(0, 10)}.`}
+        {daily ? 'Daily Executive Brief' : 'Weekly Intelligence Report'} for {windowLabel(content.window.start, content.window.end)}.
+        {' '}Days run midnight to midnight, {content.timezone} time.
+        {content.dataRefreshedAt === null ? '' : ` Data last added ${formatDate(content.dataRefreshedAt)}.`}
       </p>
     </div>
   );

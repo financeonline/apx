@@ -49,10 +49,10 @@ describe('a metric snapshot is named by its metric, its month and its source (§
       .toBe('Revenue, Mar 2026');
   });
 
-  it('falls back to the key for a metric with no declared label', () => {
+  it('falls back to the key, as words, for a metric with no declared label', () => {
     expect(metricSnapshotLabel({
       metricKey: 'revenue.variance.prev_period', periodLabel: null, basis: 'ledger',
-    })).toContain('revenue.variance.prev_period');
+    })).toContain('Revenue variance prev period');
   });
 });
 

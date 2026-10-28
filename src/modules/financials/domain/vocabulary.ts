@@ -52,10 +52,34 @@ export const METRIC_LABELS: Readonly<Record<string, { plain: string; technical: 
   customer_concentration_top1: {
     plain: 'How much you rely on your biggest customer', technical: 'Customer concentration',
   },
+  customer_concentration_top5: {
+    plain: 'How much you rely on your five biggest customers', technical: 'Top five customer share',
+  },
+  revenue_concentration_hhi: { plain: 'How spread out your sales are', technical: 'Revenue concentration (HHI)' },
+  customer_revenue: { plain: 'Sales from this customer', technical: 'Revenue by customer' },
+  customer_revenue_share: { plain: 'Share of your sales', technical: 'Share of revenue' },
+  customer_contribution: { plain: 'Left after their direct costs', technical: 'Contribution by customer' },
+  supplier_concentration_top1: {
+    plain: 'How much you rely on your biggest supplier', technical: 'Supplier concentration',
+  },
+  supplier_concentration_top5: {
+    plain: 'How much you rely on your five biggest suppliers', technical: 'Top five supplier share',
+  },
+  supplier_spend: { plain: 'Spent with this supplier', technical: 'Spend by supplier' },
+  expense_by_account: { plain: 'Spending by account', technical: 'Expenses by account' },
+  expense_by_category: { plain: 'Spending by type', technical: 'Expenses by category' },
+  interest_expense: { plain: 'Interest paid', technical: 'Interest expense' },
+  tax_expense: { plain: 'Tax', technical: 'Tax expense' },
 };
 
+/** A key with no entry still reads as words ("cash_runway" → "Cash runway"), never as a raw key. */
+function humanise(key: string): string {
+  const words = key.replace(/[_.]+/g, ' ').trim();
+  return words.charAt(0).toUpperCase() + words.slice(1);
+}
+
 export function labelFor(metricKey: string): { plain: string; technical: string } {
-  return METRIC_LABELS[metricKey] ?? { plain: metricKey, technical: metricKey };
+  return METRIC_LABELS[metricKey] ?? { plain: humanise(metricKey), technical: humanise(metricKey) };
 }
 
 /**

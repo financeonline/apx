@@ -15,6 +15,8 @@ import { AiReadingRequest, DocumentPageView, PageConfirmation, ReceiptReadingReq
 import { requirePermission } from '@/app/_lib/authz';
 import { can } from '@/core/permissions';
 import { rowsNotShownSentence, rowsReadable } from './rows-view';
+import { formatCoverage } from '../labels';
+import { formatDateTime } from '@/components/labels';
 
 export const dynamic = 'force-dynamic';
 
@@ -32,12 +34,12 @@ export const dynamic = 'force-dynamic';
  *
  * Some are acknowledgements; some SET a value the engine will read (ADR-047.6). The ones that set a
  * value carry it, because a confirmation of a range that does not say which range is not a
- * confirmation of anything.
+ * confirmation of anything — so the range question prints the range (`questionFor`).
  */
 const CONFIRMATION_QUESTIONS: Readonly<Record<string, string>> = {
-  'IMP-RANGE-015': 'This file covers the whole period you entered, even where its rows stop earlier.',
-  'IMP-TB-012': 'Are these balances year-to-date totals, or just this period’s movements?',
-  'IMP-TB-013': 'How are costs shown in this file?',
+  'IMP-RANGE-015': 'This file covers the whole period you entered, even though its rows stop earlier.',
+  'IMP-TB-012': 'Are these year-to-date totals, or just this period’s amounts?',
+  'IMP-TB-013': 'How does this file show income and costs?',
   'IMP-COV-013': 'This file replaces the report already imported for the same month. The earlier report is kept in its history but no longer counted.',
   'IMP-INV-013': 'Does this list include every invoice that was still unpaid on its start date — including invoices issued before it?',
   'IMP-INV-012': 'This list is every open invoice, not only the ones raised in the period.',
@@ -56,7 +58,7 @@ const COMPLETENESS: Readonly<Record<'trial_balance' | 'pnl_report' | 'balance_sh
   // Owner decision (2026-10-06): balance sheets are asked too — a missing receivables line is not 0.00.
   balance_sheet: {
     question: 'Is this the full balance sheet — every asset, liability and equity account with a balance at the period end?',
-    help: 'Answer yes only for the complete balance sheet from your accounting system (accounts with nothing in them may be left out). We will count a missing line — receivables or payables, say — as zero. If this file is an extract, answer no: a missing line will show as unknown, never as zero.',
+    help: 'Answer yes only for the complete balance sheet from your accounting system (accounts with nothing in them may be left out). We will count a missing line — money owed to you or by you, say — as zero. If this file is an extract, answer no: a missing line will show as unknown, never as zero.',
     complete: 'Yes — the full balance sheet (accounts left out had nothing in them)',
     partial: 'No — an extract: some accounts or sections are missing',
   },
@@ -67,10 +69,10 @@ const COMPLETENESS: Readonly<Record<'trial_balance' | 'pnl_report' | 'balance_sh
     partial: 'No — an extract: some accounts or sections are missing',
   },
   pnl_report: {
-    question: 'Is this the full P&L report — every income and expense line for the period?',
-    help: 'Balance-sheet accounts are not expected here. Answer yes only if no income or expense line was removed (lines with nothing in them may be left out). We will count any income or expense category with no line as zero — so if your report groups several kinds of cost into one line (for example wages and marketing inside "Overheads"), answer no. If this is part of a P&L — for example costs only — answer no too: categories with no line will show as unknown, never as zero.',
-    complete: 'Yes — the full P&L, every kind of cost on its own line (lines left out had nothing in them)',
-    partial: 'No — only part of the P&L',
+    question: 'Is this the full profit and loss report — every income and cost line for the period?',
+    help: 'Answer yes only if no income or cost line was removed (lines with nothing in them may be left out). We will count any income or cost category with no line as zero — so if your report groups several kinds of cost into one line (for example wages and marketing inside "Overheads"), answer no. If this is only part of the report — for example costs only — answer no too: categories with no line will show as unknown, never as zero.',
+    complete: 'Yes — the full report, every kind of cost on its own line (lines left out had nothing in them)',
+    partial: 'No — only part of the report',
   },
 };
 
@@ -78,10 +80,14 @@ function completenessKind(importType: string): 'trial_balance' | 'pnl_report' | 
   return importType === 'pnl_report' ? 'pnl_report' : importType === 'balance_sheet' ? 'balance_sheet' : 'trial_balance';
 }
 
-function questionFor(code: string, importType: string): string {
+function questionFor(code: string, importType: string, period: { start: string | null; end: string | null }): string {
   if (code === 'IMP-TB-016') return COMPLETENESS[completenessKind(importType)].question;
+  if (code === 'IMP-RANGE-015' && period.start && period.end) {
+    return `This file covers the whole period you entered — ${formatCoverage(period.start, period.end)} — even though its rows stop earlier.`;
+  }
+  // The rule code stays out of the sentence; it is kept on the form (`code`) for support.
   return CONFIRMATION_QUESTIONS[code]
-    ?? `Please confirm this file is as expected before importing (${code}).`;
+    ?? 'Please confirm this file is what you expected before it is imported.';
 }
 
 function choiceFor(code: string, importType: string): (typeof CHOICES)[string] | undefined {
@@ -126,8 +132,8 @@ const CHOICES: Readonly<Record<string, {
     name: 'balance_sign',
     label: 'How costs are shown',
     options: [
-      { value: 'natural', label: 'As the accounts hold them (debits positive)' },
-      { value: 'reporting', label: 'As a report shows them (costs positive)' },
+      { value: 'natural', label: 'Income as minus figures, costs as plus (as the accounts store them)' },
+      { value: 'reporting', label: 'Income and costs both as plus figures (as a printed report shows them)' },
     ],
   },
 };
@@ -199,13 +205,19 @@ export default async function ReviewBatchPage({
       <PageHeader
         eyebrow="Data"
         title={review.filename ?? 'Review this import'}
-        description={`${total} row${total === 1 ? '' : 's'} read · ${review.importableRows} will be imported`}
+        description={`${total} row${total === 1 ? '' : 's'} read · ${afterwards(review.batch.status, review.importableRows)}`}
       />
 
       <div className="mt-8 flex flex-col gap-6">
         {review.batch.status === 'committed' ? (
           <Banner tone="info" title="This file has already been imported.">
-            Its rows are part of your figures. Roll it back from the imports list if it was wrong.
+            Its rows are part of your figures. If it was the wrong file, use Remove import on the{' '}
+            <Link href={`/app/${orgSlug}/data/imports`} className="underline underline-offset-2">Imports list</Link>.
+          </Banner>
+        ) : review.batch.status === 'awaiting_review' ? (
+          <Banner tone="info" title="Check this file before it counts.">
+            Go down the page: answer any questions, decide on any rows we flagged, then press Import at the
+            bottom. Nothing is in your figures until you do.
           </Banner>
         ) : null}
 
@@ -226,12 +238,11 @@ export default async function ReviewBatchPage({
                 {completeness.scope === 'open_invoices'
                   ? 'Only a list that includes every invoice still unpaid on its start date — older ones too — can show what you are owed or owe. Otherwise we show it from a balance sheet, or not at all, never a total that misses old debts.'
                   : completeness.scope === 'assets_and_liabilities'
-                    ? 'A full balance sheet lists every asset, liability and equity account with a balance. Only for a full one do we count a missing line (receivables, say) as zero; otherwise it shows as unknown.'
+                    ? 'Say whether this is the whole balance sheet or only part of it. If it is whole, anything it does not list — money owed to you, say — counts as zero. If it is only part, anything it does not list shows as “unknown” instead.'
                   : completeness.scope === 'all_accounts'
-                    ? 'A full trial balance lists every account with a balance — income, expenses, assets, liabilities and equity. Only for a full report do we count a category with no line as zero; otherwise it shows as unknown.'
-                    : 'A full P&L report lists every income and expense line with an amount. Only for a full report do we count a category with no line as zero; otherwise it shows as unknown.'}{' '}
-                This says nothing about whether the amounts are right, and does not change how firm the
-                figures are.{' '}
+                    ? 'Say whether this is the whole trial balance or only part of it. If it is whole, any category it does not list counts as zero. If it is only part, those categories show as “unknown” instead.'
+                    : 'Say whether this is the whole profit and loss report or only part of it. If it is whole, any income or cost category it does not list counts as zero. If it is only part, those categories show as “unknown” instead.'}{' '}
+                This is only about what the file includes, not whether its amounts are right.{' '}
                 <Link href={`/app/${orgSlug}/data/documents/${review.batch.sourceDocumentId}`} className="text-accent underline underline-offset-2">
                   Open the stored file
                 </Link>
@@ -239,9 +250,8 @@ export default async function ReviewBatchPage({
               </p>
               {completeness.cumulative ? (
                 <p className="mt-2 text-sm text-ink-muted" data-testid="completeness-cumulative-note">
-                  These are year-to-date figures: each month is this month&apos;s report less the previous
-                  month&apos;s, so it counts a missing line as zero only when the previous month&apos;s report is
-                  confirmed as complete too.
+                  These are year-to-date totals, so we work out each month by taking away the month before.
+                  A missing line counts as zero only when the month before is confirmed as whole too.
                 </p>
               ) : null}
               <ul className="mt-3 space-y-4">
@@ -265,9 +275,9 @@ export default async function ReviewBatchPage({
                           orgSlug={orgSlug} batchId={batchId} month={m.month} monthLabel={label}
                           completeLabel={invoices ? 'Every invoice unpaid at the start, however old'
                             : completeness.scope === 'assets_and_liabilities' ? 'The full balance sheet (accounts left out had nothing in them)'
-                            : completeness.scope === 'all_accounts' ? 'The full trial balance (accounts left out had nothing in them)' : 'The full P&L (lines left out had nothing in them)'}
+                            : completeness.scope === 'all_accounts' ? 'The full trial balance (accounts left out had nothing in them)' : 'The full profit and loss report (lines left out had nothing in them)'}
                           partialLabel={invoices ? 'Only invoices issued in the period'
-                            : completeness.scope === 'all_accounts' || completeness.scope === 'assets_and_liabilities' ? 'An extract — some accounts or sections are missing' : 'Only part of the P&L'}
+                            : completeness.scope === 'all_accounts' || completeness.scope === 'assets_and_liabilities' ? 'An extract — some accounts or sections are missing' : 'Only part of the profit and loss report'}
                         />
                       ) : null}
                     </li>
@@ -280,7 +290,7 @@ export default async function ReviewBatchPage({
                   <ul className="mt-1 space-y-1 text-sm text-ink-muted" data-testid="completeness-history">
                     {completeness.history.map((h) => (
                       <li key={h.id} className="[overflow-wrap:anywhere]">
-                        {h.attestedAt.slice(0, 16).replace('T', ' ')} — {h.attestedBy} ({h.attestedRole}) recorded {h.month.slice(0, 7)} as{' '}
+                        {formatDateTime(h.attestedAt)} — {h.attestedBy} ({h.attestedRole}) recorded {monthLabel(h.month)} as{' '}
                         {h.coverage === 'complete' ? 'a full report' : 'part of the accounts'}
                         {h.supersedesId ? ', replacing an earlier answer' : ''}: “{h.reason}”
                       </li>
@@ -309,7 +319,7 @@ export default async function ReviewBatchPage({
               </div>
               <p className="mt-1 text-sm text-ink-muted">
                 APX could not find the table on its own. AI can read the rows for you; every row it reads will
-                need your confirmation against the page before it counts (CD-11).
+                need your confirmation against the page before it counts.
               </p>
               <div className="mt-3">
                 <AiReadingRequest orgSlug={orgSlug} batchId={batchId} documentId={review.batch.sourceDocumentId} />
@@ -328,7 +338,7 @@ export default async function ReviewBatchPage({
                 <>
                   <p className="mt-1 text-sm text-ink-muted">
                     AI reads each receipt&rsquo;s date, who was paid and the total. Every receipt it reads needs your
-                    confirmation against the file before it counts, and is marked as read by AI (CD-11).
+                    confirmation against the file before it counts, and is marked as read by AI.
                   </p>
                   <div className="mt-3">
                     <ReceiptReadingRequest orgSlug={orgSlug} batchId={batchId} documentId={review.batch.sourceDocumentId} accounts={expenseAccounts} />
@@ -418,7 +428,8 @@ export default async function ReviewBatchPage({
         {review.batch.extractionMethod === 'pdf_text' && review.batch.status !== 'failed' ? (
           <Banner tone="info" title="Read from the text of a PDF statement.">
             The rows were read from the statement&rsquo;s own text and checked against its printed balances.
-            Until the balances reconcile, these figures are marked as calculated rather than verified.
+            Until the transactions add up to those balances, these figures are marked as calculated rather
+            than verified.
           </Banner>
         ) : null}
 
@@ -448,8 +459,9 @@ export default async function ReviewBatchPage({
                 <h2 className="min-w-0 font-serif text-lg text-ink">Before we import this</h2>
               </div>
               <p className="mt-1 text-sm text-ink-muted">
-                We read the file this way. If any of it is wrong, discard the file and check the
-                export rather than confirming — a wrong answer here changes every figure it feeds.
+                Answer each question below. If something here looks wrong, do not confirm it: discard the file
+                (at the bottom of this page) and export it again. A wrong answer changes every figure that uses
+                this file.
               </p>
               <div className="mt-3 space-y-3">
                 {outstanding.map((code) => (
@@ -458,7 +470,7 @@ export default async function ReviewBatchPage({
                     orgSlug={orgSlug}
                     batchId={batchId}
                     code={code}
-                    question={questionFor(code, review.batch.importType)}
+                    question={questionFor(code, review.batch.importType, { start: review.batch.periodStart, end: review.batch.periodEnd })}
                     help={code === 'IMP-TB-016'
                       ? COMPLETENESS[completenessKind(review.batch.importType)].help
                       : code === 'IMP-INV-013'
@@ -557,7 +569,7 @@ export default async function ReviewBatchPage({
             <CardBody className="p-4">
               <div className="flex min-w-0 items-center gap-3">
                 <IconBadge tint="violet" size="sm"><FileUp /></IconBadge>
-                <h2 className="min-w-0 font-serif text-lg text-ink">Import</h2>
+                <h2 className="min-w-0 font-serif text-lg text-ink">Import this file</h2>
               </div>
               <div className="mt-3">
                 <CommitControls
@@ -623,6 +635,19 @@ export default async function ReviewBatchPage({
   );
 }
 
+/** What the header says became of the rows, by where the file is in its journey. */
+function afterwards(status: string, importable: number): string {
+  if (status === 'committed') return 'imported';
+  if (status === 'rolled_back') return 'removed from your figures';
+  if (status === 'rejected') return 'discarded, nothing imported';
+  return `${importable} will be imported`;
+}
+
+/** "September 2026" from a month's first day ("2026-09-01"). */
+function monthLabel(month: string): string {
+  return new Date(`${month.slice(0, 10)}T00:00:00Z`).toLocaleDateString('en-GB', { month: 'long', year: 'numeric', timeZone: 'UTC' });
+}
+
 const STATUS_LABELS: Readonly<Record<string, string>> = {
   valid: 'Ready',
   warning: 'Check',
@@ -666,8 +691,9 @@ function IssueGroupRow({ group }: { group: BatchIssueGroup }) {
           {group.rowCount} row{group.rowCount === 1 ? '' : 's'}
         </span>
       </div>
-      <p className="mt-0.5 text-xs text-ink-faint [overflow-wrap:anywhere]">
-        {group.code} · rows {group.examples.map((e) => e.rowNumber).join(', ')}
+      {/* The rule code is for support, so it sits in the tooltip rather than in the sentence. */}
+      <p className="mt-0.5 text-xs text-ink-faint [overflow-wrap:anywhere]" title={group.code}>
+        {group.examples.length === 1 ? 'Row' : 'Rows'} {group.examples.map((e) => e.rowNumber).join(', ')}
         {group.rowCount > group.examples.length ? ' and others' : ''}
       </p>
     </li>

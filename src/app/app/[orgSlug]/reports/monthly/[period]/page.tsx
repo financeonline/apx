@@ -1,14 +1,18 @@
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
 import { can } from '@/core/permissions';
-import { getMonthlyReport, getMonthlySummary, listAvailable, readsFullMonthlyReport } from '@/modules/reporting';
+import {
+  REPORT_PRIORITY_LABELS, REPORT_SEVERITY_LABELS, getMonthlyReport, getMonthlySummary, listAvailable, readsFullMonthlyReport,
+} from '@/modules/reporting';
+import { formatDate } from '@/components/labels';
 import { getAccessContext } from '@/modules/tenancy';
 import { HealthScoreInline, StatusBadgeView } from '@/components/dashboard';
 import { ChartColumn, ClipboardCheck, FileDown, FileText, TriangleAlert } from 'lucide-react';
 import { Badge, Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { PdfControl } from './pdf-control';
 import { requirePermission } from '@/app/_lib/authz';
-import { SummaryEditionScreen, summaryPdfHref } from '../../_components/summary-view';
+import { SummaryEditionScreen, provenanceLine, summaryPdfHref } from '../../_components/summary-view';
+import { REPORT_PURPOSE } from '../../_components/report-guide';
 
 export const dynamic = 'force-dynamic';
 
@@ -61,6 +65,7 @@ export default async function MonthlyReportPage({
       <PageHeader
         eyebrow={report.organisationName}
         title={`Monthly Management Report — ${report.period.label}`}
+        description={REPORT_PURPOSE.monthly}
       />
 
       <p className="mt-2 text-sm text-ink-muted">{report.basisLine}</p>
@@ -80,7 +85,7 @@ export default async function MonthlyReportPage({
       <p className="mt-3 text-sm print:hidden">
         <a href={summaryPdfHref(orgSlug, period)} download className="inline-flex items-center gap-1 text-accent underline underline-offset-2 pointer-coarse:min-h-10">
           <FileDown aria-hidden="true" className="size-4" />
-          Download the summary edition (figures and Business Health Score only, for external readers)
+          Download a short version to share with a lender, investor or partner (headline figures and Business Health Score only)
         </a>
       </p>
 
@@ -141,7 +146,7 @@ export default async function MonthlyReportPage({
                   <li key={alert.id} className="border-b border-line pb-3 last:border-0">
                     <div className="flex flex-wrap items-baseline gap-2">
                       <Badge tone={alert.severity === 'critical' ? 'danger' : 'warn'}>
-                        {alert.severity}
+                        {REPORT_SEVERITY_LABELS[alert.severity as keyof typeof REPORT_SEVERITY_LABELS] ?? alert.severity}
                       </Badge>
                       <span className="text-ink">{alert.title}</span>
                     </div>
@@ -168,7 +173,8 @@ export default async function MonthlyReportPage({
                   <li key={action.id} className="flex flex-wrap justify-between gap-2 text-sm">
                     <span className="text-ink">{action.title}</span>
                     <span className="text-ink-muted">
-                      {action.priority} · {action.dueDate ?? 'no date set'}
+                      {REPORT_PRIORITY_LABELS[action.priority as keyof typeof REPORT_PRIORITY_LABELS] ?? action.priority}
+                      {' · '}{action.dueDate === null ? 'no due date' : `due ${formatDate(action.dueDate)}`}
                     </span>
                   </li>
                 ))}
@@ -182,12 +188,7 @@ export default async function MonthlyReportPage({
           produced these figures — otherwise a report found in a drawer in six months cannot be tied
           back to anything (EVIDENCE_MODEL.md §1).
         */}
-        <p className="text-xs text-ink-faint">
-          {report.asOf.finishedAt === null
-            ? 'Figures as last calculated by APX.'
-            : `Figures as calculated on ${report.asOf.finishedAt.slice(0, 10)}`
-              + `${report.asOf.engineVersion === null ? '' : ` by engine ${report.asOf.engineVersion}`}.`}
-        </p>
+        <p className="text-xs text-ink-faint">{provenanceLine(report.asOf)}</p>
       </div>
     </>
   );

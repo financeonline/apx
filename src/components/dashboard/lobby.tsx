@@ -5,6 +5,7 @@ import type { AlertView, MetricCardView } from '@/modules/dashboard';
 import type { HealthCardView } from '@/modules/health';
 import type { Action } from '@/modules/actions';
 import { ABOVE_CARD_LINK, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
+import { formatDate } from '@/components/labels';
 import { severityLabel } from './alert-presentation';
 import { priorityLabel } from './action-card';
 import {
@@ -210,7 +211,8 @@ export function LobbyFigure({ card, trend, showWhy }: { card: MetricCardView; tr
     <article className={`@container flex h-full flex-col px-6 py-5 ${LOBBY_CARD} ${showWhy ? LOBBY_CLICKABLE : ''}`}>
       <div className="flex items-start justify-between gap-2">
         <h3 className="min-w-0 text-[0.8125rem] font-normal tracking-normal text-ink-muted">{card.label}</h3>
-        {card.status.kind !== 'none' && card.status.label !== null ? (
+        {/* Only a status that asks the reader to take care is shown here; "Calculated" is the ordinary case. */}
+        {card.status.kind !== 'none' && card.status.kind !== 'calculated' && card.status.label !== null ? (
           <span title={card.status.tooltip} className={`${ABOVE_CARD_LINK} shrink-0 rounded-md px-2 py-0.5 text-[0.6875rem] ${STATUS_CHIP[card.status.kind] ?? 'bg-surface-sunken text-ink-muted'}`}>
             {card.status.label}
           </span>
@@ -416,7 +418,7 @@ export function ActionQueue({
                 {action.title}
               </Link>
               <span className="mt-0.5 block text-xs text-ink-muted">
-                {priorityLabel(action.priority)} priority · {action.ownerName ?? 'No owner'} · {action.dueDate === null ? 'No date' : `Due ${action.dueDate}`}
+                {priorityLabel(action.priority)} priority · {action.ownerName ?? 'No owner'} · {action.dueDate === null ? 'No date' : `Due ${formatDate(action.dueDate)}`}
               </span>
             </span>
             <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs ${overdue ? 'bg-accent-soft text-accent' : action.status === 'in_progress' ? 'bg-warn-soft text-warn' : 'bg-surface-sunken text-ink-muted'}`}>

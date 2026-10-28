@@ -2,6 +2,7 @@ import { ClipboardCheck } from 'lucide-react';
 import { Badge, Card, CardBody, IconBadge, type BadgeTone } from '@/components/ui/surfaces';
 import { ABOVE_CARD_LINK, CLICKABLE_CARD, CardLink } from '@/components/ui/clickable-card';
 import { ownerLabel, type Action, type ActionPriority, type ActionStatus } from '@/modules/actions';
+import { formatDate } from '@/components/labels';
 
 /**
  * `ActionCard` (UX_ARCHITECTURE.md §7; SOW §17).
@@ -93,7 +94,7 @@ export function ActionCard({
             <div className="flex gap-1">
               <dt>Due</dt>
               <dd className={overdue ? 'text-danger' : 'text-ink'}>
-                {action.dueDate}
+                {formatDate(action.dueDate)}
                 {overdue ? <span className="sr-only"> — overdue</span> : null}
               </dd>
             </div>

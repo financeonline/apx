@@ -69,11 +69,11 @@ export default async function CampaignPage({ params, searchParams }: { params: P
             </CardBody>
           </Card>
           <Card>
-            <CardHeader title="How its opportunities converted" description={`Opportunities created between ${view.window.from.label} and ${view.window.to.label}.`} icon={<Funnel />} tint="pink" />
+            <CardHeader title="How its opportunities converted" description={`Of the opportunities added between ${view.window.from.label} and ${view.window.to.label}: how many moved past the lead stage, and how many were won.`} icon={<Funnel />} tint="pink" />
             <CardBody>
               <DetailList items={[
-                { label: 'Created', value: conv.leadsCreated },
-                { label: 'Reached opportunity', value: conv.progressed },
+                { label: 'Added', value: conv.leadsCreated },
+                { label: 'Moved past the lead stage', value: conv.progressed },
                 { label: 'Won', value: conv.wonFromCohort },
                 { label: 'Lead → opportunity', value: view.conversionRates.leadToOpportunity ?? '—' },
                 { label: 'Opportunity → customer', value: view.conversionRates.opportunityToCustomer ?? '—' },
@@ -86,7 +86,7 @@ export default async function CampaignPage({ params, searchParams }: { params: P
         <Card>
           <CardHeader title="Opportunities naming this campaign" icon={<Handshake />} />
           <CardBody className="px-0 py-0">
-            {view.opportunities.length === 0 ? <p className="px-5 py-4 text-sm text-ink-muted">None.</p> : (
+            {view.opportunities.length === 0 ? <p className="px-5 py-4 text-sm text-ink-muted">No opportunity names this campaign yet. Choose it under “Came from campaign” when you add one on the Sales page.</p> : (
               <TableWrap stack>
                 <caption className="sr-only">Opportunities for {view.campaign.name}</caption>
                 <THead columns={['Opportunity', 'Customer', 'Stage', 'Estimated value', 'Created']} />

@@ -34,7 +34,7 @@ export default async function ReceivablesPage({
     <LedgerBookPage
       orgSlug={orgSlug}
       title={TITLE}
-      description="What your customers still owe you, and how much of it is late."
+      description="Who still owes you money, and how much of it is late? Chasing the oldest invoices first brings cash in soonest."
       route="receivables"
       view={view}
     />

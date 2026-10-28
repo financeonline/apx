@@ -2,12 +2,13 @@ import { notFound } from 'next/navigation';
 import { can } from '@/core/permissions';
 import { aiQuotaStatus, listConversations } from '@/modules/ai';
 import { loadHome } from '@/modules/dashboard';
-import { getAccessContext } from '@/modules/tenancy';
+import { getAccessContext, moduleOn } from '@/modules/tenancy';
 import { AnalystNoConversationsEmpty, AnalystNoDataEmpty } from '@/components/dashboard';
 import { PageHeader } from '@/components/ui/surfaces';
 import { AnalystChat } from './analyst-chat';
 import { ConversationRail } from './conversation-rail';
 import { FactsCard } from './facts-card';
+import { AboutAnalyst } from './about-analyst';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
@@ -55,7 +56,7 @@ export default async function AnalystPage({
       <PageHeader
         eyebrow="AI Analyst"
         title="Ask about the numbers"
-        description="Answers with evidence, drawn only from your validated numbers."
+        description="Ask in your own words. Answers come only from your own figures, with a link to check where each one came from."
       />
       <div className="mt-6 grid grid-cols-1 gap-6 md:grid-cols-[220px_minmax(0,1fr)]">
         <ConversationRail orgSlug={orgSlug} conversations={conversations} current={null} />
@@ -72,6 +73,12 @@ export default async function AnalystPage({
             initialAsk={ask ?? null}
             canCreateAction={can(ctx, 'actions.create')}
             readOnly={false}
+          />
+          {/* What is in scope and what a question uses, under the question box so it never pushes it down. */}
+          <AboutAnalyst
+            quota={quota}
+            open={conversations.length === 0}
+            whatIfHref={moduleOn(ctx, 'planning') && can(ctx, 'financials.view') ? `/app/${orgSlug}/what-if` : null}
           />
         </div>
       </div>

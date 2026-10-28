@@ -3,6 +3,7 @@ import { NotFound, toMotionError } from '@/core/errors';
 import { assertCan } from '@/core/permissions';
 import type { AccessContext } from '@/modules/tenancy';
 import type { FactorResult, ImprovementAction } from '../domain/types';
+import { FACTOR_NAMES } from '../domain/config';
 
 /**
  * Reading Funding Readiness for the page (PHASE_16_IMPLEMENTATION.md §10, §11).
@@ -86,7 +87,8 @@ export async function getFundingView(ctx: AccessContext, periodId?: string): Pro
     assessment: {
       id: r.id, periodId: r.period_id, periodLabel: chosen.label, status: r.overall_status, score: r.overall_score, band: r.band,
       dataCoveragePercent: r.data_coverage_percent, factorsUsed: r.factors_used,
-      factors: r.breakdown.factors, actions: r.breakdown.actions,
+      // Each area under its current plain name, not the name stored with an older assessment (ADR-176).
+      factors: r.breakdown.factors.map((f) => ({ ...f, name: FACTOR_NAMES[f.key] ?? f.name })), actions: r.breakdown.actions,
       rulesVersion: r.rules_version, engineVersion: r.engine_version, calculationRunId: r.calculation_run_id,
       createdAt: r.created_at, disclaimer: r.disclaimer,
       evidenceBundleId: (bundle as { id?: string } | null)?.id ?? null,

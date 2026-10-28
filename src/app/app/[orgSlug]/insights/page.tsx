@@ -1,7 +1,7 @@
 import { BellRing, CalendarDays, ChartColumn, ChevronRight, CircleAlert, TrendingUp } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
-import { loadAlertsPage, loadInsights, type MovementView } from '@/modules/dashboard';
+import { labelFor, loadAlertsPage, loadInsights, type MovementView } from '@/modules/dashboard';
 import { PageHeader, Card, CardBody, EmptyState, IconBadge } from '@/components/ui/surfaces';
 import { ButtonLink } from '@/components/ui/button';
 import { CLICKABLE_ROW, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
@@ -9,7 +9,7 @@ import {
   AlertCard, NO_ALERTS_BODY, NO_ALERTS_FILTERED_BODY, NO_ALERTS_FILTERED_TITLE, NO_ALERTS_TITLE,
   bySeverity,
 } from '@/components/dashboard';
-import { AlertActions } from './alerts/alert-actions';
+import { AlertActions, AlertButtonsGuide } from './alerts/alert-actions';
 import { AlertFilters, parseAlertFilters } from './alerts/filters';
 import { requirePermission } from '@/app/_lib/authz';
 
@@ -27,15 +27,24 @@ export const dynamic = 'force-dynamic';
  * interpreted things first is the difference between a page you scan and a page you act on.
  */
 
+
 /** One movement. The whole row opens its evidence (owner, 2026-10-14): "Why?" is stretched over it. */
 function MovementRow({ movement }: { movement: MovementView }) {
   const tone = movement.favourable ? 'text-good' : 'text-danger';
+  const name = movement.dimensionLabel === null
+    ? movement.label
+    : movement.metricKey === 'expense_by_category'
+      // A standard category arrives as its key ("operating_expense"); `labelFor` names it, or makes
+      // an unknown one readable, rather than showing the key.
+      ? labelFor(movement.dimensionLabel).plain
+      : movement.dimensionLabel;
 
   return (
     <li className={`${CLICKABLE_ROW} -mx-2 flex flex-wrap items-baseline justify-between gap-x-4 gap-y-1 rounded-lg border-b border-line/60 px-2 py-3 last:border-0`}>
       <div className="min-w-0">
         <p className="text-ink">
-          {movement.dimensionLabel ?? movement.label}
+          {name}
+          {/* "Spending by account" or "Spending by type", so a reader can tell the two lists apart. */}
           {movement.dimensionLabel ? (
             <span className="ml-2 text-sm text-ink-faint">{movement.label}</span>
           ) : null}
@@ -124,7 +133,7 @@ export default async function InsightsPage({
         title="What changed"
         description={
           view.comparison
-            ? `${view.period.label} compared with ${view.comparison.label}`
+            ? `${view.period.label} compared with ${view.comparison.label}: what we spotted, then the biggest changes in your figures.`
             : view.period.label
         }
       />
@@ -140,6 +149,11 @@ export default async function InsightsPage({
             </div>
             <AlertFilters orgSlug={orgSlug} active={filters} />
           </div>
+          <p className="mt-2 text-sm text-ink-muted">
+            Things we spotted in your figures that may need a decision. Each one says what happened,
+            why it matters and what you can do.
+          </p>
+          {canManageAlerts ? <AlertButtonsGuide role={ctx.effectiveRole} /> : null}
 
           {alerts.alerts.length === 0 ? (
             <div className="mt-3">
@@ -191,8 +205,12 @@ export default async function InsightsPage({
           <CardBody className="p-4">
             <div className="flex items-center gap-3">
               <IconBadge tint="pink" size="sm"><CircleAlert /></IconBadge>
-              <h2 className="font-serif text-lg text-ink">What needs attention</h2>
+              <h2 className="font-serif text-lg text-ink">What moved against you</h2>
             </div>
+            <p className="mt-1 text-sm text-ink-muted">
+              The changes that work against you, the biggest amounts first. “Why?” shows the figures
+              behind each one.
+            </p>
             {view.unfavourable.length === 0 ? (
               <p className="mt-3 text-ink-muted">Nothing moved against you this month.</p>
             ) : (
@@ -214,6 +232,9 @@ export default async function InsightsPage({
               <IconBadge tint="violet" size="sm"><TrendingUp /></IconBadge>
               <h2 className="font-serif text-lg text-ink">What went well</h2>
             </div>
+            <p className="mt-1 text-sm text-ink-muted">
+              The changes in your favour, the biggest amounts first.
+            </p>
             {view.favourable.length === 0 ? (
               <p className="mt-3 text-ink-muted">Nothing moved in your favour this month.</p>
             ) : (

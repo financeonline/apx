@@ -1,6 +1,6 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import { compare, formatMoney } from '@/core/money';
+import { compare, formatMoney, tryParseDecimal } from '@/core/money';
 import { varianceKey } from '@/modules/financial-engine';
 import {
   listAccounts, listCounterparties, listInvoices, metricAvailability,
@@ -711,7 +711,8 @@ export function toInvoiceView(
       currency: invoice.currency, showMinorUnits: true,
     }),
     bucket,
-    bucketLabel: AGING_LABELS[bucket],
+    // A settled invoice is not late, however long ago it fell due (found in the client pass, ADR-176).
+    bucketLabel: tryParseDecimal(invoice.balanceDue)?.isZero() ? 'Paid' : AGING_LABELS[bucket],
   };
 }
 
@@ -923,7 +924,7 @@ export interface AccountsView {
 }
 
 export const CONFIDENCE_LABELS: Readonly<Record<string, string>> = {
-  unmapped: 'Not mapped',
+  unmapped: 'No category yet',
   suggested: 'Suggested — please check',
   confirmed: 'Confirmed',
 };

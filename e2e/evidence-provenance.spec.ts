@@ -74,7 +74,7 @@ test.describe('from one file to what rests on it', () => {
     test.skip(documentId === '', 'needs the seeded ledger file');
 
     await page.goto(`/app/${slug}/data/documents/${documentId}`);
-    await expect(page.getByRole('heading', { name: /what rests on this file/i })).toBeVisible();
+    await expect(page.getByRole('heading', { name: /what this file feeds/i })).toBeVisible();
     await expect(page.getByText(/records in your figures/i)).toBeVisible();
     await expect(page.getByText(/months it contributed to/i)).toBeVisible();
 

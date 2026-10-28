@@ -4,6 +4,7 @@ import { useActionState, useState } from 'react';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { Button } from '@/components/ui/button';
 import { requestPdfAction } from './actions';
+import { formatDate } from '@/components/labels';
 
 /**
  * Producing and opening the PDF (ADR-024; plan Phase 13 slice 2).
@@ -64,12 +65,12 @@ export function PdfControl({
         <input type="hidden" name="org_slug" value={orgSlug} />
         <input type="hidden" name="period_id" value={periodId} />
         <SubmitButton tone={reportFileId === null ? 'primary' : 'quiet'}>
-          {reportFileId === null ? 'Produce a PDF' : 'Produce it again'}
+          {reportFileId === null ? 'Produce a PDF' : 'Produce a new PDF'}
         </SubmitButton>
       </form>
 
       {renderedAt === null ? null : (
-        <span className="text-xs text-ink-faint">Last produced {renderedAt.slice(0, 10)}</span>
+        <span className="text-xs text-ink-faint">PDF last made {formatDate(renderedAt)}</span>
       )}
 
       <ActionMessage state={state} />

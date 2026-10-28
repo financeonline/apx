@@ -44,12 +44,12 @@ export default async function HeldNamesPage({ params }: { params: Promise<{ orgS
     <>
       <PageHeader
         eyebrow="Customers"
-        title="Name decisions"
-        description="Customers and suppliers whose names APX now reads as the same name. Imports naming them are held until you decide."
+        title="Names to check"
+        description="Customers or suppliers whose names look the same to APX — for example, the same name with different accents or spacing. New imports that mention them wait until you decide whether they are one business or two."
       />
       <div className="mt-8 flex flex-col gap-6">
         {groups.size === 0 ? (
-          <p className="text-sm text-ink-muted" data-testid="held-none">Nothing is waiting for a decision.</p>
+          <p className="text-sm text-ink-muted" data-testid="held-none">Nothing is waiting for a decision. If two names ever look the same, they will appear here for you to decide.</p>
         ) : [...groups.entries()].map(([key, members]) => (
           <Card key={key}>
             <CardBody className="p-4" data-testid="held-group">

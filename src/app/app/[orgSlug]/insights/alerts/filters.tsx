@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { TOUCH_TARGET } from '@/components/ui/clickable-card';
+import { severityLabel } from '@/components/dashboard';
 import type { AlertQuery, AlertSeverity } from '@/modules/alerts';
 
 /**
@@ -10,6 +11,10 @@ import type { AlertQuery, AlertSeverity } from '@/modules/alerts';
  *
  * The DEFAULT is open and acknowledged: the things still standing. Resolved and dismissed alerts are
  * history, and a list that opens with a year of resolved items buries the four that matter.
+ *
+ * The three status choices are always visible; the five severities sit behind a "How serious"
+ * toggle, open only when one is in use. Eight equal-weight pills was a row an owner had to read
+ * before reaching the alerts, and most never narrow by severity at all.
  */
 
 export type AlertStatusFilter = 'standing' | 'open' | 'all';
@@ -66,9 +71,9 @@ function href(orgSlug: string, status: AlertStatusFilter, severity: AlertSeverit
 }
 
 const STATUS_LABELS: Readonly<Record<AlertStatusFilter, string>> = {
-  standing: 'Still standing',
-  open: 'Open only',
-  all: 'Everything, including resolved',
+  standing: 'Not dealt with yet',
+  open: 'Not seen yet',
+  all: 'All, including dealt with',
 };
 
 export function AlertFilters({
@@ -88,19 +93,25 @@ export function AlertFilters({
           {STATUS_LABELS[status]}
         </FilterLink>
       ))}
-      <span className="px-0.5 text-ink-faint">·</span>
-      <FilterLink href={href(orgSlug, active.status, null)} current={active.severity === null}>
-        Any severity
-      </FilterLink>
-      {SEVERITIES.map((severity) => (
-        <FilterLink
-          key={severity}
-          href={href(orgSlug, active.status, severity)}
-          current={active.severity === severity}
-        >
-          {severity}
-        </FilterLink>
-      ))}
+      <details open={active.severity !== null}>
+        <summary className={`inline-flex cursor-pointer items-center rounded-full px-2.5 py-0.5 text-ink-muted hover:text-accent ${TOUCH_TARGET}`}>
+          How serious: {active.severity === null ? 'Any' : severityLabel(active.severity)}
+        </summary>
+        <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+          <FilterLink href={href(orgSlug, active.status, null)} current={active.severity === null}>
+            Any
+          </FilterLink>
+          {SEVERITIES.map((severity) => (
+            <FilterLink
+              key={severity}
+              href={href(orgSlug, active.status, severity)}
+              current={active.severity === severity}
+            >
+              {severityLabel(severity)}
+            </FilterLink>
+          ))}
+        </div>
+      </details>
     </nav>
   );
 }

@@ -6,10 +6,11 @@ import { formatValue, missingReasonText, statusFor, BASIS_TEXT } from '@/modules
 import type { AssuranceLevel, DataQuality } from '@/modules/financial-engine';
 import {
   DEFAULT_DESCRIPTOR_LIMIT, RECORD_KINDS, getDocumentReference, loadEvidenceDrawer,
-  type DocumentReference, type DrawerDifference, type RecordKind,
+  type DocumentReference, type DrawerComponent, type DrawerDifference, type RecordKind,
 } from '@/modules/evidence';
 import { getAccessContext } from '@/modules/tenancy';
 import { StatusBadgeView } from '@/components/dashboard';
+import { formatDate } from '@/components/labels';
 import { Badge, Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { TBody, TD, THead, TR } from '@/components/ui/table';
 import { CLICKABLE_ROW, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
@@ -76,12 +77,24 @@ export default async function EvidenceBundlePage({
 
   const document = await documentFor(ctx, row);
   const metric = view.metric;
+  /*
+   * A metric's or an alert's bundle is about ONE figure — the first snapshot it cites. Any other
+   * bundle (a health score, a forecast, an answer) cites a set of figures, and the first is only the
+   * first: naming the page after it told an owner who clicked "The figures behind this score" that
+   * they were looking at Revenue. Those pages are named after what they explain instead.
+   */
+  const aboutOneFigure = view.bundle.kind === 'metric' || view.bundle.kind === 'alert';
+  const title = aboutOneFigure && metric ? metric.label : (BUNDLE_TITLES[view.bundle.kind] ?? 'Where this came from');
+  // "Source" and "Where from?" appear only on rows; without any, the document card says what to do instead.
+  const hasRows = view.records.length > 0 || view.pinned.some((item) => item.canReachDocument);
+  const RELATED_SHOWN = 6;
 
   return (
     <>
       <PageHeader
-        eyebrow="Evidence"
-        title={metric ? metric.label : 'Where this came from'}
+        eyebrow="Where this number comes from"
+        title={title}
+        description="Each section below goes one step further back: the figure, what it was worked out from, the records behind it and, last, the file they were read from. Use Open, Source or Where from? to follow any line."
       />
 
       <div className="mt-8 flex flex-col gap-6">
@@ -90,7 +103,7 @@ export default async function EvidenceBundlePage({
           <CardBody>
             <div className="flex flex-wrap items-center gap-2">
               <IconBadge tint="violet" size="sm"><ShieldCheck /></IconBadge>
-              <h2 className="font-serif text-lg text-ink">What this figure rests on</h2>
+              <h2 className="font-serif text-lg text-ink">{aboutOneFigure ? 'What this figure rests on' : 'What this rests on'}</h2>
               {view.bundle.assurance === null ? null : (
                 <Badge tone="neutral">{assuranceLabel(view.bundle.assurance)}</Badge>
               )}
@@ -98,8 +111,14 @@ export default async function EvidenceBundlePage({
             <p className="mt-2 text-sm text-ink-muted">
               {view.bundle.asOf === null
                 ? 'Worked out from your records.'
-                : `Worked out on ${formatInstant(view.bundle.asOf.finishedAt)} by version ${view.bundle.asOf.engineVersion} of the calculation engine. Everything below is what it read at that moment.`}
+                : `Worked out on ${formatInstant(view.bundle.asOf.finishedAt)} from the records you had added by then. Everything below is exactly what was used at that moment, even if your figures have changed since.`}
             </p>
+            {/* The run's version is for an accountant or for us, so it sits below, small. */}
+            {view.bundle.asOf === null ? null : (
+              <p className="mt-1 text-xs text-ink-faint">
+                Calculated with version {view.bundle.asOf.engineVersion} of the calculation engine.
+              </p>
+            )}
           </CardBody>
         </Card>
 
@@ -109,7 +128,7 @@ export default async function EvidenceBundlePage({
             <CardBody>
               <div className="flex min-w-0 items-center gap-3">
                 <IconBadge tint="pink" size="sm"><ChartColumn /></IconBadge>
-                <h2 className="font-serif text-lg text-ink">The figure</h2>
+                <h2 className="font-serif text-lg text-ink">{aboutOneFigure ? 'The figure' : 'The first figure it used'}</h2>
               </div>
               <div className="mt-3 flex flex-wrap items-baseline gap-3">
                 <p className="font-mono text-3xl tabular-nums text-ink">
@@ -159,7 +178,7 @@ export default async function EvidenceBundlePage({
                     {metric.restsOn.map((statement) => (
                       <li key={statement.batchId} className="[overflow-wrap:anywhere]">
                         {statement.fileName ?? 'A bank statement'}
-                        {statement.periodStart && statement.periodEnd ? ` (${statement.periodStart} to ${statement.periodEnd})` : ''}
+                        {statement.periodStart && statement.periodEnd ? ` (${formatDate(statement.periodStart)} to ${formatDate(statement.periodEnd)})` : ''}
                         {statement.extractionMethod === 'pdf_claude' ? ' — read by AI' : ' — did not add up to its printed balances'}
                       </li>
                     ))}
@@ -241,33 +260,26 @@ export default async function EvidenceBundlePage({
             <CardBody>
               <div className="flex min-w-0 items-center gap-3">
                 <IconBadge tint="pink" size="sm"><Layers /></IconBadge>
-                <h2 className="font-serif text-lg text-ink">The other figures this rests on</h2>
+                <h2 className="font-serif text-lg text-ink">{aboutOneFigure ? 'The other figures this rests on' : 'The other figures it used'}</h2>
               </div>
-              {/* A part with evidence of its own opens it from anywhere on its row (owner, 2026-10-14). */}
-              <ul className="mt-3 space-y-1">
-                {view.relatedFigures.map((figure) => (
-                  <li key={figure.snapshotId ?? figure.name} className={`${figure.snapshotId === null ? '' : CLICKABLE_ROW} -mx-2 flex flex-wrap items-baseline justify-between gap-2 rounded-lg border-b border-line px-2 py-2 last:border-0`}>
-                    <span className="min-w-0 text-sm text-ink">{figure.label}</span>
-                    <span className="flex flex-wrap items-baseline gap-3">
-                      <span className="font-serif text-base text-ink">
-                        {formatValue(
-                          { value: figure.value, unit: figure.unit ?? 'money', currency: figure.currency },
-                          { showMinorUnits: true },
-                        )}
-                      </span>
-                      {figure.snapshotId === null ? null : (
-                        <CardLink
-                          href={`/app/${orgSlug}/evidence?snapshot=${figure.snapshotId}`}
-                          className="text-sm text-accent underline underline-offset-2 after:rounded-lg group-hover:text-accent-hover"
-                        >
-                          Open
-                          <span className="sr-only"> the evidence behind {figure.label}</span>
-                        </CardLink>
-                      )}
-                    </span>
-                  </li>
-                ))}
-              </ul>
+              <p className="mt-1 text-sm text-ink-muted">
+                {aboutOneFigure
+                  ? 'Figures this one was compared with, such as the month before. They are not part of its sum.'
+                  : 'The figures this was based on. Open any of them to see where it came from.'}
+              </p>
+              {/*
+                * A health score or forecast can cite dozens of figures. The first few are shown and
+                * the rest wait behind one toggle, so the page does not open on a wall of numbers.
+                */}
+              <RelatedList figures={view.relatedFigures.slice(0, RELATED_SHOWN)} orgSlug={orgSlug} />
+              {view.relatedFigures.length <= RELATED_SHOWN ? null : (
+                <details className="mt-2">
+                  <summary className={`inline-flex cursor-pointer items-center text-sm text-accent underline underline-offset-2 ${TOUCH_TARGET}`}>
+                    Show the other {view.relatedFigures.length - RELATED_SHOWN} figures
+                  </summary>
+                  <RelatedList figures={view.relatedFigures.slice(RELATED_SHOWN)} orgSlug={orgSlug} />
+                </details>
+              )}
             </CardBody>
           </Card>
         )}
@@ -351,14 +363,17 @@ export default async function EvidenceBundlePage({
               <p className="mt-1 text-sm text-ink-muted">
                 {block.reconciliation}
               </p>
+              <p className="mt-1 text-xs text-ink-faint">
+                Source opens the file a row was read from. Where from? shows when the row was added and whether it still counts.
+              </p>
 
               <div className="mt-4">
                 <Table>
-                  <THead columns={['Date', 'Description', 'Amount', 'Status', 'Source', 'This row']} />
+                  <THead columns={['Date', 'Description', 'Amount', 'Status', 'File', 'History']} />
                   <TBody>
                     {block.selection.rows.map((record) => (
                       <TR key={record.id}>
-                        <TD>{record.date ?? '—'}</TD>
+                        <TD className="whitespace-nowrap">{formatDate(record.date)}</TD>
                         <TD>{record.description ?? '—'}</TD>
                         <TD className="tabular-nums">{record.amount ?? '—'}</TD>
                         <TD>
@@ -444,8 +459,17 @@ export default async function EvidenceBundlePage({
             </div>
             {document === null ? (
               <p className="mt-1 text-sm text-ink-muted">
-                Choose <span className="text-ink">Source</span> on any row above to see the file it
-                was read from.
+                {hasRows ? (
+                  <>
+                    Choose <span className="text-ink">Source</span> on any row above to see the file it
+                    was read from.
+                  </>
+                ) : (
+                  <>
+                    This was worked out from other figures rather than read from a file. Choose{' '}
+                    <span className="text-ink">Open</span> on any figure above to find the file behind it.
+                  </>
+                )}
               </p>
             ) : (
               <div className="mt-3">
@@ -571,6 +595,50 @@ function quality(raw: Record<string, unknown>): DataQuality {
 
 function warningsOf(raw: Record<string, unknown>): string[] {
   return Array.isArray(raw.warnings) ? (raw.warnings as string[]) : [];
+}
+
+/**
+ * What a bundle that is not about one figure explains, named for the page title. Unknown kinds fall
+ * back to a neutral title rather than a raw enum value.
+ */
+const BUNDLE_TITLES: Readonly<Record<string, string>> = {
+  health_score: 'The figures behind your health score',
+  forecast: 'The figures behind your forecast',
+  scenario: 'The figures behind this what-if',
+  ai_response: 'The figures behind this answer',
+  action: 'The figures behind this action',
+  report: 'The figures behind this report',
+  funding_assessment: 'The figures behind this funding assessment',
+};
+
+/** One row per figure, each opening its own evidence (owner, 2026-10-14: anywhere on the row). */
+function RelatedList({ figures, orgSlug }: { figures: readonly DrawerComponent[]; orgSlug: string }) {
+  return (
+    <ul className="mt-3 space-y-1">
+      {figures.map((figure) => (
+        <li key={figure.snapshotId ?? figure.name} className={`${figure.snapshotId === null ? '' : CLICKABLE_ROW} -mx-2 flex flex-wrap items-baseline justify-between gap-2 rounded-lg border-b border-line px-2 py-2 last:border-0`}>
+          <span className="min-w-0 text-sm text-ink [overflow-wrap:anywhere]">{figure.label}</span>
+          <span className="flex flex-wrap items-baseline gap-3">
+            <span className="font-serif text-base text-ink">
+              {formatValue(
+                { value: figure.value, unit: figure.unit ?? 'money', currency: figure.currency },
+                { showMinorUnits: true },
+              )}
+            </span>
+            {figure.snapshotId === null ? null : (
+              <CardLink
+                href={`/app/${orgSlug}/evidence?snapshot=${figure.snapshotId}`}
+                className="text-sm text-accent underline underline-offset-2 after:rounded-lg group-hover:text-accent-hover"
+              >
+                Open
+                <span className="sr-only"> the evidence behind {figure.label}</span>
+              </CardLink>
+            )}
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
 }
 
 /** The §8.1 assurance word, for the statement level's badge. */

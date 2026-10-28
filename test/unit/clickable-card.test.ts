@@ -175,7 +175,7 @@ describe('every card that opens something opens it from anywhere on the card', (
 
   it('an alert: its own page is the card\'s link; "Why?" and the status controls sit above it', () => {
     const link = expectOneCardLink(createElement(AlertCard, { alert, actions: button('Mark as seen') }));
-    expect(link.text).toContain('History');
+    expect(link.text).toContain('See its history');
   });
 
   it('an alert on its own page is not a link to itself', () => {

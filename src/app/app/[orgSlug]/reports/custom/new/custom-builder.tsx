@@ -161,8 +161,9 @@ export function CustomBuilder({
           </NativeSelect>
         </label>
 
-        <div>
-          <p className="text-sm text-ink-muted">Areas to look at (optional)</p>
+        {/* A fieldset and legend, so a screen reader names each group of checkboxes. */}
+        <fieldset>
+          <legend className="text-sm text-ink-muted">Areas to look at (optional)</legend>
           <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1">
             {dimensions.map((d) => (
               <label key={d.value} className={CHOICE}>
@@ -178,10 +179,10 @@ export function CustomBuilder({
               table of APX&apos;s own figures to the report, whether or not the analyst can answer.
             </p>
           )}
-        </div>
+        </fieldset>
 
-        <div>
-          <p className="text-sm text-ink-muted">Questions — choose any of these…</p>
+        <fieldset>
+          <legend className="text-sm text-ink-muted">Questions — choose any of these…</legend>
           <div className="mt-2 flex flex-col gap-1">
             {suggestions.map((q) => (
               <label key={q} className={CHOICE}>
@@ -199,14 +200,16 @@ export function CustomBuilder({
             {questions.length} of at most {maxQuestions} questions.
             {tooLong ? ` Keep each question under ${maxChars} characters.` : ''}
           </p>
-        </div>
+        </fieldset>
       </fieldset>
 
       {phase === 'composing' ? (
-        <div>
+        <div className="flex flex-col items-start gap-2">
           <Button type="button" onClick={() => void run()} disabled={(questions.length === 0 && !hasFixed) || tooMany || tooLong || periodId === ''}>
             {questions.length === 0 && hasFixed ? 'Build the report with APX\'s figures' : 'Ask the analyst and build the report'}
           </Button>
+          {/* The questions are asked from this page, one after another: leaving it stops the run. */}
+          <p className="text-xs text-ink-faint">This can take a minute or two. Keep this page open until the report appears.</p>
         </div>
       ) : null}
 

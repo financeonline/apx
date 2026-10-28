@@ -50,7 +50,7 @@ export default async function MarketingPage({ params, searchParams }: { params: 
                         <TD className="whitespace-nowrap text-right tabular" label="Customers won">{c.customersWon}</TD>
                         <TD className="whitespace-nowrap text-right tabular max-sm:whitespace-normal" label="Revenue credited">{c.attributionStatus === 'attributed_via_won_opportunities' ? c.attributedRevenue : <span className="text-xs text-ink-muted">{c.attributionText}</span>}</TD>
                         <TD className="whitespace-nowrap text-right tabular" label="Cost per customer">{c.cac ?? <span className="text-xs text-ink-muted" title={c.cacNote ?? undefined}>—</span>}</TD>
-                        <TD className="text-right text-sm"><Link href={c.href} className="inline-flex items-center gap-0.5 rounded-xl border border-accent/45 bg-surface px-2.5 py-0.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10">Detail <ChevronRight aria-hidden="true" className="size-4" /></Link></TD>
+                        <TD className="text-right text-sm"><Link href={c.href} className="inline-flex items-center gap-0.5 rounded-xl border border-accent/45 bg-surface px-2.5 py-0.5 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10">Open <ChevronRight aria-hidden="true" className="size-4" /></Link></TD>
                       </TR>
                     ))}
                   </TBody>
@@ -72,7 +72,7 @@ export default async function MarketingPage({ params, searchParams }: { params: 
               <ul className="flex flex-wrap gap-2 text-sm" data-testid="marketing-channels">
                 {view.channels.map((ch) => <li key={ch.id}><Badge tone="neutral">{ch.name}</Badge></li>)}
               </ul>
-            ) : <p className="text-sm text-ink-muted">No channels yet.</p>}
+            ) : <p className="text-sm text-ink-muted">No channels yet{mayEdit ? ' — add one below, then choose it when you add a campaign' : ''}.</p>}
           </CardBody>
         </Card>
 

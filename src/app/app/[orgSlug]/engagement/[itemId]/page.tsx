@@ -5,6 +5,7 @@ import { ENGAGEMENT_STATUS_LABELS, getEngagementItem, type EngagementStatus } fr
 import { getAccessContext } from '@/modules/tenancy';
 import { ArrowRightLeft, History } from 'lucide-react';
 import { Badge, Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
+import { formatDate, formatDateTime } from '@/components/labels';
 import { CommentForm, StatusForm } from '@/components/engagement/forms';
 import { requirePermission } from '@/app/_lib/authz';
 import { commentEngagementItemAction, updateEngagementStatusAction } from '../actions';
@@ -32,7 +33,7 @@ export default async function EngagementItemPage({ params }: { params: Promise<{
       <div className="max-w-4xl">
         <p className="flex flex-wrap items-center gap-2 text-sm text-ink-muted">
           <Badge tone={item.status === 'delivered' ? 'accent' : item.status === 'closed' ? 'neutral' : 'warn'}>{ENGAGEMENT_STATUS_LABELS[item.status]}</Badge>
-          Raised by {item.createdBy} on {item.createdAt.slice(0, 10)}{item.dueDate === null ? '' : ` · wanted by ${item.dueDate}`}
+          Raised by {item.createdBy} on {formatDate(item.createdAt)}{item.dueDate === null ? '' : ` · wanted by ${formatDate(item.dueDate)}`}
         </p>
         {item.detail === null ? null : <p className="mt-4 whitespace-pre-line text-sm text-ink [overflow-wrap:anywhere]">{item.detail}</p>}
 
@@ -61,7 +62,7 @@ export default async function EngagementItemPage({ params }: { params: Promise<{
                   {e.actor}{' '}
                   {e.event === 'created' ? 'raised it' : e.event === 'commented' ? 'commented'
                     : `moved it from ${ENGAGEMENT_STATUS_LABELS[e.fromStatus ?? 'open']} to ${ENGAGEMENT_STATUS_LABELS[e.toStatus ?? 'open']}`}
-                  <span className="text-ink-muted"> · {e.createdAt.slice(0, 16).replace('T', ' ')} UTC</span>
+                  <span className="text-ink-muted"> · {formatDateTime(e.createdAt)} UTC</span>
                 </p>
                 {e.note === null ? null : <p className="mt-1 whitespace-pre-line text-ink-muted">{e.note}</p>}
               </li>

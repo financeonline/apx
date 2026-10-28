@@ -374,10 +374,10 @@ function describeGroup(
   };
 }
 
-/** The detected recurring payments, largest first; stopped ones last. */
-export async function loadRecurringPayments(
+/** The groups as read, and their views; the Banking page also needs each group's key and direction. */
+async function recurringGroupsAndViews(
   db: SupabaseClient, orgId: string, orgSlug: string, currency: string, requestId?: string,
-): Promise<RecurringPaymentView[]> {
+): Promise<{ groups: RecurringGroupRow[]; views: RecurringPaymentView[] }> {
   const [groups, accounts] = await Promise.all([
     listRecurringGroups(db, orgId, requestId),
     listBankAccounts(db, orgId, requestId),
@@ -385,13 +385,71 @@ export async function loadRecurringPayments(
   const members = await loadLatestGroupMembers(db, orgId, groups.map((g) => g.id), requestId);
   const names = new Map(accounts.map((a) => [a.id, a.name] as const));
   const rank = { changed: 0, active: 1, stopped: 2 } as const;
-  return groups
+  const views = groups
     .map((g) => describeGroup(g, members.get(g.id), names, currency, orgSlug))
     .sort((a, b) => rank[a.status] - rank[b.status] || new Decimal(b.expectedRaw).comparedTo(new Decimal(a.expectedRaw)));
+  return { groups, views };
+}
+
+/** The detected recurring payments, largest first; stopped ones last. */
+export async function loadRecurringPayments(
+  db: SupabaseClient, orgId: string, orgSlug: string, currency: string, requestId?: string,
+): Promise<RecurringPaymentView[]> {
+  return (await recurringGroupsAndViews(db, orgId, orgSlug, currency, requestId)).views;
+}
+
+/**
+ * The recurring-payment alerts whose stored sentence opens with the group's bank description, and
+ * the direction the rule itself implies (`recurring.amount_changed` fires either way, so its
+ * direction comes from the group).
+ */
+const SIGNATURE_LED_ALERTS: ReadonlyMap<string, RecurringGroupRow['direction'] | null> = new Map([
+  ['recurring.amount_changed', null], ['recurring.missed', 'outflow'], ['recurring.inflow_missed', 'inflow'],
+]);
+
+/**
+ * "fps credit gamma catering inv was £9,217, …" reads as a raw bank line, lower-cased because the
+ * signature is the normalised description (the original wording is not readable here, ADR-038.4).
+ * Where the sentence opens with a known group's signature, it is said as a payment from or to that
+ * payee, capitalised; anything else is only given a capital letter. Display only: the stored alert
+ * text, and the Alerts page, are unchanged.
+ */
+function noticeText(alert: AlertView, directions: ReadonlyMap<string, Direction>): string {
+  const text = alert.whatHappened || alert.title;
+  if (SIGNATURE_LED_ALERTS.has(alert.ruleKey)) {
+    const key = [...directions.keys()]
+      .filter((k) => k !== '' && text.startsWith(k))
+      .sort((a, b) => b.length - a.length)[0];
+    const direction = key === undefined ? undefined : SIGNATURE_LED_ALERTS.get(alert.ruleKey) ?? directions.get(key);
+    // The same description both ways cannot say which this was, so it keeps its own words.
+    if (key !== undefined && (direction === 'inflow' || direction === 'outflow')) {
+      // A key can carry the confirmed counterparty (`signature|cp:<id>`); only the words are shown.
+      const payee = capitalise(key.split('|cp:')[0]!.trim());
+      return `${direction === 'inflow' ? `A payment from ${payee}` : `A payment to ${payee}`}${text.slice(key.length)}`;
+    }
+  }
+  return capitalise(text);
+}
+
+type Direction = RecurringGroupRow['direction'] | 'both';
+
+/** Each group key's direction; a key seen both ways (two accounts, say) is `both`. */
+function directionsOf(groups: readonly RecurringGroupRow[]): Map<string, Direction> {
+  const out = new Map<string, Direction>();
+  for (const g of groups) {
+    const seen = out.get(g.counterpartyKey);
+    out.set(g.counterpartyKey, seen === undefined || seen === g.direction ? g.direction : 'both');
+  }
+  return out;
+}
+
+function capitalise(text: string): string {
+  return text.charAt(0).toUpperCase() + text.slice(1);
 }
 
 function noticesFrom(
   alerts: readonly AlertView[],
+  directions: ReadonlyMap<string, Direction>,
   lookalikes: number,
   uncategorised: number,
   accounts: readonly BankAccountCardView[],
@@ -404,7 +462,7 @@ function noticesFrom(
     out.push({
       kind: 'alert',
       tone: alert.severity === 'critical' || alert.severity === 'high' ? 'danger' : alert.severity === 'info' ? 'neutral' : 'warn',
-      text: alert.whatHappened || alert.title,
+      text: noticeText(alert, directions),
       href: alert.detailHref,
     });
   }
@@ -531,7 +589,8 @@ export async function loadBankingOverview(
   const lookalikes = sample.filter((t) => !t.isTransfer && looksLikeTransfer(t.descriptionNormalized)).length;
   const uncategorised = summary.accounts.reduce((acc, a) => acc + a.uncategorised_count, 0);
   const transactions = summary.accounts.reduce((acc, a) => acc + a.row_count, 0);
-  const recurring = await loadRecurringPayments(db, orgId, orgSlug, currency, requestId);
+  const { groups: recurringGroups, views: recurring } = await recurringGroupsAndViews(db, orgId, orgSlug, currency, requestId);
+  const directions = directionsOf(recurringGroups);
   const closings = [...trailing].reverse().map((id) =>
     series.find((s) => s.periodId === id && s.metricKey === 'closing_cash' && s.dimensionType === 'none')?.value ?? null);
   const names = new Map(accounts.map((a) => [a.id, a.name] as const));
@@ -555,7 +614,7 @@ export async function loadBankingOverview(
         : null,
     },
     headline,
-    notices: noticesFrom(alerts.alerts, lookalikes, uncategorised, cards, orgSlug, periodId),
+    notices: noticesFrom(alerts.alerts, directions, lookalikes, uncategorised, cards, orgSlug, periodId),
     accounts: cards,
     recurring,
     categories: categoryShares(summary, currency),

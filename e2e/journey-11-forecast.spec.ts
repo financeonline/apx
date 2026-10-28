@@ -102,7 +102,7 @@ test('a forecast is shown as an expectation, never as a result', async ({ page }
   await expect(page.getByText(/not a guarantee of what will happen/i).first()).toBeVisible();
 
   // The six headline figures §15 names.
-  for (const label of ['Revenue', 'Running costs', 'Operating profit', 'Cash at the end', 'Owed to you', 'Owed by you']) {
+  for (const label of ['Sales', 'Running costs', 'Profit', 'Cash', 'Owed to you', 'You owe']) {
     await expect(page.getByText(label, { exact: true }).first(), label).toBeVisible();
   }
 

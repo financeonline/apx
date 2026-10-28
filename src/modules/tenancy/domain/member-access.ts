@@ -138,7 +138,7 @@ export const PERMISSION_WORDS: Readonly<Record<SwitchablePermission, { readonly 
   'financials.view': { title: 'Financial detail', detail: 'Profit and loss, cash, invoices and the records behind them' },
   'financials.edit': { title: 'Correct records', detail: 'Recategorise, correct and map accounts' },
   'imports.create': { title: 'Upload data', detail: 'Upload statements, ledgers and invoice lists' },
-  'imports.review': { title: 'Review imports', detail: 'Check, commit and roll back uploads' },
+  'imports.review': { title: 'Review imports', detail: 'Check, import and remove uploads' },
   'banking.view': { title: 'Banking', detail: 'Bank accounts and transactions' },
   'banking.reconcile': { title: 'Categorise bank lines', detail: 'Categorise and pair bank transactions' },
   'customers.view': { title: 'Customers', detail: 'Customers, products, sales and marketing' },

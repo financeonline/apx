@@ -42,7 +42,7 @@ export function AccountRowView({
       <TD>
         {account.name}
         {account.isSystem ? (
-          <span className="ml-2 text-xs text-ink-faint">built in</span>
+          <span className="ml-2 text-xs text-ink-faint">standard account</span>
         ) : null}
       </TD>
       <TD>

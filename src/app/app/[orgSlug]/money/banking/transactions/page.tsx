@@ -114,7 +114,7 @@ export default async function BankTransactionsPage({
         <CardBody className="px-0 py-0">
           {view.rows.length === 0 ? (
             <p className="px-5 py-4 text-sm text-ink-muted">
-              {view.filter === 'uncategorised' ? 'Every transaction here has a category. Nothing to do.' : 'No transactions match.'}
+              {view.filter === 'uncategorised' ? 'Every transaction here has a category. Nothing to do.' : 'No transactions match this filter. Choose “All” to see every one.'}
             </p>
           ) : (
             <TableWrap stack>

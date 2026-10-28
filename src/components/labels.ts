@@ -128,11 +128,53 @@ export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'auth.sign_out': 'Signed out',
   'user.disabled': 'Account disabled',
   'user.enabled': 'Account enabled',
+  // The automatic events, in plain words (client pass, ADR-176).
+  'org.data_viewed': 'APX staff opened your company',
+  'org.purged': 'Company deleted',
+  'company_profile.updated': 'Company profile changed',
+  'document.uploaded': 'File uploaded',
+  'import.started': 'Upload started',
+  'import.validated': 'Upload checked',
+  'import.confirmed': 'Upload question answered',
+  'import.committed': 'Upload added to your figures',
+  'import.rejected': 'Upload discarded',
+  'import.rolled_back': 'Upload removed from your figures',
+  'report.completeness_attested': 'Report confirmed as complete',
+  'alert.created': 'Alert raised',
+  'alerts.evaluated': 'Alerts checked',
+  'alert.reevaluated': 'Alert re-checked',
+  'alert.converted_to_action': 'Alert turned into an action',
+  'action.created': 'Action added',
+  'action.assigned': 'Action given to someone',
+  'action.status_changed': 'Action progress updated',
+  'job.enqueued': 'Background task queued',
+  'banking.pass_applied': 'Bank lines re-checked',
+  'storage.orphans_removed': 'Unused files tidied up',
+  'ai.answered': 'AI analyst answered a question',
+  'evidence.bundle_built': 'Figures behind a number recorded',
+  'counterparty.created': 'Customer or supplier added',
+  'account.created': 'Account added',
+  'bank_account.created': 'Bank account added',
+  'scenario.created': 'What-if scenario saved',
+  'forecast.generated': 'Forecast worked out',
+  'report.composed': 'Report produced',
+  'marketing.report_requested': 'Marketing report requested',
+  'marketing.report_failed': 'Marketing report could not be made',
+  'investment.report_requested': 'Investment pack requested',
+  'funding.enabled': 'Funding readiness switched on',
 };
+
+/** Record changes the database logs itself ("db.invoices.insert"), as words: "Invoices added". */
+const AUDIT_DB_VERBS: Readonly<Record<string, string>> = { insert: 'added', update: 'changed', delete: 'removed' };
 
 export function auditActionLabel(action: string): string {
   const known = AUDIT_ACTION_LABELS[action];
   if (known) return known;
+  const db = /^db\.([a-z_]+)\.(insert|update|delete)$/.exec(action);
+  if (db) {
+    const table = db[1]!.replace(/_/g, ' ');
+    return `${table.charAt(0).toUpperCase()}${table.slice(1)} ${AUDIT_DB_VERBS[db[2]!]}`;
+  }
   const readable = action.replace(/[._]/g, ' ');
   return readable.charAt(0).toUpperCase() + readable.slice(1);
 }
@@ -161,6 +203,7 @@ export const MONTHS = [
 ] as const;
 
 /** "12 Mar 2026" (UX_ARCHITECTURE.md §8.2). Rendered in UTC so server and client agree. */
+/** "24 Sep 2026": the short month as period labels write it ("Sep 2026"), never the newer "Sept". */
 export function formatDate(value: string | null | undefined): string {
   if (!value) return '—';
   const date = new Date(value);
@@ -170,7 +213,7 @@ export function formatDate(value: string | null | undefined): string {
     month: 'short',
     year: 'numeric',
     timeZone: 'UTC',
-  }).format(date);
+  }).format(date).replace('Sept', 'Sep');
 }
 
 /** "12 Mar 2026, 14:05" for the audit log, where the time matters. */
@@ -185,7 +228,7 @@ export function formatDateTime(value: string | null | undefined): string {
     hour: '2-digit',
     minute: '2-digit',
     timeZone: 'UTC',
-  }).format(date);
+  }).format(date).replace('Sept', 'Sep');
 }
 
 /**

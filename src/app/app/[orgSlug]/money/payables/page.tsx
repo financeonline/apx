@@ -34,7 +34,7 @@ export default async function PayablesPage({
     <LedgerBookPage
       orgSlug={orgSlug}
       title={TITLE}
-      description="What you still owe your suppliers, and how much of it is late."
+      description="Who do you still need to pay, and is any of it late?"
       route="payables"
       view={view}
     />

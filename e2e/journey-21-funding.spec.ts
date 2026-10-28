@@ -4,7 +4,7 @@ import { GL_CSV, cleanUpOwn, drainQueue, importLedger, onboard, seedUser, signIn
 
 /**
  * Journey 21 — Funding Readiness (Phase 16; ADR-145). Off by default: no link and NOT FOUND. Switched
- * on: the month is assessed and shown with the disclaimer first, "Insufficient data" where a score
+ * on: the month is assessed and shown with the disclaimer first, "Not enough data to score yet" where a score
  * would overstate what is known, the factor cards, what is missing and what to do, and the evidence.
  */
 
@@ -37,7 +37,7 @@ test('funding readiness is hidden until switched on, then honest about what it d
   await expect(page.getByRole('heading', { name: 'Funding Readiness' })).toBeVisible();
   await expect(page.getByText(/It is not a lender, credit, investment or funding approval rating/)).toBeVisible();
   // No bank account and no balance sheet: cash and debt are unknown, so there is no number.
-  await expect(page.getByText('Insufficient data', { exact: true })).toBeVisible();
+  await expect(page.getByText('Not enough data to score yet', { exact: true })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Existing debt' })).toBeVisible();
   await expect(page.getByText('Existing debt: Debt could not be established from the available balance-sheet data.')).toBeVisible();
   await expect(page.getByText('Import a trial balance or balance sheet so debt can be established.')).toBeVisible();
@@ -65,5 +65,5 @@ test('funding readiness is hidden until switched on, then honest about what it d
   await page.getByRole('link', { name: '1–31 May 2026', exact: true }).click();
   await expect(page.getByRole('heading', { name: /^Funding Readiness Report — / })).toBeVisible();
   await expect(page.getByText(/It is not a lender, credit, investment or funding approval rating/)).toBeVisible();
-  await expect(page.getByText('Insufficient data', { exact: true })).toBeVisible();
+  await expect(page.getByText('Not enough data to score yet', { exact: true })).toBeVisible();
 });

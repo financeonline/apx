@@ -26,6 +26,12 @@ export function ArchiveControl({
       <SubmitButton tone="quiet" pendingLabel="Saving…">
         {archived ? 'Bring this back' : 'Put this away'}
       </SubmitButton>
+      {/* "Put this away" alone left the owner wondering whether it deleted anything. */}
+      <span className="text-sm text-ink-muted">
+        {archived
+          ? 'Puts it back in your list of saved scenarios.'
+          : 'Takes it off your list of saved scenarios. Nothing is deleted.'}
+      </span>
       <ActionMessage state={state} />
     </form>
   );

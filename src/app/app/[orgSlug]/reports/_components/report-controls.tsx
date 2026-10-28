@@ -5,6 +5,7 @@ import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
 import { Button } from '@/components/ui/button';
 import { requestComposeAction, requestStoredPdfAction } from '../actions';
 import { NativeSelect } from '@/components/ui/shadcn';
+import { formatDate } from '@/components/labels';
 
 /**
  * Asking for a report (Phase 17). Producing is queued work: the job composes and stores the report,
@@ -78,11 +79,11 @@ export function StoredPdfControl({
           <input type="hidden" name="org_slug" value={orgSlug} />
           <input type="hidden" name="report_id" value={reportId} />
           <SubmitButton tone={fileId === null ? 'primary' : 'quiet'}>
-            {fileId === null ? 'Produce a PDF' : 'Produce it again'}
+            {fileId === null ? 'Produce a PDF' : 'Produce a new PDF'}
           </SubmitButton>
         </form>
       ) : null}
-      {renderedAt === null ? null : <span className="text-xs text-ink-faint">Last produced {renderedAt.slice(0, 10)}</span>}
+      {renderedAt === null ? null : <span className="text-xs text-ink-faint">PDF last made {formatDate(renderedAt)}</span>}
       <ActionMessage state={state} />
       {message === null ? null : <p className="text-sm text-danger" role="status">{message}</p>}
     </div>

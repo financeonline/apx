@@ -1,7 +1,7 @@
 import Link from 'next/link';
 import { ListChecks } from 'lucide-react';
 import { formatMoney, formatPercent } from '@/core/money';
-import { missingReasonText } from '@/modules/dashboard';
+import { categoryLabel, missingReasonText } from '@/modules/dashboard';
 import { getBudgetView, type BudgetLineKey } from '@/modules/budgets';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
@@ -18,24 +18,29 @@ export const dynamic = 'force-dynamic';
  * from records.
  */
 
+/*
+ * The same names Profit & loss uses for the same lines (its §8.1 plain labels and category names),
+ * so a reader comparing the two pages is never left wondering whether "Revenue" here is "Sales" there.
+ */
 const LINE_LABELS: Readonly<Record<BudgetLineKey, string>> = {
-  revenue: 'Revenue',
+  revenue: 'Sales',
   other_income: 'Other income',
-  cost_of_sales: 'Cost of sales',
-  gross_profit: 'Gross profit',
-  operating_expense: 'Operating expenses (general)',
+  cost_of_sales: 'Direct costs',
+  gross_profit: 'Profit after direct costs',
+  operating_expense: 'Other running costs',
   payroll: 'Payroll',
   marketing: 'Marketing',
   depreciation: 'Depreciation',
-  operating_expenses: 'Operating expenses, total',
-  operating_profit: 'Operating profit',
-  other_expense: 'Other expenses',
-  interest_expense: 'Interest',
+  operating_expenses: 'Running costs, total',
+  operating_profit: 'Profit (before interest and tax)',
+  other_expense: 'Other costs',
+  interest_expense: 'Interest paid',
   tax_expense: 'Tax',
-  net_profit: 'Net profit',
+  net_profit: 'Profit after interest and tax',
 };
 
-const CATEGORY_NAME = (category: string) => category.replace(/_/g, ' ');
+/** A budget category in the words Profit & loss uses ("Other running costs", not "operating expense"). */
+const CATEGORY_NAME = (category: string) => categoryLabel(category);
 
 export default async function BudgetPage({
   params, searchParams,
@@ -70,7 +75,7 @@ export default async function BudgetPage({
       <PageHeader
         eyebrow="Money"
         title={`Budget against actual — ${view.period.label}`}
-        description="The budget is what was imported; the actual is the figure on Profit & loss for the same month. Shown to the penny."
+        description="Are you on track with your plan? Each line shows what you budgeted, what actually happened (the same figure as on Profit & loss), and the gap between them."
       />
       {view.months.length > 1 ? (
         <nav aria-label="Budget months" className="mb-6 flex flex-wrap gap-2 text-sm">
@@ -92,7 +97,7 @@ export default async function BudgetPage({
           <Table className="min-w-0">
             <TableHeader>
               <TableRow className="border-b border-line text-left text-ink-muted">
-                <TableHead className="py-2 pl-0 font-normal">Line</TableHead>
+                <TableHead className="py-2 pl-0 font-normal">Item</TableHead>
                 <TableHead className="py-2 pl-0 text-right font-normal">Budget</TableHead>
                 <TableHead className="py-2 pl-0 text-right font-normal">Actual</TableHead>
                 <TableHead className="py-2 pl-0 text-right font-normal">Difference</TableHead>
@@ -105,7 +110,7 @@ export default async function BudgetPage({
                     {LINE_LABELS[row.key]}
                     {row.assumedZero.length === 0 ? null : (
                       <span className="block text-xs text-ink-faint">
-                        No budget for {row.assumedZero.map(CATEGORY_NAME).join(', ')}; counted as nil.
+                        No budget set for {row.assumedZero.map(CATEGORY_NAME).join(', ')}, so it counts as zero.
                       </span>
                     )}
                   </TableHead>
@@ -121,8 +126,12 @@ export default async function BudgetPage({
                     {row.variancePct === null ? null : (
                       <span className="block text-xs text-ink-muted">{formatPercent(row.variancePct, { signDisplay: 'always' })}</span>
                     )}
-                    {row.favourable === null ? null : (
-                      <span className="sr-only">{row.favourable ? ' favourable' : ' unfavourable'}</span>
+                    {/* Said in words as well as colour (§10): red alone tells a colour-blind reader nothing. */}
+                    {row.favourable === null || row.variance === null ? null : (
+                      <span className="block text-xs">
+                        {/* A difference of exactly nothing is neither better nor worse (a string test, no arithmetic). */}
+                        {/^[-+]?0+(\.0+)?$/.test(row.variance) ? 'on budget' : row.favourable ? 'better than budget' : 'worse than budget'}
+                      </span>
                     )}
                   </TableCell>
                 </TableRow>
@@ -131,7 +140,7 @@ export default async function BudgetPage({
           </Table>
           {(view.variance?.notCompared ?? []).length === 0 ? null : (
             <p className="mt-4 text-sm text-ink-muted">
-              Also budgeted, but not part of the profit and loss so not compared:{' '}
+              Also in the budget, but not a profit and loss line, so not compared here:{' '}
               {view.variance!.notCompared.map((n) => `${CATEGORY_NAME(n.category)} ${money(n.budget)}`).join('; ')}.
             </p>
           )}
@@ -142,20 +151,20 @@ export default async function BudgetPage({
         <CardBody>
           <div className="flex items-center gap-3">
             <IconBadge tint="pink" size="sm"><ListChecks /></IconBadge>
-            <h2 className="font-serif text-lg text-ink">The budget lines</h2>
+            <h2 className="font-serif text-lg text-ink">What is in your budget</h2>
           </div>
           <ul className="mt-3 flex flex-col divide-y divide-line text-sm">
             {view.lines.map((line) => (
               <li key={line.id} className="flex flex-wrap justify-between gap-2 py-2">
                 <span className="text-ink">
                   {line.accountCode === null ? '' : `${line.accountCode} · `}{line.accountName}
-                  <span className="text-ink-muted"> · {CATEGORY_NAME(line.category)}</span>
+                  <span className="text-ink-muted"> · counted as {CATEGORY_NAME(line.category)}</span>
                 </span>
                 <span className="text-ink-muted">
                   {money(line.amount)}
                   {/* The import it came from opens for whoever reviews imports (a client does not). */}
                   {line.importBatchId === null || !can(ctx, 'imports.review') ? null : (
-                    <> · <Link href={`/app/${orgSlug}/data/imports/${line.importBatchId}`} className="text-accent underline underline-offset-2">import</Link></>
+                    <> · <Link href={`/app/${orgSlug}/data/imports/${line.importBatchId}`} className="text-accent underline underline-offset-2">see the import</Link></>
                   )}
                 </span>
               </li>

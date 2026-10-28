@@ -64,6 +64,23 @@ const MODULE_FLAGS: ReadonlyArray<readonly [string, string]> = [
 
 const plural = (n: number, one: string, many = `${one}s`) => `${n} ${n === 1 ? one : many}`;
 
+/**
+ * "30 Sep 2026" and "24 Oct 2026, 14:05": the dates a reader expects, not ISO keys. In UTC, as the
+ * shared date labels are, and "Sep" rather than the newer "Sept" so it matches the period labels.
+ */
+const DAY = new Intl.DateTimeFormat('en-GB', { day: 'numeric', month: 'short', year: 'numeric', timeZone: 'UTC' });
+const DAY_TIME = new Intl.DateTimeFormat('en-GB', {
+  day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit', timeZone: 'UTC',
+});
+function dayLabel(iso: string): string {
+  const date = new Date(iso.slice(0, 10));
+  return Number.isNaN(date.getTime()) ? iso.slice(0, 10) : DAY.format(date).replace('Sept', 'Sep');
+}
+function dayTimeLabel(iso: string | null): string {
+  const date = iso === null ? null : new Date(iso);
+  return date === null || Number.isNaN(date.getTime()) ? '' : ` ${DAY_TIME.format(date).replace('Sept', 'Sep')} UTC`;
+}
+
 function scalar(rows: readonly SnapshotRow[], key: string): SnapshotRow | null {
   return rows.find((r) => r.metricKey === key && r.dimensionType === 'none') ?? null;
 }
@@ -106,7 +123,8 @@ export async function loadDepartments(ctx: AccessContext): Promise<DepartmentsVi
       const weak = health?.band === 'at_risk' || health?.band === 'needs_attention';
       tiles.push({
         key: 'finance', title: 'Finance', href: `${base}/money`, tone: loss || weak ? 'attention' : 'good',
-        headline: `${month.label}: revenue ${money(revenue?.value ?? null)}, net profit ${money(net?.value ?? null)}`,
+        // Home's words for the same two figures (§8.1): sales, and profit after interest and tax.
+        headline: `${month.label}: sales ${money(revenue?.value ?? null)}, profit after interest and tax ${money(net?.value ?? null)}`,
         lines: [health === null || health.score === null
           ? 'No health score for this month.'
           : `Health score ${health.score} (${bandLabel(health.band) ?? 'not banded'}).`],
@@ -124,7 +142,7 @@ export async function loadDepartments(ctx: AccessContext): Promise<DepartmentsVi
       tone: facts.accounts === 0 ? 'quiet' : stale ? 'attention' : 'good',
       headline: facts.accounts === 0 ? 'No bank account added' : `${plural(facts.accounts, 'bank account')}`,
       lines: [
-        facts.statementsReach === null ? 'No bank statement imported yet.' : `Statements reach ${facts.statementsReach}.`,
+        facts.statementsReach === null ? 'No bank statement imported yet.' : `Bank statements up to ${dayLabel(facts.statementsReach)}.`,
         ...(month === null || cash === null || cash.value === null ? [] : [`Cash at the end of ${month.label}: ${money(cash.value)}.`]),
       ],
     });
@@ -199,7 +217,7 @@ export async function loadDepartments(ctx: AccessContext): Promise<DepartmentsVi
     const [forecast, budgets] = await Promise.all([loadForecast(ctx), can(ctx, 'financials.view') ? repo.budgetMonths(db, orgId) : Promise.resolve(null)]);
     tiles.push({
       key: 'planning', title: 'Planning', href: `${base}/forecast`, tone: hasForecast(forecast) || (budgets ?? 0) > 0 ? 'good' : 'quiet',
-      headline: hasForecast(forecast) ? `Forecast worked out ${forecast.generatedAt.slice(0, 10)}` : 'No forecast worked out yet',
+      headline: hasForecast(forecast) ? `Forecast worked out ${dayLabel(forecast.generatedAt)}` : 'No forecast worked out yet',
       lines: budgets === null ? [] : [budgets === 0 ? 'No budget imported.' : `A budget for ${plural(budgets, 'month')}.`],
     });
   }
@@ -216,10 +234,11 @@ export async function loadDepartments(ctx: AccessContext): Promise<DepartmentsVi
   return {
     tiles,
     system: {
-      dataRefreshed: lastData === null ? 'No data has been added yet.' : `Data last added ${lastData.slice(0, 10)}.`,
+      dataRefreshed: lastData === null ? 'No data has been added yet.' : `Data last added ${dayLabel(lastData)}.`,
       lastCalculation: run === null
         ? 'APX has not calculated anything yet.'
-        : `Last calculation ${run.status === 'succeeded' ? 'finished' : run.status} ${run.finishedAt?.slice(0, 16).replace('T', ' ') ?? ''} UTC${run.engineVersion === null ? '' : `, engine ${run.engineVersion}`}.`,
+        // The engine version is for whoever is checking a run, not the owner, so it is not shown here.
+        : `Last calculation ${run.status === 'succeeded' ? 'finished' : run.status}${dayTimeLabel(run.finishedAt ?? null)}.`,
       imports: imports === null ? null : `${plural(imports.awaitingReview, 'import')} waiting for review, ${imports.failed} failed.`,
       schedule: [
         `Figures are recalculated each day shortly after midnight (${timezone}).`,

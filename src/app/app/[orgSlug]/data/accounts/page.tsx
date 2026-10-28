@@ -32,7 +32,7 @@ export default async function AccountsPage({ params }: { params: Promise<{ orgSl
       <PageHeader
         eyebrow="Data"
         title="Accounts and categories"
-        description="Every account we have seen in your files, and the standard category it counts towards."
+        description="Every account name found in your files, and the category it is added up under in your reports — Revenue, Payroll or Marketing, for example. If an account sits under the wrong category, your profit figures will be wrong, so it is worth a quick check."
       />
 
       {view.unmappedCount > 0 ? (
@@ -46,7 +46,7 @@ export default async function AccountsPage({ params }: { params: Promise<{ orgSl
             }
           >
             Until an account has a category, whatever went through it sits outside your profit
-            figures. They are listed first below.
+            figures. Those accounts are listed first below — pick a category for each and press Save.
           </Banner>
         </div>
       ) : null}
@@ -55,24 +55,25 @@ export default async function AccountsPage({ params }: { params: Promise<{ orgSl
         <CardHeader
           icon={<ListChecks />}
           tint="violet"
-          title="Chart of accounts"
+          title="Your accounts (the chart of accounts)"
           description={
             canEdit
-              ? 'Changing a category updates every month that account appears in.'
+              ? 'To move an account, pick a new category and press Save. The change applies to every month the account appears in, and your figures are updated.'
               : 'Owners, admins, accountants and your Financial Analyst can change a category here.'
           }
         />
         <CardBody className="px-0 py-0">
           {hasLoans ? (
             <p className="px-6 pt-4 text-sm text-ink-muted">
-              Mark each loan as secured or unsecured — APX never guesses it from the name.
+              For each loan, choose whether it is secured (backed by something the business owns, such as
+              property or equipment) or unsecured. APX does not guess this from the name.
             </p>
           ) : null}
           <TableWrap>
             <caption className="sr-only">
-              Accounts with their standard category and how confident the mapping is
+              Accounts with their category and how sure we are that it is right
             </caption>
-            <THead columns={['Code', 'Account', 'Category', 'Mapping']} />
+            <THead columns={['Code', 'Account', 'Category', 'Checked?']} />
             <TBody>
               {view.rows.map((row) => (
                 <AccountRowView

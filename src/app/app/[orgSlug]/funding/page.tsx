@@ -2,7 +2,12 @@ import Link from 'next/link';
 import { can } from '@/core/permissions';
 import { notFound } from 'next/navigation';
 import { isMotionError } from '@/core/errors';
-import { FUNDING_DISCLAIMER, getFundingView, type FactorResult } from '@/modules/funding';
+import {
+  FUNDING_DISCLAIMER, NOT_SCORED_LABEL, READINESS_BANDS, getFundingView, ruleDescription, type FactorResult,
+  type RuleResult,
+} from '@/modules/funding';
+import { BASIS_TEXT } from '@/modules/financials';
+import { formatDateTime } from '@/components/labels';
 import { getAccessContext } from '@/modules/tenancy';
 import {
   ChevronRight, CircleHelp, Gauge, Lightbulb, ListChecks, ThumbsUp, TriangleAlert,
@@ -15,10 +20,26 @@ export const dynamic = 'force-dynamic';
 
 /**
  * Funding Readiness (PHASE_16_IMPLEMENTATION.md §11; ADR-145). The page order is the design's: the
- * disclaimer first, then the score or "Insufficient data", coverage, the seven factor cards, what helps,
+ * disclaimer first, then the score or "Not enough data to score yet", coverage, the seven factor cards, what helps,
  * what hurts, what is missing, what to do, the evidence, and which rules and run produced it. Flag off
  * is NOT FOUND for every role (U-5). Nothing here is written by AI (D-15).
  */
+
+/** The few band words that read as jargon, said plainly. */
+const BAND_TEXT: Readonly<Record<string, string>> = {
+  full: 'the whole month',
+  partial: 'part of the month',
+  reconciled: 'all match',
+  unreconciled: 'one does not match',
+};
+
+/** ">= 15%" reads "at least 15%"; a stored code ("no_debt") reads as words; a basis reads as its source. */
+function bandText(r: RuleResult): string | null {
+  if (r.band === null) return null;
+  if (r.rule === 'F7.2' && BASIS_TEXT[r.band]) return BASIS_TEXT[r.band]!.toLowerCase();
+  if (BAND_TEXT[r.band]) return BAND_TEXT[r.band]!;
+  return r.band.replace(/^>= /, 'at least ').replace(/^<= /, 'at most ').replace(/^> /, 'above ').replace(/_/g, ' ');
+}
 
 function FactorCard({ factor }: { factor: FactorResult }) {
   return (
@@ -26,24 +47,40 @@ function FactorCard({ factor }: { factor: FactorResult }) {
       <CardBody>
         <div className="flex flex-wrap items-baseline justify-between gap-2">
           <h3 className="font-serif text-lg text-ink">{factor.name}</h3>
-          <span className="rounded-xl bg-accent-soft px-2.5 py-0.5 font-mono text-xl tabular-nums text-accent">{factor.score === null ? '—' : factor.score}</span>
+          <span className="rounded-xl bg-accent-soft px-2.5 py-0.5 font-mono text-xl tabular-nums text-accent">
+            {factor.score === null ? '—' : factor.score}
+            {factor.score === null ? null : <span className="sr-only"> out of 100</span>}
+          </span>
         </div>
-        <p className="mt-1 text-xs text-ink-faint">
-          Weight {factor.weight}{factor.status === 'scored' ? ` · applied ${factor.appliedWeight}` : ' · not scored'}
-          {factor.key === 'F7' ? ' · diagnostic, not counted towards whether there is a score' : ''}
+        <p className="mt-1 text-xs text-ink-muted">
+          {factor.status === 'scored' ? `Counts for ${factor.appliedWeight}% of the overall score` : 'Not scored, so left out of the overall score'}
+          {factor.key === 'F7' ? '. It checks the quality of your data: it counts towards the score, but not towards whether there is one.' : '.'}
         </p>
-        {factor.capped || factor.capReason ? <p className="mt-1 text-xs text-ink-muted">At most 70: {factor.capReason}.</p> : null}
+        {factor.capped || factor.capReason ? <p className="mt-1 text-xs text-ink-muted">Capped at 70: {factor.capReason}.</p> : null}
         {factor.status === 'missing' ? (
           <p className="mt-2 text-sm text-ink-muted">{factor.missing[0]?.text ?? 'Not available.'}</p>
         ) : (
-          <ul className="mt-2 flex flex-col gap-1 text-sm">
-            {factor.rules.map((r) => (
-              <li key={r.rule} className="flex justify-between gap-2 [overflow-wrap:anywhere]">
-                <span className="text-ink-muted">{r.rule}{r.band === null ? '' : ` · ${r.band}`}{r.unavailable === null ? '' : ' · not available'}</span>
-                <span className="text-ink">{r.unavailable === null ? (r.points > 0 ? `+${r.points}` : String(r.points)) : '—'}</span>
-              </li>
-            ))}
-          </ul>
+          <details className="mt-2 text-sm">
+            <summary className={`cursor-pointer text-ink-muted underline underline-offset-2 ${TOUCH_TARGET}`}>How this was scored</summary>
+            <p className="mt-2 text-xs text-ink-muted">Each area starts from a middle score; each check below adds points or takes them off.</p>
+            <ul className="mt-2 flex flex-col gap-1">
+              {factor.rules.map((r) => {
+                const band = bandText(r);
+                return (
+                  <li key={r.rule} className="flex justify-between gap-2 [overflow-wrap:anywhere]">
+                    <span className="text-ink-muted">
+                      {ruleDescription(r.rule)}{band === null ? '' : `: ${band}`}{r.unavailable === null ? '' : ' — not available'}
+                      <span className="ml-1 text-xs text-ink-faint">({r.rule})</span>
+                    </span>
+                    <span className="whitespace-nowrap text-ink">
+                      {r.unavailable === null ? (r.points > 0 ? `+${r.points}` : String(r.points)) : '—'}
+                      {r.unavailable === null ? <span className="sr-only"> points</span> : null}
+                    </span>
+                  </li>
+                );
+              })}
+            </ul>
+          </details>
         )}
       </CardBody>
     </Card>
@@ -69,7 +106,11 @@ export default async function FundingPage({
   const a = view.assessment;
   return (
     <>
-      <PageHeader eyebrow="Indicative assessment" title="Funding Readiness" />
+      <PageHeader
+        eyebrow="Indicative assessment"
+        title="Funding Readiness"
+        description="A guide, scored from 0 to 100 from your own records, to how your figures might look if you asked for a loan or other funding — with what helps, what holds it back and what to improve."
+      />
       <Banner tone="info" title="Not a lending decision">{FUNDING_DISCLAIMER}</Banner>
 
       {view.state === 'preparing' ? (
@@ -100,20 +141,29 @@ export default async function FundingPage({
                 <Badge tone="accent">{a.band}</Badge>
               </p>
             ) : (
-              <p className="mt-1 font-serif text-2xl text-ink">Insufficient data</p>
+              <p className="mt-1 font-serif text-2xl text-ink">{NOT_SCORED_LABEL}</p>
             )}
             <p className="mt-2 text-sm text-ink-muted">
-              Data coverage {a.dataCoveragePercent}% · {a.factorsUsed} of 7 factors scored.
-              {a.status === 'insufficient_data' ? ' A score needs revenue and profitability, cash flow, and at least three of the other four substantive factors.' : ''}
+              {a.factorsUsed} of 7 areas could be scored, using {a.dataCoveragePercent}% of the information the assessment looks for.
+              {a.status === 'insufficient_data' ? ' A score needs sales and profit, cash flow, and at least three of the other four main areas.' : ''}
             </p>
+            {a.status === 'scored' ? (
+              <p className="mt-1 text-xs text-ink-muted">
+                How to read it: {READINESS_BANDS.map((b, i) => {
+                  const word = b.label.replace(' indicative readiness', '').toLowerCase();
+                  return b.min === 0 ? `below ${READINESS_BANDS[i - 1]?.min ?? 0} ${word}` : `${b.min}+ ${word}`;
+                }).join(' · ')}.
+              </p>
+            ) : null}
             </div>
           </CardBody></Card>
 
           <section aria-labelledby="factors" className="mt-6">
             <div className="flex min-w-0 items-center gap-3">
               <IconBadge tint="pink" size="sm"><ListChecks /></IconBadge>
-              <h2 id="factors" className="min-w-0 font-serif text-lg text-ink">The seven factors</h2>
+              <h2 id="factors" className="min-w-0 font-serif text-lg text-ink">The seven areas</h2>
             </div>
+            <p className="mt-2 text-sm text-ink-muted">Each area is scored out of 100 and counts for part of the overall score.</p>
             <ul className="mt-3 grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
               {a.factors.map((f) => <li key={f.key}><FactorCard factor={f} /></li>)}
             </ul>
@@ -127,7 +177,7 @@ export default async function FundingPage({
                 </IconBadge>
                 <h2 className="min-w-0 font-serif text-lg text-ink">{title as string}</h2>
               </div>
-              {(list as FactorResult['positives']).length === 0 ? <p className="mt-2 text-sm text-ink-muted">Nothing here.</p> : (
+              {(list as FactorResult['positives']).length === 0 ? <p className="mt-2 text-sm text-ink-muted">{title === 'What helps' ? 'Nothing stands out yet.' : 'Nothing is holding it back.'}</p> : (
                 <ul className="mt-2 flex list-disc flex-col gap-1 pl-5 text-sm text-ink">
                   {(list as FactorResult['positives']).map((s) => <li key={`${s.rule}:${s.text}`}>{s.text}</li>)}
                 </ul>
@@ -157,7 +207,7 @@ export default async function FundingPage({
                 {a.actions.map((x) => (
                   <li key={`${x.factor}:${x.rule ?? x.reason}`} className="flex flex-wrap justify-between gap-2">
                     <span className="text-ink">{x.text}</span>
-                    <Badge tone={x.priority === 'high' ? 'warn' : 'neutral'}>{x.priority}</Badge>
+                    <Badge tone={x.priority === 'high' ? 'warn' : 'neutral'}>{x.priority === 'high' ? 'High' : x.priority === 'medium' ? 'Medium' : 'Low'} priority</Badge>
                   </li>
                 ))}
               </ol>
@@ -171,9 +221,12 @@ export default async function FundingPage({
               <Link href={`/app/${orgSlug}/evidence/${a.evidenceBundleId}`} className={`inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft ${TOUCH_TARGET}`}>See the figures behind this assessment<ChevronRight aria-hidden="true" className="size-4" /></Link>
             )}
           </p>
-          <p className="mt-2 text-xs text-ink-faint">
-            Rules {a.rulesVersion} · engine {a.engineVersion} · assessed {a.createdAt.slice(0, 16).replace('T', ' ')} UTC from calculation {a.calculationRunId.slice(0, 8)}.
-          </p>
+          <p className="mt-2 text-xs text-ink-muted">Assessed {formatDateTime(a.createdAt)} (UTC).</p>
+          {/* Which rules and run produced it (§11) — kept for anyone checking, folded away for everyone else. */}
+          <details className="mt-1 text-xs text-ink-faint">
+            <summary className="cursor-pointer underline underline-offset-2">Technical details</summary>
+            <p className="mt-1">Rules {a.rulesVersion} · engine {a.engineVersion} · calculation {a.calculationRunId.slice(0, 8)}.</p>
+          </details>
         </>
       )}
     </>

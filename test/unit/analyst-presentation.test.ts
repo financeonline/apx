@@ -71,8 +71,8 @@ describe('ROUTE_ARCHITECTURE §121: the quota notice carries the reset time', ()
     expect(quotaNotice(null, quota)).toBeNull();
   });
   it('counts the questions left, singular and plural', () => {
-    expect(remainingLine(1)).toBe('1 question left today');
-    expect(remainingLine(7)).toBe('7 questions left today');
+    expect(remainingLine(1)).toBe('1 question left today for your business');
+    expect(remainingLine(7)).toBe('7 questions left today for your business');
     expect(remainingLine(null)).toBeNull();
   });
 });

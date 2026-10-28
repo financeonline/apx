@@ -77,6 +77,14 @@ function text(value: string | null | undefined, fallback: string): string {
   return value === null || value === undefined || value.trim() === '' ? fallback : value;
 }
 
+/** "31 Jan 2026" from a stored "2026-01-31"; anything else as it is (client pass, ADR-176). */
+function day(value: string | null | undefined, fallback: string): string {
+  const iso = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value ?? '');
+  if (!iso) return text(value, fallback);
+  const months = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+  return `${Number(iso[3])} ${months[Number(iso[2]) - 1] ?? ''} ${iso[1]}`.trim();
+}
+
 function count(value: string | null | undefined): string {
   return value ?? 'several';
 }
@@ -90,9 +98,48 @@ function isPositiveMoney(value: string | null | undefined): boolean {
 /** Plain-language names for the metrics `variance.significant` can be about. */
 const METRIC_NAMES: Readonly<Record<string, string>> = {
   operating_profit: 'Profit before interest and tax',
-  net_profit: 'Net profit',
-  net_cash_movement: 'The change in cash',
+  net_profit: 'Profit after interest and tax',
+  net_cash_movement: 'Cash',
 };
+
+/** Which way a signed money value points, or null when it is missing or unreadable. */
+function sign(value: string | null | undefined): 'up' | 'down' | 'flat' | null {
+  const parsed = tryParseDecimal(value ?? null);
+  if (parsed === null) return null;
+  return parsed.isZero() ? 'flat' : parsed.isPositive() ? 'up' : 'down';
+}
+
+/** A month's net cash movement in words: "went up by £9,627", never "changed by −£9,627". */
+function cashMove(value: string | null | undefined, currency: Currency): string {
+  const direction = sign(value);
+  if (direction === 'flat') return 'did not change';
+  return `went ${direction === 'down' ? 'down' : 'up'} by ${amount(value, currency)}`;
+}
+
+/** Bank abbreviations that read as letters, so title-casing keeps them in capitals. */
+const BANK_ABBREVIATIONS = new Set(['atm', 'bacs', 'chaps', 'dd', 'fps', 'hmrc', 'plc', 'pos', 'uk', 'vat']);
+
+/**
+ * A payee as a reader expects to see a name: "fps credit gamma catering inv" becomes
+ * “FPS Credit Gamma Catering Inv”, in quotes so it reads as the bank's words rather than ours.
+ *
+ * The signature is the lower-cased bank text the recurring detector grouped on. One that already
+ * carries capitals was cased by somebody on purpose and is left as it is.
+ */
+function payee(value: string | null | undefined, fallback: string): string {
+  if (value === null || value === undefined || value.trim() === '') return fallback;
+  const name = value.trim();
+  const cased = /[A-Z]/.test(name) ? name : name.split(/\s+/).map((word) =>
+    BANK_ABBREVIATIONS.has(word) ? word.toUpperCase() : word.charAt(0).toUpperCase() + word.slice(1),
+  ).join(' ');
+  return `“${cased}”`;
+}
+
+/** A title naming a payee: "A regular payment changed: “Loan Interest”", or the bare phrase. */
+function titled(phrase: string, value: string | null | undefined): string {
+  const name = payee(value, '');
+  return name === '' ? phrase : `${phrase}: ${name}`;
+}
 
 // ---------------------------------------------------------------------------------------------
 // The catalogue
@@ -219,19 +266,28 @@ export const TEMPLATES: Readonly<Record<AlertRuleKey | typeof OVERFLOW_RULE_KEY,
     thresholdNote: () => 'We flag a single supplier at 40% of spend, and 60% as higher.',
   },
   'recurring.amount_changed': {
-    title: (v) => `${text(v.signature, 'A regular payment')} changed amount`,
-    whatHappened: (v, c) =>
-      `${text(v.signature, 'A regular payment')} was ${money(v.actual, c)}, usually about ${money(v.expected, c)}.`,
-    whyItMatters: () =>
-      'A regular payment that changes quietly is one nobody agreed to; the difference repeats every period.',
-    whatYouCanDo: () => 'Confirm the new amount is correct with the provider.',
+    title: (v) => titled('A regular payment changed', v.signature),
+    // `direction` is absent on an alert stored before it was recorded; those read either way round.
+    whatHappened: (v, c) => v.direction === 'inflow'
+      ? `You received ${money(v.actual, c)} from ${payee(v.signature, 'a regular payer')}; it is usually about ${money(v.expected, c)}.`
+      : v.direction === 'outflow'
+        ? `You paid ${money(v.actual, c)} to ${payee(v.signature, 'a regular payee')}; it is usually about ${money(v.expected, c)}.`
+        : `${payee(v.signature, 'A regular payment')} was ${money(v.actual, c)}; it is usually about ${money(v.expected, c)}.`,
+    whyItMatters: (v) => v.direction === 'inflow'
+      ? 'A customer paying a different amount may mean a price change, a part payment or a mistake, and it will repeat each time they pay.'
+      : 'A regular amount that changes without anyone agreeing it repeats every time it is paid.',
+    whatYouCanDo: (v) => v.direction === 'inflow'
+      ? 'Check with the customer that the new amount is right.'
+      : v.direction === 'outflow'
+        ? 'Check with the supplier that the new amount is right.'
+        : 'Check with the customer or supplier involved that the new amount is right.',
     thresholdNote: () =>
       'We flag a regular payment that moves more than its usual variation, or more than 10%.',
   },
   'recurring.missed': {
-    title: (v) => `${text(v.signature, 'A regular payment')} did not happen`,
+    title: (v) => titled('A regular payment did not happen', v.signature),
     whatHappened: (v) =>
-      `${text(v.signature, 'A regular payment')} did not occur this period; it usually happens every ${text(v.cadence, 'month')}.`,
+      `${payee(v.signature, 'A regular payment')} did not go out this period; it usually does every ${text(v.cadence, 'month')}.`,
     whyItMatters: () =>
       'Either it was cancelled and the saving is real, or it failed and is now overdue. Those are opposite situations.',
     whatYouCanDo: () => 'Check whether the payment was cancelled or is overdue.',
@@ -239,9 +295,9 @@ export const TEMPLATES: Readonly<Record<AlertRuleKey | typeof OVERFLOW_RULE_KEY,
       'We flag a regular payment with at least six occurrences that stops happening.',
   },
   'recurring.inflow_missed': {
-    title: (v) => `${text(v.signature, 'A regular payment in')} did not arrive`,
+    title: (v) => titled('A regular payment in did not arrive', v.signature),
     whatHappened: (v) =>
-      `${text(v.signature, 'A regular payment in')} did not arrive this period; it usually does every ${text(v.cadence, 'month')}.`,
+      `${payee(v.signature, 'A regular payment in')} did not arrive this period; it usually does every ${text(v.cadence, 'month')}.`,
     whyItMatters: () =>
       'A regular payment in that stops is usually a customer who stopped, and that shows up in cash before it shows up anywhere else.',
     whatYouCanDo: () => 'Check whether the customer has stopped, or whether the payment is late.',
@@ -249,9 +305,9 @@ export const TEMPLATES: Readonly<Record<AlertRuleKey | typeof OVERFLOW_RULE_KEY,
       'We flag a regular payment in with at least six occurrences that stops arriving.',
   },
   'recurring.new': {
-    title: (v) => `A new regular payment to ${text(v.signature, 'a supplier')}`,
+    title: (v) => titled('A new regular payment', v.signature),
     whatHappened: (v, c) =>
-      `A new regular payment of about ${money(v.expected, c)} to ${text(v.signature, 'a supplier')} has started.`,
+      `A new regular payment of about ${money(v.expected, c)} to ${payee(v.signature, 'a supplier')} has started.`,
     whyItMatters: () =>
       'Subscriptions are easy to start and easy to forget; this one will now repeat until somebody stops it.',
     whatYouCanDo: () => 'Confirm this subscription or standing order is intended.',
@@ -261,7 +317,7 @@ export const TEMPLATES: Readonly<Record<AlertRuleKey | typeof OVERFLOW_RULE_KEY,
   'duplicate.transaction': {
     title: () => 'Two payments look like duplicates',
     whatHappened: (v, c) =>
-      `Two payments of ${money(v.amount, c)} to ${text(v.signature, 'the same payee')} on ${text(v.first_date, 'two dates')} and ${text(v.second_date, '')} look like duplicates.`.replace(' and .', '.'),
+      `Two payments of ${money(v.amount, c)} to ${payee(v.signature, 'the same payee')} on ${text(v.first_date, 'two dates')} and ${text(v.second_date, '')} look like duplicates.`.replace(' and .', '.'),
     whyItMatters: (v, c) =>
       `If this was paid twice, ${money(v.amount, c)} is sitting with somebody else and will not come back on its own.`,
     whatYouCanDo: () => 'Confirm with the supplier or bank; request a refund if it was paid twice.',
@@ -271,7 +327,7 @@ export const TEMPLATES: Readonly<Record<AlertRuleKey | typeof OVERFLOW_RULE_KEY,
   'bank.unusual_transaction': {
     title: () => 'An unusually large payment',
     whatHappened: (v, c) =>
-      `A payment of ${money(v.amount, c)} to ${text(v.signature, 'a payee')} on ${text(v.date, 'this period')} is much larger than usual.`,
+      `A payment of ${money(v.amount, c)} to ${payee(v.signature, 'a payee')} on ${day(v.date, 'this period')} is much larger than usual.`,
     whyItMatters: () =>
       'Payments this far outside the usual pattern are where mistakes and unauthorised spending show up.',
     whatYouCanDo: () => 'Verify this payment was authorised.',
@@ -290,9 +346,30 @@ export const TEMPLATES: Readonly<Record<AlertRuleKey | typeof OVERFLOW_RULE_KEY,
       `We flag an entry at least three times an account's usual size and above ${money(v.threshold_floor, c)}.`,
   },
   'variance.significant': {
-    title: (v) => `${METRIC_NAMES[v.metric_key ?? ''] ?? 'A figure'} moved sharply`,
-    whatHappened: (v, c) =>
-      `${METRIC_NAMES[v.metric_key ?? ''] ?? 'A figure'} changed by ${amount(v.value, c)} (${percent(v.pct_change)}) against ${text(v.comparison_period, 'the previous period')}.`,
+    title: (v) => {
+      const name = METRIC_NAMES[v.metric_key ?? ''];
+      if (name === undefined) return 'A figure moved sharply';
+      if (v.metric_key === 'net_cash_movement') return 'Cash moved very differently from last month';
+      const direction = sign(v.value);
+      return direction === 'up' ? `${name} rose sharply`
+        : direction === 'down' ? `${name} fell sharply` : `${name} moved sharply`;
+    },
+    // The two months side by side, rather than "the change in cash changed by £8,340 (648.1%)": a
+    // percentage of a small month is a large number that explains nothing.
+    whatHappened: (v, c) => {
+      const name = METRIC_NAMES[v.metric_key ?? ''] ?? 'A figure';
+      const against = text(v.comparison_period, 'the previous month');
+      const direction = sign(v.value);
+      const moved = direction === 'up' ? 'up' : direction === 'down' ? 'down' : 'changed by';
+      if (v.metric_key === 'net_cash_movement') {
+        return v.current == null || v.comparison == null
+          ? `Cash moved ${amount(v.value, c)} differently from ${against}.`
+          : `This month your cash ${cashMove(v.current, c)}; in ${against} it ${cashMove(v.comparison, c)}.`;
+      }
+      return v.current == null || v.comparison == null
+        ? `${name} was ${moved} ${amount(v.value, c)} (${percent(v.pct_change)}) on ${against}.`
+        : `${name} was ${money(v.current, c)} this month, ${moved} ${amount(v.value, c)} on ${against} (${money(v.comparison, c)}).`;
+    },
     whyItMatters: () =>
       'A movement this large usually has one or two causes rather than many, and they are worth naming.',
     whatYouCanDo: () => 'Open the analysis to see which categories moved.',
@@ -353,6 +430,26 @@ export function thresholdNoteFor(
 ): string | null {
   const template = TEMPLATES[ruleKey as AlertRuleKey];
   return template === undefined ? null : template.thresholdNote(thresholdSummary, currency);
+}
+
+/**
+ * Title, what happened and what to do, re-rendered from the stored summary for DISPLAY (client pass,
+ * ADR-176), so an alert raised before the copy was made plainer reads like a new one. The stored
+ * `title`/`explanation`/`recommended_next_step` stay what exports and AI answers quote. Null for a
+ * rule this build has no template for — the caller then shows the stored words.
+ */
+export function displayCopyFor(
+  ruleKey: string,
+  thresholdSummary: Readonly<Record<string, string | null>>,
+  currency: string,
+): { readonly title: string; readonly whatHappened: string; readonly whatYouCanDo: string | null } | null {
+  const template = TEMPLATES[ruleKey as AlertRuleKey];
+  if (template === undefined) return null;
+  return {
+    title: template.title(thresholdSummary, currency),
+    whatHappened: template.whatHappened(thresholdSummary, currency),
+    whatYouCanDo: template.whatYouCanDo(thresholdSummary, currency),
+  };
 }
 
 export function whyItMattersFor(

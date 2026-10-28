@@ -2,7 +2,7 @@ import { ChartColumn, Receipt, TrendingUp } from 'lucide-react';
 import { getAccessContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody } from '@/components/ui/table';
-import { loadPeriodScope, loadProfitAndLoss } from '@/modules/dashboard';
+import { categoryLabel, loadPeriodScope, METRIC_LABELS, loadProfitAndLoss } from '@/modules/dashboard';
 import { PeriodHeading } from '../_components/period-heading';
 import { FigureRow, FigureTable } from '../_components/figures';
 import { requirePermission } from '@/app/_lib/authz';
@@ -54,14 +54,18 @@ export default async function ProfitAndLossPage({
       <PeriodHeading
         eyebrow="Money"
         title="Profit & loss"
-        description={`Compared with ${comparison}. Figures are shown to the penny.`}
+        description={`Did the business make money in ${scope.period.label}? What came in from sales, what it cost, and what was left — compared with ${comparison}.`}
         scope={scope}
         hrefFor={(id) => `/app/${orgSlug}/money/profit-and-loss?period=${id}`}
       />
 
       <div className="flex flex-col gap-6">
         <Card>
-          <CardHeader title="Trading" description="What was earned, and what it cost to earn it." icon={<ChartColumn />} />
+          <CardHeader
+            title="Sales and direct costs"
+            description="What was earned, and what it cost to make or deliver it. The margin is the share of each £1 of sales left over."
+            icon={<ChartColumn />}
+          />
           <CardBody className="px-0 py-0">
             <FigureTable
               rows={view.above}
@@ -74,7 +78,7 @@ export default async function ProfitAndLossPage({
         <Card>
           <CardHeader
             title="Spending by category"
-            description="Each category as the engine recorded it for this month, biggest first."
+            description="Where the money went this month, biggest first."
             icon={<Receipt />}
             tint="pink"
           />
@@ -97,7 +101,14 @@ export default async function ProfitAndLossPage({
                 <THead columns={['Category', 'Amount', `Change vs ${comparison}`, '']} />
                 <TBody>
                   {view.spending.map((row) => (
-                    <FigureRow key={row.key} row={row.figure} label={row.label} changeLabel={`Change vs ${comparison}`} />
+                    <FigureRow
+                      key={row.key}
+                      row={row.figure}
+                      // The page's own name for a line that also heads the Trading card ("Direct costs",
+                      // not "Cost of sales" a few rows apart), read from the §8.1 table, not restated.
+                      label={METRIC_LABELS[row.key]?.plain ?? row.label}
+                      changeLabel={`Change vs ${comparison}`}
+                    />
                   ))}
                 </TBody>
               </TableWrap>
@@ -108,15 +119,31 @@ export default async function ProfitAndLossPage({
         <Card>
           <CardHeader
             title="Profit"
-            description="Running costs, then interest and tax, then what is left."
+            description="Running costs, then interest and tax, then what is left. “Profit after interest and tax” is what the business made."
             icon={<TrendingUp />}
           />
           <CardBody className="px-0 py-0">
-            <FigureTable
-              rows={view.below}
-              caption={`Operating profit, interest, tax and net profit for ${scope.period.label}`}
-              comparisonLabel={comparison}
-            />
+            <TableWrap stack>
+              <caption className="sr-only">
+                Operating profit, interest, tax and net profit for {scope.period.label}
+              </caption>
+              <THead columns={['Figure', 'Amount', `Change vs ${comparison}`, '']} />
+              <TBody>
+                {view.below.map((row) => (
+                  <FigureRow
+                    key={row.metricKey}
+                    row={row}
+                    /*
+                     * Interest and tax have no §8.1 entry yet, so the vocabulary hands back the raw key
+                     * ("interest_expense"). The category table already names both in words; use that
+                     * rather than print a key, until the vocabulary carries them.
+                     */
+                    label={row.label === row.metricKey ? categoryLabel(row.metricKey) : undefined}
+                    changeLabel={`Change vs ${comparison}`}
+                  />
+                ))}
+              </TBody>
+            </TableWrap>
           </CardBody>
         </Card>
       </div>

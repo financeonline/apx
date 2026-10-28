@@ -8,6 +8,7 @@ import { ButtonLink } from '@/components/ui/button';
 import { THead, TBody, TR, TD } from '@/components/ui/table';
 import { Table } from '@/components/ui/shadcn';
 import { RollbackControl } from './rollback-control';
+import { formatCoverage, importStatusLabel, importTypeLabel } from './labels';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
@@ -31,15 +32,15 @@ export default async function ImportsPage({ params }: { params: Promise<{ orgSlu
       <PageHeader
         eyebrow="Data"
         title="Imports"
-        description="Every file you have loaded, and what happened to it."
+        description="Every file you have uploaded, and what happened to it. Open a file to see its rows and anything that needs your answer."
       />
 
       <div className="mt-8">
         {history.length === 0 ? (
           <EmptyState title="You have not imported anything yet">
             <p>
-              Upload a bank statement, ledger or invoice list and APX will check every row before
-              anything becomes a figure.
+              Start with a bank statement. Upload it and APX checks every row; nothing counts
+              towards your figures until you have reviewed it and pressed Import.
             </p>
             {can(ctx, 'imports.create') ? (
               <div className="mt-6">
@@ -69,9 +70,9 @@ export default async function ImportsPage({ params }: { params: Promise<{ orgSlu
                           {filename ?? 'Untitled file'}
                         </Link>
                       </TD>
-                      <TD className="text-ink-muted">{TYPE_LABELS[batch.importType] ?? batch.importType}</TD>
+                      <TD className="text-ink-muted">{importTypeLabel(batch.importType)}</TD>
                       <TD className="tabular text-ink-muted">
-                        {batch.periodStart ?? '—'} → {batch.periodEnd ?? '—'}
+                        {formatCoverage(batch.periodStart, batch.periodEnd)}
                       </TD>
                       <TD className="tabular">{rows}</TD>
                       <TD><StatusBadge status={batch.status} /></TD>
@@ -84,6 +85,13 @@ export default async function ImportsPage({ params }: { params: Promise<{ orgSlu
                   ))}
                 </TBody>
               </Table>
+              {/* The three statuses an owner meets most, said once under the table rather than in a
+                  tooltip nobody finds on a phone. One run of text, not a badge per word, so a status
+                  is only ever found in the table. */}
+              <p className="mt-3 text-xs text-ink-muted">
+                Needs your review: open it and answer what it asks. Imported: part of your figures.
+                Removed: taken back out of your figures.
+              </p>
             </CardBody>
           </Card>
         )}
@@ -97,12 +105,13 @@ export default async function ImportsPage({ params }: { params: Promise<{ orgSlu
                 <div className="min-w-0">
                   <h2 className="font-serif text-lg text-ink">Export your data</h2>
                   <p className="mt-1 text-sm text-ink-muted">
-                    A CSV of what your figures rest on. Bank lines carry the masked description only; every export is recorded.
+                    Download the records behind your figures as CSV files, which open in Excel. Bank descriptions are
+                    partly hidden for privacy, and every download is recorded.
                   </p>
                 </div>
               </div>
               <ul className="mt-3 flex flex-wrap gap-2 text-sm">
-                {([['ledger', 'Ledger'], ['bank_transactions', 'Bank transactions'], ['invoices', 'Invoices'], ['metrics', 'Metrics']] as const).map(([kind, label]) => (
+                {([['ledger', 'Ledger'], ['bank_transactions', 'Bank transactions'], ['invoices', 'Invoices'], ['metrics', 'Key figures']] as const).map(([kind, label]) => (
                   <li key={kind}>
                     <a className="inline-flex items-center rounded-xl border border-line bg-surface px-3 py-1.5 font-medium text-ink transition-colors hover:border-accent/45 hover:bg-accent-soft hover:text-accent pointer-coarse:min-h-10" href={`/api/exports/${kind}?org=${orgSlug}`} download>
                       {label} (CSV)
@@ -118,36 +127,9 @@ export default async function ImportsPage({ params }: { params: Promise<{ orgSlu
   );
 }
 
-const TYPE_LABELS: Readonly<Record<string, string>> = {
-  bank_statement: 'Bank statement',
-  general_ledger: 'General ledger',
-  trial_balance: 'Trial balance',
-  pnl_report: 'Profit and loss',
-  balance_sheet: 'Balance sheet',
-  sales_invoices: 'Sales invoices',
-  purchase_invoices: 'Purchase invoices',
-  sales_report: 'Sales report',
-  purchase_report: 'Purchase report',
-  receipts: 'Receipts',
-  budget: 'Budget',
-};
-
-const STATUS_LABELS: Readonly<Record<string, string>> = {
-  created: 'Started',
-  parsing: 'Reading',
-  validating: 'Checking',
-  awaiting_review: 'Needs review',
-  committing: 'Importing',
-  committed: 'Imported',
-  rolled_back: 'Rolled back',
-  rejected: 'Discarded',
-  failed: 'Could not be read',
-  deferred_upstream: 'Waiting',
-};
-
 function StatusBadge({ status }: { status: string }) {
   const tone = status === 'committed' ? 'accent'
     : status === 'failed' || status === 'rejected' ? 'danger'
     : status === 'awaiting_review' ? 'warn' : 'neutral';
-  return <Badge tone={tone}>{STATUS_LABELS[status] ?? status}</Badge>;
+  return <Badge tone={tone}>{importStatusLabel(status)}</Badge>;
 }

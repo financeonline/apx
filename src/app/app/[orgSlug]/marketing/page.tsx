@@ -33,8 +33,8 @@ function ProfileNeeded({ base, view }: { base: string; view: MarketingView }) {
       secondary={view.canEditProfile ? undefined : 'Ask your Financial Analyst to fill in the company profile.'}
     >
       The marketing report is written from the company profile: what {view.organisationName} sells, its industry, its
-      website and social accounts. Once it says what the company sells or its industry, APX prepares the report — there
-      is no question to write.
+      website and social accounts. Fill in at least what the company sells or its industry, and APX prepares the report
+      for you — you do not need to ask anything.
     </EmptyState>
   );
 }
@@ -83,7 +83,7 @@ export default async function MarketingPage({ params }: { params: Promise<{ orgS
       <PageHeader
         eyebrow="Marketing"
         title="Marketing strategy"
-        description={`A ready-made marketing and commercial growth report for ${view.organisationName}, from its company profile and figures.`}
+        description={`A ready-made report on how ${view.organisationName} could win more customers and grow: who it competes with, who to sell to, and a plan for the first 90 days — written from its company profile and figures.`}
       />
 
       <div className="flex flex-col gap-6">

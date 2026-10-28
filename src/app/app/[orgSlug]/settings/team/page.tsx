@@ -230,12 +230,15 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
         ) : null}
       </div>
 
-      <p className="mt-6 text-sm text-ink-muted">
-        <Badge tone="neutral">Note</Badge> Only an owner can create team members. A team member who
-        manages the team can manage everyone except owners; only an owner can make or change an owner, or
-        change what an owner set. Nobody can change their own access, or give a permission or department
-        they do not have themselves.
-      </p>
+      {/* The rules in full, folded away: the page above already shows only what this viewer may do. */}
+      <details className="mt-6 rounded-xl border border-line text-sm">
+        <summary className="min-h-11 cursor-pointer px-4 py-3 font-medium">Who can change what</summary>
+        <p className="border-t border-line px-4 py-3 text-ink-muted">
+          Only an owner can create team members. A team member who manages the team can manage everyone
+          except owners; only an owner can make or change an owner, or change what an owner set. Nobody can
+          change their own access, or give a permission or department they do not have themselves.
+        </p>
+      </details>
     </>
   );
 }

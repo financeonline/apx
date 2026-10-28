@@ -130,6 +130,61 @@ describe('the numbers in the prose come from threshold_summary (ADR-032.7)', () 
   });
 });
 
+describe('a regular payment, in a reader\'s words', () => {
+  const summary = { signature: 'fps credit gamma catering inv', actual: '9217', expected: '8214' };
+
+  it('names the payee as a name, not as lower-case bank text', () => {
+    const rendered = renderAlert({ ruleKey: 'recurring.amount_changed', thresholdSummary: summary }, 'GBP');
+    expect(rendered.title).toBe('A regular payment changed: “FPS Credit Gamma Catering Inv”');
+    expect(rendered.whatHappened).toBe('“FPS Credit Gamma Catering Inv” was £9,217; it is usually about £8,214.');
+  });
+
+  it('gives money coming in a step about the customer, not the provider', () => {
+    const inflow = renderAlert({
+      ruleKey: 'recurring.amount_changed', thresholdSummary: { ...summary, direction: 'inflow' },
+    }, 'GBP');
+    expect(inflow.whatHappened).toBe('You received £9,217 from “FPS Credit Gamma Catering Inv”; it is usually about £8,214.');
+    expect(inflow.whatYouCanDo).toBe('Check with the customer that the new amount is right.');
+    expect(inflow.whyItMatters).toContain('customer');
+
+    const outflow = renderAlert({
+      ruleKey: 'recurring.amount_changed',
+      thresholdSummary: { signature: 'loan interest', actual: '86', expected: '118', direction: 'outflow' },
+    }, 'GBP');
+    expect(outflow.title).toBe('A regular payment changed: “Loan Interest”');
+    expect(outflow.whatYouCanDo).toBe('Check with the supplier that the new amount is right.');
+  });
+});
+
+describe('a big change from last month, in plain English', () => {
+  it('states both months of cash rather than "the change in cash changed by"', () => {
+    const rendered = renderAlert({
+      ruleKey: 'variance.significant',
+      thresholdSummary: {
+        metric_key: 'net_cash_movement', value: '8340', pct_change: '6.481',
+        current: '9627', comparison: '1287', comparison_period: 'the previous month',
+      },
+    }, 'GBP');
+    expect(rendered.title).toBe('Cash moved very differently from last month');
+    expect(rendered.whatHappened)
+      .toBe('This month your cash went up by £9,627; in the previous month it went up by £1,287.');
+    expect(rendered.whatHappened).not.toMatch(/changed by|648/);
+  });
+
+  it('says which way profit went, and both figures', () => {
+    const rendered = renderAlert({
+      ruleKey: 'variance.significant',
+      thresholdSummary: {
+        metric_key: 'net_profit', value: '-8340', pct_change: '-0.41',
+        current: '12000', comparison: '20340', comparison_period: 'the previous month',
+      },
+    }, 'GBP');
+    expect(rendered.title).toBe('Profit after interest and tax fell sharply');
+    expect(rendered.whatHappened)
+      .toBe('Profit after interest and tax was £12,000 this month, down £8,340 on the previous month (£20,340).');
+  });
+});
+
 describe('the threshold note §8.3 asks for', () => {
   it('states the rule in words, so a reader can argue with it', () => {
     expect(renderAlert({ ruleKey: 'concentration.customer', thresholdSummary: {} }, 'GBP')

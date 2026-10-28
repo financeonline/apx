@@ -1,7 +1,7 @@
 import 'server-only';
 import type { SupabaseClient } from '@supabase/supabase-js';
 import {
-  familyOf, loadAlertHistory, loadAlerts, thresholdNoteFor, whyItMattersFor,
+  displayCopyFor, familyOf, loadAlertHistory, loadAlerts, thresholdNoteFor, whyItMattersFor,
   type AlertListRow, type AlertQuery, type AlertSeverity,
 } from '@/modules/alerts';
 import type { PeriodLabel } from '../domain/view-models';
@@ -54,6 +54,8 @@ function toView(
 ): AlertView {
   const period = periods.get(row.periodId);
   const firstSeen = formatDate(row.firstSeenAt);
+  // The current wording, from the stored figures; the stored words only for a rule with no template.
+  const copy = displayCopyFor(row.ruleKey, row.thresholdSummary, currency);
   return {
     id: row.id,
     ruleKey: row.ruleKey,
@@ -61,10 +63,10 @@ function toView(
     severity: row.severity,
     status: row.status,
     statusReasonCode: row.statusReasonCode,
-    title: row.title,
-    whatHappened: row.explanation,
+    title: copy?.title ?? row.title,
+    whatHappened: copy?.whatHappened ?? row.explanation,
     whyItMatters: whyItMattersFor(row.ruleKey, row.thresholdSummary, currency),
-    whatYouCanDo: row.recommendedNextStep,
+    whatYouCanDo: copy?.whatYouCanDo ?? row.recommendedNextStep,
     thresholdNote: thresholdNoteFor(row.ruleKey, row.thresholdSummary, currency),
     periodLabel: period?.label ?? '',
     firstSeenLabel: firstSeen,

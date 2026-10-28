@@ -15,7 +15,7 @@ export function CurrencyForm(props: { orgSlug: string; currency: string; country
   return (
     <form action={action} className="flex flex-col gap-5">
       <input type="hidden" name="org_slug" value={props.orgSlug} />
-      <Field label="Country" htmlFor="country">
+      <Field label="Country" htmlFor="country" hint="Decides which VAT and tax rules apply.">
         <Select id="country" name="country" defaultValue={props.country}>
           <option value="GB">United Kingdom</option>
           <option value="AE">United Arab Emirates</option>
@@ -26,7 +26,7 @@ export function CurrencyForm(props: { orgSlug: string; currency: string; country
       <Field
         label="Currency"
         htmlFor="currency"
-        hint="Country decides which VAT and tax rules apply. The currency can only change before any financial records are added — amounts are never converted."
+        hint="The currency your figures are shown in. It can only be changed before any records are added, because APX never converts amounts."
       >
         <Select id="currency" name="currency" defaultValue={props.currency}>
           <option value="GBP">Pounds (GBP)</option>

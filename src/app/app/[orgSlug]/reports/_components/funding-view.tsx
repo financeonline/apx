@@ -1,5 +1,7 @@
 import Link from 'next/link';
-import type { FundingReportContent } from '@/modules/reporting';
+import { NOT_SCORED_LABEL } from '@/modules/funding';
+import { REPORT_PRIORITY_LABELS, type FundingReportContent } from '@/modules/reporting';
+import { formatDateTime } from '@/components/labels';
 import { ChevronRight, CircleHelp, Gauge, Lightbulb, ListChecks, ThumbsUp, TriangleAlert } from 'lucide-react';
 import { Badge, Banner, Card, CardBody, IconBadge } from '@/components/ui/surfaces';
 
@@ -27,7 +29,7 @@ export function FundingReportView({ content, orgSlug }: { content: FundingReport
             <Badge tone="accent">{a.band}</Badge>
           </p>
         ) : (
-          <p className="mt-1 font-serif text-2xl text-ink">Insufficient data</p>
+          <p className="mt-1 font-serif text-2xl text-ink">{NOT_SCORED_LABEL}</p>
         )}
         <p className="mt-2 text-sm text-ink-muted">Data coverage {a.dataCoveragePercent}% · {a.factorsUsed} of 7 factors scored.</p>
         </div>
@@ -91,7 +93,9 @@ export function FundingReportView({ content, orgSlug }: { content: FundingReport
             {a.actions.map((x) => (
               <li key={`${x.factor}:${x.rule ?? x.reason}`} className="flex flex-wrap justify-between gap-2">
                 <span className="text-ink">{x.text}</span>
-                <Badge tone={x.priority === 'high' ? 'warn' : 'neutral'}>{x.priority}</Badge>
+                <Badge tone={x.priority === 'high' ? 'warn' : 'neutral'}>
+                  {REPORT_PRIORITY_LABELS[x.priority as keyof typeof REPORT_PRIORITY_LABELS] ?? x.priority}
+                </Badge>
               </li>
             ))}
           </ol>
@@ -105,7 +109,8 @@ export function FundingReportView({ content, orgSlug }: { content: FundingReport
         </Link>
       </p>
       <p className="text-xs text-ink-faint">
-        Rules {a.rulesVersion} · engine {a.engineVersion} · assessed {a.assessedAt.slice(0, 16).replace('T', ' ')} UTC from calculation {a.calculationRunId.slice(0, 8)}.
+        Assessed {formatDateTime(a.assessedAt)} UTC · rules version {a.rulesVersion} · calculation version {a.engineVersion} ·
+        reference {a.calculationRunId.slice(0, 8)}.
       </p>
     </div>
   );

@@ -73,6 +73,7 @@ export {
   renderOverflow,
   thresholdNoteFor,
   whyItMattersFor,
+  displayCopyFor,
   type RenderedAlert,
 } from './domain/templates';
 

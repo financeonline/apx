@@ -1,7 +1,9 @@
 import type { BadgeTone } from '@/components/ui/surfaces';
 
+/** The file's own state (stored, checked, blocked) — not the import's, which `../imports/labels` names. */
+
 export const DOCUMENT_STATUS_LABELS: Readonly<Record<string, string>> = {
-  uploaded: 'Uploading', scanning: 'Checking', ready: 'Ready', unreadable: 'Stored only', quarantined: 'Quarantined', deleted: 'Deleted',
+  uploaded: 'Uploading', scanning: 'Checking', ready: 'Ready', unreadable: 'Stored only', quarantined: 'Blocked', deleted: 'Deleted',
 };
 export const DOCUMENT_STATUS_TONES: Readonly<Record<string, BadgeTone>> = {
   uploaded: 'neutral', scanning: 'neutral', ready: 'accent', unreadable: 'warn', quarantined: 'danger', deleted: 'neutral',

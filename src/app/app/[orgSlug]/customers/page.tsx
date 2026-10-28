@@ -51,13 +51,15 @@ export default async function CustomersPage({
     return <CustomersEmpty orgSlug={orgSlug} />;
   }
   const base = `/app/${orgSlug}/customers`;
+  // A count of rows, not a sum of money: the synthetic "not attributed" row is not a customer.
+  const namedCustomers = view.customers.filter((c) => c.counterpartyId !== null).length;
 
   return (
     <>
       <PeriodHeading
         eyebrow="Commercial"
         title="Where the money comes from"
-        description="Customers, products, campaigns and the pipeline — each tied to the revenue it produced, never guessed."
+        description="Who buys from you, what they buy, which campaigns brought them in, and the deals still open — all worked out from your own invoices and records, never guessed."
         scope={scope}
         hrefFor={(id) => `${base}?period=${id}`}
       />
@@ -90,7 +92,7 @@ export default async function CustomersPage({
           </Card>
 
           <Card className={CLICKABLE_CARD}>
-            <CardHeader title="Top products and services" description="Revenue attributed by invoice lines this month." icon={<Package />} tint="pink" action={<CardLink href={`${base}/products`} className={PILL}>All products {CHEVRON}</CardLink>} />
+            <CardHeader title="Top products and services" description="This month’s sales by what was sold, from invoices split into lines." icon={<Package />} tint="pink" action={<CardLink href={`${base}/products`} className={PILL}>All products {CHEVRON}</CardLink>} />
             <CardBody>
               {commercial.topProducts.length === 0 ? (
                 <p className="text-sm text-ink-muted">No products or services recorded yet. Add them under Products, then split invoices into lines to see what each contributes.</p>
@@ -111,7 +113,7 @@ export default async function CustomersPage({
           </Card>
 
           <Card className={CLICKABLE_CARD}>
-            <CardHeader title="Marketing" description="Spend and revenue credited through won opportunities, last twelve months." icon={<Megaphone />} tint="pink" action={<CardLink href={`${base}/marketing`} className={PILL}>All campaigns {CHEVRON}</CardLink>} />
+            <CardHeader title="Marketing" description="What each campaign cost, and the sales from the customers it won, over the last twelve months." icon={<Megaphone />} tint="pink" action={<CardLink href={`${base}/marketing`} className={PILL}>All campaigns {CHEVRON}</CardLink>} />
             <CardBody>
               {commercial.topCampaigns.length === 0 ? <p className="text-sm text-ink-muted">No campaigns recorded yet.</p> : (
                 <ul className="flex flex-col gap-2 text-sm" data-testid="commercial-marketing">
@@ -127,7 +129,7 @@ export default async function CustomersPage({
           </Card>
 
           <Card className={CLICKABLE_CARD}>
-            <CardHeader title="Pipeline" icon={<Target />} action={<CardLink href={`${base}/sales`} className={PILL}>Sales {CHEVRON}</CardLink>} />
+            <CardHeader title="Pipeline" description="Deals you are still working on, and how often they are won." icon={<Target />} action={<CardLink href={`${base}/sales`} className={PILL}>Sales {CHEVRON}</CardLink>} />
             <CardBody>
               <p className="text-sm" data-testid="commercial-pipeline">
                 <span className="font-mono text-xl tabular-nums text-ink">{commercial.pipeline.openValue}</span>
@@ -145,6 +147,16 @@ export default async function CustomersPage({
             <CardHeader title="How much you rely on your top customers" description="The measurement, for you to weigh — a high share is not a verdict." icon={<UsersRound />} />
             <CardBody className="px-0 py-0">
               <FigureTable rows={view.concentration} caption={`Customer concentration for ${scope.period.label}`} comparisonLabel={scope.previous?.label ?? 'the previous month'} />
+              {/*
+                The three figures' names are the shared vocabulary's; what each one MEANS is said here once,
+                in words, because "top five share" and a concentration index are not everyday terms.
+              */}
+              <div className="px-5 pt-3 text-xs text-ink-muted" data-testid="concentration-explained">
+                <p>Your biggest customer: the share of this month’s sales that came from your largest customer. Your five biggest customers: the share from those five together. How spread out your sales are: one measure from near 0% (sales spread across many customers) to 100% (all from a single customer).</p>
+                {namedCustomers > 0 && namedCustomers <= 5 ? (
+                  <p className="mt-1">You had {namedCustomers} customer{namedCustomers === 1 ? '' : 's'} this month, so your top five are all of your customers and their share is always 100%.</p>
+                ) : null}
+              </div>
               {commercial.concentrationTrend.some((p) => p.top5Text !== null) ? (
                 <p className="px-5 py-3 text-xs text-ink-muted">
                   Top 5 share over the last months: {commercial.concentrationTrend.filter((p) => p.top5Text !== null).map((p) => `${p.label} ${p.top5Text}`).join(' · ')}

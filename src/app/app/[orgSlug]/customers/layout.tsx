@@ -13,9 +13,10 @@ const TABS = [
   { slug: '', label: 'Customers' },
   { slug: 'products', label: 'Products' },
   { slug: 'sales', label: 'Sales' },
-  { slug: 'marketing', label: 'Marketing' },
+  // "Campaigns", not "Marketing": the top-level Marketing page is the written strategy (client pass).
+  { slug: 'marketing', label: 'Campaigns' },
   // D-5: names held for a decision after the Unicode identity change.
-  { slug: 'held', label: 'Name decisions' },
+  { slug: 'held', label: 'Names to check' },
 ] as const;
 
 export default async function CommercialLayout({

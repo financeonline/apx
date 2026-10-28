@@ -193,7 +193,7 @@ test('a person asks what would happen, and is answered — or told exactly why n
   await expect(page.getByText(/direct costs unchanged/i)).toBeVisible();
 
   // The six figures §5 names.
-  for (const label of ['Revenue', 'Running costs', 'Operating profit', 'Cash at the end', 'Owed to you', 'Owed by you']) {
+  for (const label of ['Sales', 'Running costs', 'Profit', 'Cash', 'Owed to you', 'You owe']) {
     await expect(page.getByText(label, { exact: true }).first(), label).toBeVisible();
   }
 

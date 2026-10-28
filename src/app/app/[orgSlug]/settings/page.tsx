@@ -28,7 +28,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
     <>
       <PageHeader
         title="Settings"
-        description="Details about this organisation and who can see it."
+        description="Your business details, VAT and tax settings. APX uses them to work out your figures, the VAT return and the tax estimate. Who can see the company is under Team."
       />
       <nav className="mt-4 flex flex-wrap gap-3 text-sm">
         <ShortcutLink href={`/app/${orgSlug}/settings/team`} label="Team" icon={<Users aria-hidden="true" />} />
@@ -46,7 +46,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
       {/* Forms keep a readable width on a very wide screen. */}
       <div className="mt-8 max-w-3xl">
         <Card>
-          <CardHeader icon={<Building2 />} tint="violet" title="Organisation" description="The business's name, financial year and time zone." />
+          <CardHeader icon={<Building2 />} tint="violet" title="Organisation" description="The business's name, when its financial year starts, and its time zone." />
           <CardBody>
             <OrganizationForm
               orgSlug={orgSlug}
@@ -59,7 +59,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
       </div>
       <div className="mt-8 max-w-3xl">
         <Card>
-          <CardHeader icon={<Receipt />} tint="pink" title="VAT" description="Whether your sales and costs are recorded with or without VAT." />
+          <CardHeader icon={<Receipt />} tint="pink" title="VAT" description="Whether the business is registered for VAT, which tells APX whether your sales and costs include it." />
           <CardBody>
             <VatForm orgSlug={orgSlug} status={vatStatusOf(data?.settings)} />
           </CardBody>
@@ -79,7 +79,7 @@ export default async function SettingsPage({ params }: { params: Promise<{ orgSl
       </div>
       <div className="mt-8 max-w-3xl">
         <Card>
-          <CardHeader icon={<Landmark />} tint="pink" title="Tax" description="Used for the indicative VAT return and the Corporation Tax estimate." />
+          <CardHeader icon={<Landmark />} tint="pink" title="Tax" description="Used for the estimated VAT return and the Corporation Tax estimate." />
           <CardBody>
             <TaxForm
               orgSlug={orgSlug}

@@ -179,7 +179,7 @@ export default async function CustomerPage({
                 <caption className="sr-only">
                   Sales invoices for {view.counterparty.name}
                 </caption>
-                <THead columns={['Invoice', 'Issued', 'Due', 'Aging', 'Outstanding', 'Lines']} />
+                <THead columns={['Invoice', 'Issued', 'Due', 'How late', 'Still owed', 'What was sold']} />
                 <TBody>
                   {view.invoices.map((invoice) => {
                     const lines = commercial.invoiceLines.get(invoice.id) ?? [];
@@ -191,10 +191,10 @@ export default async function CustomerPage({
                         <TD className="whitespace-nowrap tabular" label="Due">
                           {invoice.dueDate ? formatDate(invoice.dueDate) : '—'}
                         </TD>
-                        <TD className="whitespace-nowrap" label="Aging">{invoice.bucketLabel}</TD>
-                        <TD className="whitespace-nowrap text-right tabular" label="Outstanding">{invoice.balanceDue}</TD>
+                        <TD className="whitespace-nowrap" label="How late">{invoice.bucketLabel}</TD>
+                        <TD className="whitespace-nowrap text-right tabular" label="Still owed">{invoice.balanceDue}</TD>
                         <TD>
-                          {lines.length === 0 ? <span className="text-xs text-ink-muted">Not yet attributed</span> : (
+                          {lines.length === 0 ? <span className="text-xs text-ink-muted">Not split into products yet</span> : (
                             <ul className="text-xs" data-testid={`lines-${invoice.number}`}>
                               {lines.map((l) => <li key={l.id}>{l.productName ?? 'No product'} · <span className="tabular">{l.amount}</span>{l.description ? <span className="text-ink-muted"> — {l.description}</span> : null}</li>)}
                             </ul>

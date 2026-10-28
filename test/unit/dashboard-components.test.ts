@@ -145,9 +145,9 @@ describe('empty-state copy is word for word (UX_ARCHITECTURE.md §6)', () => {
 
   it('AI Analyst, data present, no conversations', () => {
     expect(ANALYST_NO_CONVERSATIONS.title).toBe('Ask anything about the numbers.');
-    expect(ANALYST_NO_CONVERSATIONS.body).toBe('Suggested:');
+    expect(ANALYST_NO_CONVERSATIONS.body).toBe('Try one of these (each uses one question):');
     expect(ANALYST_SUGGESTIONS).toEqual([
-      'How did we do in March?',
+      'How did we do last month?',
       'Which expenses went up the most?',
       'Who are our biggest customers?',
       'What should I focus on this month?',

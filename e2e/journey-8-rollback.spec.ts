@@ -41,16 +41,16 @@ test('an owner rolls back an import and the figures go with it', async ({ page }
   await page.goto(`/app/${slug}/data/imports`);
   await expect(page.getByText(/imported/i).first()).toBeVisible();
 
-  await page.getByRole('group').filter({ hasText: /roll back/i }).first().click();
-  await page.getByPlaceholder(/why are you rolling this back/i).fill('Wrong month');
-  await page.getByRole('button', { name: /remove these rows/i }).click();
+  await page.getByRole('group').filter({ hasText: /remove import/i }).first().click();
+  await page.getByPlaceholder(/why are you removing it/i).fill('Wrong month');
+  await page.getByRole('button', { name: /remove it from my figures/i }).click();
 
   /*
    * The status badge, not a message: the control lives in a `<details>` that closes when the page
    * revalidates, taking its own confirmation with it. What a person actually sees afterwards is the
-   * row saying "Rolled back", and that is what the journey should depend on.
+   * row saying "Removed" (a rollback, in the owner's words), and that is what the journey should depend on.
    */
-  await expect(page.getByText(/^Rolled back$/).first()).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByText(/^Removed$/).first()).toBeVisible({ timeout: 30_000 });
 
   // ---- Nothing of it is left in the figures ----------------------------------------------------
   const after = sql(`

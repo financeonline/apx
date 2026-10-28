@@ -1,4 +1,5 @@
 import type { FundingReportContent } from './funding-report';
+import { NOT_SCORED_LABEL } from '@/modules/funding';
 import { PdfWriter } from './pdf-kit';
 
 /** The Funding Readiness Report as a PDF (REQ-RP-05): the stored assessment, disclaimer first. */
@@ -9,7 +10,7 @@ export async function renderFundingPdf(content: FundingReportContent): Promise<U
   pdf.text(`Funding Readiness Report - ${content.period.label}`, { size: 12, muted: true, after: 6 });
   pdf.text(a.disclaimer, { size: 9, after: 8 });
 
-  pdf.heading(a.status === 'scored' ? `Indicative readiness: ${a.score} out of 100 - ${a.band}` : 'Insufficient data');
+  pdf.heading(a.status === 'scored' ? `Indicative readiness: ${a.score} out of 100 - ${a.band}` : NOT_SCORED_LABEL);
   pdf.text(`Data coverage ${a.dataCoveragePercent}%; ${a.factorsUsed} of 7 factors scored.`, { size: 9.5, muted: true, after: 6 });
 
   pdf.heading('The seven factors');

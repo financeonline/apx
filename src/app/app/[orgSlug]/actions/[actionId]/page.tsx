@@ -16,6 +16,7 @@ import { requirePermission } from '@/app/_lib/authz';
 import { listActionComments } from '@/modules/engagement';
 import { CommentForm } from '@/components/engagement/forms';
 import { addActionCommentAction } from '../../engagement/actions';
+import { formatDate, formatDateTime } from '@/components/labels';
 
 export const dynamic = 'force-dynamic';
 
@@ -70,11 +71,12 @@ export default async function ActionPage({
             <DetailList
               items={[
                 { label: 'Owner', value: ownerLabel(action, ctx.userId) },
-                { label: 'Due', value: action.dueDate ?? 'No date set' },
-                { label: 'Added', value: action.createdAt.slice(0, 10) },
+                // "24 Oct 2026", not "2026-10-24" (§8.2).
+                { label: 'Due', value: action.dueDate === null ? 'No date set' : formatDate(action.dueDate) },
+                { label: 'Added', value: formatDate(action.createdAt) },
                 ...(action.completedAt === null
                   ? []
-                  : [{ label: 'Finished', value: action.completedAt.slice(0, 10) }]),
+                  : [{ label: 'Finished', value: formatDate(action.completedAt) }]),
               ]}
             />
           </CardBody>
@@ -121,7 +123,7 @@ export default async function ActionPage({
                   href={`/app/${orgSlug}/evidence/${action.evidenceBundleId}`}
                   className="inline-flex items-center gap-1 rounded-xl border border-accent/45 bg-surface px-3 py-1 text-sm font-medium text-accent transition-colors hover:border-accent hover:bg-accent-soft pointer-coarse:min-h-10"
                 >
-                  Open the evidence
+                  See those figures
                   <ChevronRight aria-hidden="true" className="size-4" />
                 </Link>
               </p>
@@ -155,7 +157,7 @@ export default async function ActionPage({
             <CardBody>
               <div className="flex min-w-0 items-center gap-3">
                 <IconBadge tint="violet" size="sm"><ArrowRightLeft /></IconBadge>
-                <h2 className="min-w-0 font-serif text-lg text-ink">Move it along</h2>
+                <h2 className="min-w-0 font-serif text-lg text-ink">Update its progress</h2>
               </div>
               <div className="mt-3">
                 <StatusControls
@@ -189,7 +191,7 @@ export default async function ActionPage({
               <ol className="mt-3 flex flex-col gap-3 text-sm">
                 {comments.map((c) => (
                   <li key={c.id} className="border-b border-line pb-2 [overflow-wrap:anywhere] last:border-0">
-                    <p className="text-ink">{c.author}<span className="text-ink-muted"> · {c.createdAt.slice(0, 16).replace('T', ' ')} UTC</span></p>
+                    <p className="text-ink">{c.author}<span className="text-ink-muted"> · {formatDateTime(c.createdAt)} UTC</span></p>
                     <p className="mt-1 whitespace-pre-line text-ink-muted">{c.body}</p>
                   </li>
                 ))}

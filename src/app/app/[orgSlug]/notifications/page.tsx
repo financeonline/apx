@@ -1,5 +1,5 @@
 import { listNotifications } from '@/modules/engagement';
-import { NOTIFICATION_KIND_LABELS } from '@/components/labels';
+import { NOTIFICATION_KIND_LABELS, formatDateTime } from '@/components/labels';
 import { getAccessContext } from '@/modules/tenancy';
 import { Bell, BellDot } from 'lucide-react';
 import { Card, CardBody, EmptyState, IconBadge, PageHeader } from '@/components/ui/surfaces';
@@ -38,11 +38,11 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
 
   return (
     <>
-      <PageHeader eyebrow="Inbox" title="Notifications" description="What has happened that concerns you. Nothing here is sent by email." />
+      <PageHeader eyebrow="Inbox" title="Notifications" description="Updates that involve you — new data, finished reports, and requests or actions you are part of. These stay in APX; none are sent by email." />
       {/* A readable measure on a very wide screen. */}
       <div className="max-w-4xl">
         {items.length === 0 ? (
-          <EmptyState title="Nothing yet">You will be told here when data is added, a report is ready, or a request, deliverable or action you are part of moves.</EmptyState>
+          <EmptyState title="Nothing yet">There is nothing to read. You will see a note here when data is added, a report is ready, or a request, deliverable or action you are part of moves on.</EmptyState>
         ) : (
           <>
             <div className="mb-4"><MarkAllReadForm action={markAllReadAction} orgSlug={orgSlug} /></div>
@@ -58,7 +58,7 @@ export default async function NotificationsPage({ params }: { params: Promise<{ 
                       </p>
                       {n.body === null ? null : <p className="mt-1 text-ink-muted">{n.body}</p>}
                       <p className="mt-1 text-xs text-ink-faint">
-                        {NOTIFICATION_KIND_LABELS[n.kind] ?? 'Notification'} · {n.createdAt.slice(0, 16).replace('T', ' ')} UTC
+                        {NOTIFICATION_KIND_LABELS[n.kind] ?? 'Notification'} · {formatDateTime(n.createdAt)} UTC
                       </p>
                     </div>
                   </li>

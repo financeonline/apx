@@ -321,8 +321,11 @@ export async function loadHome(
   if (partial) {
     const partialSnapshots = await repo.loadPeriodSnapshots(db, orgId, partial.id, requestId);
     const partialByKey = index(partialSnapshots);
-    const inflow = partialByKey.get('cash_inflows');
-    const outflow = partialByKey.get('cash_outflows');
+    // A side with no value (a NULL snapshot) is left out rather than printed as "—"; with neither
+    // side known there is nothing to say about the month so far, so there is no line.
+    const known = (row: SnapshotRow | undefined) => (row !== undefined && row.value !== null ? row : undefined);
+    const inflow = known(partialByKey.get('cash_inflows'));
+    const outflow = known(partialByKey.get('cash_outflows'));
     if (inflow || outflow) {
       partialLine = {
         label: `${partial.label} so far`,

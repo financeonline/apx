@@ -1,11 +1,11 @@
 import Link from 'next/link';
 import { Badge, Card, CardBody } from '@/components/ui/surfaces';
-import { METRIC_LABELS } from '@/modules/financials';
 import type { DimensionBreakdown, HealthCardView } from '@/modules/health';
 import { Disclaimer } from './health-score-card';
 import {
-  BAND_SCALE, DIMENSION_DESCRIPTIONS, DIMENSION_LABELS, EXCLUSION_TEXT, capNote,
-  RULE_LABELS, bandText, bandTone, dimensionsNote, orderedDimensions, pointsText, skipText,
+  BAND_SCALE, DIMENSION_DESCRIPTIONS, DIMENSION_LABELS, EXCLUSION_TEXT, capNote, figureGroups,
+  RULE_LABELS, bandText, bandTone, dimensionsNote, orderedDimensions, pointsText, resultText,
+  skipText,
 } from './health-presentation';
 import { Table, TableBody, TableCaption, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/shadcn';
 
@@ -178,23 +178,41 @@ function MetricLinks({
   orgSlug?: string;
 }) {
   if (orgSlug === undefined) return null;
-  const pinned = dimension.metrics.filter((metric) => metric.snapshot_id !== null);
-  if (pinned.length === 0) return null;
+  const groups = figureGroups(dimension.metrics);
+  if (groups.length === 0) return null;
+  const href = (snapshotId: string) => `/app/${orgSlug}/evidence?snapshot=${snapshotId}`;
 
   return (
     <div className="mt-3 border-t border-line pt-3">
       <p className="text-xs text-ink-faint">The figures this used</p>
       <ul className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-sm">
-        {pinned.map((metric) => (
-          // A composed variance key ("operating_expenses.variance.prev_period") is one unbroken
-          // word; it must wrap inside the card, never widen the page on a phone (§11).
-          <li key={metric.snapshot_id} className="min-w-0 max-w-full">
-            <Link
-              href={`/app/${orgSlug}/evidence?snapshot=${metric.snapshot_id}`}
-              className="text-accent underline underline-offset-2 [overflow-wrap:anywhere]"
-            >
-              {METRIC_LABELS[metric.metric_key]?.technical ?? metric.metric_key}
-            </Link>
+        {groups.map((group) => (
+          // A long figure name must wrap inside the card, never widen the page on a phone (§11).
+          <li key={group.label} className="min-w-0 max-w-full">
+            {group.snapshotIds.length === 1 ? (
+              <Link
+                href={href(group.snapshotIds[0]!)}
+                className="text-accent underline underline-offset-2 [overflow-wrap:anywhere]"
+              >
+                {group.label}
+              </Link>
+            ) : (
+              // The same figure more than once (a customer's sales in each month, say): named once,
+              // with a numbered link to each; the evidence each opens names its month.
+              <span className="[overflow-wrap:anywhere]">
+                <span className="text-ink">{group.label}:</span>
+                {group.snapshotIds.map((id, index) => (
+                  <Link
+                    key={id}
+                    href={href(id)}
+                    aria-label={`${group.label}, figure ${index + 1} of ${group.snapshotIds.length}`}
+                    className="ml-1 inline-block min-w-6 px-1 text-center text-accent underline underline-offset-2"
+                  >
+                    {index + 1}
+                  </Link>
+                ))}
+              </span>
+            )}
           </li>
         ))}
       </ul>
@@ -235,7 +253,7 @@ function RuleTable({ dimension }: { dimension: DimensionBreakdown }) {
                 {RULE_LABELS[rule.rule] ?? rule.rule}
               </TableHead>
               <TableCell className="py-1 text-ink-muted">
-                {skipped ?? rule.result}
+                {skipped ?? resultText(rule.rule, rule.result)}
               </TableCell>
               <TableCell className="tabular py-1 text-right text-ink">
                 {skipped === null ? pointsText(rule.points) : '—'}

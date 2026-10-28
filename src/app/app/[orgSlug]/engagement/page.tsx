@@ -5,6 +5,7 @@ import { CircleCheck, Inbox, MessageSquarePlus, PackageCheck } from 'lucide-reac
 import { Badge, Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
 import { CardLink } from '@/components/ui/clickable-card';
 import { NewItemForm } from '@/components/engagement/forms';
+import { formatDate } from '@/components/labels';
 import { requirePermission } from '@/app/_lib/authz';
 import { createEngagementItemAction } from './actions';
 
@@ -32,7 +33,7 @@ function List({ orgSlug, items, empty }: { orgSlug: string; items: readonly Enga
         <li key={item.id} className={`${ROW} flex flex-wrap items-center justify-between gap-2 py-2.5 text-sm`}>
           <CardLink href={`/app/${orgSlug}/engagement/${item.id}`} className="min-w-0 font-medium text-ink underline-offset-2 [overflow-wrap:anywhere] after:rounded-xl hover:text-accent hover:underline">{item.title}</CardLink>
           <span className="flex flex-wrap items-center gap-2 text-ink-muted">
-            {item.dueDate === null ? null : <span>by {item.dueDate}</span>}
+            {item.dueDate === null ? null : <span>wanted by {formatDate(item.dueDate)}</span>}
             <Badge tone={item.status === 'delivered' ? 'accent' : item.status === 'closed' ? 'neutral' : 'warn'}>
               {ENGAGEMENT_STATUS_LABELS[item.status]}
             </Badge>
@@ -54,21 +55,21 @@ export default async function EngagementPage({ params }: { params: Promise<{ org
   return (
     <>
       <PageHeader eyebrow="Team and client" title="Requests and deliverables"
-        description="What has been asked of the team, and what the team is delivering — with every change recorded and everyone involved told." />
+        description="Ask your team for something, and follow what they are working on. Every change is recorded, and everyone involved is told." />
       <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
         <Card><CardBody>
           <div className="flex min-w-0 items-center gap-3">
             <IconBadge tint="violet" size="sm"><Inbox /></IconBadge>
             <h2 className="min-w-0 font-serif text-lg text-ink">Requests</h2>
           </div>
-          <div className="mt-3"><List orgSlug={orgSlug} items={items.filter((i) => i.kind === 'request' && open(i))} empty="No open requests." /></div>
+          <div className="mt-3"><List orgSlug={orgSlug} items={items.filter((i) => i.kind === 'request' && open(i))} empty="No open requests. Use the form below to ask for something." /></div>
         </CardBody></Card>
         <Card><CardBody>
           <div className="flex min-w-0 items-center gap-3">
             <IconBadge tint="pink" size="sm"><PackageCheck /></IconBadge>
             <h2 className="min-w-0 font-serif text-lg text-ink">Deliverables</h2>
           </div>
-          <div className="mt-3"><List orgSlug={orgSlug} items={items.filter((i) => i.kind === 'deliverable' && open(i))} empty="No deliverables in progress." /></div>
+          <div className="mt-3"><List orgSlug={orgSlug} items={items.filter((i) => i.kind === 'deliverable' && open(i))} empty="No deliverables being worked on right now." /></div>
         </CardBody></Card>
       </div>
       <Card className="mt-6"><CardBody>
@@ -85,7 +86,7 @@ export default async function EngagementPage({ params }: { params: Promise<{ org
           <IconBadge tint="pink" size="sm"><CircleCheck /></IconBadge>
           <h2 className="min-w-0 font-serif text-lg text-ink">Done and closed</h2>
         </div>
-        <div className="mt-3"><List orgSlug={orgSlug} items={items.filter((i) => !open(i))} empty="Nothing finished yet." /></div>
+        <div className="mt-3"><List orgSlug={orgSlug} items={items.filter((i) => !open(i))} empty="Nothing finished yet. Finished and withdrawn items move here." /></div>
       </CardBody></Card>
     </>
   );

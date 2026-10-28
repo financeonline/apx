@@ -18,6 +18,18 @@ import { Textarea } from '@/components/ui/shadcn';
  * asserted.
  */
 
+/**
+ * What each move means, in a sentence: shown as the button's tooltip, and spelled out under the
+ * buttons on the action's own page. "Mark as done" and "Dismiss" both take the action off the
+ * to-do list, and the difference — it was done, or it was decided against — is the record.
+ */
+const HINT: Readonly<Record<ActionStatus, string>> = {
+  in_progress: 'Someone has picked it up and is working on it.',
+  completed: 'It is finished. It moves to Finished.',
+  dismissed: 'You have decided not to do it. It moves to Finished, so the decision is kept.',
+  open: 'Put it back on the to-do list.',
+};
+
 const NEXT: Readonly<Record<ActionStatus, ReadonlyArray<{ status: ActionStatus; label: string }>>> = {
   open: [
     { status: 'in_progress', label: 'Start' },
@@ -67,20 +79,37 @@ export function StatusControls({
         * offers several moves, and which one was pressed is the whole message. A component that
         * only reports pending state cannot say that.
         */}
+      {/*
+        * Only the first move — the natural next step — is a solid button. Two solid buttons side
+        * by side ("Start", "Mark as done") read as equally expected, and the owner had to stop and
+        * choose between them.
+        */}
       <div className="flex flex-wrap gap-2">
-        {NEXT[status].map((next) => (
+        {NEXT[status].map((next, index) => (
           <Button
             key={next.status}
             type="submit"
             name="status"
             value={next.status}
             disabled={pending}
-            tone={next.status === 'dismissed' ? 'secondary' : 'primary'}
+            tone={index === 0 && next.status !== 'dismissed' ? 'primary' : 'secondary'}
+            title={HINT[next.status]}
           >
             {next.label}
           </Button>
         ))}
       </div>
+
+      {withOutcome ? (
+        <dl className="grid gap-1 text-sm text-ink-muted">
+          {NEXT[status].map((next) => (
+            <div key={next.status}>
+              <dt className="inline font-medium text-ink">{next.label}</dt>
+              <dd className="inline"> — {HINT[next.status]}</dd>
+            </div>
+          ))}
+        </dl>
+      ) : null}
 
       <ActionMessage state={state} />
     </form>

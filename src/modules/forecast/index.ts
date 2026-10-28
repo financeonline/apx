@@ -18,7 +18,7 @@ export type {
 } from './domain/types';
 
 export {
-  BASIS_LABEL, BASIS_TEXT, FORECAST_DISCLAIMER, FORECAST_HEADLINE_KEYS, FORECAST_METRIC_LABELS,
+  BASIS_LABEL, BASIS_TEXT, FORECAST_DISCLAIMER, FORECAST_HEADLINE_KEYS,
   UNAVAILABLE_TEXT, basisSentence, metricLabel, unavailableText,
 } from './domain/presentation';
 

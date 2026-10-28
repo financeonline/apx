@@ -1,6 +1,8 @@
 import type { ReactNode } from 'react';
-import { ArrowLeftRight, ChartColumn, HandCoins, Landmark, Receipt, Sparkles, TrendingUp, Wallet } from 'lucide-react';
-import { getAccessContext } from '@/modules/tenancy';
+import {
+  ArrowLeftRight, Building2, ChartColumn, HandCoins, Landmark, ListChecks, Percent, Receipt, Sparkles, TrendingUp, Wallet,
+} from 'lucide-react';
+import { getAccessContext, moduleOn } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { PageHeader, Card, CardBody, EmptyState, IconBadge, type IconTint } from '@/components/ui/surfaces';
 import { ABOVE_CARD_LINK, CLICKABLE_CARD, CardLink } from '@/components/ui/clickable-card';
@@ -19,6 +21,41 @@ const PAGE_ICON: Readonly<Record<string, { icon: ReactNode; tint: IconTint }>> =
   receivables: { icon: <HandCoins />, tint: 'pink' },
   payables: { icon: <Receipt />, tint: 'violet' },
 };
+
+/**
+ * The one question each page answers, in the owner's words, shown on its card above what it holds —
+ * so a reader with no accounting training picks the page by what they want to know.
+ */
+const PAGE_QUESTION: Readonly<Record<string, string>> = {
+  'profit-and-loss': 'Did I make money this month?',
+  cash: 'How much is in the bank?',
+  banking: 'What went in and out of my accounts?',
+  receivables: 'Who owes me money?',
+  payables: 'Who do I need to pay?',
+};
+
+/**
+ * The tabs the section index had no card for (Budget, Balance sheet, Tax), so every page under Money
+ * can be found from here as well as from the tabs. Shown on the same terms as their tabs in
+ * `layout.tsx`: the same permission and the same switched-on system (ADR-158). They carry no figure.
+ */
+const MORE_PAGES = [
+  {
+    slug: 'budget', title: 'Budget', question: 'Am I on track with my plan?',
+    description: 'What you budgeted beside what actually happened.',
+    permission: 'financials.view', module: 'planning', icon: <ListChecks />, tint: 'pink',
+  },
+  {
+    slug: 'balance-sheet', title: 'Balance sheet', question: 'What does the business own, and what has it borrowed?',
+    description: 'Assets and loans at the end of the month.',
+    permission: 'financials.view', module: 'tax', icon: <Building2 />, tint: 'violet',
+  },
+  {
+    slug: 'tax', title: 'Tax', question: 'How much tax should I expect to pay?',
+    description: 'Your VAT return and Corporation Tax estimate.',
+    permission: 'financials.view', module: 'tax', icon: <Percent />, tint: 'pink',
+  },
+] as const;
 
 /**
  * The Money section index (UX_ARCHITECTURE.md §3.1: "Profit and loss, cash, bank activity, who owes
@@ -64,13 +101,14 @@ export default async function MoneyPage({
 
   const view = await loadMoneyIndex(ctx.db, ctx.orgId!, orgSlug, scope, ctx.requestId);
   const links = view.links.filter((link) => can(ctx, link.permission));
+  const more = MORE_PAGES.filter((page) => can(ctx, page.permission) && moduleOn(ctx, page.module));
 
   return (
     <>
       <PageHeader
         eyebrow="Money"
         title={`The numbers in detail — ${scope.period.label}`}
-        description="Each page below shows the same month. Open one to see it line by line."
+        description="Each page answers one question about the same month. Open the one you want to know about."
       />
       <div className="mb-8">
         <PeriodPicker
@@ -128,7 +166,9 @@ export default async function MoneyPage({
 
       <ul className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {links.map((link) => {
-          const look = PAGE_ICON[link.href.split('/').pop() ?? ''] ?? { icon: <ArrowLeftRight />, tint: 'violet' as const };
+          const slug = link.href.split('/').pop() ?? '';
+          const look = PAGE_ICON[slug] ?? { icon: <ArrowLeftRight />, tint: 'violet' as const };
+          const question = PAGE_QUESTION[slug];
           return (
             <li key={link.href}>
               <Card className={`h-full ${CLICKABLE_CARD}`}>
@@ -146,6 +186,7 @@ export default async function MoneyPage({
                           {link.title}
                         </CardLink>
                       </h2>
+                      {question ? <p className="mt-1 text-sm font-medium text-ink">{question}</p> : null}
                       <p className="mt-1 text-sm text-ink-muted">{link.description}</p>
                     </div>
                   </div>
@@ -174,6 +215,29 @@ export default async function MoneyPage({
             </li>
           );
         })}
+        {more.map((page) => (
+          <li key={page.slug}>
+            <Card className={`h-full ${CLICKABLE_CARD}`}>
+              <CardBody className="flex min-w-0 gap-3.5">
+                <IconBadge tint={page.tint}>{page.icon}</IconBadge>
+                <div className="min-w-0">
+                  <h2 className="text-base">
+                    <CardLink
+                      // Only the balance sheet follows the month picked here: Budget keeps its own list of
+                      // budgeted months, and Tax works by VAT quarter and financial year.
+                      href={`/app/${orgSlug}/money/${page.slug}${page.slug === 'balance-sheet' ? `?period=${scope.period.id}` : ''}`}
+                      className="underline underline-offset-2 group-hover:text-accent"
+                    >
+                      {page.title}
+                    </CardLink>
+                  </h2>
+                  <p className="mt-1 text-sm font-medium text-ink">{page.question}</p>
+                  <p className="mt-1 text-sm text-ink-muted">{page.description}</p>
+                </div>
+              </CardBody>
+            </Card>
+          </li>
+        ))}
       </ul>
     </>
   );

@@ -85,7 +85,8 @@ export function reasonText(code: string): string | null {
 /** §6: the empty state for a list with nothing in it is a good outcome, and should read like one. */
 export const NO_ALERTS_TITLE = 'Nothing needs your attention';
 export const NO_ALERTS_BODY =
-  'We check your figures for seventeen things every time your data changes. Nothing has tripped a threshold this month.';
+  'We check your figures for seventeen things every time your data changes. Nothing has crossed the limits we watch this month.';
 export const NO_ALERTS_FILTERED_TITLE = 'Nothing matches these filters';
-export const NO_ALERTS_FILTERED_BODY = 'Try widening the status or severity filter.';
+/** Names the Insights filters by what they are called there, not "status or severity". */
+export const NO_ALERTS_FILTERED_BODY = 'Try “All, including dealt with”, or set “How serious” back to Any.';
 

@@ -47,11 +47,11 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
                 </CardBody>
               </Card>
               <Card>
-                <CardHeader title="Conversion" description={`Opportunities created between ${view.conversionWindow.from.label} and ${view.conversionWindow.to.label}.`} icon={<Funnel />} tint="pink" />
+                <CardHeader title="Conversion" description={`Of the opportunities added between ${view.conversionWindow.from.label} and ${view.conversionWindow.to.label}: how many moved past the lead stage, and how many were won.`} icon={<Funnel />} tint="pink" />
                 <CardBody>
                   <DetailList items={[
-                    { label: 'Created', value: view.conversion.leadsCreated },
-                    { label: 'Reached opportunity', value: view.conversion.progressed },
+                    { label: 'Added', value: view.conversion.leadsCreated },
+                    { label: 'Moved past the lead stage', value: view.conversion.progressed },
                     { label: 'Won', value: view.conversion.wonFromCohort },
                     { label: 'Lead → opportunity', value: <span data-testid="sales-lead-to-opp">{view.conversionRates.leadToOpportunity ?? '—'}</span> },
                     { label: 'Opportunity → customer', value: <span data-testid="sales-opp-to-customer">{view.conversionRates.opportunityToCustomer ?? '—'}</span> },
@@ -62,12 +62,12 @@ export default async function SalesPage({ params, searchParams }: { params: Prom
             </div>
 
             <Card>
-              <CardHeader title="Won against revenue" description="What was marked won each month, next to the revenue the engine recorded for that month. They are different things: a win is a promise, revenue is an invoice." icon={<ChartColumn />} />
+              <CardHeader title="Won against revenue" description="Deals marked won each month, next to the sales in your accounts for that month. They are different things: a win is a promise, a sale is an invoice." icon={<ChartColumn />} />
               <CardBody className="px-0 py-0">
                 <TableWrap stack>
                   <caption className="sr-only">Won opportunities and revenue by month</caption>
-                  <THead columns={['Month', 'Won', 'Won value', 'Lost', 'Revenue']} />
-                  <TBody>{view.byPeriod.map((p) => <TR key={p.periodId}><TD className="max-sm:font-medium">{p.label}</TD><TD className="text-right tabular" label="Won">{p.won}</TD><TD className="text-right tabular" label="Won value">{p.wonValueText}</TD><TD className="text-right tabular" label="Lost">{p.lost}</TD><TD className="text-right tabular" label="Revenue">{p.revenue ?? <span className="text-ink-faint">—</span>}</TD></TR>)}</TBody>
+                  <THead columns={['Month', 'Won', 'Won value', 'Lost', 'Sales invoiced']} />
+                  <TBody>{view.byPeriod.map((p) => <TR key={p.periodId}><TD className="max-sm:font-medium">{p.label}</TD><TD className="text-right tabular" label="Won">{p.won}</TD><TD className="text-right tabular" label="Won value">{p.wonValueText}</TD><TD className="text-right tabular" label="Lost">{p.lost}</TD><TD className="text-right tabular" label="Sales invoiced">{p.revenue ?? <span className="text-ink-faint">—</span>}</TD></TR>)}</TBody>
                 </TableWrap>
               </CardBody>
             </Card>

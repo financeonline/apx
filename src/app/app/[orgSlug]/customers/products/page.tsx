@@ -24,7 +24,7 @@ export default async function ProductsPage({ params, searchParams }: { params: P
   return (
     <>
       {scope ? (
-        <PeriodHeading eyebrow="Commercial" title="Products and services" description="What each one brought in, from the invoice lines you have attributed. Cost and contribution appear only where a purchase line names the product." scope={scope} hrefFor={(id) => `/app/${orgSlug}/customers/products?period=${id}`} />
+        <PeriodHeading eyebrow="Commercial" title="Products and services" description="What each one brought in, from the invoices you have split into lines. Its cost, and what is left after that cost, appear only where a supplier bill line names it." scope={scope} hrefFor={(id) => `/app/${orgSlug}/customers/products?period=${id}`} />
       ) : <PageHeader eyebrow="Commercial" title="Products and services" description="Add the things you sell; once invoices are imported you can split them into lines." />}
       <div className="flex flex-col gap-6">
         <Card>

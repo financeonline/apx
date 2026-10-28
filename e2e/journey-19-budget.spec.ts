@@ -41,13 +41,14 @@ test('a budget is imported and set beside the month\'s actual figures', async ({
 
   await page.goto(`/app/${slug}/money/budget`);
   await expect(page.getByRole('heading', { name: /budget against actual — may 2026/i })).toBeVisible();
-  const revenue = page.getByRole('row', { name: /^Revenue/ });
+  // Named as Profit & loss names it: "Sales", not "Revenue".
+  const revenue = page.getByRole('row', { name: /^Sales/ });
   await expect(revenue).toContainText('£38,000.00');
   await expect(revenue).toContainText('£40,000.00');
   await expect(revenue).toContainText('+£2,000.00');
   const payroll = page.getByRole('row', { name: /^Payroll/ });
   await expect(payroll).toContainText('−£500.00');
-  await expect(payroll).toContainText('favourable');
+  await expect(payroll).toContainText('better than budget');
   // The lines link back to the import they came from.
-  await expect(page.getByRole('link', { name: 'import' }).first()).toBeVisible();
+  await expect(page.getByRole('link', { name: 'see the import' }).first()).toBeVisible();
 });

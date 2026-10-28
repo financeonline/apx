@@ -3,11 +3,24 @@ import { ChartColumn, FileDown, FileText, HeartPulse } from 'lucide-react';
 import type { SummaryEditionView } from '@/modules/reporting';
 import { HealthScoreInline } from '@/components/dashboard';
 import { buttonClass } from '@/components/ui/button';
+import { formatDate } from '@/components/labels';
 import { Card, CardBody, IconBadge, PageHeader } from '@/components/ui/surfaces';
 
 /** Where the summary edition's PDF is downloaded: rendered now, never stored (ADR-172 addendum). */
 export function summaryPdfHref(orgSlug: string, periodId: string): string {
   return `/api/reports/summary/${periodId}?org=${encodeURIComponent(orgSlug)}`;
+}
+
+/**
+ * The provenance line under a monthly report, full or summary edition. It still names the run's
+ * date and calculation version — a printed page must tie back to the figures it came from
+ * (EVIDENCE_MODEL.md §1) — but in words an owner reads: "24 Oct 2026", not an ISO date, and
+ * "calculation version", not "engine".
+ */
+export function provenanceLine(asOf: { readonly finishedAt: string | null; readonly engineVersion: string | null }): string {
+  if (asOf.finishedAt === null) return 'Figures as last worked out by APX.';
+  return `Figures as worked out by APX on ${formatDate(asOf.finishedAt)}`
+    + `${asOf.engineVersion === null ? '' : ` (calculation version ${asOf.engineVersion})`}.`;
 }
 
 /**
@@ -120,12 +133,7 @@ export function SummaryEditionScreen({ orgSlug, summary }: { orgSlug: string; su
           </CardBody>
         </Card>
 
-        <p className="text-xs text-ink-faint">
-          {summary.asOf.finishedAt === null
-            ? 'Figures as last calculated by APX.'
-            : `Figures as calculated on ${summary.asOf.finishedAt.slice(0, 10)}`
-              + `${summary.asOf.engineVersion === null ? '' : ` by engine ${summary.asOf.engineVersion}`}.`}
-        </p>
+        <p className="text-xs text-ink-faint">{provenanceLine(summary.asOf)}</p>
       </div>
     </>
   );

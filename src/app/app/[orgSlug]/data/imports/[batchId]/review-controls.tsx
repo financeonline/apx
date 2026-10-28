@@ -275,7 +275,7 @@ export function CompletenessAttestationForm({
         <Input name="reason" required maxLength={2000} placeholder="For example: compared it with the full trial balance in our accounts" />
       </label>
       <div>
-        <SubmitButton pendingLabel="Recording…">Record for {monthLabel}</SubmitButton>
+        <SubmitButton pendingLabel="Saving…">Save the answer for {monthLabel}</SubmitButton>
       </div>
       <ActionMessage state={state} />
     </form>

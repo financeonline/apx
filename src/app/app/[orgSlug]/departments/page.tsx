@@ -50,12 +50,12 @@ interface Presentation {
 const PRESENTATION: Readonly<Record<string, Presentation>> = {
   finance: {
     title: 'Financial Intelligence', icon: <ChartColumn />, tint: 'violet',
-    description: ['KPIs & trends', 'Profit, cash and what you owe'],
+    description: ['Key figures & trends', 'Profit, cash and what you owe'],
     pills: [{ label: 'Profit & loss', path: 'money/profit-and-loss' }, { label: 'Cash', path: 'money/cash' }, { label: 'Balance sheet', path: 'money/balance-sheet' }, { label: 'Budget', path: 'money/budget' }],
   },
   banking: {
     title: 'Banking', icon: <Landmark />, tint: 'pink',
-    description: ['Accounts & cash movements', 'Reconciliation'],
+    description: ['Accounts & cash movements', 'Checking your bank against your books'],
     pills: [{ label: 'Transactions', path: 'money/banking/transactions' }],
   },
   planning: {
@@ -70,18 +70,18 @@ const PRESENTATION: Readonly<Record<string, Presentation>> = {
   },
   alerts: {
     title: 'Risk & Health', icon: <ShieldCheck />, tint: 'violet',
-    description: ['Business Health Score', 'Alerts & anomaly review'],
+    description: ['Business Health Score', 'Alerts & unusual items'],
     // Alerts live on Insights (there is no page at `insights/alerts` — that pill was a 404).
     pills: [{ label: 'Health score', path: 'home/health' }, { label: 'Alerts', path: 'insights#alerts-heading' }],
   },
   actions: {
     title: 'Action Centre', icon: <ClipboardCheck />, tint: 'pink',
-    description: ['Owners', 'Due dates', 'Outcomes'],
+    description: ['Who is doing what', 'By when', 'What was decided'],
     pills: [],
   },
   customers: {
     title: 'Customers', icon: <Users />, tint: 'violet',
-    description: ['Revenue by customer', 'Sales & marketing'],
+    description: ['Sales by customer', 'Sales & marketing'],
     pills: [{ label: 'Sales', path: 'customers/sales' }, { label: 'Products', path: 'customers/products' }, { label: 'Marketing', path: 'customers/marketing' }],
   },
   reports: {
@@ -189,6 +189,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
         <div className="min-w-0">
           <h1 className="text-3xl sm:text-4xl md:text-5xl">Your departments</h1>
           <p className="mt-2 text-base text-ink-muted sm:text-lg md:text-xl">One workspace. Every part of your business.</p>
+          <p className="mt-1 text-sm text-ink-muted">Open a department to see its figures. A department marked &ldquo;Needs attention&rdquo; is the place to start.</p>
         </div>
         <div className="flex flex-wrap gap-3">
           {canImport ? (
@@ -228,12 +229,12 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
                 <p className="text-sm text-ink-muted">Get your data into APX.</p>
               </div>
             </div>
-            <Link href={`${base}/data/imports`} className="inline-flex items-center text-sm font-medium text-accent hover:underline pointer-coarse:min-h-10">Imports &amp; evidence →</Link>
+            <Link href={`${base}/data/imports`} className="inline-flex items-center text-sm font-medium text-accent hover:underline pointer-coarse:min-h-10">Past uploads →</Link>
           </div>
           <ul className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
             <li><QuickLink href={`${base}/data/imports/new`} title="Upload a file" line="CSV, XLSX, PDF or an invoice photo" icon={<FileUp />} tint="violet" /></li>
             <li><QuickLink href={`${base}/data/documents`} title="Documents" line="Statements, invoices, receipts" icon={<FileText />} tint="pink" /></li>
-            <li><QuickLink href={`${base}/data/accounts`} title="Accounts" line="Your chart of accounts" icon={<ListChecks />} tint="pink" /></li>
+            <li><QuickLink href={`${base}/data/accounts`} title="Accounts" line="The list of accounts your figures are sorted into" icon={<ListChecks />} tint="pink" /></li>
           </ul>
         </section>
       ) : null}
@@ -270,7 +271,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
             <li>
               <DepartmentCard
                 title="Funding Readiness" href={`${base}/funding`} icon={<HandCoins />} tint="pink"
-                description={['Indicative assessment', 'Factors, evidence & improvements']}
+                description={['How ready you are to borrow', 'What helps, what holds you back & what to improve']}
                 status={{ tone: 'good', label: 'Switched on' }}
               />
             </li>
@@ -335,28 +336,37 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
         </section>
       ) : null}
 
+      {/*
+        The system's own housekeeping — run times, the engine version, the schedule. Useful to an
+        accountant or to us, rarely to an owner, so it starts folded: one line that opens on demand.
+      */}
       <Card className="mt-4" id="system">
         <CardBody>
-          <h2 className="text-lg text-ink">How APX is running</h2>
-          <ul className="mt-3 flex flex-col gap-1 text-sm text-ink">
-            <li>{view.system.dataRefreshed}</li>
-            <li>{view.system.lastCalculation}</li>
-            {view.system.imports === null ? null : <li>{view.system.imports}</li>}
-            {view.system.team === null ? null : <li>{view.system.team}</li>}
-          </ul>
-          <h3 className="mt-4 text-sm font-semibold text-ink">On a schedule</h3>
-          <ul className="mt-1 flex list-disc flex-col gap-1 pl-5 text-sm text-ink-muted">
-            {view.system.schedule.map((line) => <li key={line}>{line}</li>)}
-          </ul>
-          <h3 className="mt-4 text-sm font-semibold text-ink">Switched on for this organisation</h3>
-          <ul className="mt-1 flex flex-col gap-1 text-sm">
-            {view.system.modules.map((m) => (
-              <li key={m.label} className="flex justify-between gap-2">
-                <span className="text-ink">{m.label}</span>
-                <span className="text-ink-muted">{m.on ? 'On' : 'Off'}</span>
-              </li>
-            ))}
-          </ul>
+          <details>
+            <summary className="cursor-pointer">
+              <h2 className="inline text-lg text-ink">How APX is running</h2>
+              <span className="ml-2 text-sm text-ink-muted">When your figures were last updated, and what runs on a schedule</span>
+            </summary>
+            <ul className="mt-3 flex flex-col gap-1 text-sm text-ink">
+              <li>{view.system.dataRefreshed}</li>
+              <li>{view.system.lastCalculation}</li>
+              {view.system.imports === null ? null : <li>{view.system.imports}</li>}
+              {view.system.team === null ? null : <li>{view.system.team}</li>}
+            </ul>
+            <h3 className="mt-4 text-sm font-semibold text-ink">On a schedule</h3>
+            <ul className="mt-1 flex list-disc flex-col gap-1 pl-5 text-sm text-ink-muted">
+              {view.system.schedule.map((line) => <li key={line}>{line}</li>)}
+            </ul>
+            <h3 className="mt-4 text-sm font-semibold text-ink">Switched on for this organisation</h3>
+            <ul className="mt-1 flex flex-col gap-1 text-sm">
+              {view.system.modules.map((m) => (
+                <li key={m.label} className="flex justify-between gap-2">
+                  <span className="text-ink">{m.label}</span>
+                  <span className="text-ink-muted">{m.on ? 'On' : 'Off'}</span>
+                </li>
+              ))}
+            </ul>
+          </details>
         </CardBody>
       </Card>
     </>

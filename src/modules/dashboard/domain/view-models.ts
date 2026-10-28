@@ -173,6 +173,21 @@ export function changeFrom(
   // compare two different things, and the card says "compared on a different basis" instead.
   const percentInput = basisDiffers || pct === null || pct === undefined ? null : String(pct);
   const currency = base.currency ?? 'GBP';
+  const favourable = favourableWhenRising === undefined ? null : rising === favourableWhenRising;
+
+  // The change is in the figure's own unit (client pass, ADR-176): a margin moves in percentage
+  // points and a collection period in days, never in pounds ("+£0.00 (−0.4%)" read as nonsense).
+  if (base.unit !== 'money') {
+    const amount = unitChange(variance.value, base.unit);
+    return {
+      text: `${amount} vs ${comparisonLabel}`,
+      amount,
+      percent: null,
+      favourable,
+      basisDiffers,
+      comparisonLabel,
+    };
+  }
 
   return {
     text: `${formatChange(variance.value, percentInput, { currency, showMinorUnits: options.showMinorUnits })} vs ${comparisonLabel}`,
@@ -182,12 +197,28 @@ export function changeFrom(
     percent: percentInput === null
       ? null
       : formatPercent(percentInput, { signDisplay: 'always' }),
-    favourable: favourableWhenRising === undefined
-      ? null
-      : rising === favourableWhenRising,
+    favourable,
     basisDiffers,
     comparisonLabel,
   };
+}
+
+/** "+0.4 points", "−3 days", "+1.5": a movement in a figure that is not money. */
+function unitChange(value: string, unit: 'ratio' | 'count' | 'days'): string {
+  const parsed = parseDecimalOrNull(value);
+  if (parsed === null) return '—';
+  const sign = parsed.isZero() ? '' : parsed.isNegative() ? '−' : '+';
+  const size = parsed.abs();
+  if (unit === 'ratio') {
+    const points = size.times(100).toDecimalPlaces(1);
+    return points.isZero() ? 'no change' : `${sign}${points.toString()} ${points.equals(1) ? 'point' : 'points'}`;
+  }
+  if (unit === 'days') {
+    const days = size.toDecimalPlaces(0);
+    return days.isZero() ? 'no change' : `${sign}${days.toString()} ${days.equals(1) ? 'day' : 'days'}`;
+  }
+  const count = size.toDecimalPlaces(1);
+  return count.isZero() ? 'no change' : `${sign}${count.toString()}`;
 }
 
 export interface CardOptions {

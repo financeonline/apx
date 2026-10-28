@@ -1,7 +1,7 @@
 import { getAccessContext, listOrgAuditEvents } from '@/modules/tenancy';
 import { PageHeader, Card, CardBody, EmptyState, Badge } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody, TR, TD } from '@/components/ui/table';
-import { auditActionLabel, ACTOR_TYPE_LABELS } from '@/components/labels';
+import { auditActionLabel, ACTOR_TYPE_LABELS, formatDateTime } from '@/components/labels';
 import { requirePermission } from '@/app/_lib/authz';
 
 export const dynamic = 'force-dynamic';
@@ -16,6 +16,31 @@ export const dynamic = 'force-dynamic';
  */
 
 const PAGE_SIZE = 50;
+
+/**
+ * What each entry is about, in the owner's words rather than the table name. A table not listed
+ * here is shown with its underscores turned to spaces, as before, so nothing is hidden.
+ */
+const TARGET_LABELS: Readonly<Record<string, string>> = {
+  organizations: 'Company',
+  organization_members: 'Team',
+  import_batches: 'Import',
+  import_rows: 'Import',
+  source_documents: 'Document',
+  invoices: 'Invoices',
+  ledger_entries: 'Ledger',
+  bank_transactions: 'Bank transactions',
+  bank_accounts: 'Bank account',
+  accounts: 'Accounts',
+  counterparties: 'Customers and suppliers',
+  alerts: 'Alerts',
+  jobs: 'Background task',
+  calculation_runs: 'Recalculation',
+  forecast_runs: 'Forecast',
+  funding_assessments: 'Funding readiness',
+  member_permissions: 'Team access',
+  access_requests: 'Access request',
+};
 
 export default async function AuditPage({
   params,
@@ -45,6 +70,11 @@ export default async function AuditPage({
         title="Audit log"
         description="Important changes, and every time APX staff opened this organisation."
       />
+      <p className="mt-2 max-w-3xl text-sm text-ink-muted">
+        Newest first. Entries by <span className="font-medium text-ink">APX</span> are automatic — the checks
+        and recalculations APX runs after a change. Entries marked{' '}
+        <span className="font-medium text-ink">APX staff</span> are a person at APX opening your company.
+      </p>
       <div className="mt-8">
         <Card>
           <CardBody>
@@ -60,11 +90,11 @@ export default async function AuditPage({
                 <TBody>
                   {events.map((event) => (
                     <TR key={event.id}>
-                      <TD>{new Date(event.createdAt).toLocaleString('en-GB')}</TD>
+                      <TD className="whitespace-nowrap">{formatDateTime(event.createdAt)}</TD>
                       <TD>{auditActionLabel(event.action)}</TD>
                       <TD>
                         {event.targetTable
-                          ? <span className="text-ink-muted">{event.targetTable.replace(/_/g, ' ')}</span>
+                          ? <span className="text-ink-muted">{TARGET_LABELS[event.targetTable] ?? event.targetTable.replace(/_/g, ' ')}</span>
                           : '—'}
                       </TD>
                       <TD>{event.actorName ?? '—'}</TD>

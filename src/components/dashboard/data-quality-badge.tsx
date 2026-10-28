@@ -18,7 +18,10 @@ import { BADGE_SIZE_CLASS, statusTone, type BadgeSize } from './presentation';
  * Renders an already-derived badge.
  *
  * `kind: 'none'` deliberately renders nothing: a verified, complete figure is the ordinary case,
- * and the ordinary case is not decorated.
+ * and the ordinary case is not decorated. Nor, since the client pass (ADR-176), is `calculated`:
+ * "Calculated" beside every line of a Profit & loss told an owner nothing and buried the badges
+ * that do ask for care — Estimate, Partial data, Please check. The evidence page still says how a
+ * figure was worked out.
  *
  * The tooltip is carried twice on purpose — `title` for a pointer, and an `sr-only` copy for a
  * screen reader, which never sees a `title`. The badge always carries its word as well as its
@@ -31,7 +34,7 @@ export function StatusBadgeView({
   status: StatusBadge;
   size?: BadgeSize;
 }) {
-  if (status.label === null) return null;
+  if (status.label === null || status.kind === 'calculated') return null;
 
   return (
     <span className={`inline-flex ${BADGE_SIZE_CLASS[size]}`.trim()} title={status.tooltip}>

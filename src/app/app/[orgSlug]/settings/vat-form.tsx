@@ -18,7 +18,7 @@ export function VatForm(props: { orgSlug: string; status: 'registered' | 'not_re
       <Field
         label="Is the business registered for VAT?"
         htmlFor="vat_status"
-        hint="Used to compare what customers owe you, and what you owe suppliers, with your sales and costs. Changing it recalculates your figures."
+        hint="APX needs this to work out figures such as how long customers take to pay. Changing it recalculates your figures."
       >
         <Select id="vat_status" name="vat_status" defaultValue={props.status}>
           <option value="unknown">Not set</option>

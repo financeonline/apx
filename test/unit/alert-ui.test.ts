@@ -102,6 +102,15 @@ describe('grouping and tooltips', () => {
     expect(familyOf('something.invented')).toBe('Other');
   });
 
+  it('names each family in the owner\'s words, not the engine\'s', () => {
+    expect(familyOf('variance.significant')).toBe('Big change from last month');
+    expect(familyOf('recurring.amount_changed')).toBe('A regular payment changed');
+    expect(familyOf('concentration.supplier')).toBe('Relying on one supplier');
+    for (const ruleKey of ALERT_RULE_KEYS) {
+      expect(familyOf(ruleKey), ruleKey).not.toMatch(/variance|deterioration|anomaly|concentration|deviation/i);
+    }
+  });
+
   it('renders the threshold note from the stored figures', () => {
     expect(thresholdNoteFor('concentration.customer', {}, 'GBP'))
       .toBe('We flag a single customer at 35% of revenue, and 50% as high.');

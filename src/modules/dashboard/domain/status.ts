@@ -45,8 +45,11 @@ export function statusFor(input: {
     return {
       kind: 'not_available',
       label: '—',
-      // The reason is the point: "—" without one is indistinguishable from a bug.
-      tooltip: missingReasonText(dataQuality.missing),
+      // The reason is the point: "—" without one is indistinguishable from a bug. Runway is the one
+      // figure with `cash_positive`: the burn is averaged over three months, and there was none.
+      tooltip: dataQuality.warnings.includes('cash_positive')
+        ? 'Cash did not fall over the last three months, so there is no monthly burn to measure a runway from.'
+        : missingReasonText(dataQuality.missing),
     };
   }
 

@@ -149,12 +149,16 @@ export const ANALYST_NO_DATA: EmptyStateCopy = {
 
 export const ANALYST_NO_CONVERSATIONS: EmptyStateCopy = {
   title: 'Ask anything about the numbers.',
-  body: 'Suggested:',
+  body: 'Try one of these (each uses one question):',
 };
 
-/** The four suggestions §6 fixes, in order. They are buttons that send the question. */
+/**
+ * The four suggestions §6 fixes, in order. They are buttons that send the question. The first says
+ * "last month" where §6 wrote "in March", so it never points at a month the business has no figures
+ * for; the lead-in says each one uses a question from the day's allowance.
+ */
 export const ANALYST_SUGGESTIONS: readonly string[] = [
-  'How did we do in March?',
+  'How did we do last month?',
   'Which expenses went up the most?',
   'Who are our biggest customers?',
   'What should I focus on this month?',

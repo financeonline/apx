@@ -3,7 +3,7 @@ import { ClipboardCheck, History } from 'lucide-react';
 import { notFound } from 'next/navigation';
 import { getAccessContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
-import { loadAlertDetail } from '@/modules/dashboard';
+import { loadAlertDetail, type AlertHistoryView } from '@/modules/dashboard';
 import { PageHeader, Card, CardBody, Badge, IconBadge } from '@/components/ui/surfaces';
 import { AlertCard, severityLabel, severityTone } from '@/components/dashboard';
 import { AlertActions } from '../alert-actions';
@@ -40,7 +40,11 @@ export default async function AlertPage({
           Back to Insights
         </Link>
       </p>
-      <PageHeader eyebrow={detail.alert.family} title={detail.alert.title} />
+      {/*
+        * "Alert" rather than the rule family: the card below already names the family ("Big change
+        * from last month"), and saying it twice above the title adds nothing.
+        */}
+      <PageHeader eyebrow="Alert" title={detail.alert.title} />
 
       <div className="mt-8 flex flex-col gap-6">
         <AlertCard
@@ -64,8 +68,9 @@ export default async function AlertPage({
                 <h2 className="font-serif text-lg text-ink">Do something about it</h2>
               </div>
               <p className="mt-1 text-sm text-ink-muted">
-                The action keeps the figures behind this alert exactly as they are now, even after
-                the alert is looked at again.
+                Turn this into a task in the Action Centre, so someone can own it and see it through.
+                The task keeps a copy of today&rsquo;s figures, so you can always see why it was
+                raised, even after they change.
               </p>
               <div className="mt-3">
                 <ConvertControl
@@ -85,35 +90,55 @@ export default async function AlertPage({
               <h2 className="font-serif text-lg text-ink">What this alert has said</h2>
             </div>
             <p className="mt-1 text-sm text-ink-muted">
-              Every time your figures changed, we looked again. This is what we found each time.
+              Every time your figures changed, we checked again. The latest check is first.
             </p>
 
-            <ol className="mt-4 space-y-4">
-              {detail.revisions.map((revision) => (
-                <li key={revision.revisionNo} className="border-l-2 border-accent/40 pl-4">
-                  <div className="flex flex-wrap items-baseline gap-2">
-                    <Badge tone={severityTone(revision.severity)}>
-                      {severityLabel(revision.severity)}
-                    </Badge>
-                    <span className="text-sm text-ink-faint">{revision.at}</span>
-                  </div>
-                  <p className="mt-1 text-sm text-ink">{revision.explanation}</p>
-                  {revision.evidenceHref ? (
-                    <p className="mt-1 text-sm">
-                      <Link
-                        href={revision.evidenceHref}
-                        className="text-accent underline underline-offset-2"
-                      >
-                        The figures behind this
-                      </Link>
-                    </p>
-                  ) : null}
-                </li>
-              ))}
-            </ol>
+            {/*
+              * Newest first. Only the latest is open: a long run of near-identical earlier checks
+              * pushed the one that matters off the screen. The rest are one click away, unchanged.
+              */}
+            {detail.revisions.length === 0 ? null : (
+              <ol className="mt-4 space-y-4">
+                <Revision revision={detail.revisions[0]!} />
+              </ol>
+            )}
+            {detail.revisions.length <= 1 ? null : (
+              <details className="mt-4">
+                <summary className="cursor-pointer text-sm font-medium text-accent">
+                  Earlier checks ({detail.revisions.length - 1})
+                </summary>
+                <ol className="mt-3 space-y-4">
+                  {detail.revisions.slice(1).map((revision) => (
+                    <Revision key={revision.revisionNo} revision={revision} />
+                  ))}
+                </ol>
+              </details>
+            )}
           </CardBody>
         </Card>
       </div>
     </>
+  );
+}
+
+/** One check of the alert: how serious it was, when, what it said, and the figures pinned then. */
+function Revision({ revision }: { revision: AlertHistoryView['revisions'][number] }) {
+  return (
+    <li className="border-l-2 border-accent/40 pl-4">
+      <div className="flex flex-wrap items-baseline gap-2">
+        <Badge tone={severityTone(revision.severity)}>
+          {severityLabel(revision.severity)}
+        </Badge>
+        <span className="text-sm text-ink-faint">{revision.at}</span>
+      </div>
+      <p className="mt-1 text-sm text-ink">{revision.explanation}</p>
+      {revision.evidenceHref ? (
+        <p className="mt-1 text-sm">
+          <Link href={revision.evidenceHref} className="text-accent underline underline-offset-2">
+            The figures behind this
+          </Link>
+        </p>
+      ) : null}
+    </li>
   );
 }

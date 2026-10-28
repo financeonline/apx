@@ -2,6 +2,7 @@ import Link from 'next/link';
 import {
   CUSTOM_DIMENSIONS, FIXED_AREAS, MAX_CUSTOM_QUESTIONS, MAX_CUSTOM_QUESTION_CHARS, SUPPORTED_QUESTIONS, customReportPeriods,
 } from '@/modules/reporting';
+import { aiQuotaStatus } from '@/modules/ai';
 import { getAccessContext } from '@/modules/tenancy';
 import { EmptyState, PageHeader } from '@/components/ui/surfaces';
 import { requirePermission } from '@/app/_lib/authz';
@@ -16,7 +17,11 @@ export default async function NewCustomReportPage({ params }: { params: Promise<
   requirePermission(ctx, 'reports.view');
   requirePermission(ctx, 'ai.use');
 
-  const periods = await customReportPeriods(ctx);
+  // The allowance is read, not spent: the owner sees what the report will use before asking.
+  const [periods, quota] = await Promise.all([customReportPeriods(ctx), aiQuotaStatus(ctx)]);
+  const allowance = quota.remainingToday === null
+    ? 'Each question counts as one AI Analyst question.'
+    : `Each question uses one of today's AI Analyst questions; your business has ${quota.remainingToday} left today.`;
 
   return (
     <>
@@ -26,7 +31,7 @@ export default async function NewCustomReportPage({ params }: { params: Promise<
       <PageHeader
         eyebrow="Reports"
         title="Create a custom report"
-        description={`Choose a month, the areas to look at and up to ${MAX_CUSTOM_QUESTIONS} questions. The AI Analyst answers each one under its usual checks, and each question counts towards your analyst allowance.`}
+        description={`Choose a month, the areas to look at and up to ${MAX_CUSTOM_QUESTIONS} questions. The AI Analyst answers each one from your own figures, with the same checks as on the AI Analyst page. ${allowance}`}
       />
       {periods.length === 0 ? (
         <EmptyState title="There is no complete month yet">

@@ -77,7 +77,7 @@ export default async function CashPage({
       <PeriodHeading
         eyebrow="Money"
         title="Cash"
-        description="What came in, what went out, and what is left in the bank."
+        description="How much money is in the bank, and did it go up or down this month? What came in, what went out, and what is left."
         scope={scope}
         hrefFor={(id) => `/app/${orgSlug}/money/cash?period=${id}`}
       />
@@ -107,7 +107,7 @@ export default async function CashPage({
         <Card>
           <CardHeader
             title="Your accounts"
-            description="A balance for one account on its own is not a figure we calculate yet; the totals above cover every account together."
+            description="The figures above cover all your accounts together. Each account needs the balance it started from before its cash can be counted."
             icon={<Landmark />}
             tint="pink"
           />
@@ -129,7 +129,8 @@ export default async function CashPage({
                             : undefined
                         }
                       >
-                        {account.openingBalance}
+                        {/* The view's "—" for a balance nobody has entered, said in words here. */}
+                        {account.needsOpeningBalance ? 'not entered yet' : account.openingBalance}
                       </span>
                     </span>
                   ),
@@ -143,7 +144,7 @@ export default async function CashPage({
           <Card>
             <CardHeader
               title="Enter an opening balance"
-              description="Until we have it, your cash balance stays unknown rather than wrong."
+              description="Copy it from the top of the first statement you uploaded for this account. Until then your cash balance stays unknown rather than wrong."
               icon={<PencilLine />}
             />
             <CardBody>

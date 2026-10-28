@@ -70,15 +70,27 @@ function ReadyToCreate({ view, start, amount, orgSlug }: { view: InvestmentView;
           <div>
             <h2 className="text-lg">No investment pack yet</h2>
             <p className="mt-1 max-w-prose text-sm text-ink-muted">
-              ChatGPT writes the words from the company profile — the strategic objective, the reinvestment levers, three to
-              five investment options from lower to very high risk, governance and the committee’s priorities — and APX works
-              out every figure: the surplus split, five years of growth and profit, the portfolio and its return scenarios. It
-              usually takes under a minute.
+              The pack shows how this year’s spare profit could be split, five years of possible growth, and three to five
+              investment options from lower to very high risk. APX works out every figure from your own accounts; ChatGPT
+              writes the explanations from the company profile. It usually takes under a minute.
             </p>
+            <details className="mt-2 max-w-prose text-sm text-ink-muted">
+              <summary className="cursor-pointer underline underline-offset-2">What is in the pack</summary>
+              <p className="mt-1">
+                The strategic objective, the ways to reinvest in the business, the investment options, how decisions should be
+                made and reviewed (governance) and the priorities for whoever decides — with the surplus split, five years of
+                growth and profit, an example portfolio and its possible returns.
+              </p>
+            </details>
           </div>
           <div className="rounded-2xl border border-line bg-surface-sunken p-4 text-sm">
             <p className="text-ink"><span className="text-ink-muted">Built on </span><span className="tabular">{start.basis}</span></p>
-            {start.sourceNote === null ? null : <p className="mt-1 text-xs text-ink-muted">{start.sourceNote}</p>}
+            {start.sourceNote === null ? null : (
+              <details className="mt-1 text-xs text-ink-muted">
+                <summary className="cursor-pointer underline underline-offset-2">Where these figures come from</summary>
+                <p className="mt-1">{start.sourceNote}</p>
+              </details>
+            )}
             <p className="mt-3 font-medium text-ink">{start.surplusLine}</p>
           </div>
           {view.canRefresh
@@ -167,7 +179,7 @@ export default async function InvestmentPage({ params }: { params: Promise<{ org
       <PageHeader
         eyebrow="Investment"
         title="Investment pack"
-        description={`A ready-made, illustrative investment pack for ${view.organisationName}: how its surplus could be split between growing the business, external investments and liquidity.`}
+        description={`A ready-made, illustrative plan for ${view.organisationName}’s spare profit (its surplus): how it could be split between growing the business, outside investments, and cash kept to hand.`}
       />
 
       <div className="flex flex-col gap-6">

@@ -27,7 +27,7 @@ describe('rows are drawn only while the batch is in review', () => {
 
   it('says what became of the rows', () => {
     expect(rowsNotShownSentence('committed')).toMatch(/part of your figures/);
-    expect(rowsNotShownSentence('rolled_back')).toMatch(/rolled back, so none of its rows are in your figures/);
+    expect(rowsNotShownSentence('rolled_back')).toMatch(/removed, so none of its rows are in your figures/);
     expect(rowsNotShownSentence('rejected')).toMatch(/not imported, so none of its rows are in your figures/);
     expect(rowsNotShownSentence('committing')).toMatch(/being imported now/);
   });

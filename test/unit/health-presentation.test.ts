@@ -149,3 +149,58 @@ describe('ADR-134 · the cap sentence a reader sees', () => {
     expect(capNote({ capped: true, cap_reason: INFERRED_CAP_NOTE, score: 70 })).toBe('Capped at 70 — includes figures read from a PDF by AI.');
   });
 });
+
+describe('a rule result and a figure, in words (presentation only)', () => {
+  it('prints shares, margins and growth as percentages, and operators as words', async () => {
+    const { resultText } = await import('@/components/dashboard/health-presentation');
+    expect(resultText('Q1', '0.20 to 0.35')).toBe('20% to 35%');
+    expect(resultText('Q2', '> 0.85')).toBe('more than 85%');
+    expect(resultText('P1', '>= 0.15')).toBe('at least 15%');
+    expect(resultText('G1', '-0.05 to +0.05')).toBe('−5% to +5%');
+    expect(resultText('G1', '< -0.20')).toBe('less than −20%');
+    expect(resultText('B2', '>= 1.1')).toBe('at least 1.1×');
+    expect(resultText('R1', 'above 4.0x')).toBe('above 4.0×');
+    expect(resultText('Q3', '> 90 days')).toBe('more than 90 days');
+    expect(resultText('C3', 'positive in 2 of 3')).toBe('cash grew in 2 of the last 3 months');
+    expect(resultText('B3', '>= 3')).toBe('at least 3');
+    expect(resultText('P3', 'between -0.02 and +0.02')).toBe('within 2 percentage points');
+    // A result it does not recognise is printed as stored rather than guessed at.
+    expect(resultText('R2', 'down 10% or more')).toBe('down 10% or more');
+  });
+
+  it('names every band result of every banded rule without a raw ratio', async () => {
+    const { resultText } = await import('@/components/dashboard/health-presentation');
+    for (const rules of [PROFITABILITY_RULES, CASH_FLOW_RULES, REVENUE_GROWTH_RULES,
+      COST_CONTROL_RULES, CUSTOMER_QUALITY_RULES, BANKING_HEALTH_RULES]) {
+      for (const rule of Object.values(rules)) {
+        for (const band of rule.bands) {
+          const text = resultText(rule.rule, band.result);
+          // A multiple ("0.5×") is a fine thing to print; a bare ratio ("0.85") is not.
+          expect(text, `${rule.rule} ${band.result}`).not.toMatch(/[<>]=?|\b0\.\d+(?!\d*×)/);
+        }
+      }
+    }
+  });
+
+  it('names a figure by its plain label, its engine label, or what a variance compared', async () => {
+    const { figureGroups, figureLabel } = await import('@/components/dashboard/health-presentation');
+    expect(figureLabel('receivables_days')).toBe('Days to get paid');
+    expect(figureLabel('revenue_growth_mom')).toBe('Revenue growth on last month');
+    expect(figureLabel('net_profit.variance.prev_period'))
+      .toBe('Profit after interest and tax — change on last month');
+    expect(figureLabel('gross_margin.variance.trailing_3m_avg'))
+      .toBe('Margin after direct costs — change on the 3-month average');
+    expect(figureLabel('something_new')).toBe('Something new');
+
+    const groups = figureGroups([
+      { metric_key: 'customer_revenue', value: '1', snapshot_id: 's1' },
+      { metric_key: 'customer_revenue', value: '2', snapshot_id: 's2' },
+      { metric_key: 'revenue', value: '3', snapshot_id: 's3' },
+      { metric_key: 'revenue', value: '3', snapshot_id: null },
+    ]);
+    expect(groups).toEqual([
+      { label: 'Sales from this customer', snapshotIds: ['s1', 's2'] },
+      { label: 'Sales', snapshotIds: ['s3'] },
+    ]);
+  });
+});

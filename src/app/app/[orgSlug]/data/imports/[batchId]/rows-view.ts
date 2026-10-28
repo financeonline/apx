@@ -35,7 +35,7 @@ export function rowsNotShownSentence(status: ImportBatchStatus): string | null {
     case 'committed':
       return 'These rows are part of your figures now, in the records they became. A file’s own lines are shown only while it is in review.';
     case 'rolled_back':
-      return 'This import was rolled back, so none of its rows are in your figures. A file’s own lines are shown only while it is in review.';
+      return 'This import was removed, so none of its rows are in your figures. A file’s own lines are shown only while it is in review.';
     case 'rejected':
       return 'This file was not imported, so none of its rows are in your figures. A file’s own lines are shown only while it is in review.';
     default:

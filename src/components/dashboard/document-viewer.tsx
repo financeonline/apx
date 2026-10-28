@@ -34,7 +34,7 @@ export function DocumentViewer({ orgSlug, documentId, filename, page, height = 6
     return <img src={url} alt={filename} className="w-full rounded-md border border-line object-contain" style={{ maxHeight: `min(${height}px, 70dvh)` }} />;
   }
   if (!isPdf) {
-    return <p className="text-sm"><a className="underline" href={url} target="_blank" rel="noreferrer">Download {filename}</a> — the link works for the next minute.</p>;
+    return <p className="text-sm"><a className="underline" href={url} target="_blank" rel="noreferrer">Download {filename}</a> — this download link expires after a minute.</p>;
   }
   return (
     <object data={`${url}#page=${page ?? 1}&toolbar=0`} type="application/pdf" className="w-full rounded-md border border-line" style={{ height: `min(${height}px, 70dvh)` }} aria-label={`${filename}${page ? `, page ${page}` : ''}`}>
