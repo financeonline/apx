@@ -3164,3 +3164,17 @@ Decision — presentation only; no figure, gate, route or calculation changed:
 6. **Help where people start.** The upload page says what to bring and in what order and what happens next; the AI Analyst page says what it can and cannot answer and how the daily allowance works; Reports says which report to read first; the health page and evidence pages explain how to read them.
 
 Consequences: some e2e and unit expectations changed with the copy (journeys 8, 11, 12, 19, 21, evidence-provenance; unit tests for labels, analyst, clickable card). The e2e suite was not run in this pass.
+
+### ADR-178 · APX runs on Firebase only: Supabase removed
+
+Status: **built locally on 2026-10-28 on the owner's instruction. Not reviewed, merged or deployed.** Supersedes the PostgreSQL / Supabase parts of ADR-001 onward as `FIRESTORE_DATA_MODEL.md` supersedes `DATABASE_ARCHITECTURE.md`.
+
+Context: the owner decided on 2026-10-28 to move APX from Supabase to Firebase, then: "Change the full codes to Firebase. Remove the Supabase structure completely. I want everything on Firebase."
+
+Decision:
+1. **One platform.** Data in Firestore, sign-in with Firebase Authentication (server-verified `__session` cookie), files in Firebase Storage. Every former `api.*` / `api_server.*` SQL function is a TypeScript function of the same name under `src/db` (187); tenant checks, triggers and unique constraints are done there (`FIRESTORE_DATA_MODEL.md` §2–§4). The Admin SDK is reached only through `src/db` (sign-in through `src/db/auth.ts`).
+2. **Supabase removed.** The `supabase/` folder (migrations, pgTAP tests, config), the `@supabase/ssr`, `@supabase/supabase-js` and `supabase` packages, the Postgres-only scripts (`check-schema-drift`, `sync-permission-matrix`, `validate-step0.sh`, `scripts/sql`) and the Postgres CI workflow are gone; CI runs the integration suite on the Firebase emulators. Tests that read the SQL now check the database layer itself; the e2e journeys and the sample-data loader seed Firestore.
+3. **The data moved.** The local Supabase database was backed up outside the repo (`~/Desktop/APX-Supabase-Backup-2026-10-28`: full `pg_dumpall` and every stored file), then copied into the emulators' saved data (`firebase/emulator-data`, git-ignored): every row of every live organisation (test residue of deleted organisations' audit trails left out), 178 sign-in accounts with their bcrypt hashes, the Vault AI key re-sealed into `platform_secrets`, and all 373 stored files. Checked after the copy: every organisation present, the key decrypts, files read back. The copy script is in history (commit c3ffb8c).
+4. **Local passwords.** The Auth emulator cannot check an imported bcrypt hash (a real Firebase project can), so locally only accounts whose password was set again sign in; the others use "Forgot password" (the emulator shows the link in its UI, http://127.0.0.1:4000/auth).
+
+Consequences: the local stack is `npm run db:start` (Java 21, no Docker). Before connecting a real Firebase project: add the composite indexes the queries need to `firebase/firestore.indexes.json` (the emulator does not require them; a real project refuses the query), copy the emulator data into it, and measure the calculation engine's speed there — on the emulator the engine-heavy integration files take minutes each, which points at many sequential document reads. The sample-data loader's feature switch and recalculation are written directly and leave no audit event.

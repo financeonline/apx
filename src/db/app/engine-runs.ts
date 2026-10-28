@@ -8,6 +8,7 @@ import {
 import { runTx } from '../tx';
 import type { Db } from '../types';
 import { hasPermissionOf } from './access';
+import { dateValue } from './financials-helpers';
 import { prepareAudit } from './audit';
 import { intOrNull, numericText, textOrNull, writeBundle, writeBundleAt, type ItemInput } from './engine-evidence';
 import {
@@ -110,7 +111,7 @@ async function startCalculationRun(db: Db, args: Record<string, unknown>): Promi
   const fingerprint = hexOrNull(arg.str(args, 'p_fingerprint'));
   const run = {
     trigger, trigger_ref_id: triggerRef, engine_version: arg.req(args, 'p_engine_version'),
-    period_from: periodFrom, period_to: periodTo, as_of: arg.req(args, 'p_as_of'),
+    period_from: periodFrom, period_to: periodTo, as_of: dateValue(arg.req(args, 'p_as_of')),
   };
 
   // The foreign keys and `same_org_ref_trigger_ref`, checked before anything is written.

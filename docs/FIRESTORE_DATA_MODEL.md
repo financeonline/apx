@@ -125,3 +125,32 @@ in `docs/FIRESTORE_PORT_PLAN.md`.
 `firebase emulators:exec`. `test/integration/setup.ts`: `clientFor(uid)` (a user handle),
 `serviceClientScoped(org?)`, `rpc(db, fn, args)` → `{data, error}`, `sqlstate(error)` for ported
 assertions, `createAuthUser(email)` (async), `fs()` for fixtures, `resetFixtures()`.
+
+## 10. Running locally
+
+* `bash scripts/write-local-env.sh` once (writes the emulator settings into `.env.local`), then
+  `npm run db:start` (Auth 9099, Firestore 8080, Storage 9199, UI http://127.0.0.1:4000; needs
+  Java 21 — `source ~/.motion-runtime/env.sh`). Data is kept in `firebase/emulator-data`
+  (git-ignored) and saved again when the emulators stop.
+* `npm run dev` (or `npm run build && npm run start`) for the app; the job runner as before.
+* `npm run test:integration` starts its own throw-away emulators on the same ports, so stop
+  `db:start` first.
+* Passwords: the Auth emulator cannot check a bcrypt hash imported from Supabase. Accounts whose
+  password was set again sign in normally; any other account uses "Forgot password", and the reset
+  link appears in the emulator UI (Authentication tab). A real Firebase project checks the imported
+  hashes, so nobody's password changes there.
+
+## 11. Before a real Firebase project
+
+1. **Composite indexes.** `firebase/firestore.indexes.json` is empty: the emulator runs any query,
+   a real project refuses a query that filters and orders on different fields until its index
+   exists. Collect them (run the suites against a real test project and follow the links in the
+   errors, or derive them from the `where`/`orderBy` chains in `src/db`) before going live.
+2. **Data.** Copy `firebase/emulator-data` (Firestore, Auth with password hashes, Storage) into the
+   project.
+3. **Speed.** Measure the calculation engine there; on the emulator the engine-heavy integration
+   files take minutes each (many one-document reads in sequence).
+4. Settings: `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `NEXT_PUBLIC_FIREBASE_*`,
+   `FIREBASE_SERVICE_ACCOUNT`, `APX_SECRETS_KEY` (the AI keys must then be entered again, sealed
+   under the new key), the emulator hosts unset; deploy the rules and indexes (§1).
+

@@ -37,7 +37,6 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            { group: ['@supabase/*'], message: 'APX no longer uses Supabase (FIRESTORE_DATA_MODEL.md).' },
             { group: ['firebase-admin', 'firebase-admin/*', '@/db', '@/db/*'], message: 'Components and routes never reach the database directly; use modules/* services (ADR-013).' },
             { group: ['@anthropic-ai/*'], message: 'Only modules/ai/data/claude-client.ts imports the Anthropic SDK (ADR-023).' },
           ],
@@ -46,15 +45,10 @@ export default tseslint.config(
     },
   },
   // The session route turns a Firebase ID token into a session cookie: it is the one route that holds
-  // the Admin SDK's Auth (FIRESTORE_DATA_MODEL.md §2).
+  // the Admin SDK's Auth (FIRESTORE_DATA_MODEL.md §2), so the app-wide database ban does not apply.
   {
     files: ['src/app/auth/**/*.{ts,tsx}'],
-    rules: {
-      'no-restricted-imports': [
-        'error',
-        { patterns: [{ group: ['@supabase/*'], message: 'APX no longer uses Supabase (FIRESTORE_DATA_MODEL.md).' }] },
-      ],
-    },
+    rules: { 'no-restricted-imports': 'off' },
   },
   {
     files: ['src/core/**/*.ts'],
@@ -73,7 +67,7 @@ export default tseslint.config(
         'error',
         {
           patterns: [
-            { group: ['@supabase/*', 'firebase-admin', 'firebase-admin/*', 'firebase', 'firebase/*', '@/core/db', '@/core/db/*', '@/db', '@/db/*'], message: 'domain/ is pure: no I/O (ADR-022).' },
+            { group: ['firebase-admin', 'firebase-admin/*', 'firebase', 'firebase/*', '@/core/db', '@/core/db/*', '@/db', '@/db/*'], message: 'domain/ is pure: no I/O (ADR-022).' },
             { group: ['next/*', 'react'], message: 'domain/ is framework-free (ADR-022).' },
           ],
         },
