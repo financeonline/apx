@@ -9,6 +9,7 @@ import { recordAccessEvent } from '@/core/db/server-rpc';
 import { callApi } from '@/core/db';
 import { Banner } from '@/components/ui/surfaces';
 import { AccessLinksProvider } from '@/components/dashboard/access-links';
+import { LobbyCanvas } from '@/components/dashboard/lobby';
 import { ROLE_LABELS } from '@/components/labels';
 import { unreadCount } from '@/modules/engagement';
 import { fundingEnabled } from '@/modules/funding';
@@ -126,6 +127,8 @@ export default async function OrgLayout({
 
   return (
     <AppShell homeHref={landingPath(orgSlug, ctx.permissions)} groups={groups} user={user}>
+      {/* ADR-176: every page of the company, Home and the sections inside, on the lobby's light palette. */}
+      <LobbyCanvas>
         <div className="mb-6 flex flex-col gap-3 empty:mb-0">
           {isSuperAdmin(ctx) && (
             <Banner tone="warn" title="You are viewing this organisation as APX staff">
@@ -144,6 +147,7 @@ export default async function OrgLayout({
           )}
         </div>
         <AccessLinksProvider value={accessLinks}>{children}</AccessLinksProvider>
+      </LobbyCanvas>
     </AppShell>
   );
 }

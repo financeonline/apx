@@ -25,7 +25,7 @@ import { TrendChart } from '@/components/dashboard';
 import { dataLinks, sectionLinks } from '@/components/dashboard/nav';
 import { chartSeriesFrom } from '@/components/dashboard/presentation';
 import {
-  ActionQueue, ArrowLink, BandHeading, Chip, DepartmentStrip, Eyebrow, HealthRing, LobbyCanvas, LobbyFigure,
+  ActionQueue, ArrowLink, BandHeading, Chip, DepartmentStrip, Eyebrow, HealthRing, LobbyFigure,
   LobbyFooter, LobbyHero, LobbyPanel, RiskPoints, LOBBY_CARD, type LobbyDepartment,
 } from '@/components/dashboard/lobby';
 import { requirePermission } from '@/app/_lib/authz';
@@ -214,7 +214,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
 
   if (state.kind === 'first_run' || state.kind === 'awaiting_review') {
     return (
-      <LobbyCanvas>
+      <>
         {top(`Workspace · ${currency}`)}
         <div className="mt-8 flex flex-col gap-6">
           {askCard}
@@ -239,7 +239,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
           {reportsBand}
         </div>
         <LobbyFooter line="Your figures appear here once they are added" />
-      </LobbyCanvas>
+      </>
     );
   }
 
@@ -261,7 +261,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
   const showsAnalyst = sectionLinks(ctx).some((link) => link.path === 'analyst');
 
   return (
-    <LobbyCanvas>
+    <>
       {top(`${view.period.label} · ${currency}`)}
 
       <div className="mt-6 flex flex-col gap-6">
@@ -437,7 +437,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
       </section>
 
       <LobbyFooter line={view.basisLine} />
-    </LobbyCanvas>
+    </>
   );
 }
 

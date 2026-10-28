@@ -144,7 +144,7 @@ export function DepartmentCard({
  */
 export function QuickLink({ href, title, line, icon, tint }: { href: string; title: string; line: string; icon: ReactNode; tint: CardTint }) {
   return (
-    <Link href={href} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3 transition-[box-shadow,border-color,background-color] duration-200 hover:border-accent/60 hover:bg-accent-soft/40 hover:shadow-[0_0_0_1px_rgb(255_45_85/0.4),0_0_20px_-4px_rgb(255_45_85/0.45)]">
+    <Link href={href} className="flex items-center gap-3 rounded-2xl border border-line bg-surface p-3 transition-[box-shadow,border-color,background-color] duration-200 hover:border-accent/60 hover:bg-accent-soft/40 hover:shadow-[var(--glow-link)]">
       <IconTile tint={tint} size="sm">{icon}</IconTile>
       <span className="min-w-0 flex-1">
         <span className="block text-sm font-medium text-ink">{title}</span>
@@ -158,7 +158,7 @@ export function QuickLink({ href, title, line, icon, tint }: { href: string; tit
 /** A small icon button-link, as the reference's report shortcuts. */
 export function ShortcutLink({ href, label, icon }: { href: string; label: string; icon: ReactNode }) {
   return (
-    <Link href={href} className="flex items-center gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm font-medium whitespace-nowrap text-ink transition-[box-shadow,border-color,background-color] duration-200 hover:border-accent/60 hover:bg-accent-soft hover:text-accent hover:shadow-[0_0_0_1px_rgb(255_45_85/0.4),0_0_20px_-4px_rgb(255_45_85/0.45)] [&_svg]:size-4 [&_svg]:text-accent">
+    <Link href={href} className="flex items-center gap-2.5 rounded-xl border border-line bg-surface px-3.5 py-2.5 text-sm font-medium whitespace-nowrap text-ink transition-[box-shadow,border-color,background-color] duration-200 hover:border-accent/60 hover:bg-accent-soft hover:text-accent hover:shadow-[var(--glow-link)] [&_svg]:size-4 [&_svg]:text-accent">
       {icon}
       {label}
     </Link>

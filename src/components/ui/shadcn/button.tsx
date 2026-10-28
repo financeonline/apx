@@ -16,7 +16,7 @@ const buttonVariants = cva(
   {
     variants: {
       variant: {
-        default: 'border-transparent bg-accent bg-brand-gradient font-semibold text-on-accent shadow-[0_10px_28px_-12px_rgb(255_45_85/0.7)] hover:brightness-110',
+        default: 'border-transparent bg-accent bg-brand-gradient font-semibold text-on-accent shadow-[var(--glow-pill)] hover:brightness-110',
         secondary: 'border-accent/45 bg-surface text-accent hover:border-accent hover:bg-accent-soft',
         ghost: 'border-transparent bg-transparent text-ink-muted hover:bg-accent-soft hover:text-accent',
         destructive: 'border-danger/45 bg-surface text-danger hover:border-danger hover:bg-danger-soft',

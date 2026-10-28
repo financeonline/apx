@@ -21,10 +21,9 @@ import { cn } from '@/lib/utils';
  * worse than one that does not look clickable at all.
  */
 
-/** The hover/focus glow on a clickable card: a coral edge and a soft coral halo (ADR-169). */
+/** The hover/focus glow on a clickable card: a coral edge and a soft coral halo (ADR-169); quieter in the lobby palette (ADR-176). */
 export const CARD_GLOW =
-  'hover:border-accent/70 hover:shadow-[0_0_0_2px_rgb(255_45_85/0.5),0_0_36px_2px_rgb(255_45_85/0.4),0_0_80px_-10px_rgb(255_122_47/0.3)] ' +
-  'focus-within:border-accent/70 focus-within:shadow-[0_0_0_2px_rgb(255_45_85/0.65),0_0_36px_2px_rgb(255_45_85/0.4)]';
+  'hover:border-accent/70 hover:shadow-[var(--glow-card)] focus-within:border-accent/70 focus-within:shadow-[var(--glow-card-focus)]';
 
 /**
  * On the card itself: the box the link's layer fills, and the glow. `group`, so a visible "Open" or

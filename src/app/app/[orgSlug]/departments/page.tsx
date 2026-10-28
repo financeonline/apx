@@ -192,7 +192,7 @@ export default async function DepartmentsPage({ params }: { params: Promise<{ or
         </div>
         <div className="flex flex-wrap gap-3">
           {canImport ? (
-            <ButtonLink href={`${base}/data/imports/new`} tone="secondary" className="h-14 rounded-2xl bg-surface/80 px-7 text-lg shadow-[0_8px_24px_-14px_rgb(255_45_85/0.45)] [&_svg]:size-5">
+            <ButtonLink href={`${base}/data/imports/new`} tone="secondary" className="h-14 rounded-2xl bg-surface/80 px-7 text-lg shadow-[var(--glow-pill)] [&_svg]:size-5">
               <Upload aria-hidden="true" /> Add data
             </ButtonLink>
           ) : null}

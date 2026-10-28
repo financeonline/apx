@@ -31,7 +31,7 @@ export const LOBBY_CLICKABLE =
 const STRETCH_XL = 'after:rounded-xl';
 
 /**
- * The light canvas. It runs to the shell's edges (the main column's padding is taken back) and,
+ * The light canvas, around every page of a company (the org layout). It runs to the shell's edges (the main column's padding is taken back) and,
  * through a clipped spread shadow, to the window's sides on a screen wider than the column.
  */
 export function LobbyCanvas({ children }: { children: ReactNode }) {
