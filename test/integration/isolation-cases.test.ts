@@ -82,7 +82,10 @@ describe('case 9 — an assignment revoked mid-session stops working on the next
       previous_snapshot_id: null, updated_at: nowIso(),
     });
 
-    // The SAME handle throughout: this is about the next request, not about a new session.
+    // The SAME session throughout: this is about the next request, not about a new sign-in. Each
+    // request builds its own handle from the session cookie (`createUserClient`), and the read
+    // policies memoise the caller's role on that handle for the request — so the next request is
+    // a new handle for the same person, as in the app.
     const e = clientFor(employee, { email: `employee@${DOMAIN}` });
 
     const before = await rpc(e, 'my_context', { p_slug: slugA });
@@ -93,10 +96,11 @@ describe('case 9 — an assignment revoked mid-session stops working on the next
       status: 'revoked', revoke_reason: 'itest', updated_at: nowIso(),
     });
 
-    const after = await rpc(e, 'my_context', { p_slug: slugA });
+    const next = clientFor(employee, { email: `employee@${DOMAIN}` });
+    const after = await rpc(next, 'my_context', { p_slug: slugA });
     expect(after.error).toBeNull();
     expect(after.data, 'revoked: the very next request resolves nothing').toHaveLength(0);
-    expect(await orgRows(e, orgA, 'metric_current'), 'and the data goes with it').toHaveLength(0);
+    expect(await orgRows(next, orgA, 'metric_current'), 'and the data goes with it').toHaveLength(0);
   });
 });
 
