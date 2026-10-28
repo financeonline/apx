@@ -228,3 +228,23 @@ export const SWITCHABLE_PERMISSIONS: readonly Permission[] = [
 export function membershipsOf(fs: Firestore, orgId: string) {
   return orgCollection(fs, orgId, 'organization_memberships');
 }
+
+/**
+ * `app.has_recent_auth(seconds)`: the caller proved who they are (signed in, or re-entered their
+ * password) within the last `seconds`. Read from the session's `auth_time`, the Firebase equivalent
+ * of the `amr` timestamp the JWT carried.
+ */
+export function hasRecentAuth(db: Db, seconds = 600): boolean {
+  if (db.actor.kind !== 'user' || db.actor.authTime === null) return false;
+  return db.actor.authTime >= Math.floor(Date.now() / 1000) - seconds;
+}
+
+/** `app.require_super_admin(reauth)`: an active super admin, and with `reauth` a recent sign-in. */
+export async function requireSuperAdmin(db: Db, reauth = false, tx?: Transaction): Promise<void> {
+  if (!(await isSuperAdmin(db.fs, uidOf(db), readerOf(tx)))) {
+    raise.denied('platform administration requires the super admin');
+  }
+  if (reauth && !hasRecentAuth(db, 600)) {
+    raise.denied('re-authenticate within the last 10 minutes to continue');
+  }
+}
