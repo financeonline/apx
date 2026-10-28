@@ -1,47 +1,39 @@
 import 'server-only';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
-import { toMotionError } from '@/core/errors';
-import { currentOrgScope, scopedServiceClient } from './service-client';
+import { InternalError, toMotionError } from '@/core/errors';
+import { SERVER_FUNCTIONS } from '@/db/api_server';
+import { createServiceClient } from './service-client';
 
 /**
- * Service-role access — sanctioned use #3 of 3 (ADR-043; finding R2-A-01).
+ * Server-observed facts (ADR-043; finding R2-A-01).
  *
  * `api.*` is granted to `authenticated`, so anything it accepts is something a browser can assert
  * with the user's own token. Facts the SERVER observed — a download happened, a scan passed, an AI
  * answer was grounded — are written through `api_server.*`, which only the service role may
- * execute. The human actor is passed explicitly and re-validated in SQL against the
- * actor-parameterised helpers, so a compromised browser cannot forge one.
+ * run. The human actor is passed explicitly and re-validated (`src/db/app/access.ts`, the
+ * actor-parameterised helpers), so a compromised browser cannot forge one.
  *
  * This is the only file allowed to name an `api_server.*` function; the
  * `motion/no-api-server-outside-server-rpc` lint rule enforces that.
  */
 
-let cached: SupabaseClient | null = null;
-
 /**
- * The client every `api_server.*` call is made on.
+ * Runs one `api_server.*` function as the server. Inside a job the handle carries the job's
+ * organisation scope (ADR-090), because `createServiceClient` reads the ambient `withOrgScope`;
+ * outside one there is no scope to carry and none is claimed — those paths pass a human actor, which
+ * the function re-validates.
  *
- * Inside a job it is the SCOPED client for that job's organization, so the call carries
- * `x-motion-org` and `app.require_scope` / `app.audit` can check it (ADR-090). This file used to
- * keep one unscoped client of its own, which is why the organization scope never reached a single
- * `api_server.*` call even before the `set_config` fault: the scope was asserted on a different
- * client from the one making the requests (audit H1).
- *
- * Outside a job — a page, a route handler, a server action — there is no organization scope to
- * carry, and none is claimed. Those paths pass a human actor instead, which the function
- * re-validates against `app.has_permission_of`.
+ * Returns `{ data, error }` rather than throwing, so each wrapper below keeps its own translation.
  */
-function serverClient(): SupabaseClient {
-  const scope = currentOrgScope();
-  if (scope) return scopedServiceClient(scope);
-  if (cached) return cached;
-  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!url || !key) {
-    throw new Error('server-rpc requires NEXT_PUBLIC_SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY');
+async function serverCall(
+  fn: string, args: Record<string, unknown> = {},
+): Promise<{ data: unknown; error: Error | null }> {
+  const impl = SERVER_FUNCTIONS[fn];
+  if (!impl) return { data: null, error: Object.assign(new InternalError(), { cause: `api_server.${fn} is not defined` }) };
+  try {
+    return { data: await impl(createServiceClient(), args), error: null };
+  } catch (error) {
+    return { data: null, error: error instanceof Error ? error : new Error(String(error)) };
   }
-  cached = createClient(url, key, { auth: { persistSession: false, autoRefreshToken: false } });
-  return cached;
 }
 
 export interface ServerRpcActor {
@@ -71,9 +63,7 @@ export async function recordAccessEvent(
     metadata?: Record<string, string | number | string[]>;
   },
 ): Promise<number> {
-  const { data, error } = await serverClient()
-    .schema('api_server')
-    .rpc('record_access_event', {
+  const { data, error } = await serverCall('record_access_event', {
       p_actor: actor.userId,
       p_org: input.organizationId,
       p_action: input.action,
@@ -100,9 +90,7 @@ export async function throttle(
   limit: number,
   window: string,
 ): Promise<void> {
-  const { error } = await serverClient()
-    .schema('api_server')
-    .rpc('throttle', {
+  const { error } = await serverCall('throttle', {
       p_actor: actor.userId, p_bucket: bucket, p_limit: limit, p_window: window,
     });
   if (error) throw toMotionError(error, actor.requestId);
@@ -127,9 +115,7 @@ export async function recordReportFile(
     byteSize: number;
   },
 ): Promise<string> {
-  const { data, error } = await serverClient()
-    .schema('api_server')
-    .rpc('record_report_file', {
+  const { data, error } = await serverCall('record_report_file', {
       p_actor: actor?.userId ?? null,
       p_org: input.organizationId,
       p_period: input.periodId,
@@ -165,9 +151,7 @@ export async function buildMetricBundle(
   actor: ServerRpcActor,
   input: { snapshotId: string; items: readonly MetricBundleItem[] },
 ): Promise<string> {
-  const { data, error } = await serverClient()
-    .schema('api_server')
-    .rpc('build_metric_bundle_as', {
+  const { data, error } = await serverCall('build_metric_bundle_as', {
       p_actor: actor.userId,
       p_snapshot: input.snapshotId,
       p_items: input.items,
@@ -186,9 +170,7 @@ export async function purgeOrganization(
   organizationId: string,
   jobId: string,
 ): Promise<Record<string, unknown>> {
-  const { data, error } = await serverClient()
-    .schema('api_server')
-    .rpc('purge_organization', { p_org: organizationId, p_job: jobId });
+  const { data, error } = await serverCall('purge_organization', { p_org: organizationId, p_job: jobId });
   if (error) throw toMotionError(error);
   return data as Record<string, unknown>;
 }
@@ -227,9 +209,7 @@ export async function recordStorageCleanup(input: {
  * wrong silently (ADR-063).
  */
 export async function aggregationInstant(actor: ServerRpcActor | null): Promise<string> {
-  const { data, error } = await serverClient()
-    .schema('api_server')
-    .rpc('aggregation_instant');
+  const { data, error } = await serverCall('aggregation_instant');
   if (error) throw toMotionError(error, actor?.requestId);
   return data as string;
 }
@@ -252,9 +232,7 @@ export async function enqueueServerJob(
     payload?: Record<string, unknown>;
   },
 ): Promise<string> {
-  const { data, error } = await serverClient()
-    .schema('api_server')
-    .rpc('enqueue_job', {
+  const { data, error } = await serverCall('enqueue_job', {
       p_actor: actor?.userId ?? null,
       p_org: input.organizationId,
       p_job_type: input.jobType,
@@ -293,9 +271,7 @@ interface RawClaim {
 
 /** Atomically claim one runnable job, or return null when the queue is empty. */
 export async function claimJob(workerId: string): Promise<ClaimedJobRow | null> {
-  const { data, error } = await serverClient()
-    .schema('api_server')
-    .rpc('claim_job', { p_worker: workerId });
+  const { data, error } = await serverCall('claim_job', { p_worker: workerId });
 
   if (error) throw new Error(`could not claim a job: ${error.message}`);
 
@@ -323,9 +299,7 @@ export async function finishJob(
   result: Record<string, unknown> = {},
   errorMessage: string | null = null,
 ): Promise<void> {
-  const { error } = await serverClient()
-    .schema('api_server')
-    .rpc('finish_job', { p_job: jobId, p_status: status, p_result: result, p_error: errorMessage });
+  const { error } = await serverCall('finish_job', { p_job: jobId, p_status: status, p_result: result, p_error: errorMessage });
 
   // Must be loud: an unrecorded outcome leaves the job `running`, so it will be reclaimed and the
   // work may run twice. Swallowing this would hide a real duplicate-execution risk.
@@ -347,9 +321,7 @@ export async function registerDocument(
   organizationId: string,
   meta: Record<string, unknown>,
 ): Promise<string> {
-  const { data, error } = await serverClient()
-    .schema('api_server')
-    .rpc('register_document', {
+  const { data, error } = await serverCall('register_document', {
       p_actor: actor.userId,
       p_org: organizationId,
       p_meta: meta,
@@ -375,9 +347,7 @@ export async function finalizeUpload(
     status: string;
   },
 ): Promise<void> {
-  const { error } = await serverClient()
-    .schema('api_server')
-    .rpc('finalize_upload', {
+  const { error } = await serverCall('finalize_upload', {
       p_actor: actor.userId,
       p_org: organizationId,
       p_document: input.documentId,
@@ -400,7 +370,7 @@ export async function finalizeUpload(
 // ---------------------------------------------------------------------------
 
 async function serverRpc<T>(fn: string, args: Record<string, unknown>): Promise<T> {
-  const { data, error } = await serverClient().schema('api_server').rpc(fn, args);
+  const { data, error } = await serverCall(fn, args);
   if (error) throw toMotionError(error);
   return data as T;
 }
@@ -439,7 +409,7 @@ export interface PersistedBundleItem {
  * requester (AI_ARCHITECTURE.md §12; ADR-081). Bound to `(org, actor)` like every turn after it.
  */
 export async function createConversationAs(actor: ServerRpcActor, organizationId: string): Promise<string> {
-  const { data, error } = await serverClient().schema('api_server').rpc('ai_create_conversation', {
+  const { data, error } = await serverCall('ai_create_conversation', {
     p_actor: actor.userId, p_org: organizationId,
   });
   if (error) throw toMotionError(error, actor.requestId);
@@ -454,7 +424,7 @@ export async function persistUserTurn(
   actor: ServerRpcActor,
   input: { organizationId: string; conversationId: string; message: string },
 ): Promise<{ messageId: string; quota: Record<string, number | null> }> {
-  const { data, error } = await serverClient().schema('api_server').rpc('ai_persist_turn', {
+  const { data, error } = await serverCall('ai_persist_turn', {
     p_actor: actor.userId, p_org: input.organizationId, p_conversation: input.conversationId,
     p_user_message: input.message,
   });
@@ -490,7 +460,7 @@ export async function persistAssistantTurn(
     bundle: { calculation_run_id: string | null; items: readonly PersistedBundleItem[] } | null;
   },
 ): Promise<{ messageId: string; evidenceBundleId: string | null }> {
-  const { data, error } = await serverClient().schema('api_server').rpc('ai_persist_turn', {
+  const { data, error } = await serverCall('ai_persist_turn', {
     p_actor: actor.userId, p_org: input.organizationId, p_conversation: input.conversationId,
     p_assistant: input.assistant, p_tool_calls: input.toolCalls, p_bundle: input.bundle,
   });
@@ -672,37 +642,27 @@ export async function persistAlerts(
 }
 
 /**
- * The engine's three aggregation reads (§2.2, §2.4 step 4).
- *
- * They live in `app`, which is deliberately not exposed to PostgREST, so the engine reaches them
- * through `api_server` wrappers. The repository used to call them unqualified, which resolved to
- * `public` and returned PGRST202 on every calculation — the defect ADR-057.2 records.
+ * A set-returning `api_server` read, in full and in a total order — the engine's three aggregation
+ * reads among them (§2.2, §2.4 step 4). On PostgreSQL these paged around PostgREST's 1,000-row cap
+ * (ADR-120 hardening); the Firestore ports return every row, and the sort keeps the order the
+ * engine was written against.
  */
-/**
- * A set-returning `api_server` read, in full.
- *
- * PostgREST's `max_rows` (1,000) applies to a FUNCTION's result exactly as to a table's, and
- * truncates silently: `aggregate_periods` over an organisation with 1,200 customers returned 1,000
- * cells and the engine computed revenue from the ones it was handed (ADR-120 hardening). So every
- * set-returning server read pages, ordered on its full grouping key so pages never overlap or skip.
- * Each page re-evaluates the function at the same arguments — the aggregation instant is one of
- * them — so the pages are one consistent result.
- */
-const RPC_PAGE = 1000;
-
 async function serverRpcAll(
   fn: string, args: Record<string, unknown>, orderBy: readonly string[],
 ): Promise<Record<string, unknown>[]> {
-  const out: Record<string, unknown>[] = [];
-  for (let from = 0; ; from += RPC_PAGE) {
-    let query = serverClient().schema('api_server').rpc(fn, args);
-    for (const column of orderBy) query = query.order(column, { ascending: true, nullsFirst: true });
-    const { data, error } = await query.range(from, from + RPC_PAGE - 1);
-    if (error) throw toMotionError(error);
-    const page = (data ?? []) as Record<string, unknown>[];
-    out.push(...page);
-    if (page.length < RPC_PAGE) return out;
-  }
+  const { data, error } = await serverCall(fn, args);
+  if (error) throw toMotionError(error);
+  const rows = [...((data ?? []) as Record<string, unknown>[])];
+  // The total order the pages used to be read in: the result is the same whatever order a port returns.
+  const key = (v: unknown) => (v === null || v === undefined ? '' : String(v));
+  rows.sort((a, b) => {
+    for (const column of orderBy) {
+      const x = key(a[column]); const y = key(b[column]);
+      if (x !== y) return x < y ? -1 : 1;
+    }
+    return 0;
+  });
+  return rows;
 }
 
 /** The grouping key of `app.aggregate_periods`, then its sums, so the order is total. */
@@ -849,7 +809,7 @@ export async function beginPortfolioTurn(
   actor: ServerRpcActor,
   input: { question: string; scopeOrganizationIds: readonly string[]; promptVersion: string },
 ): Promise<string> {
-  const { data, error } = await serverClient().schema('api_server').rpc('portfolio_ai_begin_turn', {
+  const { data, error } = await serverCall('portfolio_ai_begin_turn', {
     p_actor: actor.userId, p_question: input.question, p_scope: [...input.scopeOrganizationIds],
     p_prompt_version: input.promptVersion,
   });
@@ -865,7 +825,7 @@ export async function finishPortfolioTurn(
     model: string | null; inputTokens: number; outputTokens: number;
   },
 ): Promise<void> {
-  const { error } = await serverClient().schema('api_server').rpc('portfolio_ai_finish_turn', {
+  const { error } = await serverCall('portfolio_ai_finish_turn', {
     p_actor: actor.userId, p_turn: input.turnId, p_answer: input.answer, p_grounding: input.grounding,
     p_model: input.model, p_tokens_in: input.inputTokens, p_tokens_out: input.outputTokens,
   });
@@ -890,9 +850,7 @@ export async function recordReport(
     contentVersion: string;
   },
 ): Promise<string> {
-  const { data, error } = await serverClient()
-    .schema('api_server')
-    .rpc('record_report', {
+  const { data, error } = await serverCall('record_report', {
       p_actor: actor?.userId ?? null,
       p_org: input.organizationId,
       p_kind: input.kind,
@@ -920,9 +878,7 @@ export async function recordReportPdf(
     byteSize: number;
   },
 ): Promise<string> {
-  const { data, error } = await serverClient()
-    .schema('api_server')
-    .rpc('record_report_pdf', {
+  const { data, error } = await serverCall('record_report_pdf', {
       p_actor: actor?.userId ?? null,
       p_org: input.organizationId,
       p_report: input.reportId,
@@ -955,7 +911,7 @@ export async function enqueueFundingBackstop(): Promise<number> {
  * server's model calls; null when none is stored. Never logged, never returned to a browser.
  */
 export async function anthropicApiKeyFromVault(): Promise<string | null> {
-  const { data, error } = await serverClient().schema('api_server').rpc('anthropic_api_key');
+  const { data, error } = await serverCall('anthropic_api_key');
   if (error) throw toMotionError(error);
   return typeof data === 'string' && data.length > 0 ? data : null;
 }
@@ -965,7 +921,7 @@ export async function anthropicApiKeyFromVault(): Promise<string | null> {
  * server's configuration applies. Read by the server that calls the model, never by a browser.
  */
 export async function aiModelChoice(): Promise<{ provider: 'anthropic' | 'openai'; model: string; effort: string | null } | null> {
-  const { data, error } = await serverClient().schema('api_server').rpc('ai_model');
+  const { data, error } = await serverCall('ai_model');
   if (error) throw toMotionError(error);
   const value = data as { provider?: unknown; model?: unknown; effort?: unknown } | null;
   if (!value || typeof value.model !== 'string' || value.model.length === 0) return null;
@@ -979,7 +935,7 @@ export async function aiModelChoice(): Promise<{ provider: 'anthropic' | 'openai
 
 /** The OpenAI key from Vault (ADR-164), for the server's model calls only. */
 export async function openAiApiKeyFromVault(): Promise<string | null> {
-  const { data, error } = await serverClient().schema('api_server').rpc('openai_api_key');
+  const { data, error } = await serverCall('openai_api_key');
   if (error) throw toMotionError(error);
   return typeof data === 'string' && data.length > 0 ? data : null;
 }
@@ -1067,7 +1023,7 @@ export async function failInvestmentReport(
 export async function aiModelFor(
   provider: 'anthropic' | 'openai',
 ): Promise<{ provider: 'anthropic' | 'openai'; model: string; effort: string | null } | null> {
-  const { data, error } = await serverClient().schema('api_server').rpc('ai_model_for', { p_provider: provider });
+  const { data, error } = await serverCall('ai_model_for', { p_provider: provider });
   if (error) throw toMotionError(error);
   const value = data as { model?: unknown; effort?: unknown } | null;
   if (!value || typeof value.model !== 'string' || value.model.length === 0) return null;

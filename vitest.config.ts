@@ -10,9 +10,9 @@ const alias = {
 export default defineConfig({
   resolve: { alias },
   test: {
-    // Every integration file talks to the one local Supabase instance and each calls
-    // resetFixtures(), which deletes every `itest-` row — including rows another file is still
-    // asserting on. Files must run one at a time.
+    // Every integration file talks to the one set of Firebase emulators and each calls
+    // resetFixtures(), which deletes every `itest-` organisation — including ones another file is
+    // still asserting on. Files must run one at a time.
     fileParallelism: false,
     coverage: {
       provider: 'v8',

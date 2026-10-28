@@ -22,3 +22,10 @@ test/regression/out/
 
 # Local secrets handoff (owner, 2026-10-07): never committed
 SECRETS.local.md
+
+# Firebase emulator state and logs
+.firebase/
+firebase-debug.log
+firestore-debug.log
+ui-debug.log
+firebase/emulator-data/

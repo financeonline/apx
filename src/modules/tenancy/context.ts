@@ -1,4 +1,4 @@
-import type { SupabaseClient } from '@supabase/supabase-js';
+import type { Db } from '@/db/types';
 import type { Permission, EffectiveRole } from '@/core/permissions';
 import type { ActorType, OrgStatus } from './domain/types';
 import type { ModuleKey } from './domain/modules';
@@ -15,8 +15,11 @@ export interface AccessContext {
   readonly effectiveRole: EffectiveRole;
   readonly permissions: ReadonlySet<Permission>;
   readonly actorType: ActorType;
-  /** User-session client: SELECT under RLS and EXECUTE on api.*; it holds no write privilege. */
-  readonly db: SupabaseClient;
+  /**
+   * The caller's database handle: reads go through `src/db/rls.ts`, writes through `api.*`
+   * (`callApi`). It carries the caller, not a privilege.
+   */
+  readonly db: Db;
   readonly requestId: string;
   readonly now: () => Date;
   /** Present so the UI can render the frozen-Home banner (ADR-044.4). */

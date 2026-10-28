@@ -1,189 +1,170 @@
-import { createHmac, randomUUID } from 'node:crypto';
-import { execFileSync } from 'node:child_process';
 import { config as loadEnv } from 'dotenv';
-import { createClient, type SupabaseClient } from '@supabase/supabase-js';
+import type { Firestore } from 'firebase-admin/firestore';
+import { auth, db as firestore } from '@/db/firestore';
+import type { Db } from '@/db/types';
+import { API_FUNCTIONS } from '@/db/api';
+import { SERVER_FUNCTIONS } from '@/db/api_server';
+import { isMotionError } from '@/core/errors';
+import { ensureProfile } from '@/db/app/profiles';
+
+/**
+ * The integration harness, on the Firebase emulators (TEST_STRATEGY.md §1; FIRESTORE_DATA_MODEL.md §9).
+ *
+ * Run with `npm run test:integration`, which starts the Auth, Firestore and Storage emulators for
+ * the `demo-apx` project, runs the suite against them and stops them. Nothing leaves the machine.
+ *
+ * What a test asserts is what a USER can do, so every assertion goes through `clientFor(userId)` —
+ * a handle with that person as the actor, exactly what `createUserClient()` builds from a session
+ * cookie — and through the same `api.*` functions and `src/db/rls.ts` reads the application uses.
+ * `fs()` writes fixtures directly and is never used to assert what a user can see.
+ */
 
 loadEnv({ path: '.env.local', quiet: true });
 
-export const SUPABASE_URL = process.env.NEXT_PUBLIC_SUPABASE_URL!;
-export const ANON_KEY = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!;
-export const JWT_SECRET = process.env.SUPABASE_JWT_SECRET!;
-const DB_CONTAINER = process.env.MOTION_DB_CONTAINER ?? 'supabase_db_MOTION';
+process.env.FIREBASE_PROJECT_ID ??= 'demo-apx';
+process.env.FIRESTORE_EMULATOR_HOST ??= '127.0.0.1:8080';
+process.env.FIREBASE_AUTH_EMULATOR_HOST ??= '127.0.0.1:9099';
+process.env.FIREBASE_STORAGE_EMULATOR_HOST ??= '127.0.0.1:9199';
 
-if (!SUPABASE_URL || !ANON_KEY || !JWT_SECRET) {
-  throw new Error('Integration tests need NEXT_PUBLIC_SUPABASE_URL, the anon key and SUPABASE_JWT_SECRET in .env.local');
+/** The Admin SDK's Firestore, for fixtures. */
+export function fs(): Firestore {
+  return firestore();
 }
 
-const b64url = (input: Buffer | string) =>
-  Buffer.from(input).toString('base64').replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '');
-
-export interface JwtOptions {
+export interface ClientOptions {
   email?: string;
-  expiresInSeconds?: number;
-  amrTimestamp?: number;
+  /** When the person last proved who they are (seconds); defaults to now. */
+  authTime?: number;
+  requestId?: string;
 }
 
-/**
- * Mint a Supabase-shaped access token. Tests exercise the real RLS path with a real JWT rather
- * than the service key, which is the only way the policies are actually proven (TEST_STRATEGY.md §1).
- */
-export function mintJwt(userId: string, options: JwtOptions = {}): string {
-  const now = Math.floor(Date.now() / 1000);
-  const header = { alg: 'HS256', typ: 'JWT' };
-  const payload = {
-    sub: userId,
-    role: 'authenticated',
-    aud: 'authenticated',
-    email: options.email ?? `${userId}@test.motion`,
-    amr: [{ method: 'password', timestamp: options.amrTimestamp ?? now }],
-    iat: now,
-    exp: now + (options.expiresInSeconds ?? 3600),
+/** A signed-in person's handle: what every assertion about access is made through. */
+export function clientFor(userId: string, options: ClientOptions = {}): Db {
+  return {
+    fs: firestore(),
+    actor: {
+      kind: 'user', userId, email: options.email ?? null,
+      authTime: options.authTime ?? Math.floor(Date.now() / 1000),
+    },
+    meta: { requestId: options.requestId ?? null },
   };
-  const signingInput = `${b64url(JSON.stringify(header))}.${b64url(JSON.stringify(payload))}`;
-  const signature = b64url(createHmac('sha256', JWT_SECRET).update(signingInput).digest());
-  return `${signingInput}.${signature}`;
 }
 
-/** A client that carries a user's JWT: SELECT under RLS and EXECUTE on api.* — nothing else. */
-export function userClient(jwt: string): SupabaseClient {
-  return createClient(SUPABASE_URL, ANON_KEY, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    global: { headers: { Authorization: `Bearer ${jwt}` } },
-  });
+/** Nobody signed in. */
+export function anonClient(): Db {
+  return { fs: firestore(), actor: { kind: 'anon' }, meta: {} };
 }
 
-export function clientFor(userId: string, options: JwtOptions = {}): SupabaseClient {
-  return userClient(mintJwt(userId, options));
+/** The server itself, optionally scoped to one organisation (what `withOrgScope` builds). */
+export function serviceClientScoped(organizationId?: string): Db {
+  return { fs: firestore(), actor: { kind: 'service', scope: organizationId ?? null }, meta: {} };
 }
 
-/** Fixture setup only. Never used to assert what a user can see. */
-export function adminSql(sql: string): string {
-  return execFileSync(
-    'docker',
-    ['exec', '-i', DB_CONTAINER, 'psql', '-U', 'postgres', '-d', 'postgres', '-tA', '-c', sql],
-    { encoding: 'utf8' },
-  ).trim();
+export interface RpcResult<T = unknown> {
+  data: T | null;
+  /** The MotionError a refusal raised, with `.code` (`NOT_FOUND`, `PERMISSION_DENIED`, …). */
+  error: (Error & { code?: string }) | null;
 }
 
 /**
- * A login row as GoTrue writes it. The token columns are empty strings, never NULL: GoTrue cannot
- * read a NULL there, and one such row breaks its admin user list for the whole instance.
+ * Calls an `api.*` (or, with `server: true`, an `api_server.*`) function and returns
+ * `{ data, error }` instead of throwing, so a test can assert a refusal as easily as a success.
  */
-export function createAuthUser(email: string): string {
-  const id = randomUUID();
-  adminSql(`
-    insert into auth.users (id, instance_id, aud, role, email, encrypted_password,
-                            email_confirmed_at, created_at, updated_at,
-                            confirmation_token, recovery_token, email_change, email_change_token_new,
-                            email_change_token_current, phone_change, phone_change_token, reauthentication_token)
-    values ('${id}','00000000-0000-0000-0000-000000000000','authenticated','authenticated',
-            '${email}','x', now(), now(), now(), '', '', '', '', '', '', '', '')
-  `);
-  return id;
-}
-
-/** Remove everything this suite created, so each file starts from a known state. */
-export function resetFixtures(): void {
-  adminSql(`
-    delete from public.organizations where slug like 'itest-%' or name like 'ITest%';
-    delete from public.platform_users where user_id in
-      (select id from auth.users where email like '%@itest.motion');
-    delete from auth.users where email like '%@itest.motion';
-    delete from public.api_rate_limits;
-  `);
-}
-
-/** Postgres SQLSTATE carried by a PostgREST error, when there is one. */
-export function sqlstate(error: unknown): string | undefined {
-  if (error && typeof error === 'object' && 'code' in error) {
-    return String((error as { code: unknown }).code);
+export async function rpc<T = unknown>(
+  db: Db, fn: string, args: Record<string, unknown> = {}, options: { server?: boolean } = {},
+): Promise<RpcResult<T>> {
+  const impl = (options.server ? SERVER_FUNCTIONS : API_FUNCTIONS)[fn];
+  if (!impl) throw new Error(`${options.server ? 'api_server' : 'api'}.${fn} is not defined`);
+  try {
+    return { data: (await impl(db, args)) as T, error: null };
+  } catch (error) {
+    return { data: null, error: error as Error & { code?: string } };
   }
-  return undefined;
 }
 
-export const PHASE1_TABLES = [
-  'organizations',
-  'profiles',
-  'platform_users',
-  'organization_memberships',
-  'organization_assignments',
-  'invitations',
-  'ownership_transfers',
-  'audit_events',
-  'jobs',
-  'api_rate_limits',
-  'role_permissions',
-  'platform_settings',
-  'platform_org_settings',
-] as const;
-
 /**
- * A service-role client for the ONE thing `adminSql` cannot reach: object storage.
- *
- * Fixture setup only, exactly like `adminSql` — never used to assert what a user can see. Storage
- * has no SQL surface, so a test about signed URLs (TEST_STRATEGY.md §4 case 5) has to put an object
- * there first.
+ * The SQLSTATE a refusal used to carry, from the MotionError it now is — so a ported assertion can
+ * keep saying `expect(sqlstate(error)).toBe('42501')`.
  */
-export function serviceStorage(): SupabaseClient {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) throw new Error('the local Supabase service-role key is not configured');
-  return createClient(SUPABASE_URL, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-  });
+export function sqlstate(error: unknown): string | undefined {
+  if (!isMotionError(error)) return undefined;
+  switch (error.code) {
+    case 'NOT_FOUND': return 'P0002';
+    case 'PERMISSION_DENIED': return '42501';
+    case 'VALIDATION': return '22023';
+    case 'CONFLICT': return '23505';
+    case 'QUOTA': return '53400';
+    default: return undefined;
+  }
 }
 
 /**
- * The session preamble a direct `psql` call needs to look like a scoped server request (ADR-090).
- *
- * PostgREST sets `request.jwt.claims` and `request.headers` on every request, and the organization
- * scope rides in the latter. `adminSql` opens a plain connection, so a test that drives an
- * `api_server.*` function has to set both itself — otherwise it is asserting against a session the
- * server never produces.
+ * A sign-in account in the Auth emulator, with its `profiles` document (what signing up creates).
+ * Returns the uid.
  */
-export function serverSession(organizationId?: string): string {
-  const headers = organizationId
-    ? `'{"x-motion-org":"${organizationId}"}'`
-    : `'{}'`;
-  return `select set_config('request.jwt.claims', '{"role":"service_role"}', false);
-    select set_config('request.headers', ${headers}, false);`;
+export async function createAuthUser(email: string, password = 'itest-password-1'): Promise<string> {
+  const existing = await auth().getUserByEmail(email).catch(() => null);
+  const user = existing ?? await auth().createUser({ email, password, emailVerified: true });
+  await ensureProfile(firestore(), user.uid, email, null);
+  return user.uid;
+}
+
+/** Deletes a whole organisation and everything under it. Fixture teardown only. */
+export async function deleteOrg(orgId: string): Promise<void> {
+  await firestore().recursiveDelete(firestore().collection('organizations').doc(orgId));
 }
 
 /**
- * A service-role client that asserts a given organization scope, or none (ADR-090).
- *
- * The production scope is set by `withOrgScope` from the `jobs` row; this exists so a test can
- * assert what happens when it is absent, or wrong, which is the whole point of a fail-closed guard.
+ * Removes what a suite created: organisations whose name or slug marks them as test fixtures, the
+ * accounts under a test domain, and the rate-limit counters.
  */
-export function serviceClientScoped(organizationId?: string): SupabaseClient {
-  const key = process.env.SUPABASE_SERVICE_ROLE_KEY;
-  if (!key) throw new Error('the local Supabase service-role key is not configured');
-  return createClient(SUPABASE_URL, key, {
-    auth: { persistSession: false, autoRefreshToken: false },
-    ...(organizationId ? { global: { headers: { 'x-motion-org': organizationId } } } : {}),
-  });
+export async function resetFixtures(match: { namePrefix?: string; emailDomain?: string } = {}): Promise<void> {
+  const f = firestore();
+  const prefix = match.namePrefix ?? 'ITest';
+  const orgs = await f.collection('organizations').get();
+  for (const o of orgs.docs) {
+    const name = String(o.get('name') ?? '');
+    const slug = String(o.get('slug') ?? '');
+    if (name.startsWith(prefix) || slug.startsWith('itest-')) await f.recursiveDelete(o.ref);
+  }
+  const domain = match.emailDomain ?? 'itest.motion';
+  let page = await auth().listUsers(1000);
+  for (;;) {
+    const doomed = page.users.filter((u) => u.email?.endsWith(`@${domain}`) || u.email?.endsWith(`.${domain}`));
+    if (doomed.length > 0) {
+      await auth().deleteUsers(doomed.map((u) => u.uid));
+      for (const u of doomed) {
+        await f.collection('profiles').doc(u.uid).delete();
+        await f.collection('platform_users').doc(u.uid).delete();
+      }
+    }
+    if (!page.pageToken) break;
+    page = await auth().listUsers(1000, page.pageToken);
+  }
+  await f.recursiveDelete(f.collection('api_rate_limits'));
+}
+
+/** Clears the whole emulator database — the clean slate the emulator offers and Postgres did not. */
+export async function wipeEmulator(): Promise<void> {
+  const host = process.env.FIRESTORE_EMULATOR_HOST;
+  const project = process.env.FIREBASE_PROJECT_ID;
+  await fetch(`http://${host}/emulator/v1/projects/${project}/databases/(default)/documents`, { method: 'DELETE' });
 }
 
 /**
- * Drains the queue until ONE named job reaches a terminal state.
- *
- * `drainJobs(n)` claims at most n jobs from a queue every suite shares, so a fixed count is a bet
- * that nobody else left work in it — and when the bet loses, the suite fails on an empty
- * `metric_current` for a reason that has nothing to do with what it tests. Waiting on the job's own
- * row is the thing each suite actually means.
- *
- * Returns the job's terminal status, so a caller can assert it succeeded rather than assume it.
+ * Drains the queue until ONE named job reaches a terminal state, and returns that state.
+ * `drain(n)` runs at most n jobs; waiting on the job's own document is what each suite means.
  */
 export async function drainUntilFinished(
   drain: (max: number) => Promise<unknown>,
   jobId: string,
   rounds = 12,
 ): Promise<string> {
+  const status = async () => String((await firestore().collection('jobs').doc(jobId).get()).get('status') ?? '');
   for (let round = 0; round < rounds; round += 1) {
-    const status = adminSql(`select status from public.jobs where id = '${jobId}'`).trim();
-    if (status === 'succeeded' || status === 'failed' || status === 'dead' || status === '') {
-      return status;
-    }
+    const s = await status();
+    if (s === 'succeeded' || s === 'failed' || s === 'dead' || s === '') return s;
     await drain(3);
   }
-  return adminSql(`select status from public.jobs where id = '${jobId}'`).trim();
+  return status();
 }

@@ -1,67 +1,49 @@
 import 'server-only';
-import { createServerClient } from '@supabase/ssr';
-import { cookies } from 'next/headers';
-import type { SupabaseClient } from '@supabase/supabase-js';
+import { cookies, headers } from 'next/headers';
+import { auth, db as firestore } from '@/db/firestore';
+import type { Db, RequestMeta } from '@/db/types';
 
 /**
- * The user-session client: the anon key plus the caller's JWT.
+ * The user-session handle: Firestore plus the caller, from the Firebase session cookie.
  *
- * It can SELECT under RLS and EXECUTE api.* functions. It holds NO table write privilege
- * (ADR-026), which is why the anon key being public is safe.
+ * It replaces the anon-key Supabase client. It carries no privilege of its own — every read goes
+ * through `src/db/rls.ts` and every write through an `api.*` function, both of which decide from
+ * `actor` — so a request without a valid session is simply `anon`.
+ *
+ * The session cookie is verified with revocation checked, so signing a person out everywhere
+ * (`revokeRefreshTokens`, `api_server.revoke_user_sessions`) ends this session on its next request.
  */
-export async function createUserClient(): Promise<SupabaseClient> {
-  const cookieStore = await cookies();
-  return createServerClient(
-    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
-    requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
-    {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll();
-        },
-        setAll(cookiesToSet) {
-          try {
-            for (const { name, value, options } of cookiesToSet) {
-              cookieStore.set(name, value, options);
-            }
-          } catch {
-            // Called from a Server Component: middleware refreshes the session instead.
-          }
-        },
-      },
-    },
-  );
+export const SESSION_COOKIE = '__session';
+
+export async function createUserClient(): Promise<Db> {
+  const [cookieStore, headerStore] = await Promise.all([cookies(), headers()]);
+  const meta: RequestMeta = {
+    requestId: headerStore.get('x-request-id'),
+    ip: headerStore.get('x-forwarded-for')?.split(',')[0]?.trim() || null,
+    userAgent: headerStore.get('user-agent'),
+  };
+  const token = cookieStore.get(SESSION_COOKIE)?.value;
+  const actor = await verifySession(token);
+  return { fs: firestore(), actor, meta };
 }
 
-function requireEnv(name: string): string {
-  const value = process.env[name];
-  if (!value) throw new Error(`Missing required environment variable ${name}`);
-  return value;
+/** Verifies a session cookie; anything invalid, expired or revoked is `anon`. */
+export async function verifySession(token: string | undefined): Promise<Db['actor']> {
+  if (!token) return { kind: 'anon' };
+  try {
+    const claims = await auth().verifySessionCookie(token, true);
+    return {
+      kind: 'user',
+      userId: claims.uid,
+      email: claims.email ?? null,
+      authTime: typeof claims.auth_time === 'number' ? claims.auth_time : null,
+    };
+  } catch {
+    return { kind: 'anon' };
+  }
 }
 
-/**
- * A request-scoped client for the PKCE callback route, which must write refreshed session cookies
- * onto an outgoing response rather than into the Server Component cookie store.
- *
- * It lives here because `core/db` is the only layer allowed to import Supabase (ADR-022); routes
- * receive a ready-made client instead of constructing one.
- */
-export function createCallbackClient(
-  getCookies: () => Array<{ name: string; value: string }>,
-  setCookie: (name: string, value: string, options: Record<string, unknown>) => void,
-): SupabaseClient {
-  return createServerClient(
-    requireEnv('NEXT_PUBLIC_SUPABASE_URL'),
-    requireEnv('NEXT_PUBLIC_SUPABASE_ANON_KEY'),
-    {
-      cookies: {
-        getAll: () => getCookies(),
-        setAll: (cookiesToSet) => {
-          for (const { name, value, options } of cookiesToSet) {
-            setCookie(name, value, (options ?? {}) as Record<string, unknown>);
-          }
-        },
-      },
-    },
-  );
+/** A handle for a known user, outside a request (job workers acting for a person, tests). */
+export function userDb(userId: string, email: string | null = null, meta: RequestMeta = {}): Db {
+  return { fs: firestore(), actor: { kind: 'user', userId, email, authTime: null }, meta };
 }
