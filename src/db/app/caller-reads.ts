@@ -2,7 +2,7 @@ import 'server-only';
 import type { DocumentData, Query } from 'firebase-admin/firestore';
 import { orgRoleOf } from './access';
 import { orgRowById, orgRows } from '../rls';
-import { globalRow, orgCollection, orgRow, type OrgTable } from '../schema';
+import { globalRow, inChunks, orgCollection, orgRow, type OrgTable } from '../schema';
 import type { Db } from '../types';
 
 /**
@@ -54,13 +54,8 @@ export async function readRowsByIds<T = DocumentData>(
   db: Db, orgId: string, table: OrgTable, ids: readonly (string | null | undefined)[],
 ): Promise<T[]> {
   const unique = [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0))];
-  const out: T[] = [];
   // `in` takes at most 30 values (FIRESTORE_DATA_MODEL.md §5).
-  for (let i = 0; i < unique.length; i += 30) {
-    const chunk = unique.slice(i, i + 30);
-    out.push(...await readRows<T>(db, orgId, table, (q) => q.where('id', 'in', chunk)));
-  }
-  return out;
+  return inChunks(unique, 30, (chunk) => readRows<T>(db, orgId, table, (q) => q.where('id', 'in', chunk)));
 }
 
 /**

@@ -20,6 +20,7 @@
     "test:integration:watch": "vitest --project integration",
     "ai:eval": "vitest run --project eval",
     "ai:eval:live": "tsx scripts/ai-eval-live.ts",
+    "db:indexes": "tsx scripts/firestore-indexes.ts",
     "db:start": "node -e \"require('fs').mkdirSync('firebase/emulator-data',{recursive:true})\" && firebase emulators:start --only auth,firestore,storage --project demo-apx --import firebase/emulator-data --export-on-exit firebase/emulator-data",
     "e2e": "playwright test",
     "e2e:smoke": "playwright test journey-1 journey-8",

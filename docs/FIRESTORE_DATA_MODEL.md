@@ -142,12 +142,14 @@ assertions, `createAuthUser(email)` (async), `fs()` for fixtures, `resetFixtures
 
 ## 11. Before a real Firebase project
 
-1. **Composite indexes.** `firebase/firestore.indexes.json` is empty: the emulator runs any query,
-   a real project refuses a query that filters and orders on different fields until its index
-   exists. Collect them (run the suites against a real test project and follow the links in the
-   errors, or derive them from the `where`/`orderBy` chains in `src/db`) before going live.
-2. **Data.** Copy `firebase/emulator-data` (Firestore, Auth with password hashes, Storage) into the
-   project.
+1. **Composite indexes.** The emulator runs any query; a real project refuses a query that filters
+   and orders on different fields until its index exists. Record what the app queries and build the
+   file from it: `FIRESTORE_QUERY_LOG=logs/firestore-queries.jsonl npm run test:integration`, then
+   `npm run db:indexes -- logs/firestore-queries.jsonl` (`--check` in CI). A query only an untested
+   path makes is not in the log: a real project's error links to the missing index.
+2. **Data.** `scripts/firebase-copy.ts` (dump from the emulators, load into the project): Firestore,
+   the accounts with their bcrypt hashes, the stored files, the AI keys re-sealed under the
+   project's `APX_SECRETS_KEY`, and optionally the super admin handed to another account.
 3. **Speed.** Measure the calculation engine there; on the emulator the engine-heavy integration
    files take minutes each (many one-document reads in sequence).
 4. Settings: `FIREBASE_PROJECT_ID`, `FIREBASE_STORAGE_BUCKET`, `NEXT_PUBLIC_FIREBASE_*`,

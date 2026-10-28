@@ -6,6 +6,7 @@ import { API_FUNCTIONS } from '@/db/api';
 import { SERVER_FUNCTIONS } from '@/db/api_server';
 import { isMotionError } from '@/core/errors';
 import { ensureProfile } from '@/db/app/profiles';
+import { startQueryLog } from './query-log';
 
 /**
  * The integration harness, on the Firebase emulators (TEST_STRATEGY.md §1; FIRESTORE_DATA_MODEL.md §9).
@@ -25,6 +26,9 @@ process.env.FIREBASE_PROJECT_ID ??= 'demo-apx';
 process.env.FIRESTORE_EMULATOR_HOST ??= '127.0.0.1:8080';
 process.env.FIREBASE_AUTH_EMULATOR_HOST ??= '127.0.0.1:9099';
 process.env.FIREBASE_STORAGE_EMULATOR_HOST ??= '127.0.0.1:9199';
+
+// `scripts/firestore-indexes.ts` builds the composite indexes from what the suite actually queries.
+if (process.env.FIRESTORE_QUERY_LOG) startQueryLog(process.env.FIRESTORE_QUERY_LOG);
 
 /** The Admin SDK's Firestore, for fixtures. */
 export function fs(): Firestore {

@@ -4,7 +4,7 @@ import type { Permission } from '@/core/permissions';
 import {
   effectivePermission, isSuperAdmin, orgRoleOf, adviserOrgIds, type OrgRole,
 } from './app/access';
-import { globalRow, orgCollection, orgRow, type OrgTable } from './schema';
+import { globalRow, inChunks, orgCollection, orgRow, type OrgTable } from './schema';
 import { readerOf, uidOf, type Db } from './types';
 
 /**
@@ -369,14 +369,11 @@ async function ownAiMessageIds(c: ReadCtx, messageIds: string[]): Promise<Set<st
 }
 
 async function currentSnapshotIds(c: ReadCtx, snapshotIds: string[]): Promise<Set<string>> {
-  const out = new Set<string>();
-  const unique = [...new Set(snapshotIds)];
-  for (let i = 0; i < unique.length; i += 30) {
-    const chunk = unique.slice(i, i + 30);
+  const current = await inChunks([...new Set(snapshotIds)], 30, async (chunk) => {
     const snap = await orgCollection(c.db.fs, c.orgId, 'metric_current').where('snapshot_id', 'in', chunk).get();
-    for (const d of snap.docs) out.add(String(d.get('snapshot_id')));
-  }
-  return out;
+    return snap.docs.map((d) => String(d.get('snapshot_id')));
+  });
+  return new Set(current);
 }
 
 /** Global tables' SELECT policies. */

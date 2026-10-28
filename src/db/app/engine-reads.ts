@@ -3,7 +3,7 @@ import type { DocumentData, Query } from 'firebase-admin/firestore';
 import type { Permission } from '@/core/permissions';
 import { orgRoleOf } from './access';
 import { orgRows, readCtx } from '../rls';
-import { globalRow, orgCollection, type OrgTable } from '../schema';
+import { globalRow, inChunks, orgCollection, type OrgTable } from '../schema';
 import { uidOf, type Db } from '../types';
 
 /**
@@ -35,12 +35,8 @@ export async function readRowsIn(
   db: Db, orgId: string, table: OrgTable, field: string, ids: readonly (string | null | undefined)[], refine?: Refine,
 ): Promise<DocumentData[]> {
   const unique = [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0))];
-  const out: DocumentData[] = [];
-  for (let i = 0; i < unique.length; i += 30) {
-    const chunk = unique.slice(i, i + 30);
-    out.push(...await readRows(db, orgId, table, (q) => (refine ? refine(q.where(field, 'in', chunk)) : q.where(field, 'in', chunk))));
-  }
-  return out;
+  return inChunks(unique, 30, (chunk) =>
+    readRows(db, orgId, table, (q) => (refine ? refine(q.where(field, 'in', chunk)) : q.where(field, 'in', chunk))));
 }
 
 /**

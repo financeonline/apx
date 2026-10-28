@@ -101,6 +101,17 @@ export function acrossOrgs(fs: Firestore, table: OrgTable): Query {
   return fs.collectionGroup(table);
 }
 
+/**
+ * Reads `values` in slices of `size` (an `in` filter takes at most 30), all slices at once, and
+ * joins the results in slice order. One slice after another made a read of a few hundred ids a few
+ * dozen round trips in a row — seconds on a page that asks for every current figure.
+ */
+export async function inChunks<V, T>(values: readonly V[], size: number, read: (slice: V[]) => Promise<T[]>): Promise<T[]> {
+  const slices: V[][] = [];
+  for (let i = 0; i < values.length; i += size) slices.push(values.slice(i, i + size));
+  return (await Promise.all(slices.map(read))).flat();
+}
+
 /** The document id as a field to order or page by (a stable tie-breaker after any other order). */
 export const documentIdField = (): FieldPath => FieldPath.documentId();
 

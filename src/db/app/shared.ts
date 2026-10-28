@@ -15,18 +15,28 @@ import { hasPermissionOf } from './access';
 
 // ── Names ────────────────────────────────────────────────────────────────────────────────────────
 
+/** Runs of whitespace, punctuation, symbols and control characters — but never a letter (Ⓐ is one). */
+const NAME_SEPARATORS = /(?:(?!\p{Alphabetic})[\p{White_Space}\p{P}\p{S}\p{Cc}])+/gu;
+
+/** Unicode's SIMPLE lower-case mapping of one code point (what Postgres' pg_c_utf8 applied). */
+function simpleLower(ch: string): string {
+  if (ch === 'İ') return 'i̇'; // İ by its full mapping: "İzmir" and "Izmir" are two names
+  const lower = ch.toLowerCase(); // one code point at a time, so final-sigma context never applies
+  return [...lower].length === 1 ? lower : ch;
+}
+
 /**
- * `app.normalize_name`: the comparison key for counterparty, account, product, campaign and channel
- * names — NFC, case-folded (Turkish dotted İ and final sigma handled), runs of whitespace,
- * punctuation and control characters collapsed to one space, trimmed.
+ * `app.normalize_name` (migration 20261006000001): the comparison key for counterparty, account,
+ * product, campaign and channel names — NFC, simple case-folded code point by code point (Turkish
+ * dotted İ by its full mapping, final sigma as sigma), runs of whitespace, punctuation, symbols and
+ * control characters collapsed to one space, trimmed. It must equal the import path's
+ * `storedNameKey` for every code point (test/integration/unicode-names.test.ts): the keys already
+ * stored were made by PostgreSQL with exactly this rule.
  */
 export function normalizeName(name: string): string {
-  return name
-    .normalize('NFC')
-    .replace(/İ/g, 'i̇')
-    .toLowerCase()
-    .replace(/ς/g, 'σ')
-    .replace(/[\s\p{P}\p{Cc}$+<=>^`|~]+/gu, ' ')
+  return [...name.normalize('NFC')].map(simpleLower).join('')
+    .replace(/ς/gu, 'σ')
+    .replace(NAME_SEPARATORS, ' ')
     .trim();
 }
 

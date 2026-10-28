@@ -5,7 +5,7 @@ import { toMotionError } from '@/core/errors';
 import type { Permission } from '@/core/permissions';
 import { orgRoleOf } from '@/db/app/access';
 import { orgRows, readCtx } from '@/db/rls';
-import { globalRow, orgCollection, type OrgTable } from '@/db/schema';
+import { globalRow, inChunks, orgCollection, type OrgTable } from '@/db/schema';
 import { uidOf, type Db } from '@/db/types';
 import type { SnapshotRow, PeriodLabel } from '../domain/view-models';
 
@@ -50,16 +50,10 @@ async function readRowsIn(
   db: Db, orgId: string, table: OrgTable, field: string, values: readonly string[],
   refine?: (q: Query) => Query, requestId?: string,
 ): Promise<DocumentData[]> {
-  const unique = [...new Set(values)];
-  const out: DocumentData[] = [];
-  for (let i = 0; i < unique.length; i += 30) {
-    const chunk = unique.slice(i, i + 30);
-    out.push(...await readRows(db, orgId, table, (q) => {
-      const narrowed = q.where(field, 'in', chunk);
-      return refine ? refine(narrowed) : narrowed;
-    }, requestId));
-  }
-  return out;
+  return inChunks([...new Set(values)], 30, (chunk) => readRows(db, orgId, table, (q) => {
+    const narrowed = q.where(field, 'in', chunk);
+    return refine ? refine(narrowed) : narrowed;
+  }, requestId));
 }
 
 /**
