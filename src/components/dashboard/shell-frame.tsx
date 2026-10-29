@@ -103,10 +103,11 @@ export function ShellFrame({
 
   return (
     <div data-nav={docked ? 'shown' : 'hidden'} className="group/shell min-h-dvh lg:data-[nav=shown]:flex">
-      {/* The docked sidebar, from `lg`, while shown. */}
+      {/* The docked sidebar, from `lg`, while shown. Above the page: the company pages' light canvas
+          (`LobbyCanvas`) paints its background out to the window's edges and would cover it. */}
       <aside
         aria-label="Main menu"
-        className="isolate sticky top-0 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface/80 px-4 pt-5 lg:group-data-[nav=shown]/shell:flex"
+        className="isolate sticky top-0 z-30 hidden h-dvh w-64 shrink-0 flex-col overflow-y-auto border-r border-line bg-surface/80 px-4 pt-5 lg:group-data-[nav=shown]/shell:flex"
       >
         <div className="mb-8 flex items-start justify-between gap-2">
           {brand}
