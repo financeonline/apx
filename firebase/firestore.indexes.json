@@ -1,6 +1,20 @@
 {
   "indexes": [
     {
+      "collectionGroup": "action_comments",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "action_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "created_at",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "actions",
       "queryScope": "COLLECTION_GROUP",
       "fields": [
@@ -83,20 +97,6 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
-          "fieldPath": "role",
-          "order": "ASCENDING"
-        },
-        {
-          "fieldPath": "created_at",
-          "order": "ASCENDING"
-        }
-      ]
-    },
-    {
-      "collectionGroup": "ai_messages",
-      "queryScope": "COLLECTION",
-      "fields": [
-        {
           "fieldPath": "created_at",
           "order": "ASCENDING"
         },
@@ -106,6 +106,20 @@
         },
         {
           "fieldPath": "output_tokens",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ai_messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "role",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "created_at",
           "order": "ASCENDING"
         }
       ]
@@ -307,6 +321,32 @@
       "queryScope": "COLLECTION",
       "fields": [
         {
+          "fieldPath": "period_id",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "record_status",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "superseded_by",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "entry_date",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "id",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "ledger_entries",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
           "fieldPath": "record_status",
           "order": "ASCENDING"
         },
@@ -403,6 +443,20 @@
         {
           "fieldPath": "storage_path",
           "order": "ASCENDING"
+        }
+      ]
+    },
+    {
+      "collectionGroup": "source_documents",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "deleted_at",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "created_at",
+          "order": "DESCENDING"
         }
       ]
     },
