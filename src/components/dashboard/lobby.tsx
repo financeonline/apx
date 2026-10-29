@@ -1,11 +1,12 @@
 import Link from 'next/link';
 import type { ReactNode } from 'react';
-import { ArrowRight, ChevronRight, LayoutGrid, Plus } from 'lucide-react';
+import { ArrowRight, ChevronRight } from 'lucide-react';
 import type { AlertView, MetricCardView } from '@/modules/dashboard';
 import type { HealthCardView } from '@/modules/health';
 import type { Action } from '@/modules/actions';
 import { ABOVE_CARD_LINK, CardLink, TOUCH_TARGET } from '@/components/ui/clickable-card';
 import { formatDate } from '@/components/labels';
+import { MoreApps } from './more-apps';
 import { severityLabel } from './alert-presentation';
 import { priorityLabel } from './action-card';
 import {
@@ -67,11 +68,12 @@ export interface LobbyDepartment {
 
 /**
  * "Your departments": one tile per department the reader may open, the current one marked, and
- * "More apps" — every department — last. Numbered as the reference; the count is of real tiles.
+ * "More apps" last — it opens the workspace window (`MoreApps`). Numbered as the reference; the
+ * count is of real tiles.
  */
 export function DepartmentStrip({
-  departments, currentKey, moreHref,
-}: { departments: readonly LobbyDepartment[]; currentKey: string; moreHref: string | null }) {
+  departments, currentKey, showMore,
+}: { departments: readonly LobbyDepartment[]; currentKey: string; showMore: boolean }) {
   return (
     <nav aria-labelledby="lobby-departments" className="border-b border-line pb-6">
       <div className="flex items-baseline gap-4">
@@ -109,21 +111,9 @@ export function DepartmentStrip({
             </li>
           );
         })}
-        {moreHref ? (
+        {showMore ? (
           <li className="min-w-0">
-            <Link
-              href={moreHref}
-              className="flex h-full min-w-0 items-center gap-3 rounded-[0.625rem] border border-dashed border-line-strong bg-surface-sunken px-4 py-3 transition-colors hover:border-accent/50"
-            >
-              <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-lg bg-accent-soft text-accent [&_svg]:size-[1.125rem]">
-                <LayoutGrid />
-              </span>
-              <span className="min-w-0 flex-1 leading-tight">
-                <span className="block truncate text-sm font-semibold text-ink">More apps</span>
-                <span className="mt-0.5 block truncate text-xs text-ink-muted">Every department</span>
-              </span>
-              <Plus aria-hidden="true" className="size-4 shrink-0 text-ink-muted" />
-            </Link>
+            <MoreApps departments={departments} />
           </li>
         ) : null}
       </ul>

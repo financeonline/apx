@@ -185,8 +185,8 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
 
   /*
    * ADR-176: Home is the client lobby. The departments the reader may open head it, as a row — each
-   * gated as its own section is, so a tile never leads to a refusal — and "More apps" opens
-   * Departments, where every one of them is.
+   * gated as its own section is, so a tile never leads to a refusal — and "More apps" opens the
+   * workspace window (owner's reference, 2026-10-29) for a reader who may see Departments.
    */
   const departments: LobbyDepartment[] = [
     { key: 'analysis', title: 'Financial Analysis', line: 'Understand performance', href: `${base}/home`, icon: <ChartColumn /> },
@@ -197,7 +197,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
     ...(showsActions
       ? [{ key: 'actions', title: 'Manage Workflow', line: 'Assign, track & review', href: `${base}/actions`, icon: <ListChecks /> }] : []),
   ];
-  const moreHref = can(ctx, DEPARTMENTS_PERMISSION) ? `${base}/departments` : null;
+  const showMore = can(ctx, DEPARTMENTS_PERMISSION);
 
   const orgName = org?.name ?? 'Your company';
   const currency = org?.baseCurrency ?? 'GBP';
@@ -206,7 +206,7 @@ export default async function HomePage({ params }: { params: Promise<{ orgSlug: 
 
   const top = (orgLine: string) => (
     <>
-      <DepartmentStrip departments={departments} currentKey="analysis" moreHref={moreHref} />
+      <DepartmentStrip departments={departments} currentKey="analysis" showMore={showMore} />
       <LobbyHero section="Financial Analysis" greeting={greeting} orgName={orgName} orgLine={orgLine} />
     </>
   );
