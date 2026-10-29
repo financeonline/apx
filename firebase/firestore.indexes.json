@@ -93,6 +93,24 @@
       ]
     },
     {
+      "collectionGroup": "ai_messages",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "created_at",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "input_tokens",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "output_tokens",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "ai_tool_calls",
       "queryScope": "COLLECTION",
       "fields": [
