@@ -51,14 +51,20 @@ export class NotFound extends MotionError {
   }
 }
 
+/** The sentence `requireSuperAdmin(db, true)` raises when the last sign-in is over ten minutes old. */
+export const REAUTH_REQUIRED = 're-authenticate within the last 10 minutes to continue';
+
 export class PermissionDenied extends MotionError {
   readonly code = 'PERMISSION_DENIED' as const;
   readonly status = 403;
   constructor(public readonly permission?: string) {
     super(
-      permission
-        ? `You do not have permission to do this (${permission}).`
-        : 'You do not have permission to do this.',
+      permission === REAUTH_REQUIRED
+        // Not a missing permission: say what to do (the "Confirm it is you" bar on the platform pages).
+        ? 'For your security, confirm it is you: enter your password in "Confirm it is you" at the top of this page, then try again.'
+        : permission
+          ? `You do not have permission to do this (${permission}).`
+          : 'You do not have permission to do this.',
     );
   }
 }

@@ -17,6 +17,9 @@ export async function createCompanyAction(_previous: ActionResult | null, form: 
   const ctx = await getPlatformContext();
   try {
     assertCan(ctx, 'platform.orgs.manage');
+    // Creating a company needs a sign-in from the last ten minutes; the password here renews it in the same step.
+    const current = form.get('current_password');
+    if (typeof current === 'string' && current !== '') await confirmPassword(ctx, current);
     const created = await createCompanyAsPlatform(ctx, {
       name: text(form, 'name'),
       countryCode: text(form, 'country_code'),

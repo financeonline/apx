@@ -1,6 +1,7 @@
 import 'server-only';
 import { ROLE_MATRIX, type EffectiveRole, type GrantedRole, type Permission } from '@/core/permissions';
 import { raise } from '../raise';
+import { REAUTH_REQUIRED } from '@/core/errors';
 import { globalRow, orgCollection, orgRow, overrideId } from '../schema';
 import { readerOf, uidOf, type Db, type Reader } from '../types';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
@@ -245,6 +246,6 @@ export async function requireSuperAdmin(db: Db, reauth = false, tx?: Transaction
     raise.denied('platform administration requires the super admin');
   }
   if (reauth && !hasRecentAuth(db, 600)) {
-    raise.denied('re-authenticate within the last 10 minutes to continue');
+    raise.denied(REAUTH_REQUIRED);
   }
 }
