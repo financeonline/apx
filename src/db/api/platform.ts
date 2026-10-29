@@ -667,7 +667,9 @@ async function set_org_module(db: Db, args: Record<string, unknown>): Promise<Re
   const key = arg.str(args, 'p_feature_key');
   const on = arg.bool(args, 'p_on');
   await throttleRpc(db);
-  await requireSuperAdmin(db, true);
+  // No recent-sign-in check (owner, 2026-10-29: the super admin switches systems directly). Still the
+  // super admin only, and audited; nothing is deleted by a switch.
+  await requireSuperAdmin(db);
   if (key === null || !SWITCHABLE_MODULES.has(key)) raise.invalid('that is not a system APX can switch');
   if (on === null) raise.invalid('on or off is required');
 
