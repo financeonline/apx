@@ -210,7 +210,10 @@ export function runPipeline(input: PipelineInput): PipelineResult {
      * as data made "Date" fail the date column on every file and left a reviewer dismissing an
      * "error" that was the column headings (ADR-083).
      */
-    const nonTabular = row.nonTabular === true || (table.headerRow !== undefined && row.rowNumber === table.headerRow);
+    // `headerRow` is the header's 1-based place in `rows`, not its line number: a CSV numbers rows by
+    // source line, so a blank line above the header made the two differ and the headings an error row.
+    const headerLine = table.headerRow === undefined ? undefined : table.rows[table.headerRow - 1];
+    const nonTabular = row.nonTabular === true || row === headerLine;
     const { mapped, raw } = mapRow(table.columns, row.cells, columnMap);
     return { row, nonTabular, mapped, raw };
   });

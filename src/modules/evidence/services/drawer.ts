@@ -2,7 +2,7 @@ import 'server-only';
 import { InternalError, NotFound } from '@/core/errors';
 import { formatMoney, parseDecimalOrNull } from '@/core/money';
 import { assertCan } from '@/core/permissions';
-import { orgRowById, orgRows } from '@/db/rls';
+import { orgRowById, orgRows, orgRowsByIds } from '@/db/rls';
 import type { Db } from '@/db/types';
 import type { AccessContext } from '@/modules/tenancy';
 import { metricDefinition, isMetricKey, type MetricUnit } from '@/modules/financial-engine';
@@ -239,10 +239,8 @@ async function restsOnStatements(ctx: AccessContext, orgId: string, snapshot: Ro
   if (!Array.isArray(ids) || ids.length === 0) return [];
   const unique = [...new Set(ids.map(String))];
   const batches: Row[] = [];
-  for (let i = 0; i < unique.length; i += 30) {
-    const chunk = unique.slice(i, i + 30);
-    batches.push(...await orgRows<Row>(ctx.db, orgId, 'import_batches', (q) => q.where('id', 'in', chunk)));
-  }
+  // By document id, under the table's policy (orgRowsByIds) — a `where('id','in',…)` scans the collection on the index-less emulator.
+  batches.push(...await orgRowsByIds<Row>(ctx.db, orgId, 'import_batches', unique));
   // The embedded `source_documents(original_filename)`: a second read, null where the caller may
   // not see the document (as the embed was under RLS).
   const fileNames = new Map<string, string>();
@@ -331,11 +329,14 @@ async function periodLabelOf(ctx: AccessContext, orgId: string, periodId: string
 async function currency(
   ctx: AccessContext, orgId: string, snapshot: Row,
 ): Promise<{ isCurrent: boolean; currentValue: string | null }> {
+  // A standard category has no id; without its key every category of the month would match.
+  const dimensionKey = str(snapshot, 'dimension_key');
   const currentId = await currentCellSnapshot(ctx.db, orgId, {
     periodId: String(snapshot.period_id),
     metricKey: String(snapshot.metric_key),
     dimensionType: String(snapshot.dimension_type),
     dimensionId: str(snapshot, 'dimension_id'),
+    ...(dimensionKey !== null ? { dimensionKey } : {}),
   });
   if (currentId === null || currentId === String(snapshot.id)) {
     return { isCurrent: true, currentValue: null };
@@ -641,6 +642,8 @@ export async function currentSnapshotId(
     readonly periodId: string;
     readonly dimensionType?: string;
     readonly dimensionId?: string | null;
+    /** A standard category's name (ADR-053): the dimension that is not a row has no id. */
+    readonly dimensionKey?: string | null;
   },
 ): Promise<string | null> {
   const orgId = requireOrgId(ctx);
@@ -649,6 +652,7 @@ export async function currentSnapshotId(
     metricKey: input.metricKey,
     dimensionType: input.dimensionType ?? 'none',
     dimensionId: input.dimensionId ? input.dimensionId : null,
+    ...(input.dimensionKey ? { dimensionKey: input.dimensionKey } : {}),
   });
 }
 
@@ -659,13 +663,16 @@ export async function currentSnapshotId(
  */
 async function currentCellSnapshot(
   db: Db, orgId: string,
-  cell: { periodId: string; metricKey: string; dimensionType: string; dimensionId: string | null },
+  cell: { periodId: string; metricKey: string; dimensionType: string; dimensionId: string | null; dimensionKey?: string },
 ): Promise<string | null> {
-  const rows = await orgRows<{ snapshot_id?: string }>(db, orgId, 'metric_current', (q) => q
-    .where('period_id', '==', cell.periodId)
-    .where('metric_key', '==', cell.metricKey)
-    .where('dimension_type', '==', cell.dimensionType)
-    .where('dimension_id', '==', cell.dimensionId));
+  const rows = await orgRows<{ snapshot_id?: string }>(db, orgId, 'metric_current', (q) => {
+    const byCell = q
+      .where('period_id', '==', cell.periodId)
+      .where('metric_key', '==', cell.metricKey)
+      .where('dimension_type', '==', cell.dimensionType)
+      .where('dimension_id', '==', cell.dimensionId);
+    return cell.dimensionKey === undefined ? byCell : byCell.where('dimension_key', '==', cell.dimensionKey);
+  });
   if (rows.length > 1) throw new InternalError();
   return rows[0]?.snapshot_id ?? null;
 }

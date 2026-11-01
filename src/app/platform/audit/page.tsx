@@ -1,8 +1,9 @@
 import Link from 'next/link';
 import { assertCan } from '@/core/permissions';
+import { PermissionDenied, REAUTH_REQUIRED } from '@/core/errors';
 import { readableOrganizations, searchAudit } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
-import { Card, CardBody, EmptyState, PageHeader } from '@/components/ui/surfaces';
+import { Banner, Card, CardBody, EmptyState, PageHeader } from '@/components/ui/surfaces';
 import { THead, TBody, TR, TD } from '@/components/ui/table';
 import { auditActionLabel, formatDateTime } from '@/components/labels';
 import { Button, Input, NativeSelect, Table } from '@/components/ui/shadcn';
@@ -52,10 +53,29 @@ export default async function PlatformAuditPage({
     .sort((a, b) => a.name.localeCompare(b.name))
     .slice(0, 200);
 
-  const events = await searchAudit(ctx, {
-    organizationId, action: prefix, from: since,
-    limit: PAGE_SIZE, offset: (pageNumber - 1) * PAGE_SIZE,
-  });
+  // Reading the whole platform's trail needs a sign-in from the last ten minutes. An older one is
+  // not an error page: the "Confirm it is you" bar sits above, and this says to use it (QA, 2 Nov
+  // 2026: the refusal escaped as a 500).
+  let events: Awaited<ReturnType<typeof searchAudit>>;
+  try {
+    events = await searchAudit(ctx, {
+      organizationId, action: prefix, from: since,
+      limit: PAGE_SIZE, offset: (pageNumber - 1) * PAGE_SIZE,
+    });
+  } catch (error) {
+    if (!(error instanceof PermissionDenied && error.permission === REAUTH_REQUIRED)) throw error;
+    return (
+      <>
+        <PageHeader title="Audit" description="Everything APX recorded, newest first." />
+        <div className="mt-6">
+          <Banner tone="info" title="Confirm it is you to see the audit log">
+            The audit log needs your password from the last ten minutes. Enter it in “Confirm it is you”
+            at the top of this page, then open the audit log again.
+          </Banner>
+        </div>
+      </>
+    );
+  }
 
   const href = (over: Record<string, string | null>) => {
     const next = new URLSearchParams();

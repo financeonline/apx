@@ -229,6 +229,27 @@ export interface CardOptions {
   readonly showMinorUnits?: boolean;
 }
 
+/**
+ * The "Why?" link of one figure (§4): the metric, the month and — for a figure broken down by an
+ * account, a customer or a standard category — WHICH row of the breakdown. Without the dimension the
+ * evidence page looks for the undimensioned figure, which a breakdown-only metric
+ * (`expense_by_category`, `expense_by_account`, …) does not have, and the link opens a 404.
+ * Scalars keep the plain `?metric=&period=` form.
+ */
+export function evidenceHref(
+  orgSlug: string,
+  cell: Pick<SnapshotRow, 'metricKey' | 'periodId' | 'dimensionType' | 'dimensionId' | 'dimensionKey'>,
+  periodId: string = cell.periodId,
+): string {
+  const query = new URLSearchParams({ metric: cell.metricKey, period: periodId });
+  if (cell.dimensionType && cell.dimensionType !== 'none') {
+    query.set('dim', cell.dimensionType);
+    if (cell.dimensionId) query.set('dimension', cell.dimensionId);
+    if (cell.dimensionKey) query.set('key', cell.dimensionKey);
+  }
+  return `/app/${orgSlug}/evidence?${query.toString()}`;
+}
+
 export function toMetricCard(
   row: SnapshotRow,
   period: PeriodLabel,
@@ -256,6 +277,6 @@ export function toMetricCard(
     basisText: BASIS_TEXT[row.basis] ?? '',
     period,
     // The "Why?" affordance every number carries (§4).
-    whyHref: `/app/${options.orgSlug}/evidence?metric=${encodeURIComponent(row.metricKey)}&period=${period.id}`,
+    whyHref: evidenceHref(options.orgSlug, row, period.id),
   };
 }

@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  DOCUMENT_KINDS, IMPORT_TARGET, IMPORT_TYPES, IMPORT_TYPE_SPECS, assertImportSupported, isDocumentKind,
+  DOCUMENT_KINDS, IMPORT_TARGET, IMPORT_TYPES, IMPORT_TYPE_SPECS, assertImportSupported, isDocumentKind, proposeColumnMap,
   pdfHandling, targetFor,
 } from '@/modules/imports';
 import { ValidationError } from '@/core/errors';
@@ -117,6 +117,16 @@ describe('combinations MOTION cannot import are refused before anything is store
     }
   });
 
+  it('refuses a range that ends before it starts, or is not two dates — before the file is stored', () => {
+    const gl = { ...ok, importType: 'general_ledger' };
+    expect(() => assertImportSupported({ ...gl, periodStart: '2026-09-30', periodEnd: '2026-01-01' }))
+      .toThrow('cannot be before the first');
+    expect(() => assertImportSupported({ ...gl, periodStart: '', periodEnd: '2026-01-01' }))
+      .toThrow('first and last day');
+    expect(assertImportSupported({ ...gl, periodStart: '2026-01-01', periodEnd: '2026-01-01' })).toBe('general_ledger');
+    expect(assertImportSupported(gl)).toBe('general_ledger');
+  });
+
   it('reads PDF figures for bank statements; receipts are read with AI on request (ADR-150); every other PDF is stored, not read', () => {
     for (const type of IMPORT_TYPES) {
       expect(pdfHandling(type), type).toBe(type === 'bank_statement' ? 'read' : type === 'receipts' ? 'read_on_request' : 'store_only');
@@ -129,5 +139,20 @@ describe('the document kinds the app sends are the database\'s', () => {
     expect([...DOCUMENT_KINDS].sort()).toEqual(enumValues('document_kind_enum').sort());
     expect(isDocumentKind('invoice')).toBe(true);
     expect(isDocumentKind('sales_invoices')).toBe(false);
+  });
+});
+
+describe('a ledger that names its accounts only by code', () => {
+  const table = (columns: string[]) => ({ columns, rows: [] }) as unknown as Parameters<typeof proposeColumnMap>[0];
+
+  it('reads the code as the account when no column names one (fixtures/imports/gl_unmapped_accounts.xlsx)', () => {
+    const map = proposeColumnMap(table(['Date', 'Journal', 'Code', 'Description', 'Debit', 'Credit']), 'general_ledger');
+    expect(map.Code).toBe('account');
+  });
+
+  it('keeps the code as the code when an account column is there too', () => {
+    const map = proposeColumnMap(table(['Date', 'Code', 'Account', 'Debit', 'Credit']), 'general_ledger');
+    expect(map.Code).toBe('code');
+    expect(map.Account).toBe('account');
   });
 });

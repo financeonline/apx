@@ -4,7 +4,7 @@ import type { Db } from '@/db/types';
 import { Decimal, formatMoney, formatPercent, parseDecimalOrNull } from '@/core/money';
 import { varianceKey } from '@/modules/financial-engine';
 import * as repo from '../data/repository';
-import { formatValue, labelFor, type PeriodLabel, type SnapshotRow } from '../domain/view-models';
+import { evidenceHref, formatValue, labelFor, type PeriodLabel, type SnapshotRow } from '../domain/view-models';
 import { statusFor, type StatusBadge } from '../domain/status';
 
 /**
@@ -108,7 +108,9 @@ function movementFrom(
     current: componentValue('current'),
     comparison: componentValue('comparison'),
     status: statusFor(variance),
-    whyHref: `/app/${orgSlug}/evidence?metric=${encodeURIComponent(baseKey)}&period=${periodId}`,
+    // The evidence of the FIGURE that moved (the base metric, not its variance), for the same row of
+    // the breakdown: a category or an account movement names its dimension, or the link is a 404.
+    whyHref: evidenceHref(orgSlug, { ...variance, metricKey: baseKey }, periodId),
     basisDiffers,
   };
 }

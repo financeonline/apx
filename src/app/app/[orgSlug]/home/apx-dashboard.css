@@ -1319,3 +1319,32 @@
   .apx-dash :is(.metric,.report-point,.chart-card,.growth-card,.queue-card,.history-card,.compliance-card,.ops-card,.department,.operations-panel,.report-summary,.workspace-context>section,.metric-value,.report-value,.growth-result>strong,.apx-draw,.apx-pop,.apx-fade,.apx-grow,.apx-sweep){animation:none!important}
   .apx-dash :is(.ops-card,.metric,.report-point),.apx-dash :is(.ops-card,.metric,.report-point):hover{transition:none!important;translate:none}
 }
+/* Compliance View as the older Home's "Workspace status" (owner, 2026-11-02), and the whole card
+   opening Data progress: its "Add or check your data" link is stretched over the card (CardLink);
+   the four lines sit above that layer with their own pages. Hover lifts the card as the dashboard's
+   other clickable cards (.ops-card, .metric); keyboard focus on the card's link rings the card. */
+.apx-dash .compliance-card.is-link{position:relative;display:flex;flex-direction:column;transition:translate .2s ease-out,box-shadow .2s ease-out,border-color .18s}
+.apx-dash .compliance-card.is-link:has(.compliance-more:focus-visible){outline:3px solid #d94ba7;outline-offset:4px}
+.apx-dash .compliance-card .compliance-more:focus-visible{outline:none}
+.apx-dash .compliance-status.is-current{color:#236fac}
+.apx-dash .current-dot{width:6px;height:6px;background:#3284d8;border-radius:50%;display:inline-block;flex-shrink:0}
+.apx-dash .compliance-basis{font-size:9px;line-height:1.7;color:#5f748c;margin:0 0 6px}
+.apx-dash .compliance-lines{list-style:none;margin:0;padding:0}
+.apx-dash .compliance-lines a.compliance-row{color:inherit;text-decoration:none}
+.apx-dash .compliance-lines a.compliance-row:hover strong{color:#b72e87}
+.apx-dash .compliance-lines .compliance-row>span:last-child{font-size:9px;max-width:none;white-space:nowrap;color:#236fac}
+.apx-dash .compliance-lines .compliance-row.warning>span:last-child{color:#b12887;font-weight:600}
+.apx-dash .compliance-card .compliance-more{display:inline-flex;align-items:center;gap:5px;margin-top:auto;padding-top:12px;font-size:10px;align-self:flex-start}
+@media (hover:hover){
+  .apx-dash .compliance-card.is-link:hover{translate:0 -2px;box-shadow:0 8px 22px #1d3c5c14;border-color:#e3b3d1}
+  .apx-dash .compliance-card.is-link:hover .compliance-more{color:#b72e87}
+}
+@media(max-width:700px){
+  .apx-dash .compliance-basis{font-size:10px}
+  .apx-dash .compliance-lines .compliance-row strong{font-size:12px}
+  .apx-dash .compliance-lines .compliance-row>span:last-child{font-size:11px}
+  .apx-dash .compliance-card .compliance-more{font-size:11px}
+}
+@media (prefers-reduced-motion:reduce){
+  .apx-dash .compliance-card.is-link,.apx-dash .compliance-card.is-link:hover{transition:none!important;translate:none}
+}

@@ -112,12 +112,12 @@ export function AuthForm({ mode }: { mode: Mode }) {
     params.get('verified') === '1' ? 'Email address confirmed. You can log in now.' : null);
   const [showPassword, setShowPassword] = useState(false);
 
-  // The same rule the callback applies (ADR-069): `router.push` is not trusted to keep an
-  // off-origin target internal, so it is never handed one.
-  const safeNext = safeNextPath(params.get('next'), window.location.origin);
-
   async function onSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    // The same rule the callback applies (ADR-069): `router.push` is not trusted to keep an
+    // off-origin target internal, so it is never handed one. Worked out here, in the browser: the
+    // form also renders on the server, where there is no `window`.
+    const safeNext = safeNextPath(params.get('next'), window.location.origin);
     setBusy(true);
     setError(null);
     setNotice(null);
@@ -183,7 +183,9 @@ export function AuthForm({ mode }: { mode: Mode }) {
   const ToggleIcon = showPassword ? EyeOff : Eye;
 
   return (
-    <form onSubmit={onSubmit} className="flex flex-col gap-5">
+    // `post`: a press before the page has hydrated is a native submit, and the browser's default GET
+    // would put the email and password in the address bar, the history and the server's request log.
+    <form method="post" onSubmit={onSubmit} className="flex flex-col gap-5">
       <div className="mb-2 space-y-3">
         <h1 className="text-4xl font-bold tracking-tight text-ink">{copy.title}</h1>
         <p className="text-lg leading-snug text-ink/90">{copy.lead}</p>

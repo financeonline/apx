@@ -20,7 +20,10 @@ export default defineConfig({
   outputDir: '../../logs/sample-data/results',
   use: {
     ...devices['Desktop Chrome'],
-    baseURL: process.env.MOTION_SAMPLE_URL ?? 'http://127.0.0.1:3000',
+    // `localhost`, not 127.0.0.1: the dev server serves its scripts and accepts Server Actions only on
+    // the origin it names (`serverActions.allowedOrigins`, Next's dev-origin check), so on 127.0.0.1
+    // the pages never hydrate and the sign-in form submits as a plain GET.
+    baseURL: process.env.MOTION_SAMPLE_URL ?? 'http://localhost:3000',
     screenshot: 'only-on-failure',
   },
 });

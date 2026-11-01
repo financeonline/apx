@@ -110,6 +110,10 @@ const TYPE_NOUN: Readonly<Record<ImportType, string>> = {
 export function assertImportSupported(input: {
   readonly importType: string;
   readonly bankAccountId: string | null;
+  /** The declared range, when the form gave one: checked here, before the file is stored, because a
+   *  file stored and then refused stays behind and blocks the same file ("already uploaded"). */
+  readonly periodStart?: string;
+  readonly periodEnd?: string;
 }): ImportType {
   if (!isImportType(input.importType)) {
     throw new ValidationError('Choose what kind of file this is.', [
@@ -126,6 +130,19 @@ export function assertImportSupported(input: {
     throw new ValidationError(`A ${TYPE_NOUN[input.importType]} is not imported into a bank account.`, [
       { path: 'bank_account_id', message: 'Only a bank statement belongs to a bank account.' },
     ]);
+  }
+  const isoDate = /^\d{4}-\d{2}-\d{2}$/;
+  if (input.periodStart !== undefined && input.periodEnd !== undefined) {
+    if (!isoDate.test(input.periodStart) || !isoDate.test(input.periodEnd)) {
+      throw new ValidationError('Enter the first and last day the file covers.', [
+        { path: 'period_start', message: 'Enter the first and last day the file covers.' },
+      ]);
+    }
+    if (input.periodEnd < input.periodStart) {
+      throw new ValidationError('The last day the file covers cannot be before the first.', [
+        { path: 'period_end', message: 'The last day the file covers cannot be before the first.' },
+      ]);
+    }
   }
   return input.importType;
 }
@@ -221,6 +238,14 @@ export function proposeColumnMap(
       map[suggestion.sourceColumn] = suggestion.target;
     }
   }
+  // A ledger, trial balance or budget that names its accounts only by code (Date, Journal, Code, …):
+  // the code IS the account (§6.2 lets a code header stand for either). Mapped to `code` alone, every
+  // row was refused "This row has no account", and the upload page has no mapping step to fix it.
+  const needsAccount = ['ledger_entries', 'period_balances', 'budget_lines'].includes(targetFor(importType));
+  if (needsAccount && !Object.values(map).includes('account')) {
+    const codeColumn = Object.keys(map).find((column) => map[column] === 'code');
+    if (codeColumn !== undefined) map[codeColumn] = 'account';
+  }
   return map;
 }
 
@@ -287,9 +312,11 @@ export async function startImport(input: StartImportInput): Promise<StartImportR
     );
   }
 
+  // ADR-175: one checked invoice covers its own date, set below, so the form's range is not its range.
   const importType = assertImportSupported({
     importType: input.importType,
     bankAccountId: input.bankAccountId,
+    ...(input.checkedInvoice === undefined ? { periodStart: input.periodStart, periodEnd: input.periodEnd } : {}),
   });
   const spec = IMPORT_TYPE_SPECS[importType];
   const isPdf = validation.detectedKind === 'pdf' || input.file.name.toLowerCase().endsWith('.pdf');

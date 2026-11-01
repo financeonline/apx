@@ -18,6 +18,7 @@ export {
 export {
   METRIC_LABELS,
   changeFrom,
+  evidenceHref,
   formatValue,
   labelFor,
   toMetricCard,

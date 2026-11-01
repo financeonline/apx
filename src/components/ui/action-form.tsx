@@ -11,16 +11,19 @@ export function SubmitButton({
   pendingLabel,
   tone = 'primary',
   className = '',
+  pending: sentByHand = false,
   'aria-label': ariaLabel,
 }: {
   children: ReactNode;
   pendingLabel?: string;
   tone?: ButtonTone;
   className?: string;
+  /** For a form that dispatches its action from `onSubmit` (so `useFormStatus` never sees it pending). */
+  pending?: boolean;
   /** For a button whose visible word is the same on every row ("Deactivate"), naming what it acts on. */
   'aria-label'?: string;
 }) {
-  const { pending } = useFormStatus();
+  const pending = useFormStatus().pending || sentByHand;
   return (
     <button type="submit" disabled={pending} aria-label={ariaLabel} className={buttonClass(tone, className)}>
       {pending ? (pendingLabel ?? 'Working…') : children}

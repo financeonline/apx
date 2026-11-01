@@ -90,7 +90,10 @@ export default async function CashPage({
         */}
         {view.missingAccounts.length > 0 ? (
           <Banner tone="warn" title="Your cash balance is not complete yet">
-            Add a statement or an opening balance for {view.missingAccounts.join(', ')}.
+            {/* Not "or an opening balance" alone: one dated before a stretch no statement covers does
+                not settle this month — only a statement covering it, or the balance at its start, does. */}
+            Upload a statement covering {scope.period.label} for {view.missingAccounts.join(', ')}, or
+            enter its balance at the start of {scope.period.label}.
           </Banner>
         ) : null}
 

@@ -11,7 +11,8 @@ import {
 import {
   complianceChecks, financeLine, firstName, greeting, lastLoginLabel, workflowPanel,
 } from '../../src/modules/departments/domain/dashboard-extras';
-import { annualComparison, compactMoney, marketingWindow, type AnnualFacts } from '../../src/modules/marketing/domain/annual';
+import { annualComparison, compactMoney, growthBaselines, marketingWindow, type AnnualFacts } from '../../src/modules/marketing/domain/annual';
+import { effectiveView } from '../../src/modules/departments/domain/dashboard';
 import type { FigureFact, MonthFacts } from '../../src/modules/marketing/domain/financials';
 
 /** The department dashboard's money departments and shared panels (ADR-180). */
@@ -64,6 +65,14 @@ describe('the month window', () => {
     expect(w.periodCaption).toBe('Aug – Sep 2026');
     expect(buildMonthWindow(all, new Set(), 6, 'current', 'GBP')).toBeNull();
     expect(windowCaption([])).toBe('');
+  });
+});
+
+describe('Current / Last Completed', () => {
+  it('moves the window in Financial Analysis only, where its control is shown', () => {
+    expect(effectiveView({ dept: 'analysis', view: 'last' })).toBe('last');
+    expect(effectiveView({ dept: 'analysis', view: 'current' })).toBe('current');
+    for (const dept of ['banking', 'capture', 'workflow', 'clients'] as const) expect(effectiveView({ dept, view: 'last' })).toBe('current');
   });
 });
 
@@ -236,9 +245,41 @@ describe('the year figures (modules/marketing annual)', () => {
     expect([m.revenue, m.spend, m.shareDisplay]).toEqual(['1000.00', '50.00', '5.0% of revenue']);
   });
 
+  it('growth rows: the prototype’s projection in Decimal, with the card line in the same words as with an investment', () => {
+    // Twelve whole months of 2024: revenue 12,000, gross profit 7,200, net profit 3,600.
+    const facts: AnnualFacts = { currency: 'GBP', fiscalYearStartMonth: 1, months: range(2024, 1, 12), categorySpend: [], campaignSpend: [] };
+    const [report] = growthBaselines(annualComparison(facts)!);
+    expect(report!.key).toBe('report');
+    expect([report!.revenue, report!.grossProfit, report!.profit]).toEqual(['12000.00', '7200.00', '3600.00']);
+    // +20%, overheads fixed: revenue 14,400; profit 3,600 + 7,200 × 0.2 = 5,040; cost 9,360.
+    const fixed = report!.rows.fixed.find((r) => r.rate === 20)!;
+    expect([fixed.revenue, fixed.cost, fixed.profit]).toEqual(['£14,400', '£9,360', '£5,040']);
+    expect([fixed.uplift, fixed.profitCompact]).toEqual(['+£2.4k', '£5k']);
+    // +30%, all costs scale: profit 3,600 × 1.3 = 4,680.
+    const scale = report!.rows.scale.find((r) => r.rate === 30)!;
+    expect([scale.profit, scale.uplift, scale.profitCompact]).toEqual(['£4,680', '+£3.6k', '£4.7k']);
+  });
+
   it('compact money never reads "1000k"', () => {
     expect(compactMoney('999950.00', 'GBP')).toBe('£1m');
     expect(compactMoney('1284000.00', 'GBP')).toBe('£1.28m');
     expect(compactMoney('-379000.00', 'GBP')).toBe('−£379k');
+  });
+});
+
+describe('the activity window (owner, 2026-11-02: activity counted up to today)', () => {
+  it('ends at today’s month, keeps months with no fiscal period, and links year-earlier periods', async () => {
+    const { buildActivityWindow } = await import('@/modules/departments/domain/dashboard-money');
+    const periods = [
+      { id: 'p-2025-10', periodStart: '2025-10-01', isComplete: true },
+      { id: 'p-2026-09', periodStart: '2026-09-01', isComplete: true },
+      { id: 'p-2026-10', periodStart: '2026-10-01', isComplete: false },
+    ];
+    const w = buildActivityWindow(periods, 3, '2026-11-02', 'GBP');
+    expect(w.months.map((m) => m.periodStart)).toEqual(['2026-09-01', '2026-10-01', '2026-11-01']);
+    expect(w.months.map((m) => m.periodId)).toEqual(['p-2026-09', 'p-2026-10', 'ym:2026-11']);
+    expect(w.months[1]!.yearEarlierPeriodId).toBe('p-2025-10');
+    expect(w.periodCaption).toBe('Sep – Nov 2026');
+    expect(w.snapshotLabel).toBe('To date · Nov 2026');
   });
 });

@@ -17,7 +17,8 @@ Firebase project):
 1. `scripts/write-local-env.sh` once, so `.env.local` points the app at the emulators.
 2. `npm run db:start` — Auth 9099, Firestore 8080, Storage 9199 (data kept in
    `firebase/emulator-data` between runs).
-3. The app running on http://127.0.0.1:3000 (`npm run dev`), with the same `CRON_SECRET` as below.
+3. The app running on http://localhost:3000 (`npm run dev`), with the same `CRON_SECRET` as below.
+   Use `localhost`, not 127.0.0.1: on 127.0.0.1 the dev server's pages do not hydrate.
 4. A local account signed up in the app, owning the target company, which must be empty (its slug
    defaults to `a-org`; set `MOTION_SAMPLE_SLUG` for another).
 

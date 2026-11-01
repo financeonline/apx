@@ -1,11 +1,13 @@
 import 'server-only';
 import { assertCan } from '@/core/permissions';
+import { systemClock, todayInTimeZone } from '@/core/periods';
 import type { AccessContext } from '@/modules/tenancy';
 import {
-  DEPARTMENT_IDS, DEPARTMENT_META, PERIOD_MONTHS,
+  DEPARTMENT_IDS, DEPARTMENT_META, PERIOD_MONTHS, effectiveView,
   type DashboardParams, type DepartmentDashboard, type DepartmentId, type DepartmentView, type MonthWindow,
   type PeriodMonths, type ReportView,
 } from '../../domain/dashboard';
+import { buildActivityWindow } from '../../domain/dashboard-money';
 import { loadAnalysisView } from './analysis';
 import { loadBankingView } from './banking';
 import { loadCaptureView } from './capture';
@@ -50,10 +52,14 @@ export function parseDashboardParams(searchParams: SearchParams): DashboardParam
 
 export async function loadDepartmentDashboard(ctx: AccessContext, params: DashboardParams): Promise<DepartmentDashboard | null> {
   assertCan(ctx, 'dashboard.view');
-  const { window, periods } = await loadWindowAndPeriods(ctx, params);
+  const { window, periods } = await loadWindowAndPeriods(ctx, { months: params.months, view: effectiveView(params) });
   if (window === null) return null;
+  // Owner, 2026-11-02: uploads, tasks and requests are counted up to today, not in the figures' months.
+  const activity = buildActivityWindow(periods, params.months, todayInTimeZone(systemClock, 'UTC'), window.currency);
+  const deptWindow: MonthWindow = params.dept === 'capture' || params.dept === 'workflow' ? activity
+    : params.dept === 'clients' ? { ...window, activity } : window;
   const [view, extras] = await Promise.all([
-    LOADERS[params.dept](ctx, window),
+    LOADERS[params.dept](ctx, deptWindow),
     loadDashboardExtras(ctx, window, { periods }),
   ]);
   return {

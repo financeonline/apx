@@ -65,6 +65,21 @@ export default async function BankingPage({
           Upload a statement as a CSV, spreadsheet or PDF and this page will show your cash, what
           came in and went out, and anything worth a look.
         </EmptyState>
+        {/* The accounts already added, so nobody adds the same one twice while waiting for a statement. */}
+        {accounts.length > 0 ? (
+          <div className="mt-6">
+            <Card>
+              <CardHeader title="Your bank accounts" description="Each one is waiting for its first statement." icon={<Landmark />} />
+              <CardBody>
+                <ul className="space-y-1 text-sm text-ink" data-testid="banking-accounts-pending">
+                  {accounts.map((account) => (
+                    <li key={account.id}>{account.name} <span className="text-ink-muted">· {account.bankName} · {account.reference}</span></li>
+                  ))}
+                </ul>
+              </CardBody>
+            </Card>
+          </div>
+        ) : null}
         {mayAddAccount ? (
           <div className="mt-6">
             <Card>

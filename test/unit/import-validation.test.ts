@@ -297,6 +297,19 @@ describe('batch-level checks (§8.2)', () => {
     expect(chainIssue, 'the reviewer must be told WHERE it broke').toBeDefined();
   });
 
+  it('follows a liability account\'s running balance the other way round too', () => {
+    // fixtures/imports/bank_positive_out.csv after its positive_out transform: purchases are money
+    // out (negative) and RAISE the balance owed; a refund or a repayment lowers it.
+    const card = {
+      targetTable: 'bank_transactions' as const, importType: 'bank_statement' as const,
+      amounts: ['-45.20', '-128.75', '28.75', '-210.00', '1000.00'], openingBalance: null, closingBalance: null,
+      balanceChain: ['1045.20', '1173.95', '1145.20', '1355.20', '355.20'],
+    };
+    const chainBreak = (issues: ReturnType<typeof checkBatch>) => issues.find((i) => i.code === 'IMP-BAL-006');
+    expect(chainBreak(checkBatch({ ...card, liabilityAccount: true })), 'a card statement that follows on').toBeUndefined();
+    expect(chainBreak(checkBatch(card)), 'the same rows read as a current account do not follow on').toBeDefined();
+  });
+
   it('errors when a trial balance does not balance', () => {
     const issues = checkBatch({
       targetTable: 'period_balances', importType: 'trial_balance',

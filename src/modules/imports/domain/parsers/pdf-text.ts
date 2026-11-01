@@ -37,6 +37,17 @@ import type {
 } from '../pipeline-types';
 import { Decimal, toMoneyString } from '@/core/money';
 import * as pdfjs from 'pdfjs-dist/legacy/build/pdf.mjs';
+// @ts-expect-error -- pdf.js ships no types for its worker module; only `WorkerMessageHandler` is used.
+import * as pdfjsWorker from 'pdfjs-dist/legacy/build/pdf.worker.mjs';
+
+/*
+ * pdf.js on a server runs its "worker" in the same thread, and finds it by `import()`-ing
+ * `pdf.worker.mjs` next to its own file. Bundled into a server chunk (Next/Turbopack), that file is
+ * not there, and every PDF statement failed with "Setting up fake worker failed". pdf.js looks for
+ * `globalThis.pdfjsWorker` first, so the worker is handed to it here and nothing is fetched at run time.
+ */
+const workerHost = globalThis as { pdfjsWorker?: unknown };
+workerHost.pdfjsWorker ??= pdfjsWorker;
 
 // ---------------------------------------------------------------------------------------------
 // Tokenising (§5.3: per-page text with positional data; lines grouped by y within 2 pt)

@@ -12,9 +12,13 @@ export function compactMoney(value: Decimal | string | null, currency: string): 
   const sign = d.isNegative() ? '−' : '';
   const a = d.abs();
   const trim = (s: string) => s.replace(/\.0+$/, '').replace(/(\.\d*[1-9])0+$/, '$1');
-  if (a.greaterThanOrEqualTo(1_000_000)) return `${sign}${symbol}${trim(a.dividedBy(1_000_000).toDecimalPlaces(2, ROUND_HALF_UP).toFixed(2))}m`;
-  if (a.greaterThanOrEqualTo(1_000)) return `${sign}${symbol}${trim(a.dividedBy(1_000).toDecimalPlaces(1, ROUND_HALF_UP).toFixed(1))}k`;
-  return `${sign}${symbol}${a.toDecimalPlaces(0, ROUND_HALF_UP).toFixed(0)}`;
+  // The unit is chosen AFTER rounding (as the services' `compactMoney`): £999,960 reads "£1m", never
+  // "£1000k", and £999.60 reads "£1k", never "£1000".
+  const thousands = a.dividedBy(1_000).toDecimalPlaces(1, ROUND_HALF_UP);
+  if (thousands.greaterThanOrEqualTo(1_000)) return `${sign}${symbol}${trim(a.dividedBy(1_000_000).toDecimalPlaces(2, ROUND_HALF_UP).toFixed(2))}m`;
+  const whole = a.toDecimalPlaces(0, ROUND_HALF_UP);
+  if (whole.greaterThanOrEqualTo(1_000)) return `${sign}${symbol}${trim(thousands.toFixed(1))}k`;
+  return `${sign}${symbol}${whole.toFixed(0)}`;
 }
 
 /** Whole units, "£278,000". */

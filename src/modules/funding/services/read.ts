@@ -38,6 +38,10 @@ export interface FundingView {
 
 export async function fundingEnabled(ctx: AccessContext): Promise<boolean> {
   if (!ctx.orgId) return false;
+  // ADR-173: Funding Readiness is a department. For a team member whose departments leave it out it
+  // is absent exactly as if the company had it switched off — the page, its menu entries and its
+  // links — however the company is set (`ctx.modules` is the company's systems narrowed to them).
+  if (ctx.modules && !ctx.modules.has('funding')) return false;
   const org = await readOrganization(ctx.db, ctx.orgId);
   return (org?.features as Record<string, unknown> | undefined)?.funding_readiness === true;
 }

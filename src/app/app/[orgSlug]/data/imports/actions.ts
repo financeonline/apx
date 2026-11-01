@@ -364,7 +364,7 @@ export async function statementBalancesAction(_previous: ActionResult | null, fo
       ? 'The statement reconciles to the balances you entered.'
       : result.comparison === 'matches_ai'
         ? 'Those are the balances the AI read, so they cannot vouch for its rows. Confirm each row against the page.'
-        : 'Saved. The transactions do not add up to those balances; see the note above.');
+        : 'Saved. The transactions do not add up to those balances; see About this file below.');
   } catch (error) {
     return fail(error, { requestId, action: 'imports.balances' });
   }

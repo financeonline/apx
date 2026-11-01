@@ -14,6 +14,8 @@ const FIELD_IDS: Record<keyof Fields, string> = {
 const fieldsOf = (t: TargetsRecord['targets']): Fields => ({
   workflow: String(t.workflow), sales: t.sales, marketing: t.marketing, costRatio: t.costRatio, marketingRatio: t.marketingRatio,
 });
+/** Who may save (`canManageTargets`: financials.view + financials.edit — owner, 2026-11-01). */
+const WHO_SAVES = 'Only an owner, admin, analyst or accountant can save targets.';
 const DEFAULT_FIELDS: Fields = { workflow: '80', sales: '300000', marketing: '15000', costRatio: '65', marketingRatio: '5' };
 
 /** `operations.js#chartFrame` for the 340×125 card chart. */
@@ -113,7 +115,7 @@ export function MonthlyTargetsCard({ orgSlug, targets, initialCheck, currency }:
         const body = (await response.json().catch(() => null)) as { error?: { message?: string; issues?: Array<{ message: string }> } } | null;
         const issue = body?.error?.issues?.[0]?.message;
         setStatus(issue ? `${issue} Your entries are still here.` : response.status === 403
-          ? 'Only an owner or admin can save targets. Your entries are still here.'
+          ? `${WHO_SAVES} Your entries are still here.`
           : 'Targets could not be saved. Your entries are still here; try again.');
         return;
       }
@@ -234,7 +236,7 @@ export function MonthlyTargetsCard({ orgSlug, targets, initialCheck, currency }:
               ) : null}
             </details>
             <p id="targets-save-status" className="targets-save-status" role="status">
-              {canManage ? status : `${status} Only an owner or admin can save targets.`}
+              {canManage ? status : `${status} ${WHO_SAVES}`}
             </p>
           </form>
           <div id="monthly-notifications" aria-live="polite">

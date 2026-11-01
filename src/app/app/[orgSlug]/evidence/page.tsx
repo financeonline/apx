@@ -20,10 +20,12 @@ export default async function EvidenceEntryPage({
   searchParams,
 }: {
   params: Promise<{ orgSlug: string }>;
-  searchParams: Promise<{ metric?: string; period?: string; dimension?: string; snapshot?: string }>;
+  searchParams: Promise<{
+    metric?: string; period?: string; dim?: string; dimension?: string; key?: string; snapshot?: string;
+  }>;
 }) {
   const { orgSlug } = await params;
-  const { metric, period, dimension, snapshot } = await searchParams;
+  const { metric, period, dim, dimension, key, snapshot } = await searchParams;
 
   const ctx = await getAccessContext(orgSlug);
   requirePermission(ctx, 'financials.view');
@@ -39,10 +41,14 @@ export default async function EvidenceEntryPage({
 
   if (!metric || !period) notFound();
 
+  // A figure broken down by account, customer or standard category names its row (`dim` with the
+  // row's id or, for a category, its key — `evidenceHref`). A bare `?dimension=` is a customer, the
+  // form older links used.
+  const dimensionType = dim ?? (dimension ? 'counterparty' : undefined);
   const snapshotId = await currentSnapshotId(ctx, {
     metricKey: metric,
     periodId: period,
-    ...(dimension ? { dimensionType: 'counterparty', dimensionId: dimension } : {}),
+    ...(dimensionType ? { dimensionType, dimensionId: dimension ?? null, dimensionKey: key ?? null } : {}),
   });
   // No snapshot for that metric and month is NOT FOUND, not an empty drawer: there is no evidence
   // because there is no figure, and an empty panel would suggest the evidence had been lost.

@@ -1,5 +1,5 @@
 import 'server-only';
-import { orgRowById, orgRows } from '@/db/rls';
+import { orgRowById, orgRowsByIds } from '@/db/rls';
 import type { Db } from '@/db/types';
 import { parseMoney, toMoneyString } from '@/core/money';
 import { countRowsByStatus, listBatchRows, listBatches } from '../data/repository';
@@ -165,7 +165,7 @@ export async function loadBatchReview(
  * authority, and it re-runs against data that may have changed since. This exists so the screen can
  * say WHY rather than presenting a button that fails.
  */
-function blockingReasonFor(
+export function blockingReasonFor(
   batch: ImportBatch,
   importableRows: number,
   meta: BatchMeta,
@@ -191,6 +191,14 @@ function blockingReasonFor(
   if (undecidedErrors.length > 0) {
     return `${undecidedErrors.length} row${undecidedErrors.length === 1 ? '' : 's'} `
       + 'cannot be imported. Skip them, or fix the file and upload it again.';
+  }
+
+  // The same rule as `assert_batch_committable`: a file-level error (a trial balance that does not
+  // balance, a statement that does not add up) refuses the import. Said here, by name, rather than
+  // offering Import and answering "this file has 1 problem(s)…" from the database.
+  const fileError = meta.batchIssues.find((issue) => issue.severity === 'error');
+  if (fileError) {
+    return `This file cannot be imported until this is put right: ${fileError.message}`;
   }
 
   if (importableRows === 0) {
@@ -270,19 +278,22 @@ export async function loadImportHistory(
 
   const ids = [...new Set(batches.map((b) => b.sourceDocumentId).filter((id): id is string => id !== null))];
   const data: Array<{ id: string; original_filename: string }> = [];
-  for (let i = 0; i < ids.length; i += 30) {
-    const chunk = ids.slice(i, i + 30);
-    data.push(...await orgRows<{ id: string; original_filename: string }>(db, orgId, 'source_documents', (q) => q
-      .where('id', 'in', chunk)
-      .select('id', 'original_filename')));
-  }
+  // By document id, under the table's policy (orgRowsByIds) — a `where('id','in',…)` scans the collection on the index-less emulator.
+  data.push(...await orgRowsByIds<{ id: string; original_filename: string }>(db, orgId, 'source_documents', ids));
   const names = new Map(data.map((row) => [row.id, row.original_filename]));
 
   return batches.map((batch) => ({
     batch,
     filename: batch.sourceDocumentId === null ? null : names.get(batch.sourceDocumentId) ?? null,
-    rows: Object.values(batch.rowCounts ?? {}).reduce<number>(
-      (total, n) => total + (typeof n === 'number' ? n : 0), 0,
-    ),
+    rows: rowsRead(batch.rowCounts),
   }));
+}
+
+/**
+ * How many rows a batch read. `row_counts` holds `total` beside the per-status counts (pipeline.ts),
+ * so summing every value counted each row twice — 217 for a 109-row file.
+ */
+export function rowsRead(counts: Readonly<Record<string, number>> | null | undefined): number {
+  if (typeof counts?.total === 'number') return counts.total;
+  return Object.values(counts ?? {}).reduce<number>((sum, n) => sum + (typeof n === 'number' ? n : 0), 0);
 }

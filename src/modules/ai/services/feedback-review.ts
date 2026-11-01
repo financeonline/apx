@@ -3,7 +3,7 @@ import { assertCan } from '@/core/permissions';
 import { NotFound } from '@/core/errors';
 import { callApi } from '@/core/db/api-rpc';
 import { locateOrgRow, reachableOrganizations } from '@/db/app/ai-reads';
-import { orgQuery, orgRowById, orgRows } from '@/db/rls';
+import { orgQuery, orgRowById, orgRows, orgRowsByIds } from '@/db/rls';
 import type { AccessContext } from '@/modules/tenancy';
 import type { SubmitAnswer } from '../domain/contract';
 import type { FeedbackType } from './feedback';
@@ -77,11 +77,8 @@ function toItem(row: Row, org: { name: string; slug: string } | undefined, messa
 async function messagesOf(ctx: AccessContext, orgId: string, ids: string[]): Promise<Map<string, Row>> {
   const unique = [...new Set(ids)];
   const out = new Map<string, Row>();
-  for (let i = 0; i < unique.length; i += 30) {
-    const chunk = unique.slice(i, i + 30);
-    const rows = await orgRows<Row>(ctx.db, orgId, 'ai_messages', (q) => q.where('id', 'in', chunk));
-    for (const r of rows) out.set(String(r.id), r);
-  }
+  // By document id, under the table's policy (orgRowsByIds) — a `where('id','in',…)` scans the collection on the index-less emulator.
+  for (const r of await orgRowsByIds<Row>(ctx.db, orgId, 'ai_messages', unique)) out.set(String(r.id), r);
   return out;
 }
 

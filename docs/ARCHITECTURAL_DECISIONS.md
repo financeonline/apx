@@ -3211,3 +3211,20 @@ Decision:
 4. **Left out / different**: the sector briefing (owner: later); Reset demo (no demo state); the Client/Analyst select (the real role shows); the APAX avatar image until the owner approves downloading it.
 
 Consequences: new modules `targets`, `feedback`; new tables `monthly_targets` (org) and `dashboard_feedback` (global); `api.my_previous_sign_in` (LAST LOGIN) with a new `audit_events` index in `firebase/firestore.indexes.json` (must be deployed to the real project); `ImportBatch.createdAt`. The old Home lobby components remain for the first-run state.
+
+### ADR-181 · Full-app QA pass: the Compliance card opens Data progress; by-id reads; fixes across capture, roles and evidence
+
+Status: **built and checked locally on 2026-11-02 on the owner's instruction ("check the full app, OCR, uploading files, and all departments … fix … then commit and push").**
+
+Decision and fixes:
+1. **Compliance view card** (owner: "make this card clickable … show the actual progress of where it is and what we are stuck on"; "exactly the information as in the screenshot"): the card shows the older Home "Workspace status" lines (Figures up to date, basis line, Uploads waiting for review, Last data added, VAT, Corporation Tax, Add or check your data) and the whole card opens **Data progress** (`/app/<slug>/data/progress`, Data › Progress, `imports.review`): a headline status, "What we are stuck on" (real blockers only, each with the page that fixes it), a 12-month coverage strip per source, and each upload's seven-step progress. Card and page count failed uploads by one rule (`unresolvedFailures`).
+2. **Activity departments count up to today** (owner, 2026-11-02): Data Capture, Manage Workflow and Client Management's requests use the last 1/3/6 months ending this month (`buildActivityWindow`); financial departments keep the latest month with figures.
+3. **Reads by id**: `where('id','in',…)` on the index-less emulator scans whole collections; the calculation's Health/Forecast steps ran ~108 of them per run (395 s of query time, ~2.6 GB churn). `engine-reads.readRowsIn` and six other sites now read documents by id under the same policy (`orgRowsByIds`): one recalculation 34 s → 4 s locally. The import commit's `in` queries on other fields (dedupe hash, period, invoice number) are kept — on real Firestore they are the cheapest correct reads.
+4. **Evidence**: derived figures name their components for every family (`withDerivedIds` in `composePeriod`), the reader accepts an honestly unlinked component (null), and breakdown "Why?" links carry their dimension — all 51 Why? links open.
+5. **Data capture**: PDF bank statements parse again (pdf.js worker via `globalThis.pdfjsWorker`); code-only ledgers map their account; header-after-blank-line, credit-card/loan running balances, refused uploads no longer stored or clearing the form, unimportable files blocked at review, doubled row counts, money in/out labelled on review, wording fixes; sign-up/sign-in always POST (no password in a URL).
+6. **Roles & platform**: Funding Readiness honours a person's departments (ADR-173 leak closed); analyst assignment by dropdowns; `/platform/audit` asks to re-confirm instead of failing; a styled app-wide 404; the AI chat stream stops writing once the reader leaves; `/sign-in` no longer reads `window` while rendering.
+7. **Dashboard**: Last Completed applies only to Financial Analysis; growth summary line format; compact money rounding; targets wording (analysts and accountants may save).
+
+Checked: `tsc`, `eslint .`, `npm run test:unit` 3286/3286 (the route-contracts cron test now accepts the Hobby plan's daily schedule, ADR-178 addendum), production build, every page per role (owner, admin, accountant, client, third party, analyst, super admin), every upload fixture incl. PDF and OCR.
+
+Known, left for the owner: opening `/analyst?ask=…` sends the question to the paid AI at once (a GET link can start a paid call); single signed-amount bank statements on current accounts are refused as specified (ADR-058.13).

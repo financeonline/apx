@@ -2,7 +2,7 @@ import 'server-only';
 import Decimal from 'decimal.js';
 import type { Query } from 'firebase-admin/firestore';
 import { ValidationError } from '@/core/errors';
-import { orgRows } from '@/db/rls';
+import { orgRows, orgRowsByIds } from '@/db/rls';
 import type { OrgTable } from '@/db/schema';
 import type { Db } from '@/db/types';
 import type { RecordStatusEvent, RecordStatusEventName, HistoryInterval } from '../domain/as-of';
@@ -271,7 +271,8 @@ export async function fetchAccountCategories(
 ): Promise<Map<string, string>> {
   const out = new Map<string, string>();
   for (const batch of batched([...new Set(accountIds)], ID_BATCH)) {
-    const rows = await orgRows<Row>(db, orgId, 'accounts', (q) => q.where('id', 'in', batch));
+    // By document id, under the table's policy (orgRowsByIds) — a `where('id','in',…)` scans the collection on the index-less emulator.
+    const rows = await orgRowsByIds<Row>(db, orgId, 'accounts', batch);
     for (const row of rows) out.set(String(row.id), String(row.standard_category));
   }
   return out;

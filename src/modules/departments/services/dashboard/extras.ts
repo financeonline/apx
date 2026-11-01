@@ -13,10 +13,14 @@ import { canManageTargets } from '@/modules/targets';
 import { ROLE_NAMES, moduleOn, type AccessContext } from '@/modules/tenancy';
 import * as basicsRepo from '../../data/repository';
 import * as repo from '../../data/dashboard-repository';
+import * as progressRepo from '../../data/progress-repository';
+import { complianceCard } from '../../domain/data-progress';
+import { complianceBasisLine, figuresUpdating, importFacts } from '../data-progress';
+import { systemClock, todayInTimeZone } from '@/core/periods';
 import { dayLabel } from '../../domain/dashboard-ops';
 import { minusEach, valuesFor } from '../../domain/dashboard-money';
 import {
-  comparativePanel, complianceChecks, financeLine, firstName, greeting, growthView, keyIndicatorsPanel, lastLoginLabel,
+  comparativePanel, financeLine, firstName, greeting, growthView, keyIndicatorsPanel, lastLoginLabel,
   marketingPanel, workflowPanel, type ReadinessFacts,
 } from '../../domain/dashboard-extras';
 import type { DashboardExtras, MonthWindow, TargetActuals } from '../../domain/dashboard';
@@ -63,7 +67,8 @@ export async function loadDashboardExtras(
   const seesTax = can(ctx, 'financials.view') && moduleOn(ctx, 'tax');
   const ids = [...new Set([...window.months, ...recent].map((m) => m.periodId))];
 
-  const [org, basics, profile, signedIn, facts, series, actions, batches, tax] = await Promise.all([
+  const seesImports = can(ctx, 'imports.review');
+  const [org, basics, profile, signedIn, facts, series, actions, batches, tax, uploads, runs] = await Promise.all([
     loadOrganizationFacts(db, orgId),
     basicsRepo.organisationBasics(db, orgId),
     repo.myProfile(db, ctx.requestId),
@@ -73,6 +78,8 @@ export async function loadDashboardExtras(
     seesActions ? listActions(ctx) : Promise.resolve(null as readonly Action[] | null),
     repo.batchFacts(db, orgId),
     seesTax ? loadTaxDates(ctx) : Promise.resolve(null),
+    seesImports ? progressRepo.allBatches(db, orgId) : Promise.resolve(null),
+    progressRepo.latestRuns(db, orgId),
   ]);
 
   // ---- The masthead ----
@@ -144,7 +151,7 @@ export async function loadDashboardExtras(
     growth: comparison === null ? [] : growthView(growthBaselines(comparison), annualCurrency),
     comparative: comparison === null ? null : comparativePanel(comparativeYears(comparison), annualCurrency),
     marketing: facts === null ? null : marketingPanel(marketingWindowFor(facts, window), annualCurrency),
-    compliance: complianceChecks(readiness),
+    compliance: await complianceView(ctx, base, options.periods ?? [], recent, uploads, runs.succeeded, tax, basics.timezone),
     workflow: workflowPanel(readiness),
     targets: { history, defaultMonth: anchor?.periodStart.slice(0, 7) ?? '', canSave: canManageTargets(ctx) },
     financeLine: financeLine(window.snapshotLabel, window.periodCaption, revenue, profit, currency),
@@ -164,6 +171,27 @@ export async function loadDashboardExtras(
       actions: `${base}/actions`, insights: `${base}/insights`, customers: `${base}/customers`, money: `${base}/money`,
     },
   };
+}
+
+/**
+ * Compliance View — exactly the older Home's "Workspace status" (owner, 2026-11-02): the calculation's
+ * state, the basis line, and for whoever keeps the data the uploads waiting, the last data added, VAT
+ * and Corporation Tax. The whole card opens Data progress.
+ */
+async function complianceView(
+  ctx: AccessContext, base: string, periods: readonly PeriodLabel[], recent: MonthWindow['months'],
+  uploads: readonly progressRepo.BatchRow[] | null, succeeded: progressRepo.RunFacts | null, tax: TaxDates | null, timezone: string,
+) {
+  const imports = uploads === null ? null : importFacts(uploads);
+  const ids = new Set(recent.map((m) => m.periodId));
+  const [recalculating, basis] = await Promise.all([
+    figuresUpdating(ctx, succeeded),
+    complianceBasisLine(ctx, periods.filter((p) => ids.has(p.id)), imports?.lastDataAdded ?? null),
+  ]);
+  return complianceCard({
+    base, recalculating, basisLine: basis, imports, lastDataAdded: imports?.lastDataAdded ?? null,
+    canAddData: can(ctx, 'imports.create'), tax, today: todayInTimeZone(systemClock, timezone),
+  });
 }
 
 function marketingWindowFor(facts: AnnualFacts, window: MonthWindow) {

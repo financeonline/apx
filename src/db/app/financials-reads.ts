@@ -1,6 +1,6 @@
 import 'server-only';
 import type { DocumentData, Query } from 'firebase-admin/firestore';
-import { orgRows, orgRowById } from '../rls';
+import { orgRows, orgRowById, orgRowsByIds } from '../rls';
 import { globalRow, inChunks, orgCollection, orgRow, type OrgTable } from '../schema';
 import { uidOf, type Db } from '../types';
 import { orgRoleOf } from './access';
@@ -56,7 +56,8 @@ export async function readRowsByIds<T = DocumentData>(db: Db, orgId: string, tab
     const snaps = await db.fs.getAll(...unique.map((id) => orgRow(db.fs, orgId, table, id)));
     return snaps.filter((s) => s.exists).map((s) => s.data() as T);
   }
-  return inChunks(unique, 30, (chunk) => orgRows<T>(db, orgId, table, (q) => q.where('id', 'in', chunk)));
+  // By document id, under the table's policy (orgRowsByIds) — a `where('id','in',…)` scans the collection on the index-less emulator.
+  return inChunks(unique, 300, (chunk) => orgRowsByIds<T>(db, orgId, table, chunk));
 }
 
 /**

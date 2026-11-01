@@ -144,7 +144,7 @@ export async function fetchMetricSnapshot(
   if (full === null) return null;
   const row = project(
     full,
-    'id,organization_id,calculation_run_id,period_id,metric_key,dimension_type,dimension_id,value,unit,currency,basis,assurance_level,data_quality',
+    'id,organization_id,calculation_run_id,period_id,metric_key,dimension_type,dimension_id,dimension_key,value,unit,currency,basis,assurance_level,data_quality',
   );
   const detail = await snapshotDetail(db, orgId, full);
   return {

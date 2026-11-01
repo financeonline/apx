@@ -16,7 +16,7 @@ import {
 import { AiReadingRequest, DocumentPageView, PageConfirmation, ReceiptReadingRequest, StatementBalancesForm } from './pdf-review';
 import { requirePermission } from '@/app/_lib/authz';
 import { can } from '@/core/permissions';
-import { rowsNotShownSentence, rowsReadable } from './rows-view';
+import { rowsNotShownSentence, rowsReadable, summariseRow } from './rows-view';
 import { formatCoverage } from '../labels';
 import { formatDateTime } from '@/components/labels';
 
@@ -39,7 +39,7 @@ export const dynamic = 'force-dynamic';
  * confirmation of anything — so the range question prints the range (`questionFor`).
  */
 const CONFIRMATION_QUESTIONS: Readonly<Record<string, string>> = {
-  'IMP-RANGE-015': 'This file covers the whole period you entered, even though its rows stop earlier.',
+  'IMP-RANGE-015': 'This file covers the whole period you entered, even if its rows stop earlier.',
   'IMP-TB-012': 'Are these year-to-date totals, or just this period’s amounts?',
   'IMP-TB-013': 'How does this file show income and costs?',
   'IMP-COV-013': 'This file replaces the report already imported for the same month. The earlier report is kept in its history but no longer counted.',
@@ -85,7 +85,7 @@ function completenessKind(importType: string): 'trial_balance' | 'pnl_report' | 
 function questionFor(code: string, importType: string, period: { start: string | null; end: string | null }): string {
   if (code === 'IMP-TB-016') return COMPLETENESS[completenessKind(importType)].question;
   if (code === 'IMP-RANGE-015' && period.start && period.end) {
-    return `This file covers the whole period you entered — ${formatCoverage(period.start, period.end)} — even though its rows stop earlier.`;
+    return `This file covers the whole period you entered — ${formatCoverage(period.start, period.end)} — even if its rows stop earlier.`;
   }
   // The rule code stays out of the sentence; it is kept on the form (`code`) for support.
   return CONFIRMATION_QUESTIONS[code]
@@ -192,7 +192,10 @@ export default async function ReviewBatchPage({
   const aiPages = showsRows && review.batch.extractionMethod === 'pdf_claude'
     ? [...new Set(review.rows.filter((r) => r.sourcePage !== null).map((r) => r.sourcePage!))].sort((a, b) => a - b)
     : [];
-  const outstanding = review.requiredConfirmations
+  // Questions and the Import / Discard controls belong to a file still open. A discarded or removed
+  // one kept offering "Yes, that is right" and "Discard this file", and the discard could be sent again.
+  const closed = ['committed', 'committing', 'rejected', 'rolled_back'].includes(review.batch.status);
+  const outstanding = review.batch.status !== 'awaiting_review' ? [] : review.requiredConfirmations
     .filter((code) => !review.confirmedCodes.includes(code));
 
   return (
@@ -442,8 +445,9 @@ export default async function ReviewBatchPage({
                 <h2 className="min-w-0 font-serif text-lg text-ink">About this file</h2>
               </div>
               <ul className="mt-2 space-y-1 text-sm">
+                {/* One code can be raised twice (IMP-BAL-006: the totals AND the running balance), so not keyed by code alone. */}
                 {review.batchIssues.map((issue) => (
-                  <li key={issue.code} className={`[overflow-wrap:anywhere] ${issue.severity === 'error' ? 'text-danger' : 'text-ink-muted'}`}>
+                  <li key={`${issue.code}|${issue.message}`} className={`[overflow-wrap:anywhere] ${issue.severity === 'error' ? 'text-danger' : 'text-ink-muted'}`}>
                     {issue.message}
                   </li>
                 ))}
@@ -529,7 +533,7 @@ export default async function ReviewBatchPage({
                   rows={review.undecidedErrors.map((row) => ({
                     id: row.id,
                     rowNumber: row.rowNumber,
-                    summary: summarise(row.rawData),
+                    summary: summariseRow(row.rawData),
                   }))}
                 />
               </div>
@@ -556,7 +560,7 @@ export default async function ReviewBatchPage({
                   rows={review.duplicates.map((row) => ({
                     id: row.id,
                     rowNumber: row.rowNumber,
-                    summary: summarise(row.rawData),
+                    summary: summariseRow(row.rawData),
                     decided: row.reviewerDecision === 'none' ? null : row.reviewerDecision,
                   }))}
                 />
@@ -565,7 +569,7 @@ export default async function ReviewBatchPage({
           </Card>
         ) : null}
 
-        {review.batch.status === 'committed' ? null : (
+        {closed ? null : (
           <Card>
             <CardBody className="p-4">
               <div className="flex min-w-0 items-center gap-3">
@@ -614,7 +618,7 @@ export default async function ReviewBatchPage({
                       <TR key={row.id}>
                         <TD className="tabular">{row.rowNumber}</TD>
                         <TD><StatusBadge status={row.status} /></TD>
-                        <TD>{summarise(row.rawData)}</TD>
+                        <TD>{summariseRow(row.rawData)}</TD>
                         <TD className="text-ink-muted">
                           {row.issues.map((issue) => issue.message).join(' · ') || '—'}
                         </TD>
@@ -699,13 +703,4 @@ function IssueGroupRow({ group }: { group: BatchIssueGroup }) {
       </p>
     </li>
   );
-}
-
-/** A row in the reviewer's words: the first few non-empty cells of the file, verbatim. */
-function summarise(raw: Readonly<Record<string, unknown>>): string {
-  return Object.values(raw)
-    .filter((v) => v !== null && v !== undefined && String(v).trim() !== '')
-    .slice(0, 4)
-    .map((v) => String(v))
-    .join(' · ') || '(empty row)';
 }

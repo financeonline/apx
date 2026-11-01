@@ -42,3 +42,23 @@ export function rowsNotShownSentence(status: ImportBatchStatus): string | null {
       return 'A file’s own lines are shown only while it is in review.';
   }
 }
+
+/** A figure as a file writes one: `2500.00`, `-1,234.56`, `(75.00)`, `£12`. Not a date (`2026-01-01`, `01.02.2026`). */
+const FIGURE = /^[-+(]?[£$€]?\s?\d[\d,]*(\.\d+)?\)?$/;
+
+/**
+ * One line of the file in a few words, for the review page ("What it says", unreadable rows,
+ * possible duplicates). Empty cells are left out, so a figure carries its column's heading —
+ * `Paid Out 2500.00`, not a bare `2500.00` that reads the same whether money went out or came in.
+ */
+export function summariseRow(raw: Readonly<Record<string, unknown>>): string {
+  return Object.entries(raw)
+    .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '')
+    .slice(0, 6)
+    .map(([key, value]) => {
+      const text = String(value).trim();
+      const heading = key.trim();
+      return FIGURE.test(text) && /[A-Za-z]/.test(heading) && heading !== text ? `${heading} ${text}` : text;
+    })
+    .join(' · ') || '(empty row)';
+}

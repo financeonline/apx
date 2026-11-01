@@ -6,7 +6,7 @@ import { useDash } from './dash-context';
 import { DataIcon } from './icon';
 import type { GrowthRowsView } from './types';
 
-type Row = { readonly rate: number; readonly revenue: string; readonly cost: string; readonly profit: string; readonly uplift: string; readonly profitCompact?: string };
+type Row = { readonly rate: number; readonly revenue: string; readonly cost: string; readonly profit: string; readonly uplift: string; readonly profitCompact: string };
 
 const RATES = [10, 20, 30] as const;
 const isZero = (s: string) => /^\s*0*(\.0*)?\s*$/.test(s);
@@ -90,7 +90,7 @@ export function GrowthCard({ orgSlug, baselines, currency }: { orgSlug: string; 
       <div className="growth-result" aria-busy={pending}>
         <span id="growth-result-label">Projected annual revenue · +{rate}%</span>
         <strong id="growth-revenue" key={`${base.key}-${rate}`}>{selected?.revenue}</strong>
-        <small id="growth-uplift">{selected ? `${selected.uplift} revenue · ${selected.profitCompact ?? selected.profit} ${base.profitLabel.toLowerCase()}` : ''}</small>
+        <small id="growth-uplift">{selected ? `${selected.uplift} revenue · ${selected.profitCompact} ${base.profitLabel.toLowerCase()}` : ''}</small>
       </div>
       <details className="growth-adjust">
         <summary>Adjust costs &amp; investment</summary>

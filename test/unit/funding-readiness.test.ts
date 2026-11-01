@@ -280,3 +280,16 @@ describe('the gate and the overall score (§6)', () => {
     expect(JSON.stringify(two)).toBe(JSON.stringify(one));
   });
 });
+
+describe('Funding Readiness is a department (ADR-173)', () => {
+  it('is absent for a team member whose departments leave it out, without asking the database', async () => {
+    const { fundingEnabled } = await import('@/modules/funding');
+    // A 3rd party starts with the Reports department only. `db` is never read: had the company's
+    // switch been consulted, this would throw.
+    const ctx = {
+      orgId: 'org-1', modules: new Set(['reports']),
+      db: new Proxy({}, { get: () => { throw new Error('the database was read'); } }),
+    } as unknown as Parameters<typeof fundingEnabled>[0];
+    await expect(fundingEnabled(ctx)).resolves.toBe(false);
+  });
+});

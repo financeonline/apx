@@ -127,13 +127,18 @@ export async function POST(request: NextRequest) {
     const refused = await Promise.race([firstStatus.then(() => null), turn]);
     if (refused) throw refused;
 
+    // The reader may leave mid-answer (closes the tab, follows a link): the turn still finishes and is
+    // saved, but nothing more is written to the stream that is gone — enqueueing there throws, and
+    // the throw surfaced as an unhandled rejection (QA, 2 Nov 2026).
+    let gone = false;
     const stream = new ReadableStream<Uint8Array>({
       start(controller) {
         for (const e of buffered) controller.enqueue(frame(e));
         buffered.length = 0;
-        sink = (e) => controller.enqueue(frame(e));
-        void turn.then(() => controller.close());
+        sink = (e) => { if (!gone) controller.enqueue(frame(e)); };
+        void turn.then(() => { if (!gone) { gone = true; controller.close(); } });
       },
+      cancel() { gone = true; },
     });
 
     return new Response(stream, {

@@ -11,6 +11,8 @@ import {
   normaliseHeaderCell,
   parseCsv,
 } from '../../src/modules/imports/domain/parsers/csv';
+import { runPipeline } from '../../src/modules/imports/domain/pipeline';
+import { proposeColumnMap } from '@/modules/imports';
 
 /**
  * The CSV parser — IMPORT_ENGINE.md §5.1.
@@ -103,6 +105,17 @@ describe('nothing is discarded (§5.1, SOW §23)', () => {
     // it is `IMP-ROW-005`, not `IMP-ROW-001`.
     expect(table.rows[2]?.cells).toEqual(['Account Name', 'Acme Trading Ltd']);
     expect(table.warnings.map((w) => w.code)).not.toContain('IMP-ROW-001');
+  });
+
+  it('skips the header line itself when a blank line sits above it (headerRow is a place in rows, not a line)', () => {
+    const table = parseCsv(fixtureText('csv-with-preamble.csv'), withSynonyms);
+    const result = runPipeline({
+      organizationId: '00000000-0000-4000-8000-000000000001', importType: 'bank_statement', targetTable: 'bank_transactions',
+      table, columnMap: proposeColumnMap(table, 'bank_statement'), transforms: {}, baseCurrency: 'GBP', today: '2026-09-05',
+      declaredPeriodStart: '2026-08-01', declaredPeriodEnd: '2026-08-31', accounts: [], counterparties: [], existingRecords: [],
+    });
+    const header = result.rows.find((row) => row.sourceRef === 'csv:row:6');
+    expect(header?.status, 'the column headings are not an error row').toBe('skipped');
   });
 
   it('numbers rows by the physical line, so csv:row:{n} opens line n (§13)', () => {

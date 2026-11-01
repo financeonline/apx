@@ -123,7 +123,9 @@ export async function loadClientsView(ctx: AccessContext, window: MonthWindow): 
   const overdueTotal = attention.reduce((sum, c) => sum.plus(c.overdueAmount), new Decimal(0));
 
   // ---- Requests and reviews (engagement items) ----
-  const keys = window.months.map((m) => m.periodStart.slice(0, 7));
+  // Requests and reviews are activity: counted up to today (owner, 2026-11-02), not in the figures' months.
+  const activityWindow = window.activity ?? window;
+  const keys = activityWindow.months.map((m) => m.periodStart.slice(0, 7));
   const items: readonly EngagementItemView[] = engagement ?? [];
   const inWindow = (date: string) => { const key = monthKey(date); return key !== null && keys.includes(key); };
   const completedDates = items.filter((i) => COMPLETED.has(i.status)).map((i) => i.updatedAt);
@@ -207,15 +209,15 @@ export async function loadClientsView(ctx: AccessContext, window: MonthWindow): 
         label: 'Active clients', value: formatCount(active.length), change: `${formatCount(attention.length)} overdue`, note: 'customers this period',
         spark: countSpark(window, window.months.map((m) => activeByPeriod.get(m.periodId)?.size ?? 0)),
       },
-      { label: 'Reviews completed', value: formatCount(completed), change: figure, note: 'of requests', spark: countSpark(window, completedByMonth) },
+      { label: 'Reviews completed', value: formatCount(completed), change: figure, note: 'of requests', spark: countSpark(activityWindow, completedByMonth) },
       {
         label: 'Needs attention', value: formatCount(attention.length), change: 'Review due', note: 'overdue invoices',
         spark: countSpark(window, window.months.map((m) => overdueCustomersAt(customerInvoices, monthEndOf(m.periodStart)))),
       },
     ],
     chart: countChart({
-      dept: 'clients', window, first: requestsByMonth, second: completedByMonth,
-      baseline: countBaseline(items.map((i) => i.createdAt), window),
+      dept: 'clients', window: activityWindow, first: requestsByMonth, second: completedByMonth,
+      baseline: countBaseline(items.map((i) => i.createdAt), activityWindow),
       insight: `${formatCount(completed)} ${completed === 1 ? 'review' : 'reviews'} completed across ${plural(requests, 'request')}.`,
       figure,
     }),

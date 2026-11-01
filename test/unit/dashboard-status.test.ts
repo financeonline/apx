@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 
 import {
-  BASIS_TEXT, PARTIAL_DATA_THRESHOLD, changeFrom, formatValue, labelFor, missingReasonText,
+  BASIS_TEXT, PARTIAL_DATA_THRESHOLD, changeFrom, evidenceHref, formatValue, labelFor, missingReasonText,
   statusFor, toMetricCard, type PeriodLabel, type SnapshotRow,
 } from '@/modules/dashboard';
 import { PERFECT_QUALITY, type DataQuality } from '@/modules/financial-engine';
@@ -266,6 +266,31 @@ describe('the metric card view model (§5)', () => {
     expect(card.status.kind).toBe('none');
     expect(card.whyHref).toContain('metric=revenue');
     expect(card.whyHref).toContain(`period=${may.id}`);
+    // A scalar names no dimension: the evidence page reads the undimensioned figure.
+    expect(card.whyHref).not.toContain('dim=');
+  });
+
+  it('names the row of a breakdown in the Why link, or the evidence page has no figure to open', () => {
+    // Insights' "Spending by type" / "Spending by account" movements opened a 404: the link said
+    // only `expense_by_category` and the month, and that metric has no undimensioned figure.
+    const category = toMetricCard(
+      row({ metricKey: 'expense_by_category', dimensionType: 'standard_category', dimensionKey: 'operating_expense' }),
+      may, null, { orgSlug: 'acme', comparisonLabel: 'April 2026' },
+    );
+    const categoryQuery = new URL(category.whyHref, 'http://x').searchParams;
+    expect(categoryQuery.get('metric')).toBe('expense_by_category');
+    expect(categoryQuery.get('dim')).toBe('standard_category');
+    expect(categoryQuery.get('key')).toBe('operating_expense');
+    expect(categoryQuery.get('dimension')).toBeNull();
+
+    const account = evidenceHref('acme', {
+      metricKey: 'expense_by_account', periodId: may.id, dimensionType: 'account', dimensionId: 'acc-1', dimensionKey: null,
+    });
+    const accountQuery = new URL(account, 'http://x').searchParams;
+    expect(account.startsWith('/app/acme/evidence?')).toBe(true);
+    expect(accountQuery.get('dim')).toBe('account');
+    expect(accountQuery.get('dimension')).toBe('acc-1');
+    expect(accountQuery.get('key')).toBeNull();
   });
 
   it('shows net profit on a visible second line under operating profit (§4)', () => {

@@ -7,6 +7,8 @@
  * (formatted by the service); numbers are only for drawing. Pure types and constants: no I/O.
  */
 
+import type { ComplianceCardView } from './data-progress';
+
 export const DEPARTMENT_IDS = ['analysis', 'banking', 'capture', 'workflow', 'clients'] as const;
 export type DepartmentId = (typeof DEPARTMENT_IDS)[number];
 
@@ -18,6 +20,16 @@ export interface DashboardParams {
   readonly dept: DepartmentId;
   readonly months: PeriodMonths;
   readonly view: ReportView;
+}
+
+/**
+ * The view that decides the window: Current / Last Completed is Financial Analysis' control (the
+ * prototype hides it elsewhere and its other departments ignore it), so every other department reads
+ * Current — `?view=last` stays in the URL for the way back to Financial Analysis, but never moves a
+ * window whose control is hidden.
+ */
+export function effectiveView(params: Pick<DashboardParams, 'dept' | 'view'>): ReportView {
+  return params.dept === 'analysis' ? params.view : 'current';
 }
 
 /** The prototype's `departments` table, verbatim. */
@@ -161,7 +173,7 @@ export interface KeyIndicatorCardView {
 }
 export interface KeyIndicatorsPanel { readonly period: string; readonly cards: readonly KeyIndicatorCardView[]; readonly source: string }
 
-export interface GrowthRowView { readonly rate: number; readonly revenue: string; readonly cost: string; readonly profit: string; readonly uplift: string }
+export interface GrowthRowView { readonly rate: number; readonly revenue: string; readonly cost: string; readonly profit: string; readonly uplift: string; readonly profitCompact: string }
 export interface GrowthBaselineView {
   readonly key: string; readonly label: string; readonly profitLabel: string;
   /** Decimal strings, for the investment adjustment (done by the server action, never in a component). */
@@ -235,7 +247,8 @@ export interface DashboardExtras {
   readonly growth: readonly GrowthBaselineView[];
   readonly comparative: ComparativePanel | null;
   readonly marketing: MarketingPanel | null;
-  readonly compliance: readonly ComplianceCheck[];
+  /** Compliance View: the older Home's "Workspace status" lines; the card opens Data progress. */
+  readonly compliance: ComplianceCardView;
   readonly workflow: WorkflowPanel;
   readonly targets: TargetsPanel;
   /** "Sep 2026: revenue £…, operating costs £…, operating profit £… (29.6% margin)." — the templates. */
@@ -281,6 +294,12 @@ export interface MonthWindow {
   readonly snapshotLabel: string;   // "Current · Sep 2026" | "Last Completed · Aug 2026"
   readonly reportingCutoff: string; // "Reporting cutoff · September 2026"
   readonly currency: string;
+  /**
+   * The same number of months ending at TODAY's month (owner, 2026-11-02): what Client Management
+   * counts its requests and reviews in — activity, not figures. Data Capture and Manage Workflow are
+   * given this window as their main one. Absent on an activity window itself.
+   */
+  readonly activity?: MonthWindow;
   /**
    * ADDED (optional): up to six months ending at the same anchor, oldest first, whatever the selected
    * period — the prototype's three-month sparks and the targets history read beyond a one- or

@@ -129,6 +129,8 @@ export {
   groupIssues,
   loadBatchReview,
   loadImportHistory,
+  rowsRead,
+  blockingReasonFor,
   type BatchIssueGroup,
   type BatchReview,
   type ImportHistoryRow,

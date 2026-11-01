@@ -42,6 +42,41 @@ export function windowCaption(months: readonly { readonly periodStart: string }[
 }
 
 /**
+ * The activity window (owner, 2026-11-02: uploads, tasks and requests are counted "up to today"):
+ * `months` calendar months ending at the month containing `today`, oldest first. A month the company
+ * has no fiscal period for is still shown (activity happens whether or not figures exist); its
+ * `periodId` is then the month itself (`ym:2026-11`), which no figure reader ever looks up.
+ */
+export function buildActivityWindow(
+  periods: readonly PeriodLike[], months: number, today: string, currency: string,
+): MonthWindow {
+  const byMonth = new Map(periods.map((p) => [p.periodStart.slice(0, 7), p]));
+  const end = yearMonthOf(today);
+  const picked: WindowMonth[] = [];
+  for (let i = months - 1; i >= 0; i -= 1) {
+    const ym = addMonths(end, -i);
+    const key = ymKey(ym);
+    const period = byMonth.get(key);
+    const earlier = byMonth.get(ymKey(addMonths(ym, -12)));
+    picked.push({
+      periodId: period?.id ?? `ym:${key}`,
+      periodStart: period?.periodStart ?? `${key}-01`,
+      label: shortMonth(ym),
+      longLabel: periodLabel(ym),
+      isComplete: period?.isComplete ?? false,
+      yearEarlierPeriodId: earlier?.id ?? null,
+    });
+  }
+  return {
+    months: picked,
+    periodCaption: windowCaption(picked),
+    snapshotLabel: `To date · ${periodLabel(end)}`,
+    reportingCutoff: `Activity up to today · ${periodLabelLong(end)}`,
+    currency,
+  };
+}
+
+/**
  * The selected months, oldest first, ending at the anchor: the latest month with figures
  * (`current`) or the latest COMPLETE month with figures (`last`). Calendar months are counted back
  * from the anchor; a month the company has no period for is skipped, and months before the first one

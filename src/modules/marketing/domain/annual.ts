@@ -238,7 +238,10 @@ export interface GrowthRow {
   readonly revenue: string;
   readonly cost: string;
   readonly profit: string;
+  /** "+£34.2k" — the revenue added, as the card's summary line shows it. */
   readonly uplift: string;
+  /** "£61.3k" — the projected profit, compact, for the same line. */
+  readonly profitCompact: string;
 }
 export interface GrowthBaseline {
   readonly key: string;
@@ -262,7 +265,10 @@ function project(revenue: Decimal, grossProfit: Decimal, profit: Decimal, rate: 
     revenue: m(projectedRevenue),
     cost: m(projectedRevenue.minus(projectedProfit)),
     profit: m(projectedProfit),
-    uplift: compactMoney(revenue.times(g).toFixed(2), currency),
+    // The same words as `projectGrowthAction` (the rows with an investment), so the card's line reads
+    // alike whether or not an investment is entered: "+£34.2k revenue · £61.3k net profit".
+    uplift: `+${compactMoney(revenue.times(g).toFixed(2), currency)}`,
+    profitCompact: compactMoney(projectedProfit.toFixed(2), currency),
   };
 }
 

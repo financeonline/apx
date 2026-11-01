@@ -215,9 +215,10 @@ export default async function InsightsPage({
               <p className="mt-3 text-ink-muted">Nothing moved against you this month.</p>
             ) : (
               <ul className="mt-2">
+                {/* A standard category has no dimension id (its name is its key, ADR-053): the label keeps its row apart. */}
                 {view.unfavourable.slice(0, 10).map((movement) => (
                   <MovementRow
-                    key={`${movement.metricKey}|${movement.dimensionId ?? ''}`}
+                    key={`${movement.metricKey}|${movement.dimensionId ?? movement.dimensionLabel ?? ''}`}
                     movement={movement}
                   />
                 ))}
@@ -241,7 +242,7 @@ export default async function InsightsPage({
               <ul className="mt-2">
                 {view.favourable.slice(0, 10).map((movement) => (
                   <MovementRow
-                    key={`${movement.metricKey}|${movement.dimensionId ?? ''}`}
+                    key={`${movement.metricKey}|${movement.dimensionId ?? movement.dimensionLabel ?? ''}`}
                     movement={movement}
                   />
                 ))}

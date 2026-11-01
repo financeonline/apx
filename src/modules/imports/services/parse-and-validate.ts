@@ -188,9 +188,12 @@ export async function parseAndValidate(
     ]);
 
     let bankIdentity;
+    // A card or loan statement's balances are what is owed, so its balance checks run the other way.
+    let liabilityAccount = false;
     if (input.bankAccountId) {
       const data = await orgRowById<Record<string, unknown>>(deps.db, input.organizationId, 'bank_accounts', input.bankAccountId);
       if (data) {
+        liabilityAccount = data.account_type === 'credit_card' || data.account_type === 'loan';
         bankIdentity = {
           bankName: data.bank_name as string | null,
           sortCodeMasked: data.sort_code_masked as string | null,
@@ -212,6 +215,7 @@ export async function parseAndValidate(
       declaredPeriodEnd: input.declaredPeriodEnd,
       ...(input.annotateRow === undefined ? {} : { annotateRow: input.annotateRow }),
       ...(input.balancesRequired === undefined ? {} : { balancesRequired: input.balancesRequired }),
+      liabilityAccount,
       accounts,
       counterparties,
       existingRecords,

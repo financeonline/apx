@@ -6,7 +6,7 @@ import {
 } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { loadHome, loadOrganizationFacts } from '@/modules/dashboard';
-import { DEPARTMENT_META, loadDepartmentDashboard, parseDashboardParams, type DepartmentDashboard } from '@/modules/departments';
+import { DEPARTMENT_META, effectiveView, loadDepartmentDashboard, parseDashboardParams, type DepartmentDashboard } from '@/modules/departments';
 import type { Metadata } from 'next';
 import { DEFAULT_TARGETS, getMonthlyTargets } from '@/modules/targets';
 import { listAvailable } from '@/modules/reporting';
@@ -153,7 +153,7 @@ export default async function HomePage({
   };
   const feedback: FeedbackContext = {
     orgSlug, department: dept, departmentName: view.name, role: extras.identity.role, period: view.periodCaption,
-    months: String(dashParams.months), view: dashParams.view === 'last' ? 'Last Completed' : 'Current', scenario,
+    months: String(dashParams.months), view: effectiveView(dashParams) === 'last' ? 'Last Completed' : 'Current', scenario,
   };
   const initialCheck = await initialTargetsCheck(ctx, dashboard, currency);
 

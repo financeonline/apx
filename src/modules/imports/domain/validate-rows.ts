@@ -507,7 +507,9 @@ export function checkBatch(input: BatchCheckInput): BatchIssue[] {
         const current = readAmount(input.balanceChain[i] ?? '');
         const amount = readAmount(input.amounts[i] ?? '');
         if (!previous || !current || !amount) continue;
-        if (previous.plus(amount).minus(current).abs().greaterThan(TOLERANCE)) {
+        // A card or loan statement's balance is what is OWED: money out raises it, as in the totals above.
+        const step = input.liabilityAccount ? amount.negated() : amount;
+        if (previous.plus(step).minus(current).abs().greaterThan(TOLERANCE)) {
           issues.push({
             code: 'IMP-BAL-006', severity: 'error',
             message: 'The running balance does not follow on from the previous row.',

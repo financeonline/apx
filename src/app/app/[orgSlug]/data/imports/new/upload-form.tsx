@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { useActionState, useRef, useState } from 'react';
+import { startTransition, useActionState, useRef, useState } from 'react';
 import { Field, Input, Select } from '@/components/ui/field';
 import { FileDrop } from '@/components/ui/file-drop';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
@@ -56,7 +56,7 @@ export function UploadForm({
   /** ADR-150: the import types whose PDFs and photos MOTION reads with AI when asked (receipts). */
   aiReadTypes?: readonly string[];
 }) {
-  const [state, action] = useActionState(startImportAction, null);
+  const [state, action, pending] = useActionState(startImportAction, null);
   const [importType, setImportType] = useState('bank_statement');
   const [file, setFile] = useState<File | null>(null);
   const periodStart = useRef<HTMLInputElement>(null);
@@ -76,7 +76,18 @@ export function UploadForm({
 
   return (
     // Wider while an invoice is being checked, so the invoice and its fields sit side by side.
-    <form action={action} className={`${readsInvoice ? 'max-w-5xl' : 'max-w-xl'} space-y-5`}>
+    <form
+      action={action}
+      // Sent by hand: React resets a form after its action — after a refusal too — which emptied the
+      // dates, the account and the file while the drop area still named the file. The browser's own
+      // checks (required fields) still run first: `submit` only fires once they pass.
+      onSubmit={(event) => {
+        event.preventDefault();
+        const data = new FormData(event.currentTarget);
+        startTransition(() => action(data));
+      }}
+      className={`${readsInvoice ? 'max-w-5xl' : 'max-w-xl'} space-y-5`}
+    >
       <input type="hidden" name="org_slug" value={orgSlug} />
 
       <div className="max-w-xl space-y-5">
@@ -167,7 +178,7 @@ export function UploadForm({
       ) : null}
 
       <div className="flex flex-wrap items-center gap-3">
-        <SubmitButton pendingLabel="Reading your file…">Upload and check</SubmitButton>
+        <SubmitButton pendingLabel="Reading your file…" pending={pending}>Upload and check</SubmitButton>
         <span className="text-sm text-ink-muted">Nothing is imported until you review it.</span>
       </div>
 

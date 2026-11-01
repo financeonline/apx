@@ -2,7 +2,7 @@ import 'server-only';
 import type { DocumentData, Query } from 'firebase-admin/firestore';
 import type { Permission } from '@/core/permissions';
 import { orgRoleOf } from './access';
-import { orgRows, readCtx } from '../rls';
+import { orgRows, orgRowsByIds, readCtx } from '../rls';
 import { globalRow, inChunks, orgCollection, type OrgTable } from '../schema';
 import { uidOf, type Db } from '../types';
 
@@ -30,11 +30,29 @@ export async function readRows(db: Db, orgId: string, table: OrgTable, refine?: 
   return orgRows(db, orgId, table, refine);
 }
 
-/** `.in(field, ids)`: chunked at Firestore's 30 values per `in`, then joined. */
+/**
+ * `.in(field, ids)`: chunked at Firestore's 30 values per `in`, then joined.
+ *
+ * A lookup by `id` alone is a direct read of the documents (every org table keeps a row under its
+ * `id`, `orgRow`), not a query: on the emulator, which has no indexes, each `where('id','in',…)` scans
+ * the whole collection, and the calculation's Health/Forecast steps ran ~100 of them over every
+ * snapshot ever written — gigabytes of churn per run (2026-11-02). Access is unchanged: the server
+ * reads its scoped organisation directly, a person through `orgRowsByIds` (the table's policy).
+ */
 export async function readRowsIn(
   db: Db, orgId: string, table: OrgTable, field: string, ids: readonly (string | null | undefined)[], refine?: Refine,
 ): Promise<DocumentData[]> {
   const unique = [...new Set(ids.filter((id): id is string => typeof id === 'string' && id.length > 0))];
+  if (field === 'id' && !refine) {
+    if (unique.length === 0) return [];
+    if (db.actor.kind === 'service') {
+      if (db.actor.scope && db.actor.scope !== orgId) return [];
+      return inChunks(unique, 300, async (chunk) =>
+        (await db.fs.getAll(...chunk.map((id) => orgCollection(db.fs, orgId, table).doc(id))))
+          .filter((snap) => snap.exists).map((snap) => snap.data()!));
+    }
+    return inChunks(unique, 300, (chunk) => orgRowsByIds(db, orgId, table, chunk));
+  }
   return inChunks(unique, 30, (chunk) =>
     readRows(db, orgId, table, (q) => (refine ? refine(q.where(field, 'in', chunk)) : q.where(field, 'in', chunk))));
 }
