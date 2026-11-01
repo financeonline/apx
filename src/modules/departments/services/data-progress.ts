@@ -148,7 +148,11 @@ export async function complianceBasisLine(
 const ym = (iso: string | null) => (iso === null ? null : iso.slice(0, 7));
 const rangeOf = (b: BatchRow): DateRange | null => (b.periodStart && b.periodEnd ? { start: b.periodStart, end: b.periodEnd } : null);
 const ranges = (batches: readonly BatchRow[]) => batches.map(rangeOf).filter((r): r is DateRange => r !== null);
-const rowsOf = (b: BatchRow) => Object.values(b.rowCounts).reduce((n, v) => n + v, 0);
+// `row_counts` holds `total` beside the per-status counts, so summing every value counted each row
+// twice (217 for a 109-row file); `total` is the rows read, as `rowsRead` in imports/services/review.ts.
+const rowsOf = (b: BatchRow) => (typeof b.rowCounts.total === 'number'
+  ? b.rowCounts.total
+  : Object.values(b.rowCounts).reduce((n, v) => n + (typeof v === 'number' ? v : 0), 0));
 const accountName = (a: BankAccount | undefined) => a?.name ?? 'Bank account';
 
 export async function loadDataProgress(ctx: AccessContext): Promise<DataProgressView> {
