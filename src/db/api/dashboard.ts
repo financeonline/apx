@@ -119,8 +119,9 @@ async function get_monthly_targets(db: Db, args: Record<string, unknown>): Promi
  * from a stale dialog never silently overwrites another session's. Each save adds one to the revision.
  *
  * Who may save: `financials.view` (the targets are judged against the company's figures) AND
- * `settings.manage` — the permission that means "decides this company's own settings and plans"
- * (owner, admin, super admin), the same one the VAT, tax and fiscal-year settings ask for.
+ * `financials.edit` — owner, admin, super admin, the APX Financial Analyst and the company's
+ * accountant (owner, 2026-11-01: analysts and accountants set targets too); never a client or a
+ * third party.
  */
 async function set_monthly_targets(db: Db, args: Record<string, unknown>): Promise<Record<string, unknown>> {
   await rpcThrottle(db);
@@ -136,7 +137,7 @@ async function set_monthly_targets(db: Db, args: Record<string, unknown>): Promi
   return runTx(db, async (tx) => {
     await requireOrg(db, org, tx);
     await requirePermission(db, org, 'financials.view', tx);
-    await requirePermission(db, org, 'settings.manage', tx);
+    await requirePermission(db, org, 'financials.edit', tx);
     const ref = orgRow(db.fs, org, 'monthly_targets', month);
     const snap = await tx.get(ref);
     const before = snap.exists ? snap.data()! : null;

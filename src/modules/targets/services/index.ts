@@ -53,7 +53,7 @@ function toRecord(row: TargetsRow): MonthlyTargetsRecord {
 
 /** Whether this person may save targets (show the dialog's Save button only then). */
 export function canManageTargets(ctx: AccessContext): boolean {
-  return can(ctx, 'financials.view') && can(ctx, 'settings.manage');
+  return can(ctx, 'financials.view') && can(ctx, 'financials.edit');
 }
 
 /** The month's saved targets, or the defaults with revision 0 when none were saved. */
@@ -74,7 +74,7 @@ export async function saveMonthlyTargets(
   ctx: AccessContext, month: string, targets: unknown, expectedRevision: unknown,
 ): Promise<MonthlyTargetsRecord> {
   assertCan(ctx, 'financials.view');
-  assertCan(ctx, 'settings.manage');
+  assertCan(ctx, 'financials.edit');
   const m = parseTargetMonth(month);
   const parsed = parseMonthlyTargets(targets);
   const expected = parseExpectedRevision(expectedRevision);
