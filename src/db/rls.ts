@@ -174,6 +174,9 @@ const POLICIES: Partial<Record<OrgTable, Policy>> = {
       },
     };
   },
+  // The department dashboard's monthly targets: everyone who sees the dashboard sees the goals. They
+  // are written only by `api.set_monthly_targets` (financials.view + settings.manage).
+  monthly_targets: anyOf('dashboard.view'),
   notifications: async (c) => (c.role ? { where: [['user_id', '==', c.uid]] } : false),
   opportunities: anyOf('customers.view', 'financials.view'),
   organization_assignments: async (c) => (c.role && MANAGERS.has(c.role) ? ALL : { where: [['employee_user_id', '==', c.uid]] }),

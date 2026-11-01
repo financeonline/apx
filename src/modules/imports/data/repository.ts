@@ -63,6 +63,7 @@ export async function listBatches(
     balanceBasis: r.balance_basis,
     committedAt: r.committed_at,
     rolledBackAt: r.rolled_back_at,
+    createdAt: r.created_at,
     extractionMethod: (r.extraction_method as ImportBatch['extractionMethod']) ?? 'csv',
     errorSummary: (r.error_summary as ImportBatch['errorSummary']) ?? null,
     extractionStats: (r.extraction_stats as ImportBatch['extractionStats']) ?? {},

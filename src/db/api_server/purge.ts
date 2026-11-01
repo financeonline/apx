@@ -46,6 +46,7 @@ const ORDER: readonly OrgTable[] = [
   // `member_login_claims` was missing from the SQL list (its FK cascaded only from `organizations`,
   // which the purge keeps), so the guard would have refused an organisation holding one. It is first.
   'member_login_claims',
+  'monthly_targets',
   'scenario_values', 'scenario_runs', 'forecast_values', 'forecast_runs',
   'invoice_lines', 'opportunities', 'campaign_spend', 'campaigns', 'marketing_channels', 'products',
   'report_completeness_attestations',
@@ -165,6 +166,18 @@ async function purge_organization(db: Db, args: Record<string, unknown>): Promis
     jobsDeleted += 1;
   }
   if (jobsDeleted > 0) counts.jobs = jobsDeleted;
+
+  // 3b. The company's dashboard feedback notes (a top-level table): what its people wrote goes too.
+  let feedbackDeleted = 0;
+  const feedbackWriter = fs.bulkWriter();
+  await eachPage(globalCollection(fs, 'dashboard_feedback').where('organization_id', '==', org), async (docs) => {
+    for (const d of docs) {
+      void feedbackWriter.delete(d.ref);
+      feedbackDeleted += 1;
+    }
+  });
+  await feedbackWriter.close();
+  if (feedbackDeleted > 0) counts.dashboard_feedback = feedbackDeleted;
 
   // 4. The guard: what turns "a table was added and this list was not updated" into a loud failure.
   for (const sub of await orgDoc(fs, org).listCollections()) {

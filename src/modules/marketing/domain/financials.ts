@@ -145,6 +145,13 @@ export interface FinancialFacts {
   readonly accountSpend: readonly AccountSpendFact[];
   readonly campaignSpend: readonly CampaignSpendFact[];
   readonly productSales: readonly ProductSalesFact[];
+  /**
+   * Where the marketing row comes from, when the caller has already decided it over a wider set of
+   * months (the dashboard's year figures, ADR-180: a year built from a SUBSET of months must use the
+   * same source as the three-year table, or one year reads accounts and the next campaigns).
+   * Absent: decided from these facts' own report years (`marketingSourceOf`).
+   */
+  readonly marketingSource?: MarketingSource;
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -289,7 +296,12 @@ function marketingSource(years: readonly ReportYear[], facts: FinancialFacts): M
   return null;
 }
 
-function marketingFromAccounts(months: readonly MonthFacts[], categorySpend: readonly CategorySpendFact[]): Decimal | null {
+/** The marketing source `buildMarketingFinancials` would use for these facts (their report years). */
+export function marketingSourceOf(facts: FinancialFacts): MarketingSource {
+  return marketingSource(reportYears(facts.months, facts.fiscalYearStartMonth), facts);
+}
+
+export function marketingFromAccounts(months: readonly MonthFacts[], categorySpend: readonly CategorySpendFact[]): Decimal | null {
   let total = ZERO;
   for (const month of months) {
     const row = categorySpend.find((r) => r.periodId === month.periodId && r.category === 'marketing');
@@ -642,7 +654,7 @@ export function buildMarketingFinancials(facts: FinancialFacts): MarketingFinanc
   const latest = years[years.length - 1];
   if (latest === undefined) return null;
 
-  const marketing = marketingSource(years, facts);
+  const marketing = facts.marketingSource !== undefined ? facts.marketingSource : marketingSource(years, facts);
   const overview = years.map((y) => financialYear(y, facts, marketing));
   const products = productSales(years, facts);
   const costs = costLines(latest, facts);

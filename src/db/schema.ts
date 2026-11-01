@@ -34,7 +34,7 @@ export const ORG_TABLES = [
   'funding_assessments', 'funding_current', 'health_current', 'health_scores', 'import_batches',
   'import_mappings', 'import_rows', 'investment_reports', 'invitations', 'invoice_lines', 'invoices',
   'ledger_entries', 'marketing_channels', 'marketing_reports', 'member_login_claims',
-  'member_permission_overrides', 'metric_current', 'metric_snapshots', 'notifications',
+  'member_permission_overrides', 'metric_current', 'metric_snapshots', 'monthly_targets', 'notifications',
   'opportunities', 'organization_assignments', 'organization_memberships', 'organization_profiles',
   'ownership_transfers', 'period_balances', 'platform_org_settings', 'products',
   'record_status_events', 'recurring_payment_groups', 'report_completeness_attestations',
@@ -49,7 +49,7 @@ export type OrgTable = (typeof ORG_TABLES)[number];
  */
 export const GLOBAL_TABLES = [
   'organizations', 'profiles', 'platform_users', 'platform_settings', 'api_rate_limits',
-  'portfolio_ai_turns', 'audit_events', 'jobs',
+  'portfolio_ai_turns', 'audit_events', 'jobs', 'dashboard_feedback',
 ] as const;
 export type GlobalTable = (typeof GLOBAL_TABLES)[number];
 
@@ -62,7 +62,8 @@ export type GlobalTable = (typeof GLOBAL_TABLES)[number];
  *    uuid in `id` for references);
  *  - the per-period "current" tables: the period id;
  *  - `member_permission_overrides`: `{user_id}__{permission}`;
- *  - `metric_current`: `metricCellId(...)` — the unique cell.
+ *  - `metric_current`: `metricCellId(...)` — the unique cell;
+ *  - `monthly_targets`: the month it sets, `YYYY-MM` (one record per company per month).
  */
 export const ORG_SINGLETON_ID = 'current';
 export const ORG_SINGLETONS = ['organization_profiles', 'platform_org_settings'] as const;

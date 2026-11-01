@@ -512,6 +512,22 @@ const my_profile: DbFunction = async (db) => {
   }];
 };
 
+/**
+ * `api.my_previous_sign_in()` (department dashboard, ADR-180): when the caller signed in BEFORE the
+ * sign-in that opened this session — the prototype's "Last login". Only the caller's own
+ * `auth.sign_in` audit rows are read (index: actor_user_id, action, created_at desc), and only their
+ * time leaves; never the IP or the user agent stored beside it.
+ */
+const my_previous_sign_in: DbFunction = async (db) => {
+  const uid = uidOf(db);
+  if (!uid) return [];
+  const snap = await db.fs.collection('audit_events')
+    .where('actor_user_id', '==', uid).where('action', '==', 'auth.sign_in')
+    .orderBy('created_at', 'desc').limit(2).select('created_at').get();
+  const previous = snap.docs[1];
+  return previous === undefined ? [] : [{ created_at: String(previous.get('created_at')) }];
+};
+
 /** `api.set_last_active_org`. */
 const set_last_active_org: DbFunction = async (db, args) => {
   await RPC(db);
@@ -1482,7 +1498,7 @@ export const functions: DbFunctions = {
   accept_invitation, accept_ownership_transfer, access_requests_list, begin_member_login, cancel_deletion,
   cancel_ownership_transfer, change_member_role, create_organization, decide_access_request, disable_user,
   enable_user, finish_member_login, initiate_ownership_transfer, invite_member, invite_member_with_token,
-  leave_organization, my_access, my_context, my_organizations, my_platform_role, my_profile, org_advisers,
+  leave_organization, my_access, my_context, my_organizations, my_platform_role, my_previous_sign_in, my_profile, org_advisers,
   org_audit_events, org_invitations, org_member_departments, org_member_permissions, org_members, remove_member,
   request_access, request_deletion, revoke_invitation, set_last_active_org, set_member_departments,
   set_member_permission, set_member_status, set_tax_settings, set_vat_registration, set_currency_and_country,

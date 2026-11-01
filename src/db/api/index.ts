@@ -16,6 +16,7 @@ import { functions as investment } from './investment';
 import { functions as scenarios } from './scenarios';
 import { functions as ai } from './ai';
 import { functions as jobs } from './jobs';
+import { functions as dashboard } from './dashboard';
 
 /**
  * Every `api.*` function: what a signed-in user may ask the database to do (ADR-026).
@@ -24,7 +25,7 @@ import { functions as jobs } from './jobs';
  * merge mistake, so `assertDisjoint` fails the server at start-up rather than letting one silently win.
  */
 const AREAS: ReadonlyArray<readonly [string, DbFunctions]> = [
-  ['tenancy', tenancy], ['platform', platform], ['portfolio', portfolio], ['imports', imports], ['financials', financials], ['banking', banking], ['commercial', commercial], ['marketing', marketing], ['engagement', engagement], ['actions', actions], ['alerts', alerts], ['reporting', reporting], ['investment', investment], ['scenarios', scenarios], ['ai', ai], ['jobs', jobs],
+  ['tenancy', tenancy], ['platform', platform], ['portfolio', portfolio], ['imports', imports], ['financials', financials], ['banking', banking], ['commercial', commercial], ['marketing', marketing], ['engagement', engagement], ['actions', actions], ['alerts', alerts], ['reporting', reporting], ['investment', investment], ['scenarios', scenarios], ['ai', ai], ['jobs', jobs], ['dashboard', dashboard],
 ];
 
 function assertDisjoint(areas: typeof AREAS): DbFunctions {

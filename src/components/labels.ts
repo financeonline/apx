@@ -98,6 +98,8 @@ export const NOTIFICATION_KIND_LABELS: Record<string, string> = {
  */
 export const AUDIT_ACTION_LABELS: Record<string, string> = {
   'org.created': 'Organisation created',
+  'targets.set': 'Monthly targets saved',
+  'dashboard.feedback_submitted': 'Dashboard feedback sent',
   'org.updated': 'Organisation details changed',
   'org.deletion_requested': 'Deletion requested',
   'org.deletion_cancelled': 'Deletion cancelled',

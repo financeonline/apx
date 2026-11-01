@@ -2,3 +2,9 @@
 export { loadDepartments, type DepartmentTile, type DepartmentsView, type SystemOverview, type TileTone } from './services';
 /** Home's "Data & compliance" strip, composed by permission (ADR-172 follow-up). */
 export { loadDataCompliance, type DataComplianceView } from './services/data-compliance';
+
+/** The department dashboard (ADR-180; docs/DEPARTMENT_DASHBOARD_PLAN.md): the contract and its loader. */
+export * from './domain/dashboard';
+export { loadDepartmentDashboard, parseDashboardParams } from './services/dashboard';
+export { loadWindow } from './services/dashboard/window';
+export { clientReviewTitle, reviewRequestTitle } from './services/dashboard/review-requests';

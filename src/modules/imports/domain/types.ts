@@ -159,6 +159,8 @@ export interface ImportBatch {
   readonly balanceBasis: 'cumulative' | 'movement' | null;
   readonly committedAt: string | null;
   readonly rolledBackAt: string | null;
+  /** When the batch was started (`import_batches.created_at`); optional so hand-built batches need not carry it. */
+  readonly createdAt?: string;
   readonly extractionMethod: ExtractionMethod;
   /** `{stage, message}` when the batch failed (§7.2, §16). */
   readonly errorSummary: { readonly stage?: string; readonly message?: string } | null;

@@ -35,6 +35,17 @@ export {
 
 // Section 03's figures, and the writer of Sections 01–02 and the commentary.
 export { loadMarketingFinancials } from './services/financials';
+
+// The department dashboard's year figures (ADR-180): pure totals over Section 03's own rules.
+export {
+  GROWTH_RATES, annualComparison, compactMoney, comparativeYears, growthBaselines, keyIndicators, marketingShare,
+  marketingWindow, spanLabel,
+  type AnnualComparison, type AnnualFacts, type ComparativeYear, type CostMode, type GrowthBaseline, type GrowthRow,
+  type KeyIndicatorCard, type KeyIndicatorsView, type MarketingMonth, type MarketingShare, type MarketingWindow,
+  type Window as AnnualWindow,
+} from './domain/annual';
+export type { MarketingSource } from './domain/financials';
+export { loadAnnualFacts } from './services/annual';
 export { generateMarketingNarrative } from './services/generate-narrative';
 
 // The presentation the page, the Word file and the PDF share, and the two files.

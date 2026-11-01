@@ -29,6 +29,7 @@ export default async function PlatformLayout({ children }: { children: React.Rea
             { label: 'Assignments', href: '/platform/assignments', icon: 'assignments' },
             { label: 'Jobs', href: '/platform/jobs', icon: 'jobs' },
             { label: 'AI feedback', href: '/platform/ai-feedback', icon: 'analyst' },
+            { label: 'Dashboard feedback', href: '/platform/feedback', icon: 'engagement' },
             { label: 'Audit', href: '/platform/audit', icon: 'audit' },
             { label: 'Settings', href: '/platform/settings', icon: 'settings' },
           ],

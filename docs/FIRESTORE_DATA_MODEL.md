@@ -47,7 +47,7 @@ the Admin SDK bypasses rules — so the checks in `src/db` ARE the tenant bounda
 * Organisation-scoped tables are sub-collections: `organizations/{orgId}/{table}/{docId}`
   (`ORG_TABLES` in `src/db/schema.ts`). Use `orgCollection`, `orgRow`.
 * Global: `organizations`, `profiles`, `platform_users`, `platform_settings`, `api_rate_limits`,
-  `portfolio_ai_turns`, `audit_events`, `jobs` (`globalCollection`, `globalRow`).
+  `portfolio_ai_turns`, `audit_events`, `jobs`, `dashboard_feedback` (`globalCollection`, `globalRow`).
 * `role_permissions` is gone: `core/permissions` `ROLE_MATRIX` is the only source.
 * Collection = table name; field = column name (snake_case). Every org document also stores
   `organization_id`. Collection-group queries (`acrossOrgs`) serve the portfolio and platform.
@@ -64,6 +64,7 @@ Document ids:
 | `health_current`, `funding_current` | the `period_id` |
 | `member_permission_overrides` | `overrideId(user_id, permission)` |
 | `metric_current` | `metricCellId({...})` |
+| `monthly_targets` | the month, `YYYY-MM` (one record per company per month; `revision` for optimistic concurrency) |
 | `platform_settings` | its `key` |
 | `api_rate_limits` | `hashKey([actor, bucket, window_start])` |
 | `audit_events`, `record_status_events` | uuid (they were `bigint` identities; an id is now a string) |
