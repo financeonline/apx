@@ -1,4 +1,5 @@
 import 'server-only';
+import { log } from '@/core/logging';
 import { callApi } from '@/core/db';
 import { orgQuery, orgRows, orgRowsByIds } from '@/db/rls';
 import type { Db } from '@/db/types';
@@ -62,6 +63,14 @@ export async function myProfile(db: Db, requestId?: string): Promise<{ fullName:
 
 /** When the reader signed in before this session's sign-in (`api.my_previous_sign_in`); null if never. */
 export async function previousSignIn(db: Db, requestId?: string): Promise<string | null> {
-  const rows = await callApi<Array<{ created_at: string }>>(db, 'my_previous_sign_in', {}, requestId);
-  return rows?.[0]?.created_at ?? null;
+  try {
+    const rows = await callApi<Array<{ created_at: string }>>(db, 'my_previous_sign_in', {}, requestId);
+    return rows?.[0]?.created_at ?? null;
+  } catch (error) {
+    // LAST LOGIN is a courtesy line: it must never take the dashboard down. On a project where the
+    // `audit_events (actor_user_id, action, created_at desc)` index is not deployed yet the query is
+    // refused; the line is then left out and the failure is logged for staff.
+    log.warn('previous sign-in unavailable', { requestId, service: 'departments.dashboard', error: String(error) });
+    return null;
+  }
 }
