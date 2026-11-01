@@ -33,9 +33,19 @@ export function ShellFrame({
   compactBrand,
   sidebar,
   headerEnd,
+  look = 'dark',
+  ribbon,
   children,
 }: {
   initiallyDocked: boolean;
+  /**
+   * `light` (ADR-179): the company pages' white masthead from the owner's third reference — taller,
+   * not sticky, the magenta ribbon in its corner — and the whole frame, menu included, on the light
+   * palette (`.theme-lobby`). `dark` is ADR-169's bar, for Command Centre and Platform.
+   */
+  look?: 'dark' | 'light';
+  /** The light masthead's corner art (`RibbonArt`), drawn behind the menu button. */
+  ribbon?: ReactNode;
   /** The wordmark link for the sidebar and the drawer. */
   brand: ReactNode;
   /** The smaller wordmark link for the top bar. */
@@ -101,8 +111,24 @@ export function ShellFrame({
     rememberDocked(false);
   };
 
+  const menuButton = (
+    <button
+      ref={openButton}
+      type="button"
+      onClick={openMenu}
+      aria-label="Open menu"
+      aria-expanded={drawerOpen}
+      aria-controls="apx-drawer"
+      className={look === 'light'
+        ? 'flex size-10 shrink-0 items-center justify-center rounded-[0.4375rem] border border-white/70 bg-white/90 text-ink shadow-[0_2px_10px_rgb(129_29_94/0.18)] transition-colors hover:text-accent'
+        : 'flex size-10 shrink-0 items-center justify-center rounded-xl border border-line text-ink transition-colors hover:border-accent/60 hover:text-accent'}
+    >
+      <Menu aria-hidden="true" className="size-5" strokeWidth={1.75} />
+    </button>
+  );
+
   return (
-    <div data-nav={docked ? 'shown' : 'hidden'} className="group/shell min-h-dvh lg:data-[nav=shown]:flex">
+    <div data-nav={docked ? 'shown' : 'hidden'} className={`group/shell min-h-dvh lg:data-[nav=shown]:flex ${look === 'light' ? 'theme-lobby' : ''}`}>
       {/* The docked sidebar, from `lg`, while shown. Above the page: the company pages' light canvas
           (`LobbyCanvas`) paints its background out to the window's edges and would cover it. */}
       <aside
@@ -125,21 +151,24 @@ export function ShellFrame({
       </aside>
 
       {/* The top bar: always below `lg`; from `lg` only while the sidebar is hidden. */}
-      <header className="panel sticky top-0 z-20 flex items-center gap-3 border-x-0 border-t-0 px-4 py-2.5 sm:px-6 lg:group-data-[nav=shown]/shell:hidden">
-        <button
-          ref={openButton}
-          type="button"
-          onClick={openMenu}
-          aria-label="Open menu"
-          aria-expanded={drawerOpen}
-          aria-controls="apx-drawer"
-          className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-line text-ink transition-colors hover:border-accent/60 hover:text-accent"
-        >
-          <Menu aria-hidden="true" className="size-5" strokeWidth={1.75} />
-        </button>
-        {compactBrand}
-        {headerEnd}
-      </header>
+      {look === 'light' ? (
+        <header className="relative isolate z-20 overflow-hidden border-b border-line bg-surface lg:group-data-[nav=shown]/shell:hidden">
+          {ribbon}
+          <div className="mx-auto flex min-h-[7.5rem] max-w-[100rem] flex-wrap items-center gap-x-6 gap-y-4 px-4 py-5 sm:min-h-[8.5rem] sm:px-6 lg:px-11">
+            <div className="flex min-w-0 items-center gap-5 sm:gap-14">
+              {menuButton}
+              {compactBrand}
+            </div>
+            <div className="ml-auto flex min-w-0 flex-wrap items-center justify-end gap-3">{headerEnd}</div>
+          </div>
+        </header>
+      ) : (
+        <header className="panel sticky top-0 z-20 flex items-center gap-3 border-x-0 border-t-0 px-4 py-2.5 sm:px-6 lg:group-data-[nav=shown]/shell:hidden">
+          {menuButton}
+          {compactBrand}
+          {headerEnd}
+        </header>
+      )}
 
       {/* The drawer, below `lg`. */}
       {drawerOpen ? (
@@ -149,7 +178,7 @@ export function ShellFrame({
             aria-label="Close menu"
             tabIndex={-1}
             onClick={() => setDrawerOpen(false)}
-            className="absolute inset-0 bg-black/70"
+            className={`absolute inset-0 ${look === 'light' ? 'bg-[#2d1823]/25 backdrop-blur-[4px]' : 'bg-black/70'}`}
           />
           <div
             id="apx-drawer"

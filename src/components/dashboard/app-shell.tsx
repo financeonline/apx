@@ -2,7 +2,7 @@ import Link from 'next/link';
 import { cookies } from 'next/headers';
 import { ChevronRight } from 'lucide-react';
 import type { ReactNode } from 'react';
-import { CornerBlob, Wordmark } from './brand';
+import { CornerBlob, LightLockup, RibbonArt, Wordmark } from './brand';
 import { SidebarNav, type SidebarGroup } from './sidebar';
 import { NAV_COOKIE } from './nav-cookie';
 import { ShellFrame } from './shell-frame';
@@ -20,6 +20,8 @@ export async function AppShell({
   groups,
   user,
   footer,
+  look = 'dark',
+  headerActions,
   children,
 }: {
   homeHref: string;
@@ -30,8 +32,16 @@ export async function AppShell({
   /** The signed-in person, as the reference's sidebar shows them. */
   user?: { name: string; role: string; href: string };
   footer?: ReactNode;
+  /**
+   * `light` (ADR-179): the company pages' white masthead and light menu, the owner's third reference.
+   * Command Centre and Platform keep the dark bar.
+   */
+  look?: 'dark' | 'light';
+  /** Light masthead only: links before the signed-in person (the notifications bell). */
+  headerActions?: ReactNode;
   children: ReactNode;
 }) {
+  const light = look === 'light';
   // Initials: a name's first two words, or an email's first two letters before the @.
   const initials = !user ? ''
     : user.name.includes('@') ? user.name.slice(0, 2).toUpperCase()
@@ -61,25 +71,54 @@ export async function AppShell({
           Execute · Grow
         </p>
       </div>
-      {/* The reference's corner shape behind the menu's last lines. */}
-      <CornerBlob idPrefix="sidebar-blob" className="pointer-events-none absolute bottom-0 left-0 -z-10 w-full -scale-y-100 opacity-35" />
+      {/* The reference's corner shape behind the menu's last lines (the dark look only). */}
+      {light ? null : <CornerBlob idPrefix="sidebar-blob" className="pointer-events-none absolute bottom-0 left-0 -z-10 w-full -scale-y-100 opacity-35" />}
     </>
   );
   const brand = (
     <Link href={homeHref} className="px-2" aria-label={homeLabel}>
-      <Wordmark idPrefix="sidebar-logo" />
+      {light ? <LightLockup idPrefix="sidebar-lockup" compact /> : <Wordmark idPrefix="sidebar-logo" />}
       {area ? <span className="mt-3 block text-xs font-semibold tracking-[0.12em] text-ink-muted uppercase">{area}</span> : null}
     </Link>
   );
-  const compactBrand = (
+  const compactBrand = light ? (
+    <Link href={homeHref} aria-label={homeLabel} className="min-w-0"><LightLockup idPrefix="masthead-lockup" /></Link>
+  ) : (
     <Link href={homeHref} aria-label={homeLabel}><Wordmark tagline={false} idPrefix="topbar-logo" /></Link>
+  );
+  // The reference's identity block: actions, then the person (avatar, name, role) behind a hairline,
+  // then Log out — each a real link or form.
+  const lightEnd = (
+    <>
+      {headerActions}
+      {user ? (
+        <Link href={user.href} className="flex min-w-0 items-center gap-2.5 border-l border-line-strong pl-4 hover:text-accent">
+          <span aria-hidden="true" className="flex size-[2.0625rem] shrink-0 items-center justify-center rounded-full border border-[#e6c9dc] bg-[#faf0f6] text-xs font-semibold text-accent">
+            {initials}
+          </span>
+          <span className="hidden min-w-0 leading-tight sm:block">
+            <span className="block max-w-[11rem] truncate text-[0.8125rem] font-semibold">{user.name}</span>
+            <span className="block max-w-[11rem] truncate text-[0.6875rem] text-ink-muted">{user.role}</span>
+          </span>
+        </Link>
+      ) : null}
+      <SignOutHeaderButton look="light" />
+    </>
   );
   // Hidden by default; shown while this browser session asked for it (`ShellFrame`).
   const docked = (await cookies()).get(NAV_COOKIE)?.value === 'shown';
 
   return (
-    <ShellFrame initiallyDocked={docked} brand={brand} compactBrand={compactBrand} sidebar={sidebar} headerEnd={<SignOutHeaderButton />}>
-      <CornerBlob idPrefix="page-blob" className="fixed top-0 right-0 -z-10 hidden w-[26rem] max-w-[45vw] -scale-x-100 opacity-25 md:block" />
+    <ShellFrame
+      initiallyDocked={docked}
+      brand={brand}
+      compactBrand={compactBrand}
+      sidebar={sidebar}
+      headerEnd={light ? lightEnd : <SignOutHeaderButton />}
+      look={look}
+      ribbon={light ? <RibbonArt idPrefix="masthead-ribbon" className="absolute -top-[6.375rem] -left-[5.25rem] -z-10 w-[18.75rem] opacity-95" /> : undefined}
+    >
+      {light ? null : <CornerBlob idPrefix="page-blob" className="fixed top-0 right-0 -z-10 hidden w-[26rem] max-w-[45vw] -scale-x-100 opacity-25 md:block" />}
       <main className="mx-auto w-full min-w-0 max-w-[100rem] flex-1 px-4 py-6 sm:px-6 lg:px-8 lg:py-8">{children}</main>
     </ShellFrame>
   );

@@ -46,6 +46,9 @@
   /* Text on the coral/orange gradient: near-black, as the reference's "Log in". */
   --color-on-accent: #140a0c;
 
+  /* Link blue (ADR-179): the light pages' text links; a light blue on the dark ground. */
+  --color-blue-ink: #8fbfff;
+
   /* The second brand colour — orange (kept under the old token name, used for icon tiles). */
   --color-pink: #ff8a4c;
   --color-pink-icon: #ff8a4c;
@@ -90,54 +93,79 @@
 }
 
 /*
- * The client lobby's light palette (ADR-176): the owner's second reference — white ground, warm grey
- * rules, APX red and wine. Only the lobby's main area takes it; the shell, its dark bar and the
- * wordmark are unchanged. The tokens are redefined in scope, so every utility inside follows without
- * a literal hex value in a component. Every text colour measured at WCAG AA on white and on #f7f0f1.
+ * The company pages' light palette (ADR-176, re-coloured by ADR-179): the owner's third reference
+ * ("APX Financial System", 2026-11-01) — white ground, cool blue-grey rules, APX magenta `#c12591`
+ * with blue `#3284d8` as the second colour, Georgia for the display headings, Inter for the rest.
+ * Every company page takes it, its masthead and menu included (`AppShell look="light"`); sign-in,
+ * Command Centre and Platform keep ADR-169's dark palette. The tokens are redefined in scope, so every
+ * utility inside follows without a literal hex value in a component. Every TEXT colour measured at
+ * WCAG AA on white, #f9fbfe and #fff2fa — the reference's lighter greys (#75859a, #8a9bad) fail it,
+ * so text uses the same hue a step darker; the bright blue is for lines and dots only.
  */
 .theme-lobby {
+  --font-sans: Inter, 'Helvetica Neue', Arial, ui-sans-serif, system-ui, sans-serif;
+  --font-serif: Inter, 'Helvetica Neue', Arial, ui-sans-serif, system-ui, sans-serif;
   --color-paper: #ffffff;
   --color-surface: #ffffff;
-  --color-surface-sunken: #f7f3f3;
-  --color-ink: #27272a;
-  --color-ink-muted: #6e6b70;
-  --color-ink-faint: #737075;
-  --color-line: #ebe5e6;
-  --color-line-strong: #ddd3d6;
-  --color-accent: #b72e3d;
-  --color-accent-hover: #8c243c;
-  --color-accent-soft: #faf0f3;
-  --color-brand-ink: #27272a;
+  --color-surface-sunken: #f9fbfe;
+  --color-ink: #273343;
+  --color-ink-muted: #5a6a7f;
+  --color-ink-faint: #5f6f84;
+  --color-line: #e6ecf3;
+  --color-line-strong: #d3dde9;
+  --color-accent: #c12591;
+  --color-accent-hover: #a31f79;
+  --color-accent-soft: #fff2fa;
+  --color-brand-ink: #273343;
   --color-on-accent: #ffffff;
-  --color-pink: #ee604e;
-  --color-pink-icon: #b72e3d;
-  --color-pink-soft: #fbeff1;
-  --color-good: #2f7a4b;
-  --color-good-dot: #3c9a5f;
-  --color-good-soft: #edf6f0;
+  /* The second colour: blue. Text in it uses `--color-blue-ink`; `--color-pink` stays the token name. */
+  --color-pink: #3284d8;
+  --color-pink-icon: #236fac;
+  --color-pink-soft: #eef4fb;
+  --color-blue-ink: #236fac;
+  /* The reference's language: blue is "fine", magenta asks for attention. Words always carry it too. */
+  --color-good: #236fac;
+  --color-good-dot: #3284d8;
+  --color-good-soft: #eef4fb;
   --color-warn: #8a5a00;
   --color-warn-dot: #d99a1e;
   --color-warn-soft: #fbf3e2;
-  --color-danger: #b72e3d;
-  --color-danger-soft: #faf0f3;
-  --color-chart-1: #b72e3d;
-  --color-chart-2: #ee604e;
-  --color-chart-3: #8c243c;
-  --color-chart-4: #7c6f9e;
-  --color-chart-5: #3c9a5f;
-  --color-chart-6: #8a8590;
+  --color-danger: #b22d8b;
+  --color-danger-soft: #fff2fa;
+  --color-chart-1: #c12591;
+  --color-chart-2: #3284d8;
+  --color-chart-3: #175fa7;
+  --color-chart-4: #8a5cc2;
+  --color-chart-5: #2f8f6b;
+  --color-chart-6: #8a9bad;
   --panel-shadow: none;
   --radius-card: 0.75rem;
-  --brand-gradient: linear-gradient(100deg, #b72e3d 0%, #c43d47 55%, #b72e3d 100%);
-  --glow-card: 0 10px 28px -18px rgb(140 36 60 / 0.45);
-  --glow-card-focus: 0 0 0 2px rgb(183 46 61 / 0.35);
-  --glow-link: 0 8px 22px -16px rgb(140 36 60 / 0.45);
-  --glow-pill: 0 8px 20px -14px rgb(140 36 60 / 0.55);
-  --lobby-wine: #8c243c;
+  /* Primary buttons are solid magenta, as the reference's; the blue-to-magenta blend marks a selection. */
+  --brand-gradient: linear-gradient(120deg, #c12591, #c12591);
+  --select-gradient: linear-gradient(120deg, #267cc7, #c12591);
+  --icon-gradient: linear-gradient(125deg, #2479c9, #cc2598);
+  --glow-card: 0 4px 22px rgb(30 109 184 / 0.06), 0 0 0 1px rgb(193 37 145 / 0.18);
+  --glow-card-focus: 0 0 0 2px rgb(193 37 145 / 0.4);
+  --glow-link: 0 6px 18px -12px rgb(193 37 145 / 0.45);
+  --glow-pill: 0 4px 14px rgb(140 42 170 / 0.13);
+  /* Serif display headings (cards' titles) are the reference's deep blue. */
+  --lobby-wine: #2d5376;
   --lobby-serif: Georgia, 'Times New Roman', serif;
   color-scheme: light;
   background-color: var(--color-paper);
   color: var(--color-ink);
+  font-family: var(--font-sans);
+}
+
+/* The reference's buttons have 7px corners (shadcn's default is 12px); a round icon button stays round. */
+.theme-lobby [data-slot='button']:not([class*='rounded-full']) {
+  border-radius: 0.4375rem;
+}
+
+/* The reference's focus ring: a 3px magenta outline, clear of the element. */
+.theme-lobby :focus-visible {
+  outline: 3px solid #d94ba7;
+  outline-offset: 3px;
 }
 
 @layer base {

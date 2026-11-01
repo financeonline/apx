@@ -4,7 +4,7 @@ import { callApi } from '@/core/db';
 import { toMotionError } from '@/core/errors';
 import type { Permission } from '@/core/permissions';
 import { orgRoleOf } from '@/db/app/access';
-import { orgRows, readCtx } from '@/db/rls';
+import { orgRows, orgRowsByIds, readCtx } from '@/db/rls';
 import { globalRow, inChunks, orgCollection, type OrgTable } from '@/db/schema';
 import { uidOf, type Db } from '@/db/types';
 import type { SnapshotRow, PeriodLabel } from '../domain/view-models';
@@ -45,11 +45,35 @@ async function readRows(
   }
 }
 
-/** `where(field, 'in', values)` in chunks of 30 (Firestore's limit), the results concatenated. */
+/**
+ * Rows by their own id, read directly (`getAll`) rather than queried — every org table keeps a row
+ * under its `id` as the document id (`orgRow`). The caller's access is the same as `orgRows`
+ * (`orgRowsByIds` re-applies the table's policy). One batched read instead of a `where('id', 'in')`
+ * query per 30 ids: on the emulator, which has no indexes, each such query scans the whole
+ * collection, and a Home with a few thousand figure pointers ran hundreds of them at once and
+ * exhausted its memory.
+ */
+async function readRowsByIds(
+  db: Db, orgId: string, table: OrgTable, ids: readonly string[], requestId?: string,
+): Promise<DocumentData[]> {
+  // `orgRowsByIds` treats a service caller as `readRows` does: its own organisation (or unscoped)
+  // reads everything, any other reads nothing.
+  try {
+    return await inChunks([...new Set(ids)].filter(Boolean), 300, (chunk) => orgRowsByIds(db, orgId, table, chunk));
+  } catch (error) {
+    throw toMotionError(error, requestId);
+  }
+}
+
+/**
+ * `where(field, 'in', values)` in chunks of 30 (Firestore's limit), the results concatenated. A
+ * lookup by `id` alone is a direct read (`readRowsByIds`).
+ */
 async function readRowsIn(
   db: Db, orgId: string, table: OrgTable, field: string, values: readonly string[],
   refine?: (q: Query) => Query, requestId?: string,
 ): Promise<DocumentData[]> {
+  if (field === 'id' && !refine) return readRowsByIds(db, orgId, table, values, requestId);
   return inChunks([...new Set(values)], 30, (chunk) => readRows(db, orgId, table, (q) => {
     const narrowed = q.where(field, 'in', chunk);
     return refine ? refine(narrowed) : narrowed;

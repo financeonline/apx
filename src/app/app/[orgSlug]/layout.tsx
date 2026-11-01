@@ -1,3 +1,5 @@
+import Link from 'next/link';
+import { Bell } from 'lucide-react';
 import { dataLinks, sectionLinks } from '@/components/dashboard/nav';
 import type { SidebarGroup, SidebarIcon } from '@/components/dashboard/sidebar';
 import { AppShell } from '@/components/dashboard/app-shell';
@@ -126,7 +128,28 @@ export default async function OrgLayout({
   };
 
   return (
-    <AppShell homeHref={landingPath(orgSlug, ctx.permissions)} groups={groups} user={user}>
+    <AppShell
+      homeHref={landingPath(orgSlug, ctx.permissions)}
+      groups={groups}
+      user={user}
+      look="light"
+      headerActions={unread === null ? null : (
+        // The reference's round header icon: the notifications inbox, with its unread count.
+        <Link
+          href={`${base}/notifications`}
+          aria-label={unread > 0 ? `Notifications, ${unread} unread` : 'Notifications'}
+          title="Notifications"
+          className="relative flex size-[2.0625rem] shrink-0 items-center justify-center rounded-full text-ink-muted transition-colors hover:bg-accent-soft hover:text-accent"
+        >
+          <Bell aria-hidden="true" className="size-[1.1875rem]" strokeWidth={1.6} />
+          {unread > 0 ? (
+            <span aria-hidden="true" className="absolute -top-0.5 -right-0.5 flex min-w-4 items-center justify-center rounded-full bg-accent px-1 text-[0.625rem] leading-4 font-semibold text-on-accent tabular-nums">
+              {unread > 99 ? '99+' : unread}
+            </span>
+          ) : null}
+        </Link>
+      )}
+    >
       {/* ADR-176: every page of the company, Home and the sections inside, on the lobby's light palette. */}
       <LobbyCanvas>
         <div className="mb-6 flex flex-col gap-3 empty:mb-0">

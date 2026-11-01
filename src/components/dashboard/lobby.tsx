@@ -16,21 +16,26 @@ import {
 import { SPARK_BOX, sparklineRuns, type TrendSeriesView } from './presentation';
 
 /**
- * The client lobby (ADR-176), in the owner's second reference: a light page of quiet cards under the
- * unchanged APX bar — the departments in a row, the greeting, then the analysis in numbered bands.
+ * The client lobby (ADR-176), in the owner's third reference (ADR-179, "APX Financial System",
+ * 2026-11-01): white cards with cool hairlines, APX magenta with blue as the second colour, Georgia
+ * for the cards' display titles — the departments in a row, the greeting, then the analysis.
  *
  * Every figure, label and sentence arrives from a view model; these components only lay them out.
- * The palette is `.theme-lobby` (globals.css), so the tokens used here are the lobby's own.
+ * The palette is `.theme-lobby` (globals.css), so the tokens used here are the lobby's own; the few
+ * literal colours are the reference's decorative tints (icon wells, hairlines), never text meaning.
  */
 
-/** A lobby card: white, a warm hairline, soft corners, no shadow — as the reference. */
+/** A lobby card: white, a cool hairline, 12px corners, no shadow — as the reference. */
 export const LOBBY_CARD = 'rounded-xl border border-line bg-surface';
 
-/** A lobby card that opens something: the reference's quiet hover, in place of the dark glow. */
+/** A lobby card that opens something: the reference's quiet magenta hover. */
 export const LOBBY_CLICKABLE =
-  'group relative transition-[box-shadow,border-color] duration-200 hover:border-accent/40 hover:shadow-[0_10px_28px_-18px_rgb(140_36_60/0.45)] focus-within:border-accent/60 focus-within:shadow-[0_0_0_2px_rgb(183_46_61/0.35)]';
+  'group relative transition-[box-shadow,border-color,background-color] duration-200 hover:border-[#d6a0c3] hover:shadow-[var(--glow-card)] focus-within:border-accent/60 focus-within:shadow-[var(--glow-card-focus)]';
 
 const STRETCH_XL = 'after:rounded-xl';
+
+/** The reference's serif display title (cards' headings): Georgia, deep blue. */
+export const SERIF_TITLE = 'font-[family-name:var(--lobby-serif)] font-normal tracking-[-0.015em] text-[color:var(--lobby-wine)]';
 
 /**
  * The light canvas, around every page of a company (the org layout). It runs to the shell's edges (the main column's padding is taken back) and,
@@ -38,22 +43,25 @@ const STRETCH_XL = 'after:rounded-xl';
  */
 export function LobbyCanvas({ children }: { children: ReactNode }) {
   return (
-    <div className="theme-lobby -mx-4 -my-6 min-h-[calc(100vh-4rem)] px-4 pt-6 pb-10 [box-shadow:0_0_0_100vmax_var(--color-paper)] [clip-path:inset(0_-100vmax)] sm:-mx-6 sm:px-6 lg:-mx-8 lg:-my-8 lg:px-8 lg:pt-8">
+    <div className="theme-lobby -mx-4 -my-6 min-h-[calc(100vh-4rem)] px-4 pt-6 pb-10 [box-shadow:0_0_0_100vmax_var(--color-paper)] [clip-path:inset(0_-100vmax)] sm:-mx-6 sm:px-6 lg:-mx-8 lg:-my-8 lg:px-11 lg:pt-8">
       {children}
     </div>
   );
 }
 
-/** The small capitals over a heading: "YOUR NEXT MOVES". */
-export function Eyebrow({ children, tone = 'muted', as: Tag = 'p' }: { children: ReactNode; tone?: 'muted' | 'accent'; as?: 'p' | 'span' }) {
+/** The small capitals over a heading: "YOUR NEXT MOVES" — with the reference's magenta dot when asked. */
+export function Eyebrow({
+  children, tone = 'muted', as: Tag = 'p', dot = false,
+}: { children: ReactNode; tone?: 'muted' | 'accent'; as?: 'p' | 'span'; dot?: boolean }) {
   return (
-    <Tag className={`text-[0.625rem] font-semibold tracking-[0.2em] uppercase ${tone === 'accent' ? 'text-accent' : 'text-ink-muted'}`}>
+    <Tag className={`flex items-center gap-2 text-[0.625rem] leading-relaxed font-semibold tracking-[0.17em] uppercase ${tone === 'accent' ? 'text-accent' : 'text-ink-muted'}`}>
+      {dot ? <span aria-hidden="true" className="inline-block size-[5px] shrink-0 rounded-full bg-accent" /> : null}
       {children}
     </Tag>
   );
 }
 
-/** The reference's red full stop after a heading. Decorative. */
+/** The reference's magenta full stop after a heading. Decorative. */
 function Stop() {
   return <span aria-hidden="true" className="text-accent">.</span>;
 }
@@ -68,21 +76,24 @@ export interface LobbyDepartment {
 
 /**
  * "Your departments": one tile per department the reader may open, the current one marked, and
- * "More apps" last — it opens the workspace window (`MoreApps`). Numbered as the reference; the
- * count is of real tiles.
+ * "More apps" in its own column — it opens the workspace window (`MoreApps`). Numbered as the
+ * reference; the count is of real tiles.
  */
 export function DepartmentStrip({
   departments, currentKey, showMore,
 }: { departments: readonly LobbyDepartment[]; currentKey: string; showMore: boolean }) {
   return (
-    <nav aria-labelledby="lobby-departments" className="border-b border-line pb-6">
-      <div className="flex items-baseline gap-4">
+    <nav
+      aria-labelledby="lobby-departments"
+      className={`grid gap-x-3 gap-y-2.5 border-b border-line pb-[1.375rem] ${showMore ? 'lg:grid-cols-[minmax(0,1fr)_9rem] xl:grid-cols-[minmax(0,1fr)_10.3125rem]' : ''}`}
+    >
+      <div className="flex items-baseline gap-3.5 lg:col-span-full">
         <h2 id="lobby-departments"><Eyebrow as="span">Your departments</Eyebrow></h2>
-        <span className="text-[0.625rem] font-semibold tracking-[0.2em] text-ink-faint uppercase">
+        <span className="text-[0.5625rem] font-semibold tracking-[0.17em] text-ink-muted uppercase">
           {String(departments.length).padStart(2, '0')} active
         </span>
       </div>
-      <ul className="mt-3 grid grid-cols-1 gap-3 min-[30rem]:grid-cols-2 md:grid-cols-3 xl:grid-cols-5">
+      <ul className="grid min-w-0 grid-cols-2 gap-2.5 sm:grid-cols-3 lg:auto-cols-fr lg:grid-flow-col lg:grid-cols-none xl:gap-[0.6875rem]">
         {departments.map((department, index) => {
           const current = department.key === currentKey;
           return (
@@ -90,33 +101,36 @@ export function DepartmentStrip({
               <Link
                 href={department.href}
                 aria-current={current ? 'page' : undefined}
-                className={`relative flex h-full min-w-0 items-center gap-3 overflow-hidden rounded-[0.625rem] border px-4 py-3 transition-[border-color,box-shadow] duration-200 ${
+                className={`relative flex h-full min-h-[4.375rem] min-w-0 items-center gap-2.5 rounded-[0.625rem] border px-3 py-3 transition-[border-color,transform,background-color] duration-200 ${
                   current
-                    ? 'border-accent/45 bg-[linear-gradient(115deg,var(--color-accent-soft),var(--color-surface))]'
-                    : 'border-line bg-surface hover:border-accent/40 hover:shadow-[0_10px_28px_-18px_rgb(140_36_60/0.45)]'
+                    ? 'border-[#c13c99] bg-[#fff7fc]'
+                    : 'border-[#e8e2e6] bg-surface hover:-translate-y-0.5 hover:border-[#d6a0c3] hover:bg-[#fdfafc]'
                 }`}
               >
-                <span aria-hidden="true" className={`flex size-9 shrink-0 items-center justify-center rounded-lg [&_svg]:size-[1.125rem] ${current ? 'bg-accent text-on-accent' : 'bg-accent-soft text-accent'}`}>
+                <span
+                  aria-hidden="true"
+                  className={`flex size-[2.0625rem] shrink-0 items-center justify-center rounded-lg [&_svg]:size-[1.125rem] [&_svg]:stroke-[1.6] ${current ? 'bg-[image:var(--icon-gradient)] text-white' : 'bg-[#f6eff4] text-[#a9588d]'}`}
+                >
                   {department.icon}
                 </span>
                 <span className="min-w-0 flex-1 leading-tight">
-                  <span className="block truncate text-sm font-semibold text-ink">{department.title}</span>
-                  <span className="mt-0.5 block truncate text-xs text-ink-muted">{department.line}</span>
+                  <span className="block truncate text-[0.75rem] font-semibold text-ink">{department.title}</span>
+                  <span className="mt-1 block truncate text-[0.6875rem] text-ink-muted">{department.line}</span>
                 </span>
-                <span aria-hidden="true" className="self-start text-[0.625rem] tracking-[0.15em] text-ink-faint">
+                <span aria-hidden="true" className="hidden self-start text-[0.5625rem] text-[#c2b3bd] xl:inline">
                   {String(index + 1).padStart(2, '0')}
                 </span>
-                {current ? <span aria-hidden="true" className="absolute inset-x-5 bottom-0 h-[3px] rounded-t-full bg-accent" /> : null}
+                {current ? <span aria-hidden="true" className="absolute inset-x-[1.125rem] -bottom-px h-[3px] rounded-[2px] bg-accent" /> : null}
               </Link>
             </li>
           );
         })}
-        {showMore ? (
-          <li className="min-w-0">
-            <MoreApps departments={departments} />
-          </li>
-        ) : null}
       </ul>
+      {showMore ? (
+        <div className="min-w-0">
+          <MoreApps departments={departments} />
+        </div>
+      ) : null}
     </nav>
   );
 }
@@ -126,60 +140,66 @@ export function LobbyHero({
   section, greeting, orgName, orgLine,
 }: { section: string; greeting: string; orgName: string; orgLine: string }) {
   return (
-    <header className="flex flex-wrap items-end justify-between gap-6 pt-6">
+    <header className="flex flex-wrap items-center justify-between gap-6 pt-[1.375rem] pb-2">
       <div className="min-w-0">
-        <p className="flex items-center gap-3 text-[0.625rem] tracking-[0.2em] text-ink-muted uppercase">
-          Workspace <span aria-hidden="true">/</span>
-          <span className="text-xs tracking-normal text-ink normal-case">{section}</span>
+        <p className="flex items-center gap-3 text-[0.625rem] tracking-[0.18em] text-ink-muted uppercase">
+          Workspace <span aria-hidden="true" className="text-[#c4bfc2]">/</span>
+          <span className="text-[0.6875rem] font-medium tracking-[0.02em] text-ink normal-case">{section}</span>
         </p>
-        <h1 className="mt-3 text-[1.75rem] leading-tight font-normal tracking-[-0.01em] sm:text-[2rem]">
+        <h1 className="mt-3 text-[1.5625rem] leading-[1.2] font-normal tracking-[-0.032em] text-ink">
           Clarity today.{' '}
-          <em className="font-[family-name:var(--lobby-serif)] font-normal text-accent">Confidence tomorrow.</em>
+          <em className="block font-[family-name:var(--lobby-serif)] text-[1.6875rem] font-normal tracking-[-0.022em] text-accent sm:ml-1.5 sm:inline">
+            Confidence tomorrow.
+          </em>
         </h1>
-        <p className="mt-2 text-sm text-ink-muted">{greeting}</p>
+        <p className="mt-2.5 text-[0.75rem] text-ink-muted">{greeting}</p>
       </div>
-      <div className={`flex min-w-0 items-center gap-3 px-3 py-2.5 ${LOBBY_CARD}`}>
-        <span aria-hidden="true" className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-line text-sm font-semibold text-accent">
+      <div className="flex min-w-0 items-center gap-3">
+        <span aria-hidden="true" className="flex size-[2.3125rem] shrink-0 items-center justify-center rounded-[0.625rem] border border-line text-sm font-semibold text-accent">
           {orgName.trim().slice(0, 1).toUpperCase() || 'A'}
         </span>
         <span className="min-w-0 leading-tight">
-          <span className="block truncate text-sm font-semibold text-ink">{orgName}</span>
-          <span className="mt-0.5 block truncate text-xs text-ink-muted">{orgLine}</span>
+          <span className="block truncate text-[0.75rem] font-semibold text-ink">{orgName}</span>
+          <span className="mt-1.5 block truncate text-[0.6875rem] text-ink-muted">{orgLine}</span>
         </span>
       </div>
     </header>
   );
 }
 
-/** A numbered band's heading: "01 / UNDERSTAND YOUR PERFORMANCE", then the title with its red stop. */
+/** A numbered band's heading: "• 01 / UNDERSTAND YOUR PERFORMANCE", then the title with its magenta stop. */
 export function BandHeading({
   id, number, eyebrow, title, end,
 }: { id: string; number: string; eyebrow: string; title: string; end?: ReactNode }) {
   return (
     <div className="flex flex-wrap items-end justify-between gap-4">
       <div className="min-w-0">
-        <Eyebrow>{number} / {eyebrow}</Eyebrow>
-        <h2 id={id} className="mt-2 text-[1.75rem] leading-tight font-semibold tracking-[-0.02em] text-ink">
+        <Eyebrow dot>{number} / {eyebrow}</Eyebrow>
+        <h2 id={id} className="mt-1.5 text-[1.5rem] leading-tight font-semibold tracking-[-0.025em] text-ink sm:text-[1.75rem]">
           {title}<Stop />
         </h2>
       </div>
-      {end ? <div className="flex flex-wrap items-center gap-2">{end}</div> : null}
+      {end ? <div className="flex flex-wrap items-center gap-x-5 gap-y-2">{end}</div> : null}
     </div>
   );
 }
 
-/** A quiet text link with an arrow, as the reference's "Explore the insight →". */
+/** The reference's text button: blue, semibold, an arrow — "View assumptions →". */
 export function ArrowLink({ href, children, className = '' }: { href: string; children: ReactNode; className?: string }) {
   return (
-    <Link href={href} className={`inline-flex items-center gap-1.5 text-sm font-semibold text-accent hover:text-accent-hover ${TOUCH_TARGET} ${className}`}>
-      {children} <ArrowRight aria-hidden="true" className="size-4" />
+    <Link href={href} className={`inline-flex items-center gap-2 text-[0.75rem] font-semibold text-blue-ink hover:text-accent ${TOUCH_TARGET} ${className}`}>
+      {children} <ArrowRight aria-hidden="true" className="size-[0.8125rem]" />
     </Link>
   );
 }
 
-/** A chip in a band's corner: the period, the basis. */
+/** A pill in a band's corner: the period, the basis — the reference's "2023 vs 2022". */
 export function Chip({ children }: { children: ReactNode }) {
-  return <span className="inline-flex items-center rounded-md bg-accent-soft px-2.5 py-1 text-xs text-accent">{children}</span>;
+  return (
+    <span className="inline-flex items-center rounded-[0.3125rem] border border-[#ead7e3] bg-[#f4f7fb] px-2.5 py-1.5 text-[0.6875rem] whitespace-nowrap text-[#8c5077]">
+      {children}
+    </span>
+  );
 }
 
 const STATUS_CHIP: Readonly<Record<string, string>> = {
@@ -189,8 +209,8 @@ const STATUS_CHIP: Readonly<Record<string, string>> = {
 };
 
 /**
- * A headline figure, the reference's way: the label, the figure large, the change in colour under it,
- * and its last twelve months as a small line in the corner. The whole card opens the figure's
+ * A headline figure, the reference's metric card: the label, the figure large, the change under it,
+ * and its last twelve months as a small magenta line at the right. The whole card opens the figure's
  * evidence ("Why?"), for a reader who may open it (ADR-172).
  */
 export function LobbyFigure({ card, trend, showWhy }: { card: MetricCardView; trend: TrendSeriesView | null; showWhy: boolean }) {
@@ -198,49 +218,49 @@ export function LobbyFigure({ card, trend, showWhy }: { card: MetricCardView; tr
   const tone = !card.change || card.change.basisDiffers || card.change.favourable === null ? 'text-ink-muted'
     : card.change.favourable ? 'text-good' : 'text-danger';
   return (
-    <article className={`@container flex h-full flex-col px-6 py-5 ${LOBBY_CARD} ${showWhy ? LOBBY_CLICKABLE : ''}`}>
+    <article className={`@container flex h-full flex-col px-[1.4375rem] py-[1.3125rem] ${LOBBY_CARD} ${showWhy ? LOBBY_CLICKABLE : ''}`}>
       <div className="flex items-start justify-between gap-2">
-        <h3 className="min-w-0 text-[0.8125rem] font-normal tracking-normal text-ink-muted">{card.label}</h3>
+        <h3 className="min-w-0 text-[0.75rem] font-normal tracking-normal text-ink-muted">{card.label}</h3>
         {/* Only a status that asks the reader to take care is shown here; "Calculated" is the ordinary case. */}
         {card.status.kind !== 'none' && card.status.kind !== 'calculated' && card.status.label !== null ? (
-          <span title={card.status.tooltip} className={`${ABOVE_CARD_LINK} shrink-0 rounded-md px-2 py-0.5 text-[0.6875rem] ${STATUS_CHIP[card.status.kind] ?? 'bg-surface-sunken text-ink-muted'}`}>
+          <span title={card.status.tooltip} className={`${ABOVE_CARD_LINK} shrink-0 rounded px-2 py-0.5 text-[0.6875rem] ${STATUS_CHIP[card.status.kind] ?? 'bg-surface-sunken text-ink-muted'}`}>
             {card.status.label}
           </span>
         ) : null}
       </div>
-      <p className="mt-3 text-[1.75rem] leading-none font-medium tracking-[-0.03em] break-words text-ink tabular-nums @[16rem]:text-[2.125rem]">
+      <p className="mt-3.5 text-[1.75rem] leading-[1.15] font-medium tracking-[-0.025em] break-words text-ink tabular-nums @[16rem]:text-[2.125rem]">
         {card.value}
       </p>
       {card.secondaryLine ? (
-        <p className="mt-2 text-xs text-ink-muted">
+        <p className="mt-2 text-[0.6875rem] text-ink-muted">
           {card.secondaryLine.label}: <span className="tabular-nums">{card.secondaryLine.value}</span>
         </p>
       ) : null}
-      <div className="mt-auto flex items-end justify-between gap-3 pt-4">
-        <div className="min-w-0">
+      <div className="mt-auto flex items-end justify-between gap-4 pt-3">
+        <div className="min-w-0 text-[0.6875rem] leading-[1.7]">
           {!card.change ? (
-            <p className="text-xs text-ink-faint">no comparison yet</p>
+            <p className="text-ink-faint">no comparison yet</p>
           ) : card.change.basisDiffers ? (
-            <p className="text-xs text-ink-faint"><span className="tabular-nums">{card.change.amount}</span> compared on a different basis</p>
+            <p className="text-ink-faint"><span className="tabular-nums">{card.change.amount}</span> compared on a different basis</p>
           ) : (
-            <p className={`text-xs font-semibold tabular-nums ${tone}`}>{card.change.text}</p>
+            <p className={`font-semibold tabular-nums ${tone}`}>{card.change.text}</p>
           )}
           {showWhy ? (
             <CardLink
               href={card.whyHref}
               title={[card.technicalLabel, card.basisText].filter(Boolean).join(' · ') || undefined}
-              className={`mt-1.5 inline-flex items-center gap-0.5 text-xs text-ink-muted group-hover:text-accent ${STRETCH_XL}`}
+              className={`mt-1 inline-flex items-center gap-0.5 text-ink-muted group-hover:text-accent ${STRETCH_XL}`}
             >
               Why? <ChevronRight aria-hidden="true" className="size-3.5" />
             </CardLink>
           ) : card.basisText ? (
-            <p className="mt-1.5 text-xs text-ink-faint">{card.basisText}</p>
+            <p className="mt-1 text-ink-faint">{card.basisText}</p>
           ) : null}
         </div>
         {runs.length > 0 ? (
-          <svg aria-hidden="true" viewBox={`0 0 ${SPARK_BOX.width} ${SPARK_BOX.height}`} className="h-9 w-24 shrink-0 overflow-visible">
+          <svg aria-hidden="true" viewBox={`0 0 ${SPARK_BOX.width} ${SPARK_BOX.height}`} className="h-[3.0625rem] w-[8.375rem] max-w-[45%] shrink-0 overflow-visible">
             {runs.map((points) => (
-              <polyline key={points} points={points} fill="none" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" className="stroke-pink" />
+              <polyline key={points} points={points} fill="none" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" vectorEffect="non-scaling-stroke" className="stroke-accent" />
             ))}
           </svg>
         ) : null}
@@ -250,52 +270,53 @@ export function LobbyFigure({ card, trend, showWhy }: { card: MetricCardView; tr
 }
 
 /**
- * "Top risks" in the reference's report-points panel: a tinted band of up to three numbered cards,
- * each opening its alert. Highest severity first, as the service ordered them.
+ * "Top risks" in the reference's "Key Report Indicators" panel: up to three numbered cards, each
+ * opening its alert, with the alert's next step as the card's "Focus". Highest severity first, as
+ * the service ordered them.
  */
 export function RiskPoints({ risks, allHref, periodLabel }: { risks: readonly AlertView[]; allHref: string; periodLabel: string }) {
   return (
-    <section aria-labelledby="lobby-risks" className="rounded-xl border border-line-strong bg-[linear-gradient(115deg,var(--color-surface-sunken),var(--color-surface))] p-5 sm:p-6">
+    <section aria-labelledby="lobby-risks" className="rounded-xl border border-[#e5eaf2] bg-surface p-5 sm:p-[1.4375rem]">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <Eyebrow tone="accent">From your alerts</Eyebrow>
-          <h2 id="lobby-risks" className="mt-2 text-xl font-semibold tracking-[-0.01em] text-ink">
-            {risks.length === 0 ? 'Nothing needs your attention' : risks.length === 1 ? 'One point to look at' : `${risks.length === 2 ? 'Two' : 'Three'} points to look at`}<Stop />
+          <Eyebrow>From your alerts</Eyebrow>
+          <h2 id="lobby-risks" className="mt-1.5 text-[1.25rem] font-semibold tracking-[-0.022em] text-ink">
+            {risks.length === 0 ? 'Nothing needs your attention' : 'Key report indicators'}<Stop />
           </h2>
         </div>
-        <div className="flex flex-wrap items-center gap-3">
+        <div className="flex flex-wrap items-center gap-x-5 gap-y-2">
           <Chip>{periodLabel}</Chip>
           <ArrowLink href={allHref}>See all alerts</ArrowLink>
         </div>
       </div>
       {risks.length === 0 ? (
-        <p className="mt-3 max-w-prose text-sm text-ink-muted">No open alerts. APX checks again after every calculation.</p>
+        <p className="mt-3 max-w-prose text-[0.75rem] text-ink-muted">No open alerts. APX checks again after every calculation.</p>
       ) : (
-        <ul className="mt-5 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <ul className="mt-5 grid gap-[1.125rem] md:grid-cols-2 xl:grid-cols-3">
           {risks.map((risk, index) => (
             <li key={risk.id} className="min-w-0">
-              <article className={`flex h-full flex-col p-5 ${LOBBY_CARD} ${LOBBY_CLICKABLE}`}>
-                <div className="flex items-start justify-between gap-3">
-                  <span aria-hidden="true" className="text-xs tracking-[0.2em] text-ink-faint">{String(index + 1).padStart(2, '0')}</span>
-                  <span title={risk.thresholdNote ?? undefined} className={`${ABOVE_CARD_LINK} rounded px-2 py-0.5 text-[0.6875rem] ${risk.severity === 'critical' || risk.severity === 'high' ? 'bg-accent-soft text-accent' : risk.severity === 'medium' ? 'bg-warn-soft text-warn' : 'bg-surface-sunken text-ink-muted'}`}>
+              <article className={`flex h-full flex-col rounded-[0.625rem] border border-[#e7edf5] bg-surface p-5 ${LOBBY_CLICKABLE}`}>
+                <div className="flex items-center justify-between gap-2">
+                  <span aria-hidden="true" className="text-[0.625rem] tracking-[0.15em] text-ink-faint">{String(index + 1).padStart(2, '0')}</span>
+                  <span title={risk.thresholdNote ?? undefined} className={`${ABOVE_CARD_LINK} rounded px-[0.4375rem] py-1 text-[0.625rem] leading-[1.6] ${risk.severity === 'critical' || risk.severity === 'high' ? 'bg-accent-soft text-danger' : risk.severity === 'medium' ? 'bg-warn-soft text-warn' : 'bg-surface-sunken text-ink-muted'}`}>
                     {severityLabel(risk.severity)}
                   </span>
                 </div>
-                <h3 className="mt-4 text-[0.9375rem] font-semibold tracking-normal text-[color:var(--lobby-wine)]">
+                <h3 className="mt-4 text-[1.0625rem] leading-snug font-semibold tracking-[-0.01em] text-[#ae2787]">
                   <CardLink href={risk.detailHref} className={STRETCH_XL}>{risk.title}</CardLink>
                 </h3>
-                <p className="mt-1 text-xs text-ink-muted">
+                <p className="mt-1.5 text-[0.6875rem] text-ink-muted">
                   {risk.family} · {risk.periodLabel}{risk.recurring ? ` · seen since ${risk.firstSeenLabel}` : null}
                 </p>
-                <p className="mt-4 text-sm leading-relaxed text-ink-muted">{risk.whatHappened}</p>
+                <p className="mt-4 mb-[1.125rem] text-[0.75rem] leading-[1.85] text-ink-muted">{risk.whatHappened}</p>
                 {risk.whatYouCanDo || risk.whyItMatters ? (
-                  <div className="mt-auto border-t border-line pt-4">
-                    <Eyebrow tone="accent">{risk.whatYouCanDo ? 'What you can do' : 'Why it matters'}</Eyebrow>
-                    <p className="mt-1.5 text-sm text-ink-muted">{risk.whatYouCanDo ?? risk.whyItMatters}</p>
+                  <div className="mt-auto border-t border-[#f0e6ec] pt-3">
+                    <Eyebrow tone="accent">{risk.whatYouCanDo ? 'Focus' : 'Why it matters'}</Eyebrow>
+                    <p className="mt-1 text-[0.6875rem] leading-[1.8] text-[#4d6177]">{risk.whatYouCanDo ?? risk.whyItMatters}</p>
                   </div>
                 ) : null}
                 {risk.evidenceHref ? (
-                  <Link href={risk.evidenceHref} className={`${ABOVE_CARD_LINK} mt-4 inline-flex w-fit items-center gap-0.5 text-xs font-semibold text-accent hover:text-accent-hover ${TOUCH_TARGET}`}>
+                  <Link href={risk.evidenceHref} className={`${ABOVE_CARD_LINK} mt-3 inline-flex w-fit items-center gap-0.5 text-[0.6875rem] font-semibold text-blue-ink hover:text-accent ${TOUCH_TARGET}`}>
                     Why? <ChevronRight aria-hidden="true" className="size-3.5" />
                   </Link>
                 ) : null}
@@ -308,23 +329,39 @@ export function RiskPoints({ risks, allHref, periodLabel }: { risks: readonly Al
   );
 }
 
-/** A lobby card with a band label and a title, as the reference's "Performance over time" card. */
+const PANEL_TONE: Readonly<Record<'plain' | 'tinted' | 'growth' | 'blush', string>> = {
+  plain: 'border-line bg-surface',
+  // The reference's light-blue insight card.
+  tinted: 'border-[#e3eaf3] bg-[#f1f6fc]',
+  // The reference's "How can I Grow?" card: a blue wash fading to white.
+  growth: 'border-[#e3eaf3] bg-[linear-gradient(135deg,#f4f8fd,#ffffff_75%)] shadow-[0_4px_22px_rgb(30_109_184/0.03)]',
+  // The reference's pink feedback card.
+  blush: 'border-[#f0e3eb] bg-[#f9f2f7]',
+};
+
+/**
+ * A lobby card with a band label and a title, as the reference's chart and insight cards. A `serif`
+ * title is the reference's Georgia display heading in deep blue.
+ */
 export function LobbyPanel({
-  id, eyebrow, title, end, children, tone = 'plain', className = '',
+  id, eyebrow, title, end, children, tone = 'plain', serif = false, className = '',
 }: {
   id: string; eyebrow: string; title: ReactNode; end?: ReactNode; children: ReactNode;
-  /** `tinted` is the reference's pink "APX perspective" card. */
-  tone?: 'plain' | 'tinted'; className?: string;
+  tone?: 'plain' | 'tinted' | 'growth' | 'blush'; serif?: boolean; className?: string;
 }) {
   return (
-    <section
-      aria-labelledby={id}
-      className={`min-w-0 rounded-xl border p-5 sm:p-6 ${tone === 'tinted' ? 'border-accent/15 bg-accent-soft' : 'border-line bg-surface'} ${className}`}
-    >
+    <section aria-labelledby={id} className={`min-w-0 rounded-xl border p-5 sm:p-6 ${PANEL_TONE[tone]} ${className}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
-          <Eyebrow tone={tone === 'tinted' ? 'accent' : 'muted'}>{eyebrow}</Eyebrow>
-          <h2 id={id} className="mt-2 text-xl font-semibold tracking-[-0.01em] text-ink">{title}</h2>
+          <Eyebrow>{eyebrow}</Eyebrow>
+          <h2
+            id={id}
+            className={serif
+              ? `mt-3 text-[1.5rem] leading-[1.2] sm:text-[1.625rem] ${SERIF_TITLE}`
+              : 'mt-1.5 text-[1.0625rem] font-semibold tracking-[-0.012em] text-ink'}
+          >
+            {title}
+          </h2>
         </div>
         {end}
       </div>
@@ -334,8 +371,9 @@ export function LobbyPanel({
 }
 
 /**
- * The Business Health Score as the reference's ring: the score in the middle, its band and change
- * beside it, and the SOW §9 disclaimer, which is never left off a screen showing the score.
+ * The Business Health Score as the reference's "Revenue mix" donut: the score in the middle, its
+ * band and change beside it as the mix rows, and the SOW §9 disclaimer, which is never left off a
+ * screen showing the score.
  */
 export function HealthRing({
   view, comparisonLabel, explainHref,
@@ -344,9 +382,9 @@ export function HealthRing({
   if (view.score === null) {
     return (
       <div>
-        <p className="text-base text-ink">{NOT_ENOUGH_DATA_TITLE}</p>
-        <p className="mt-1 text-sm text-ink-muted">{NOT_ENOUGH_DATA_BODY}</p>
-        <p className="mt-4 text-xs text-ink-faint">{HEALTH_DISCLAIMER}</p>
+        <p className="text-sm text-ink">{NOT_ENOUGH_DATA_TITLE}</p>
+        <p className="mt-1 text-[0.75rem] text-ink-muted">{NOT_ENOUGH_DATA_BODY}</p>
+        <p className="mt-4 text-[0.6875rem] text-ink-faint">{HEALTH_DISCLAIMER}</p>
       </div>
     );
   }
@@ -356,65 +394,64 @@ export function HealthRing({
   return (
     <div>
       <div className="flex flex-wrap items-center gap-6">
-        <div className="relative size-32 shrink-0">
+        <div className="relative size-28 shrink-0">
           <svg viewBox="0 0 112 112" aria-hidden="true" className="size-full -rotate-90">
-            <circle cx="56" cy="56" r={radius} fill="none" strokeWidth="12" className="stroke-pink-soft" />
-            <circle cx="56" cy="56" r={radius} fill="none" strokeWidth="12" strokeDasharray={ring.dash} strokeLinecap="butt" className="stroke-accent" />
+            <circle cx="56" cy="56" r={radius} fill="none" strokeWidth="11" className="stroke-pink" />
+            <circle cx="56" cy="56" r={radius} fill="none" strokeWidth="11" strokeDasharray={ring.dash} strokeLinecap="butt" className="stroke-accent" />
           </svg>
           <p className="absolute inset-0 flex flex-col items-center justify-center leading-none">
-            <span className="text-2xl font-semibold text-ink tabular-nums">{view.score}</span>
-            <span className="mt-1 text-[0.625rem] text-ink-muted">out of 100</span>
+            <span className="text-[1.25rem] font-semibold tracking-[-0.04em] text-ink tabular-nums">{view.score}</span>
+            <span className="mt-1.5 text-[0.625rem] text-ink-muted">out of 100</span>
           </p>
         </div>
-        <dl className="min-w-0 flex-1 space-y-2 text-sm">
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="flex items-center gap-2 text-ink-muted"><span aria-hidden="true" className="size-1.5 rounded-full bg-accent" />Band</dt>
-            <dd className="font-semibold text-ink">{bandText(view.band)}</dd>
+        <dl className="min-w-0 flex-1 text-[0.75rem]">
+          <div className="my-3 flex items-center gap-2">
+            <dt className="flex items-center gap-2 text-ink-muted"><span aria-hidden="true" className="size-[5px] rounded-[2px] bg-accent" />Band</dt>
+            <dd className="ml-auto font-semibold whitespace-nowrap text-ink">{bandText(view.band)}</dd>
           </div>
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="flex items-center gap-2 text-ink-muted"><span aria-hidden="true" className="size-1.5 rounded-full bg-pink" />Change</dt>
-            <dd className={`font-semibold tabular-nums ${CHANGE_TONE_CLASS[tone]}`}>{changeText(view.changeVsPrevious, comparisonLabel)}</dd>
+          <div className="my-3 flex items-center gap-2">
+            <dt className="flex items-center gap-2 text-ink-muted"><span aria-hidden="true" className="size-[5px] rounded-[2px] bg-pink" />Change</dt>
+            <dd className={`ml-auto font-semibold whitespace-nowrap tabular-nums ${CHANGE_TONE_CLASS[tone]}`}>{changeText(view.changeVsPrevious, comparisonLabel)}</dd>
           </div>
-          <div className="flex items-baseline justify-between gap-3">
-            <dt className="flex items-center gap-2 text-ink-muted"><span aria-hidden="true" className="size-1.5 rounded-full bg-line-strong" />Areas scored</dt>
-            <dd className="font-semibold text-ink tabular-nums">{view.dimensionsUsed} of {view.dimensionsTotal}</dd>
+          <div className="my-3 flex items-center gap-2">
+            <dt className="flex items-center gap-2 text-ink-muted"><span aria-hidden="true" className="size-[5px] rounded-[2px] bg-line-strong" />Areas scored</dt>
+            <dd className="ml-auto font-semibold whitespace-nowrap text-ink tabular-nums">{view.dimensionsUsed} of {view.dimensionsTotal}</dd>
           </div>
         </dl>
       </div>
-      {note ? <p className="mt-3 text-xs text-ink-faint">{note}</p> : null}
-      {view.capped ? <p className="mt-1 text-xs text-ink-muted">{PROXY_CAP_NOTE}</p> : null}
-      <ArrowLink href={explainHref} className="mt-4">What makes up this score?</ArrowLink>
-      <p className="mt-3 text-xs text-ink-faint">{HEALTH_DISCLAIMER}</p>
+      {note ? <p className="mt-3 text-[0.6875rem] text-ink-faint">{note}</p> : null}
+      {view.capped ? <p className="mt-1 text-[0.6875rem] text-ink-muted">{PROXY_CAP_NOTE}</p> : null}
+      <ArrowLink href={explainHref} className="mt-3">What makes up this score?</ArrowLink>
+      <p className="mt-2 text-[0.6875rem] text-ink-faint">{HEALTH_DISCLAIMER}</p>
     </div>
   );
 }
 
 /**
- * "Your next moves": the open actions as the reference's queue — an icon, the action, its priority
- * and date, a chip for its state, and an arrow. Each row opens its action.
+ * "Priorities & observations": the open actions as the reference's queue — an icon well, the action,
+ * its priority and date, a tag for its state. Each row opens its action.
  */
 export function ActionQueue({
   actions, today, actionHref, icon,
 }: { actions: readonly Action[]; today: string; actionHref: (id: string) => string; icon: ReactNode }) {
   return (
-    <ul className="divide-y divide-line border-b border-line">
+    <ul className="border-b border-[#ebedf0]">
       {actions.map((action) => {
         const overdue = action.dueDate !== null && action.dueDate < today;
         return (
-          <li key={action.id} className="group relative flex items-center gap-4 py-4">
-            <span aria-hidden="true" className="flex size-9 shrink-0 items-center justify-center rounded-lg border border-line bg-surface-sunken text-accent [&_svg]:size-4">{icon}</span>
+          <li key={action.id} className="group relative flex items-center gap-2.5 border-t border-[#ebedf0] py-4 first:border-t-0 hover:bg-[#fcf9fb]">
+            <span aria-hidden="true" className="flex size-[1.625rem] shrink-0 items-center justify-center rounded-[0.4375rem] border border-[#efdee9] bg-[#f8fafc] text-accent [&_svg]:size-[0.9375rem]">{icon}</span>
             <span className="min-w-0 flex-1">
-              <Link href={actionHref(action.id)} className="block font-semibold text-ink [overflow-wrap:anywhere] after:absolute after:inset-0 after:content-[''] group-hover:text-accent">
+              <Link href={actionHref(action.id)} className="block text-[0.75rem] leading-[1.6] font-medium text-ink [overflow-wrap:anywhere] after:absolute after:inset-0 after:content-[''] group-hover:text-accent">
                 {action.title}
               </Link>
-              <span className="mt-0.5 block text-xs text-ink-muted">
+              <span className="mt-0.5 block text-[0.6875rem] leading-[1.6] text-ink-muted">
                 {priorityLabel(action.priority)} priority · {action.ownerName ?? 'No owner'} · {action.dueDate === null ? 'No date' : `Due ${formatDate(action.dueDate)}`}
               </span>
             </span>
-            <span className={`shrink-0 rounded-md px-2 py-0.5 text-xs ${overdue ? 'bg-accent-soft text-accent' : action.status === 'in_progress' ? 'bg-warn-soft text-warn' : 'bg-surface-sunken text-ink-muted'}`}>
+            <span className={`shrink-0 rounded px-2 py-1 text-[0.625rem] whitespace-nowrap ${overdue ? 'bg-[#f8edf4] text-danger' : action.status === 'in_progress' ? 'bg-warn-soft text-warn' : 'bg-[#f1f2ef] text-[#536c5d]'}`}>
               {overdue ? 'Overdue' : action.status === 'in_progress' ? 'In progress' : 'Open'}
             </span>
-            <ArrowRight aria-hidden="true" className="size-4 shrink-0 text-ink-faint group-hover:text-accent" />
           </li>
         );
       })}
@@ -422,12 +459,69 @@ export function ActionQueue({
   );
 }
 
+export interface NextMove {
+  readonly key: string;
+  readonly eyebrow: string;
+  readonly title: string;
+  readonly line: string;
+  readonly href: string;
+  readonly cta: string;
+  readonly icon: ReactNode;
+}
+
+/**
+ * "Make the next move." — the reference's operations panel: one card per workspace the reader may
+ * open, each a serif title, a line on what it is for, and a full-width button that opens it.
+ */
+export function NextMovePanel({ moves }: { moves: readonly NextMove[] }) {
+  if (moves.length === 0) return null;
+  return (
+    <section aria-labelledby="lobby-next-move" className="rounded-[0.875rem] border border-[#e3eaf3] bg-surface p-5 sm:p-[1.375rem]">
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div className="min-w-0">
+          <Eyebrow>APX intelligence · Operations · Targets</Eyebrow>
+          <h2 id="lobby-next-move" className={`mt-2.5 text-[1.625rem] leading-[1.2] sm:text-[1.8125rem] ${SERIF_TITLE}`}>Make the next move.</h2>
+          <p className="mt-2 text-[0.75rem] leading-[1.8] text-ink-muted">Connect the work, ask better questions and keep each month’s progress visible.</p>
+        </div>
+      </div>
+      <ul className={`mt-5 grid gap-4 sm:grid-cols-2 ${moves.length >= 4 ? 'xl:grid-cols-4' : moves.length === 3 ? 'xl:grid-cols-3' : ''}`}>
+        {moves.map((move, index) => (
+          <li key={move.key} className="min-w-0">
+            <article className="flex h-full flex-col overflow-hidden rounded-xl border border-[#e5ecf4] bg-surface">
+              <div className="border-b border-[#edf1f6] px-[1.0625rem] pt-4 pb-3">
+                <p className="text-[0.5625rem] font-semibold tracking-[0.13em] text-ink-muted uppercase">
+                  {String(index + 1).padStart(2, '0')} / {move.eyebrow}
+                </p>
+                <h3 className={`mt-2 text-[1.3125rem] leading-[1.2] ${SERIF_TITLE}`}>{move.title}</h3>
+              </div>
+              <div className="flex flex-1 items-start gap-3 bg-[linear-gradient(145deg,#ffffff,#f6faff)] px-[1.0625rem] py-4">
+                <span aria-hidden="true" className="flex size-[1.875rem] shrink-0 items-center justify-center rounded-lg bg-[#f0f7fe] text-[#367eb9] [&_svg]:size-[1.0625rem]">{move.icon}</span>
+                <p className="text-[0.75rem] leading-[1.7] text-ink-muted">{move.line}</p>
+              </div>
+              <div className="px-[0.9375rem] pt-3.5 pb-4">
+                <Link
+                  href={move.href}
+                  className="flex min-h-[2.375rem] w-full items-center justify-center gap-2.5 rounded-md bg-accent px-3 py-2.5 text-[0.75rem] font-medium text-on-accent transition-colors hover:bg-accent-hover"
+                >
+                  {move.cta} <ArrowRight aria-hidden="true" className="size-3.5" />
+                </Link>
+              </div>
+            </article>
+          </li>
+        ))}
+      </ul>
+    </section>
+  );
+}
+
 /** The lobby's last line, as the reference's footer. */
 export function LobbyFooter({ line }: { line: string }) {
   return (
-    <footer className="mt-10 flex flex-wrap items-center justify-between gap-3 border-t border-line pt-5 text-xs text-ink-muted">
-      <p><span className="font-semibold tracking-[0.2em] text-ink">APX</span><span className="ml-3">Finance in motion.</span></p>
-      <p className="flex items-center gap-2"><span aria-hidden="true" className="size-1.5 rounded-full bg-accent" />{line}</p>
+    <footer className="mt-8 flex flex-wrap items-center justify-between gap-4 border-t border-line pt-5 pb-6 text-[0.6875rem] text-ink-muted">
+      <p className="flex flex-wrap items-center gap-1.5">
+        <span className="mr-2 font-semibold tracking-[0.18em] text-ink">APX</span>Finance in motion.
+      </p>
+      <p className="flex items-center gap-2"><span aria-hidden="true" className="size-1 rounded-full bg-[#c591b3]" />{line}</p>
     </footer>
   );
 }

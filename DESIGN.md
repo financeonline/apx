@@ -1,6 +1,8 @@
 # APX — Design
 
-> **Current look: ADR-169** (2026-10-13) — the client's APX design: dark only, near-black ground `#09090b`, cards `#141417`, white text, hot-red accent `#ff2d55`, orange `#ff8a4c`, the pink-and-orange `--brand-gradient` on primary buttons and the current navigation item, the client's logo (`public/brand/apx-logo.png`) and sign-in background (`public/brand/apx-background.webp`). Tokens live in `src/app/globals.css`. The palette below is the original direction, kept for history.
+> **Company pages: ADR-179** (2026-11-01) — the owner's third reference: white ground and masthead, APX magenta `#c12591` with blue `#3284d8` as the second colour, ink `#273343`, cool rules `#e6ecf3`, muted text `#5a6a7f` (the reference's lighter greys darkened to pass WCAG AA), link blue `#236fac`, deep-blue Georgia display titles `#2d5376`, Inter for everything else. Tokens in `.theme-lobby` (`src/app/globals.css`); components in `src/components/dashboard/lobby.tsx`.
+>
+> **Current look: ADR-169** (2026-10-13) — the client's APX design: dark only, near-black ground `#09090b`, cards `#141417`, white text, hot-red accent `#ff2d55`, orange `#ff8a4c`, the pink-and-orange `--brand-gradient` on primary buttons and the current navigation item, the client's logo (`public/brand/apx-logo.png`) and sign-in background (`public/brand/apx-background.webp`) — now for sign-in, Command Centre and Platform. Tokens live in `src/app/globals.css`. The palette below is the original direction, kept for history.
 
 MOTION is read by business owners who are not accountants, and by advisers who are. The interface
 has to feel like a well-kept ledger: quiet, ordered, and confident enough that a number on screen is
