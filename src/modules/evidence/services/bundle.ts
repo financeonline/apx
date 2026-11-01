@@ -288,6 +288,8 @@ export async function resolveDerived(
 
   const components: DerivedComponentView[] = [];
   for (const component of evidenceQuery.components) {
+    // An unlinked component (null id) is named by the figure but cannot be opened (descriptor.ts).
+    if (component.snapshot_id === null) continue;
     const row = await fetchMetricSnapshot(ctx.db, orgId, component.snapshot_id);
     if (row === null) {
       // §8.2: snapshots referenced by evidence are never archived, so a missing one is a real

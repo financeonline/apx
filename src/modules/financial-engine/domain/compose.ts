@@ -742,7 +742,13 @@ export function composePeriod(input: ComposeInput): MetricResult[] {
 
   // A stable order makes two runs over identical data write byte-identical snapshots, which is the
   // guarantee §1.1 makes and TEST_STRATEGY asserts.
-  return results.sort(
+  //
+  // Every family's derived figure is linked here, not only receivables'. The cash and concentration
+  // families build their components with null ids ("the run fills them in as it writes" — the
+  // PostgreSQL insert did that; the Firestore port did not, ADR-178), so closing cash, net cash
+  // movement and runway were written unable to say which figures they came from, and their "Why?"
+  // failed. An id already set is kept; one that resolves to no figure stays null (`withDerivedIds`).
+  return results.map((r) => withDerivedIds(r, resolve)).sort(
     (a, b) => a.key.localeCompare(b.key)
       || (a.dimensionId ?? '').localeCompare(b.dimensionId ?? ''),
   );

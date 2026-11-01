@@ -168,7 +168,8 @@ const context = (): EngineContext => ({
   settings: { baseCurrency: 'GBP', fiscalYearStartMonth: 1, timezone: 'Europe/London', vatRegistered: false, defaultVatRate: null, taxableCategories: [] },
 });
 
-function composed(ym: string, statements: readonly StatementRef[]): MetricResult[] {
+type Resolver = NonNullable<Parameters<typeof composePeriod>[0]['resolveSnapshotId']>;
+function composed(ym: string, statements: readonly StatementRef[], resolveSnapshotId?: Resolver): MetricResult[] {
   const period = P(ym);
   const h = history(statements);
   const batches: CoverageBatch[] = statements.map((s) => ({
@@ -182,6 +183,7 @@ function composed(ym: string, statements: readonly StatementRef[]): MetricResult
   const inflow = amounts.filter((a) => a.greaterThan(0)).reduce((t, a) => t.plus(a), new Decimal(0));
   const outflow = amounts.filter((a) => a.lessThan(0)).reduce((t, a) => t.minus(a), new Decimal(0));
   return composePeriod({
+    ...(resolveSnapshotId ? { resolveSnapshotId } : {}),
     period, coverage, transferLegs: [], context: context(), cashAccounts: h.get(period.id) ?? [],
     bankRecordAssurance: bankRecordAssuranceFor(statements, period),
     cells: [{
@@ -224,5 +226,35 @@ describe('the stored figures, the dashboard label and Health', () => {
 
     const verified = withMetric(baselineSnapshots(), { key: 'closing_cash', value: closing.value, unit: 'money', assurance: 'verified' });
     expect(computeHealthScore(healthInput({ snapshots: verified }))!.breakdown.find((d) => d.key === 'cash_flow')!.capped).toBe(false);
+  });
+});
+
+
+describe('derived cash figures name the figures they came from (the "Why?" on Cash)', () => {
+  // The run mints an id per undimensioned figure before composing (composeWithIds); stand in for it.
+  const ids = (key: string, dimensionId: string | null) => (dimensionId === null ? `id-${key}` : null);
+  const components = (results: readonly MetricResult[], key: string) => {
+    const q = metric(results, key).evidenceQuery;
+    return q?.kind === 'derived' ? q.components : null;
+  };
+
+  it('closing cash links opening cash and net cash movement; net movement links inflows and outflows', () => {
+    const results = composed('2026-08', BASE, ids);
+    expect(components(results, 'closing_cash')).toEqual([
+      { name: 'opening_cash', snapshot_id: 'id-opening_cash' },
+      { name: 'net_cash_movement', snapshot_id: 'id-net_cash_movement' },
+    ]);
+    expect(components(results, 'net_cash_movement')).toEqual([
+      { name: 'cash_inflows', snapshot_id: 'id-cash_inflows' },
+      { name: 'cash_outflows', snapshot_id: 'id-cash_outflows' },
+    ]);
+  });
+
+  it('a component that is no figure of the period stays honestly unlinked (null), never invented', () => {
+    const results = composed('2026-08', BASE, (key, dimensionId) => (key === 'opening_cash' && dimensionId === null ? 'id-opening_cash' : null));
+    expect(components(results, 'closing_cash')).toEqual([
+      { name: 'opening_cash', snapshot_id: 'id-opening_cash' },
+      { name: 'net_cash_movement', snapshot_id: null },
+    ]);
   });
 });

@@ -181,7 +181,13 @@ export const EvidenceQuerySchema = z.discriminatedUnion('kind', [
   z.strictObject({ kind: z.literal('leaf'), descriptor: QueryDescriptorV1Schema }),
   z.strictObject({
     kind: z.literal('derived'),
-    components: z.array(z.strictObject({ name: z.string().min(1), snapshot_id: uuid })).min(1),
+    /*
+     * A component the engine could not link is written with `snapshot_id: null` — honestly unlinked
+     * (a balance-sheet term such as `inventory`, or a figure built from a per-customer breakdown),
+     * never invented (financial-engine `withDerivedIds`). The reader accepts it and simply does not
+     * descend into it, rather than refusing the whole figure.
+     */
+    components: z.array(z.strictObject({ name: z.string().min(1), snapshot_id: uuid.nullable() })).min(1),
   }),
   /*
    * Step 0E: a figure that is the DIFFERENCE of two periods' records (a cumulative trial balance's or

@@ -191,6 +191,8 @@ async function walk(state: WalkState, snapshot: Row): Promise<void> {
   }
 
   for (const component of evidenceQuery.components) {
+    // An unlinked component (null id) is named but has nothing to descend into (descriptor.ts).
+    if (component.snapshot_id === null) continue;
     const row = await fetchMetricSnapshot(ctx.db, orgId, component.snapshot_id);
     // §8.2: a snapshot an evidence item references is never archived, so a missing component is an
     // integrity failure, not an empty branch to render as zero.
