@@ -117,3 +117,6 @@ export {
   landingSection,
   type LandingSection,
 } from './domain/landing';
+
+/** Where a signed-in account belongs; the pages decide this since the proxy became edge-only (ADR-183). */
+export { homePathFor, platformHomeFor } from './services/session-home';

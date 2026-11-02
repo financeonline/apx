@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createUserClient } from '@/core/db/user-client';
+import { platformHomeFor } from '@/modules/tenancy';
 import { listMyOrganizations, sessionUserOf } from '@/modules/tenancy';
 import { OnboardingForm } from './onboarding-form';
 import { BrandedScreen } from '@/components/dashboard/branded-screen';
@@ -9,6 +10,9 @@ export const dynamic = 'force-dynamic';
 export default async function OnboardingPage() {
   const db = await createUserClient();
   if (!sessionUserOf(db)) redirect('/sign-in?next=/onboarding');
+  // Platform accounts are never members of a customer organisation (§8.5).
+  const platformHome = await platformHomeFor(db);
+  if (platformHome) redirect(platformHome);
 
   const organizations = await listMyOrganizations(db);
   if (organizations.length > 0) redirect('/select-organization');

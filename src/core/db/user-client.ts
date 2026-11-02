@@ -1,6 +1,8 @@
 import 'server-only';
 import { cookies, headers } from 'next/headers';
 import { auth, db as firestore } from '@/db/firestore';
+import { globalRow } from '@/db/schema';
+import { SESSION_COOKIE } from '@/core/routing';
 import type { Db, RequestMeta } from '@/db/types';
 
 /**
@@ -13,7 +15,7 @@ import type { Db, RequestMeta } from '@/db/types';
  * The session cookie is verified with revocation checked, so signing a person out everywhere
  * (`revokeRefreshTokens`, `api_server.revoke_user_sessions`) ends this session on its next request.
  */
-export const SESSION_COOKIE = '__session';
+export { SESSION_COOKIE };
 
 export async function createUserClient(): Promise<Db> {
   const [cookieStore, headerStore] = await Promise.all([cookies(), headers()]);
@@ -23,8 +25,17 @@ export async function createUserClient(): Promise<Db> {
     userAgent: headerStore.get('user-agent'),
   };
   const token = cookieStore.get(SESSION_COOKIE)?.value;
+  const fs = firestore();
   const actor = await verifySession(token);
-  return { fs: firestore(), actor, meta };
+  // A disabled account is signed out on its next request, whatever it asked for (ROUTE_ARCHITECTURE.md
+  // §8.4). This check lived in the proxy; it moved here when the proxy became edge-only (ADR-183).
+  if (actor.kind === 'user' && await accountDisabled(fs, actor.userId)) return { fs, actor: { kind: 'anon' }, meta };
+  return { fs, actor, meta };
+}
+
+async function accountDisabled(fs: ReturnType<typeof firestore>, uid: string): Promise<boolean> {
+  const profile = await globalRow(fs, 'profiles', uid).get();
+  return profile.exists && Boolean(profile.get('disabled_at'));
 }
 
 /** Verifies a session cookie; anything invalid, expired or revoked is `anon`. */

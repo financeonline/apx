@@ -1,5 +1,6 @@
 import { redirect } from 'next/navigation';
 import { createUserClient } from '@/core/db/user-client';
+import { platformHomeFor } from '@/modules/tenancy';
 import { landingPathForRole, listMyOrganizations, sessionUserOf } from '@/modules/tenancy';
 import { adviserOrganisations } from '@/modules/portfolio';
 import { Card, CardBody, Badge } from '@/components/ui/surfaces';
@@ -13,6 +14,9 @@ export const dynamic = 'force-dynamic';
 export default async function SelectOrganizationPage() {
   const db = await createUserClient();
   if (!sessionUserOf(db)) redirect('/sign-in?next=/select-organization');
+  // Platform accounts are never members of a customer organisation (§8.5).
+  const platformHome = await platformHomeFor(db);
+  if (platformHome) redirect(platformHome);
 
   const organizations = await listMyOrganizations(db);
   if (organizations.length === 0) redirect('/onboarding');

@@ -8,6 +8,8 @@
  * Browsers that restore the previous session on start-up also restore session cookies, so there the
  * session survives a restart; that is the browser's choice, as for every site.
  */
+/** The Firebase session cookie (`createUserClient` verifies it; the proxy only reads its expiry). */
+export const SESSION_COOKIE = '__session';
 export const SESSION_ONLY_COOKIE = 'apx_session_only';
 export const SESSION_ALIVE_COOKIE = 'apx_alive';
 

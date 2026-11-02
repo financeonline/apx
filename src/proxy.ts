@@ -1,21 +1,23 @@
 import { NextResponse, type NextRequest } from 'next/server';
-import { SESSION_COOKIE, verifySession } from '@/core/db/user-client';
-import { db as firestore } from '@/db/firestore';
-import { globalRow } from '@/db/schema';
-import { SESSION_ALIVE_COOKIE, SESSION_ONLY_COOKIE, safeNextPath, sessionVisitEnded } from '@/core/routing';
+import {
+  SESSION_ALIVE_COOKIE, SESSION_COOKIE, SESSION_ONLY_COOKIE, safeNextPath, sessionVisitEnded,
+} from '@/core/routing';
 
 /**
- * Route-family gatekeeper (ROUTE_ARCHITECTURE.md §8).
+ * Route-family gatekeeper (ROUTE_ARCHITECTURE.md §8), edge-safe (ADR-183).
  *
- * What the proxy does (Next 16's `proxy.ts`, formerly `middleware.ts`; Node.js runtime): verify the
- * `__session` cookie, classify the path, and decide which of the three families the request may
- * enter. What it deliberately does NOT do: resolve organisation access. That must return a uniform
- * 404, so it happens in `app/[orgSlug]/layout.tsx` through `getAccessContext()` (§8.7). The proxy
- * never widens access — every rule below is also enforced by `src/db/rls.ts` and the `api.*`
- * functions.
+ * Netlify runs Next's proxy (formerly middleware) at its edge, where Firebase's server library
+ * cannot load, so this file imports nothing but `next/server` and the pure routing rules. It does
+ * what a cookie alone can tell it: give the request an id, end a session whose cookie has expired or
+ * whose visit is over, send a signed-out visitor to sign-in (an API caller gets 401), and let the
+ * public paths through. Everything that needs the database happened here once and now happens in
+ * the pages that already re-check it, with the session verified properly there (revocation
+ * included): `/` sends an account to its own home (`src/app/page.tsx`), sign-in and sign-up bounce
+ * a signed-in visitor, the platform and company layouts answer the uniform 404, the no-org pages
+ * send platform accounts away, and `createUserClient` treats a disabled account as signed out.
  *
- * A user who may not enter a family gets 404, never 403: a 403 would confirm the family exists for
- * somebody (SECURITY_MODEL.md §14).
+ * The proxy never widens access — every rule is also enforced by `src/db/rls.ts` and the `api.*`
+ * functions. A user who may not enter a family gets 404, never 403 (SECURITY_MODEL.md §14).
  */
 
 const PUBLIC_PREFIXES = [
@@ -32,24 +34,16 @@ const PUBLIC_PREFIXES = [
   '/api/health',
   /*
    * The cron routes authenticate themselves — a constant-time compare of `CRON_SECRET`, 404
-   * otherwise — and their caller is Vercel Cron, which has no session. Requiring one here sent
+   * otherwise — and their caller is a scheduler, which has no session. Requiring one here sent
    * every scheduled drain to the sign-in page instead: the queue would never have run in
    * production (ADR-078).
    */
   '/api/jobs',
 ] as const;
 
-type Family = 'public' | 'auth-noorg' | 'app' | 'portfolio' | 'platform';
-
-function classify(pathname: string): Family {
-  if (pathname === '/') return 'public';
-  if (PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`))) {
-    return 'public';
-  }
-  if (pathname === '/platform' || pathname.startsWith('/platform/')) return 'platform';
-  if (pathname === '/portfolio' || pathname.startsWith('/portfolio/')) return 'portfolio';
-  if (pathname.startsWith('/app/')) return 'app';
-  return 'auth-noorg';
+function isPublic(pathname: string): boolean {
+  if (pathname === '/') return true;
+  return PUBLIC_PREFIXES.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
 }
 
 /** Only same-origin relative paths survive as a `next` target (§10, ADR-069) — one rule, one place. */
@@ -58,9 +52,23 @@ function relativeTarget(request: NextRequest): string {
   return safeNextPath(`${pathname}${search}`, origin);
 }
 
-interface PlatformRoleRow {
-  platform_role: string;
-  status: string;
+/**
+ * Whether the session cookie is a token that has not expired. This reads the token's own `exp`
+ * claim and checks NO signature: the server verifies the cookie, with revocation, on every page
+ * and route (`createUserClient`). A forged or revoked cookie passes here and is `anon` there, so
+ * it buys nothing; an expired or malformed one is cleared here instead of being re-verified forever.
+ */
+function tokenUnexpired(token: string | undefined): boolean {
+  if (!token) return false;
+  const parts = token.split('.');
+  if (parts.length !== 3) return false;
+  try {
+    const b64 = parts[1]!.replace(/-/g, '+').replace(/_/g, '/');
+    const payload = JSON.parse(atob(b64.padEnd(b64.length + ((4 - (b64.length % 4)) % 4), '='))) as { exp?: unknown };
+    return typeof payload.exp === 'number' && payload.exp * 1000 > Date.now();
+  } catch {
+    return false;
+  }
 }
 
 /** Clears every cookie a session consists of. */
@@ -70,54 +78,40 @@ function clearSession(response: NextResponse): void {
   }
 }
 
-export async function proxy(request: NextRequest) {
+export function proxy(request: NextRequest) {
   const requestId = crypto.randomUUID();
   const requestHeaders = new Headers(request.headers);
   requestHeaders.set('x-request-id', requestId);
+  const url = request.nextUrl;
 
-  const response = NextResponse.next({ request: { headers: requestHeaders } });
   /** Set when this request ends the session: every response below then clears its cookies. */
   let endSession = false;
-
-  /** Every early return must carry the refreshed cookies and the request id forward. */
-  const finish = (target?: URL, rewrite = false): NextResponse => {
-    const outgoing = target
-      ? rewrite
-        ? NextResponse.rewrite(target, { request: { headers: requestHeaders } })
-        : NextResponse.redirect(target)
-      : response;
-    if (target) {
-      for (const cookie of response.cookies.getAll()) outgoing.cookies.set(cookie);
-    }
-    if (endSession) clearSession(outgoing);
-    outgoing.headers.set('x-request-id', requestId);
-    return outgoing;
+  const finish = (response: NextResponse): NextResponse => {
+    if (endSession) clearSession(response);
+    response.headers.set('x-request-id', requestId);
+    return response;
   };
+  const pass = () => finish(NextResponse.next({ request: { headers: requestHeaders } }));
 
-  const url = request.nextUrl;
-  const family = classify(url.pathname);
+  // The health check is public and must not depend on anything.
+  if (url.pathname === '/api/health') return pass();
 
-  // The health check is public and must not depend on Auth being reachable.
-  if (url.pathname === '/api/health') return finish();
-
-  // 1. The session: the `__session` cookie, verified with revocation checked. Anything invalid,
-  //    expired or revoked is no session; a stale cookie is cleared rather than re-verified forever.
+  // 1. The session cookie: present and unexpired, or no session. A stale cookie is cleared.
+  //    (Not on `/auth/session`, which is about to set a new one.)
   const token = request.cookies.get(SESSION_COOKIE)?.value;
-  const actor = await verifySession(token);
-  let user = actor.kind === 'user' ? { id: actor.userId } : null;
-  // (Not on `/auth/session`, which is about to set a new one.)
-  if (token && !user && url.pathname !== '/auth/session') endSession = true;
+  let signedIn = tokenUnexpired(token);
+  if (token && !signedIn && url.pathname !== '/auth/session') endSession = true;
 
   // 1a. "Keep me signed in" was left unticked and this is a later visit: end the session here,
   //     then treat the request as signed out (ADR-169).
-  if (user && sessionVisitEnded(request.cookies)) {
+  if (signedIn && sessionVisitEnded(request.cookies)) {
     endSession = true;
-    user = null;
+    signedIn = false;
   }
 
   // 2. No session: public passes, everything else goes to sign-in with a relative `next`.
-  if (!user) {
-    if (family === 'public') return finish();
+  if (!signedIn) {
+    if (isPublic(url.pathname)) return pass();
     /*
      * An API route answers 401, never a redirect (ROUTE_ARCHITECTURE.md §237): its caller is a
      * fetch, not a person, and a redirect to the sign-in page would be followed into a 405 from a
@@ -125,83 +119,25 @@ export async function proxy(request: NextRequest) {
      * decide for themselves.
      */
     if (url.pathname.startsWith('/api/')) {
-      const denied = NextResponse.json(
+      return finish(NextResponse.json(
         { error: { code: 'NOT_FOUND', message: 'Sign in to continue.', requestId } },
         { status: 401 },
-      );
-      for (const cookie of response.cookies.getAll()) denied.cookies.set(cookie);
-      if (endSession) clearSession(denied);
-      denied.headers.set('x-request-id', requestId);
-      return denied;
+      ));
     }
     const signIn = new URL('/sign-in', url.origin);
     signIn.searchParams.set('next', relativeTarget(request));
-    return finish(signIn);
+    return finish(NextResponse.redirect(signIn));
   }
 
-  // Signed-in users never see the sign-in and sign-up pages.
-  if (url.pathname === '/sign-in' || url.pathname === '/sign-up') {
-    return finish(new URL('/', url.origin));
-  }
-
-  // Public pages other than `/` need no further checks; skip the two round trips.
-  if (family === 'public' && url.pathname !== '/') return finish();
-
-  // 3. One pass for the two facts every later rule needs (§8.4, §8.5), read directly as the server.
-  const fs = firestore();
-  const [profileSnap, platformSnap] = await Promise.all([
-    globalRow(fs, 'profiles', user.id).get(),
-    globalRow(fs, 'platform_users', user.id).get(),
-  ]);
-  const platform = platformSnap.exists ? (platformSnap.data() as PlatformRoleRow) : undefined;
-
-  // 4. A disabled account is signed out on its next request, whatever it was asking for.
-  if (profileSnap.exists && profileSnap.get('disabled_at')) {
-    endSession = true;
-    const signIn = new URL('/sign-in', url.origin);
-    signIn.searchParams.set('error', 'disabled');
-    return finish(signIn);
-  }
-
-  const isPlatformAccount = Boolean(platform);
-  const isActiveSuperAdmin =
-    platform?.platform_role === 'super_admin' && platform.status === 'active';
-  const isActivePlatformAccount = isPlatformAccount && platform?.status === 'active';
-
-  // 5. Family membership. Anything not permitted renders the uniform 404 at the requested URL.
-  const notFound = new URL('/404', url.origin);
-
-  if (family === 'platform' && !isActiveSuperAdmin) return finish(notFound, true);
-  /*
-   * `/portfolio` is the Command Centre for every adviser-capable role, member or platform account
-   * (ADR-112). Which organisations, if any, a session may advise needs the database, so the
-   * portfolio layout decides and renders the uniform 404 for a caller with none — a client-only
-   * member, a stranger, an unassigned employee. The proxy keeps only the session checks above.
-   */
-
-  // 6. `/` with a session goes to the family the account belongs to. A stale or foreign
-  //    last_active_org_id is never resolved to a slug (§8.6) — /select-organization decides.
-  if (url.pathname === '/') {
-    if (isActiveSuperAdmin) return finish(new URL('/platform', url.origin));
-    if (isActivePlatformAccount) return finish(new URL('/portfolio', url.origin));
-    return finish(new URL('/select-organization', url.origin));
-  }
-
-  // Platform accounts are never members of a customer organisation, so the no-org pages that
-  // exist to pick or create one belong to their own family instead (§8.5).
-  if (isActivePlatformAccount && (url.pathname === '/select-organization' || url.pathname === '/onboarding')) {
-    return finish(new URL(isActiveSuperAdmin ? '/platform' : '/portfolio', url.origin));
-  }
-
-  // 7. `/app/[orgSlug]/*` is resolved by the org layout, which owns the uniform 404.
-  return finish();
+  // 3. A session: the page decides the rest, with the cookie verified properly there.
+  return pass();
 }
 
 export const config = {
   matcher: [
     /*
      * Everything except Next's own static output and file requests. The proxy must see every
-     * page and route handler so a revoked or ended session is cleared on each of them. `ocr/` is the
+     * page and route handler so an ended session is cleared on each of them. `ocr/` is the
      * in-browser OCR engine and language file (ADR-175): static, public, and several MB each.
      */
     '/((?!_next/static|_next/image|ocr/|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webm|ico|woff2?)$).*)',
