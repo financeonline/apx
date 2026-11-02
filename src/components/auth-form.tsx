@@ -254,15 +254,16 @@ export function AuthForm({ mode }: { mode: Mode }) {
         {busy ? null : <ArrowRight aria-hidden="true" className="size-5" strokeWidth={2} />}
       </button>
 
+      {/* No "Sign up" link on sign-in (owner, 2026-11-02): companies are set up by APX; the page itself stays for invited people. */}
+      {mode === 'sign-in' ? null : (
       <p className="mt-2 text-center text-sm text-ink-muted">
-        {mode === 'sign-in' ? (
-          <>Don&rsquo;t have an account? <Link href="/sign-up" className="ml-1.5 font-medium text-accent hover:text-accent-hover">Sign up</Link></>
-        ) : mode === 'sign-up' ? (
+        {mode === 'sign-up' ? (
           <>Already have an account? <Link href="/sign-in" className="ml-1.5 font-medium text-accent hover:text-accent-hover">Log in</Link></>
         ) : (
           <Link href="/sign-in" className="font-medium text-accent hover:text-accent-hover">Back to log in</Link>
         )}
       </p>
+      )}
     </form>
   );
 }
