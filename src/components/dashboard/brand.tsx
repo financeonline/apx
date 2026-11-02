@@ -128,10 +128,11 @@ export function LightMark({ className = 'h-10 w-auto', idPrefix = 'apx-light-mar
  */
 export function LightLockup({ idPrefix = 'apx-lockup', compact = false }: { idPrefix?: string; compact?: boolean }) {
   return (
-    <span className="flex items-center gap-4 sm:gap-5">
-      <LightMark idPrefix={idPrefix} className={compact ? 'h-8 w-auto' : 'h-9 w-auto sm:h-11'} />
+    <span className={`flex items-center ${compact ? 'gap-3' : 'gap-4 sm:gap-5'}`}>
+      <LightMark idPrefix={idPrefix} className={compact ? 'h-7 w-auto' : 'h-9 w-auto sm:h-11'} />
       <span className="leading-none text-ink">
-        <span className={`block font-bold tracking-[0.2em] ${compact ? 'text-2xl' : 'text-[1.625rem] sm:text-[2rem]'}`}>APX</span>
+        {/* Compact: the menu column is 14rem of content; the lockup must leave room for the Hide menu button beside it. */}
+        <span className={`block font-bold tracking-[0.2em] ${compact ? 'text-xl' : 'text-[1.625rem] sm:text-[2rem]'}`}>APX</span>
         <span className="mt-2 block text-[0.5rem] font-medium tracking-[0.24em] whitespace-nowrap uppercase">Financial system</span>
       </span>
       {compact ? null : (

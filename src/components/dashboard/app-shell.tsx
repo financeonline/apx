@@ -75,8 +75,10 @@ export async function AppShell({
       {light ? null : <CornerBlob idPrefix="sidebar-blob" className="pointer-events-none absolute bottom-0 left-0 -z-10 w-full -scale-y-100 opacity-35" />}
     </>
   );
+  // `min-w-0 flex-1`: the brand yields to the Hide menu button beside it instead of pushing it out of
+  // the column (the light lockup did, and the button was invisible — owner, 2026-11-02).
   const brand = (
-    <Link href={homeHref} className="px-2" aria-label={homeLabel}>
+    <Link href={homeHref} className="min-w-0 flex-1 overflow-hidden px-2" aria-label={homeLabel}>
       {light ? <LightLockup idPrefix="sidebar-lockup" compact /> : <Wordmark idPrefix="sidebar-logo" />}
       {area ? <span className="mt-3 block text-xs font-semibold tracking-[0.12em] text-ink-muted uppercase">{area}</span> : null}
     </Link>
