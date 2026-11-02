@@ -1,5 +1,5 @@
 import { KeyRound, UserCog } from 'lucide-react';
-import { listPlatformUsers } from '@/modules/platform';
+import { analystCompanies, listPlatformUsers, readableOrganizations } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { PageHeader, Card, CardHeader, CardBody, EmptyState } from '@/components/ui/surfaces';
 import { TableWrap, THead, TBody } from '@/components/ui/table';
@@ -11,13 +11,22 @@ export default async function PlatformUsersPage() {
   const ctx = await getPlatformContext();
   // A failing read throws rather than rendering as an empty list — the one thing a platform page
   // must not show (PRODUCTION_AUDIT.md M2; ADR-070).
-  const users = await listPlatformUsers(ctx);
+  const [users, organizations, assignedTo] = await Promise.all([
+    listPlatformUsers(ctx),
+    readableOrganizations(ctx.db),
+    analystCompanies(ctx),
+  ]);
+  // ADR-182: the super admin ticks which companies each Financial Analyst can open, here.
+  const companies = organizations
+    .filter((o) => o.status !== 'deleted')
+    .map((o) => ({ id: String(o.id), name: String(o.name), slug: String(o.slug) }))
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   return (
     <>
       <PageHeader
         title="Platform accounts"
-        description="The super admin and APX’s Financial Analysts. A platform account can never be a member of a customer organisation."
+        description="You and your team of Financial Analysts. Choose which companies each analyst can open. A platform account can never be a member of a customer organisation."
       />
       <div className="mt-8 flex flex-col gap-6">
         <Card>
@@ -27,7 +36,7 @@ export default async function PlatformUsersPage() {
               <EmptyState title="No platform accounts yet">Add the first one below.</EmptyState>
             ) : (
               <TableWrap>
-                <THead columns={['Email', 'Name', 'Role', 'Status', '']} />
+                <THead columns={['Email', 'Name', 'Role', 'Companies', 'Status', '']} />
                 <TBody>
                   {users.map((user) => (
                     <PlatformUserRow
@@ -37,6 +46,8 @@ export default async function PlatformUsersPage() {
                       fullName={user.fullName}
                       platformRole={user.platformRole}
                       status={user.status}
+                      companies={companies}
+                      assigned={assignedTo.get(user.userId) ?? []}
                     />
                   ))}
                 </TBody>
@@ -48,10 +59,10 @@ export default async function PlatformUsersPage() {
           <CardHeader
             icon={<KeyRound />}
             tint="pink"
-            title="Add a platform admin"
+            title="Add a Financial Analyst to your team"
             description="Needs your password from the last ten minutes (Confirm it is you, above)."
           />
-          <CardBody><AddPlatformUserForm /></CardBody>
+          <CardBody><AddPlatformUserForm companies={companies} /></CardBody>
         </Card>
       </div>
     </>

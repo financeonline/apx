@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { callApi, revokeUserSessions } from '@/core/db';
-import { addPlatformUser } from '@/modules/platform';
+import { addPlatformUser, setAnalystCompanies } from '@/modules/platform';
 import { confirmPassword, getPlatformContext } from '@/modules/tenancy';
 import { assertCan } from '@/core/permissions';
 import { fail, done, text, optionalText } from '@/app/_lib/server-action';
@@ -25,17 +25,49 @@ export async function addPlatformUserAction(
     requestId = ctx.requestId;
     assertCan(ctx, 'platform.users.manage');
     const origin = await requestOrigin();
-    const { invited } = await addPlatformUser(
+    const { userId, invited } = await addPlatformUser(
       ctx,
       { email: text(form, 'email'), role: text(form, 'platform_role') },
       { redirectTo: `${origin}/account` },
     );
+    // ADR-182: the companies ticked on the same form are given at once.
+    const companies = organizationIds(form);
+    if (companies.length > 0) await setAnalystCompanies(ctx, userId, companies);
     revalidatePath('/platform/users');
-    return done(invited
+    revalidatePath('/platform/assignments');
+    const access = companies.length === 0
+      ? ' They cannot open any company until you tick one.'
+      : ` They can open ${companies.length} ${companies.length === 1 ? 'company' : 'companies'}.`;
+    return done((invited
       ? 'Invited. They will receive an email to set their password.'
-      : 'Added.');
+      : 'Added.') + access);
   } catch (error) {
     return fail(error, { requestId, action: 'platform.addUser' });
+  }
+}
+
+/** The ticked `organization_id` checkboxes of a form. */
+function organizationIds(form: FormData): string[] {
+  return [...new Set(form.getAll('organization_id').filter((v): v is string => typeof v === 'string' && v.length > 0))];
+}
+
+/** ADR-182: which companies one Financial Analyst can open, from the ticks on Platform accounts. */
+export async function setAnalystCompaniesAction(
+  _previous: ActionResult | null,
+  form: FormData,
+): Promise<ActionResult> {
+  let requestId: string | undefined;
+  try {
+    const ctx = await getPlatformContext();
+    requestId = ctx.requestId;
+    assertCan(ctx, 'assignments.manage');
+    const { added, removed, total } = await setAnalystCompanies(ctx, text(form, 'user_id'), organizationIds(form));
+    revalidatePath('/platform/users');
+    revalidatePath('/platform/assignments');
+    if (added === 0 && removed === 0) return done('No change.');
+    return done(`Saved. They can open ${total} ${total === 1 ? 'company' : 'companies'}.`);
+  } catch (error) {
+    return fail(error, { requestId, action: 'platform.setAnalystCompanies' });
   }
 }
 
@@ -54,6 +86,7 @@ export async function revokePlatformRoleAction(
     // database (ADR-075). After the revocation committed, so a failure here cannot undo it.
     await revokeUserSessions(userId);
     revalidatePath('/platform/users');
+    revalidatePath('/platform/assignments');
     return done('Platform role removed.');
   } catch (error) {
     return fail(error, { requestId, action: 'platform.revokeRole' });

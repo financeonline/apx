@@ -1,13 +1,56 @@
 'use client';
 
 import { useActionState } from 'react';
-import { addPlatformUserAction, revokePlatformRoleAction } from '../actions';
+import { addPlatformUserAction, revokePlatformRoleAction, setAnalystCompaniesAction } from '../actions';
 import { Field, Input } from '@/components/ui/field';
 import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 import { TR, TD } from '@/components/ui/table';
 import { PLATFORM_ROLE_LABELS } from '@/components/labels';
 
-export function AddPlatformUserForm() {
+export interface CompanyChoice { readonly id: string; readonly name: string; readonly slug: string }
+
+/**
+ * The companies as ticks (ADR-182): the super admin chooses exactly which ones a Financial Analyst
+ * can open. `checked` are the ones they can open now.
+ */
+function CompanyTicks({ companies, checked, idPrefix }: {
+  companies: readonly CompanyChoice[]; checked: ReadonlySet<string>; idPrefix: string;
+}) {
+  if (companies.length === 0) {
+    return <p className="text-sm text-ink-muted">There are no companies yet. Create one on Companies first.</p>;
+  }
+  return (
+    <fieldset>
+      <legend className="text-sm font-medium text-ink">Companies they can open</legend>
+      <p className="text-xs text-ink-muted">Tick each company this person may work on. Unticked companies are hidden from them.</p>
+      <ul className="mt-3 grid gap-2 md:grid-cols-2">
+        {companies.map((c) => (
+          <li key={c.id} className="min-w-0">
+            <label
+              htmlFor={`${idPrefix}-${c.id}`}
+              className="flex min-h-11 cursor-pointer items-start gap-3 rounded-xl border border-line bg-surface p-3 transition-colors hover:border-accent/60 has-[:checked]:border-accent has-[:checked]:bg-accent-soft/40"
+            >
+              <input
+                id={`${idPrefix}-${c.id}`}
+                type="checkbox"
+                name="organization_id"
+                value={c.id}
+                defaultChecked={checked.has(c.id)}
+                className="mt-1 size-4 shrink-0 accent-accent"
+              />
+              <span className="min-w-0">
+                <span className="block text-sm font-medium text-ink">{c.name}</span>
+                <span className="block text-xs text-ink-muted">{c.slug}</span>
+              </span>
+            </label>
+          </li>
+        ))}
+      </ul>
+    </fieldset>
+  );
+}
+
+export function AddPlatformUserForm({ companies }: { companies: readonly CompanyChoice[] }) {
   const [state, action] = useActionState(addPlatformUserAction, null);
   return (
     <form action={action} className="flex flex-col gap-5">
@@ -16,10 +59,33 @@ export function AddPlatformUserForm() {
       </Field>
       {/* ADR-159: there is one super admin; everyone added here is staff. */}
       <input type="hidden" name="platform_role" value="employee" />
-      <p className="text-sm text-ink-muted">They are added as a Financial Analyst. There is one super admin.</p>
+      <p className="text-sm text-ink-muted">They are added to your team as a Financial Analyst. There is one super admin.</p>
+      <CompanyTicks companies={companies} checked={new Set()} idPrefix="new-analyst" />
       <ActionMessage state={state} />
-      <SubmitButton pendingLabel="Adding…">Add platform admin</SubmitButton>
+      <SubmitButton pendingLabel="Adding…">Add Financial Analyst</SubmitButton>
     </form>
+  );
+}
+
+/** One analyst's companies: the names, and the ticks to change them. */
+function AnalystCompanies({ userId, companies, assigned }: {
+  userId: string; companies: readonly CompanyChoice[]; assigned: ReadonlySet<string>;
+}) {
+  const [state, action] = useActionState(setAnalystCompaniesAction, null);
+  const names = companies.filter((c) => assigned.has(c.id)).map((c) => c.name);
+  return (
+    <div className="flex min-w-0 flex-col gap-2">
+      <span className="text-sm text-ink">{names.length === 0 ? 'No companies yet' : names.join(', ')}</span>
+      <details className="group">
+        <summary className="cursor-pointer text-xs font-medium text-accent hover:underline">Change companies</summary>
+        <form action={action} className="mt-3 flex flex-col gap-4">
+          <input type="hidden" name="user_id" value={userId} />
+          <CompanyTicks companies={companies} checked={assigned} idPrefix={`analyst-${userId}`} />
+          <ActionMessage state={state} />
+          <SubmitButton pendingLabel="Saving…">Save companies</SubmitButton>
+        </form>
+      </details>
+    </div>
   );
 }
 
@@ -29,16 +95,28 @@ export function PlatformUserRow(props: {
   fullName: string | null;
   platformRole: string;
   status: string;
+  companies: readonly CompanyChoice[];
+  assigned: readonly string[];
 }) {
   const [state, action] = useActionState(revokePlatformRoleAction, null);
+  const isSuperAdmin = props.platformRole === 'super_admin';
   return (
     <TR>
       <TD className="break-all">{props.email ?? <code className="text-xs">{props.userId}</code>}</TD>
       <TD>{props.fullName ?? '—'}</TD>
       <TD>{PLATFORM_ROLE_LABELS[props.platformRole] ?? props.platformRole}</TD>
+      <TD>
+        {isSuperAdmin ? (
+          <span className="text-xs text-ink-muted">Every company</span>
+        ) : props.status === 'active' ? (
+          <AnalystCompanies userId={props.userId} companies={props.companies} assigned={new Set(props.assigned)} />
+        ) : (
+          <span className="text-xs text-ink-muted">—</span>
+        )}
+      </TD>
       <TD>{props.status}</TD>
       <TD>
-        {props.platformRole === 'super_admin' ? (
+        {isSuperAdmin ? (
           <span className="text-xs text-ink-muted">The super admin</span>
         ) : (
           <>

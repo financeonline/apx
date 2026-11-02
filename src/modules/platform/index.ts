@@ -3,8 +3,8 @@ export {
   loadAiModelSettings, setAiModel, AI_EFFORTS, type AiModelOption, type AiModelSettings, type AiEffortLevel, type AiProvider,
   loadOpenAiKeyStatus, setOpenAiKey, clearOpenAiKey, setActiveAiProvider, type AiProviderChoice,
   updateOrgQuotas, updateOrganizationAsPlatform,
-  setOrgModule, createCompanyAsPlatform, editCompanyAsPlatform, changeOwnerLoginAsPlatform, listCompanyOwners, deleteCompanyAsPlatform, restoreCompanyAsPlatform, purgeCompanyNowAsPlatform, listPlatformUsers, addPlatformUser,
-  type CreatedCompany, type PlatformUser, type AddedPlatformUser,
+  setOrgModule, createCompanyAsPlatform, editCompanyAsPlatform, changeOwnerLoginAsPlatform, listCompanyOwners, deleteCompanyAsPlatform, restoreCompanyAsPlatform, purgeCompanyNowAsPlatform, listPlatformUsers, addPlatformUser, setAnalystCompanies, analystCompanies,
+  type CreatedCompany, type AnalystCompaniesChange, type PlatformUser, type AddedPlatformUser,
   type AuditFilters, type OrgQuotas, type OrganizationDetail, type PlatformAuditEvent,
   type PlatformAssignment, type PlatformMember, type PlatformOrganization, type PlatformSetting,
 } from './services';

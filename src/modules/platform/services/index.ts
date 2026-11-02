@@ -3,7 +3,7 @@ import { anthropicApiKeyFromVault, openAiApiKeyFromVault, revokeUserSessions } f
 import {
   createConfirmedLogin, inviteLogin, isEmailTaken, loginIdByEmail, removeLogin, updateLogin,
 } from '@/db/app/platform-auth';
-import { countOrgRows, readableOrganization, readGlobal } from '@/db/app/platform-reads';
+import { countOrgRows, readActiveAssignments, readableOrganization, readGlobal } from '@/db/app/platform-reads';
 import { orgRowById, orgRows } from '@/db/rls';
 import { ORG_SINGLETON_ID } from '@/db/schema';
 import { DEFAULT_ANALYST_MODEL, OPENAI_EFFORTS, isOpenAiChatModel, isOpenAiReasoningModel } from '@/modules/ai';
@@ -392,6 +392,62 @@ export async function addPlatformUser(
     throw error;
   }
   return { userId, invited };
+}
+
+/** Each Financial Analyst's companies (organisation ids) that they can open now (ADR-182). */
+export async function analystCompanies(ctx: AccessContext): Promise<ReadonlyMap<string, readonly string[]>> {
+  assertCan(ctx, 'assignments.manage');
+  const now = Date.now();
+  const byAnalyst = new Map<string, string[]>();
+  for (const a of await readActiveAssignments(ctx.db, 1000)) {
+    if (typeof a.ends_at === 'string' && new Date(a.ends_at).getTime() <= now) continue;
+    const list = byAnalyst.get(String(a.employee_user_id)) ?? [];
+    list.push(String(a.organization_id));
+    byAnalyst.set(String(a.employee_user_id), list);
+  }
+  return byAnalyst;
+}
+
+export interface AnalystCompaniesChange {
+  readonly added: number;
+  readonly removed: number;
+  /** The companies the analyst can open after the change. */
+  readonly total: number;
+}
+
+/**
+ * Set exactly which companies one Financial Analyst can open (ADR-182): every ticked company gets
+ * an assignment, every unticked one that had an active assignment is revoked. Each step is the
+ * existing audited `api.create_assignment` / `api.revoke_assignment`, so the super admin's recent
+ * sign-in and the per-company audit trail are unchanged; a company already in place is left alone,
+ * keeping its end date.
+ */
+export async function setAnalystCompanies(
+  ctx: AccessContext,
+  employeeUserId: string,
+  organizationIds: readonly string[],
+): Promise<AnalystCompaniesChange> {
+  assertCan(ctx, 'assignments.manage');
+  if (!employeeUserId) throw new ValidationError('Choose a Financial Analyst.');
+  const wanted = new Set(organizationIds.filter((id) => id.length > 0));
+  const current = (await readActiveAssignments(ctx.db, 1000))
+    .filter((a) => a.employee_user_id === employeeUserId);
+  // A lapsed assignment (past its end date) no longer gives access, so ticking it renews it.
+  const live = (a: Record<string, unknown>) => typeof a.ends_at !== 'string' || new Date(a.ends_at).getTime() > Date.now();
+  const held = new Set(current.filter(live).map((a) => String(a.organization_id)));
+
+  let added = 0, removed = 0;
+  for (const org of wanted) {
+    if (held.has(org)) continue;
+    await callApi(ctx.db, 'create_assignment', { p_org: org, p_employee: employeeUserId, p_ends_at: null }, ctx.requestId);
+    added += 1;
+  }
+  for (const a of current) {
+    if (wanted.has(String(a.organization_id))) continue;
+    await callApi(ctx.db, 'revoke_assignment', { p_assignment: String(a.id), p_reason: 'Companies changed by the super admin' }, ctx.requestId);
+    removed += 1;
+  }
+  return { added, removed, total: wanted.size };
 }
 
 /**

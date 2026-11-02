@@ -3228,3 +3228,14 @@ Decision and fixes:
 Checked: `tsc`, `eslint .`, `npm run test:unit` 3286/3286 (the route-contracts cron test now accepts the Hobby plan's daily schedule, ADR-178 addendum), production build, every page per role (owner, admin, accountant, client, third party, analyst, super admin), every upload fixture incl. PDF and OCR.
 
 Known, left for the owner: opening `/analyst?ask=…` sends the question to the paid AI at once (a GET link can start a paid call); single signed-amount bank statements on current accounts are refused as specified (ADR-058.13).
+
+### ADR-182 · The super admin's team: add a Financial Analyst and tick the companies they can open
+
+Status: **built and checked locally on 2026-11-02** (owner: "let super admin add his team login user finance analyst under superadmin and superadmin can … select which company he can access").
+
+Decision:
+1. **One place, Platform accounts (`/platform/users`)**: "Add a Financial Analyst to your team" takes the email and a tick per company; the accounts table gains a **Companies** column listing what each analyst can open, with **Change companies** (the same ticks, Save companies). The super admin's row reads "Every company". `/platform/assignments` stays, showing the same assignments with their end dates.
+2. **Ticks are assignments**: `setAnalystCompanies` (`modules/platform`) creates an assignment for each newly ticked company and revokes each unticked one, each through the existing `api.create_assignment` / `api.revoke_assignment` — so the recent-sign-in rule (Confirm it is you), the per-company audit events and "an owner can always remove adviser access" are unchanged. A company already given is left alone and keeps its end date (twelve months by default); a lapsed one is renewed when ticked.
+3. **Fix**: `api.create_assignment` refused an analyst a company they had held before ("already assigned"), because a revoked assignment keeps its document. Only a current (active, not lapsed) assignment blocks now; the earlier one is overwritten and audited as an update.
+
+Checked locally on two throwaway companies (QA Team Test One/Two) and a test analyst: add with one ticked, add a second, untick one, tick it back; the analyst's company list and `/app/<slug>` open only those two, any other company answers 404. `tsc`, `eslint`, unit tests 3286/3286.

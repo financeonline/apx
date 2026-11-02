@@ -483,7 +483,13 @@ async function create_assignment(db: Db, args: Record<string, unknown>): Promise
     if (!orgSnap.exists || orgSnap.get('status') === 'deleted') raise.notFound();
     // `organization_assignments_org_employee_unique`: the document id IS the employee.
     const ref = orgRow(db.fs, org, 'organization_assignments', employee);
-    if ((await tx.get(ref)).exists) raise.conflict('that employee is already assigned to this organization');
+    // A revoked or lapsed assignment keeps its document (it is the record of that access), so only a
+    // CURRENT one blocks: the same analyst can be given the company again (ADR-182).
+    const existing = await tx.get(ref);
+    const lapsed = (end: unknown) => typeof end === 'string' && new Date(end).getTime() <= Date.now();
+    if (existing.exists && existing.get('status') === 'active' && !lapsed(existing.get('ends_at'))) {
+      raise.conflict('that employee is already assigned to this organization');
+    }
 
     const now = new Date();
     const yearOn = new Date(now);
@@ -495,7 +501,9 @@ async function create_assignment(db: Db, args: Record<string, unknown>): Promise
       revoked_reason: null, created_at: now.toISOString(), updated_at: now.toISOString(),
     };
     const audits = [
-      await prepareRowAudit(db, 'organization_assignments', 'insert', null, row, tx),
+      existing.exists
+        ? await prepareRowAudit(db, 'organization_assignments', 'update', existing.data()!, row, tx)
+        : await prepareRowAudit(db, 'organization_assignments', 'insert', null, row, tx),
       await prepareAudit(db, {
         organizationId: org, action: 'assignment.created', targetTable: 'organization_assignments', targetId: id,
         after: { employee_user_id: employee },
