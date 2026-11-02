@@ -1,5 +1,6 @@
-# Netlify hosting (ADR-183). The Next.js adapter (OpenNext, @netlify/plugin-nextjs) is added by
-# Netlify automatically when it sees Next.js; it is deliberately not pinned here.
+# Netlify hosting (ADR-183). The Next.js adapter (@netlify/plugin-nextjs) is named here without a
+# version — Netlify installs its current release on every build. Left out, the first deploy built the
+# app but published only the static files: every server page answered 404 (2026-11-02).
 [build]
   # `npm run build` runs `prebuild` (the OCR files) and then `next build`; the second step bundles the
   # job worker into netlify/functions/jobs-worker-background.mjs (scripts/build-netlify-worker.mjs).
@@ -8,6 +9,9 @@
 
 [build.environment]
   NODE_VERSION = "24"
+
+[[plugins]]
+  package = "@netlify/plugin-nextjs"
 
 [functions]
   # The job worker bundle keeps its npm packages external; Netlify packs them from node_modules.
