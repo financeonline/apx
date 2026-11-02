@@ -64,7 +64,7 @@ jobs:
           distribution: temurin
           java-version: '21'
       - run: npm ci
-      - name: write local env for the emulators (demo-apx: cannot reach Google)
+      - name: "write local env for the emulators (demo-apx, which cannot reach Google)"
         run: bash scripts/write-local-env.sh
       - name: integration tests (the src/db checks, a session per role, on the emulators)
         run: npm run test:integration
