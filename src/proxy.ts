@@ -136,10 +136,12 @@ export function proxy(request: NextRequest) {
 export const config = {
   matcher: [
     /*
-     * Everything except Next's own static output and file requests. The proxy must see every
-     * page and route handler so an ended session is cleared on each of them. `ocr/` is the
-     * in-browser OCR engine and language file (ADR-175): static, public, and several MB each.
+     * Everything except Next's own static output, file requests and Netlify's own function paths.
+     * The proxy must see every page and route handler so an ended session is cleared on each of
+     * them. `ocr/` is the in-browser OCR engine and language file (ADR-175): static, public, and
+     * several MB each. `.netlify/` is where the host serves the job worker and its timers (ADR-183):
+     * matched here, the worker's call was sent to the sign-in page and the queue never drained.
      */
-    '/((?!_next/static|_next/image|ocr/|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webm|ico|woff2?)$).*)',
+    '/((?!_next/static|_next/image|\\.netlify/|ocr/|favicon.ico|robots.txt|sitemap.xml|.*\\.(?:svg|png|jpg|jpeg|gif|webp|webm|ico|woff2?)$).*)',
   ],
 };
