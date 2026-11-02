@@ -48,23 +48,23 @@ export function ComparativeFinancials({ panel }: { panel: ComparativePanel | nul
         <svg id="pnl-bars" viewBox="0 0 340 175" role="img" aria-label={`Annual sales and total costs: ${panel.years.map((p) => `${p.year} sales ${p.salesDisplay}, total costs ${p.costDisplay}`).join('; ')}`}>
           {panel.ticks.map((label, i) => (
             <g key={`g${i}`}>
-              <line x1={X0} x2={X0 + W} y1={tickY(i, panel.ticks.length)} y2={tickY(i, panel.ticks.length)} stroke="#e9edf3" strokeDasharray="3 4" />
-              <text x={X0 - 7} y={tickY(i, panel.ticks.length) + 3} textAnchor="end" fill="#637388" fontSize="8">{label}</text>
+              <line x1={X0} x2={X0 + W} y1={tickY(i, panel.ticks.length)} y2={tickY(i, panel.ticks.length)} stroke="var(--dash-line)" strokeDasharray="3 4" />
+              <text x={X0 - 7} y={tickY(i, panel.ticks.length) + 3} textAnchor="end" fill="var(--dash-muted)" fontSize="8">{label}</text>
             </g>
           ))}
           {panel.years.map((p, i) => (
             <g key={p.year}>
               {p.sales === null ? null : (
-                <rect className="apx-grow" style={{ '--apx-i': i * 2 } as CSSProperties} x={x(i) - 21} y={y(p.sales)} width="18" height={Math.max(0, y(0) - y(p.sales))} rx="3" fill="#c12591">
+                <rect className="apx-grow" style={{ '--apx-i': i * 2 } as CSSProperties} x={x(i) - 21} y={y(p.sales)} width="18" height={Math.max(0, y(0) - y(p.sales))} rx="3" fill="var(--dash-accent)">
                   <title>{`${p.year} Sales: ${p.salesDisplay}`}</title>
                 </rect>
               )}
               {p.cost === null ? null : (
-                <rect className="apx-grow" style={{ '--apx-i': i * 2 + 1 } as CSSProperties} x={x(i) + 3} y={y(p.cost)} width="18" height={Math.max(0, y(0) - y(p.cost))} rx="3" fill="#3284d8">
+                <rect className="apx-grow" style={{ '--apx-i': i * 2 + 1 } as CSSProperties} x={x(i) + 3} y={y(p.cost)} width="18" height={Math.max(0, y(0) - y(p.cost))} rx="3" fill="var(--dash-second)">
                   <title>{`${p.year} Total costs: ${p.costDisplay}`}</title>
                 </rect>
               )}
-              <text x={x(i)} y="165" textAnchor="middle" fill="#637388" fontSize="9">{p.year}</text>
+              <text x={x(i)} y="165" textAnchor="middle" fill="var(--dash-muted)" fontSize="9">{p.year}</text>
             </g>
           ))}
         </svg>

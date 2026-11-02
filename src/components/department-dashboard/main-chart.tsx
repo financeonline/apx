@@ -15,7 +15,7 @@ import { downloadChartCsv, unitLabel, type ExportMeta } from './export-csv';
  */
 const W = 680, H = 235, LEFT = 43, RIGHT = 17, TOP = 17, BOTTOM = 32;
 const PLOT_W = W - LEFT - RIGHT, PLOT_H = H - TOP - BOTTOM;
-const COLORS = ['#c12591', '#3284d8'] as const;
+const COLORS = ['var(--dash-accent)', 'var(--dash-second)'] as const;
 
 type Pt = { x: number; y: number; i: number };
 
@@ -111,7 +111,7 @@ export function MainChart({ chart, meta }: { chart: MainChartView; meta: ExportM
         <svg id="main-chart" viewBox={`0 0 ${W} ${H}`} role="img" aria-labelledby="chart-title chart-desc">
           <defs>
             <linearGradient id="area-fill" x1="0" y1="0" x2="0" y2="1">
-              <stop stopColor="#b53387" stopOpacity=".1" /><stop offset="1" stopColor="#b53387" stopOpacity="0" />
+              <stop stopColor="var(--dash-accent)" stopOpacity=".1" /><stop offset="1" stopColor="var(--dash-accent)" stopOpacity="0" />
             </linearGradient>
           </defs>
           {chart.ticks.map((label, i) => (
@@ -130,8 +130,8 @@ export function MainChart({ chart, meta }: { chart: MainChartView; meta: ExportM
           )) : null}
           {showBaseline ? baselineRuns.map((run, k) => (
             run.length > 1
-              ? <polyline key={`b${k}`} className="apx-fade" points={pts(run)} fill="none" stroke="#adb3b9" strokeWidth="1.5" strokeDasharray="5 5" />
-              : <circle key={`b${k}`} className="apx-pop" cx={run[0]!.x} cy={run[0]!.y} r="4" fill="#adb3b9" />
+              ? <polyline key={`b${k}`} className="apx-fade" points={pts(run)} fill="none" stroke="var(--dash-baseline)" strokeWidth="1.5" strokeDasharray="5 5" />
+              : <circle key={`b${k}`} className="apx-pop" cx={run[0]!.x} cy={run[0]!.y} r="4" fill="var(--dash-baseline)" />
           )) : null}
           {([firstRuns, secondRuns] as const).map((seriesRuns, j) => {
             if (!visible[j]) return null;

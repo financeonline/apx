@@ -2,7 +2,7 @@ import type { CSSProperties } from 'react';
 import type { Mix } from '@/modules/departments';
 import { DataIcon } from './icon';
 
-const COLORS = ['#c12591', '#3284d8', '#dce9f9'] as const;
+const COLORS = ['var(--dash-accent)', 'var(--dash-second)', 'var(--dash-mix-rest)'] as const;
 const CIRCUMFERENCE = 339.292; // 2π × 54
 
 /** "The bigger picture" donut (`app.js#render` → `#donut-chart`, `#mix-legend`). */
@@ -37,7 +37,7 @@ export function RevenueMix({ mix }: { mix: Mix }) {
       <div className="composition">
         <div className="donut-wrap">
           <svg id="donut-chart" viewBox="0 0 140 140" role="img" aria-label={label}>
-            <circle cx="70" cy="70" r="54" fill="none" stroke="#f6edf3" strokeWidth="13" />
+            <circle cx="70" cy="70" r="54" fill="none" stroke="var(--dash-donut-track)" strokeWidth="13" />
             {segments}
           </svg>
           <div className="donut-label"><strong id="donut-value">{mix.total}</strong><span id="donut-caption">{mix.caption}</span></div>

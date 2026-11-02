@@ -128,7 +128,7 @@ export function ShellFrame({
   );
 
   return (
-    <div data-nav={docked ? 'shown' : 'hidden'} className={`group/shell min-h-dvh lg:data-[nav=shown]:flex ${look === 'light' ? 'theme-lobby' : ''}`}>
+    <div data-nav={docked ? 'shown' : 'hidden'} data-look={look} className={`group/shell min-h-dvh lg:data-[nav=shown]:flex ${look === 'light' ? 'theme-lobby' : ''}`}>
       {/* The docked sidebar, from `lg`, while shown. Above the page: the company pages' light canvas
           (`LobbyCanvas`) paints its background out to the window's edges and would cover it. */}
       <aside

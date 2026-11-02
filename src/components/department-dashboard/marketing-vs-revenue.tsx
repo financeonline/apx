@@ -47,20 +47,20 @@ export function MarketingVsRevenue({ panel, snapshotLabel, currency }: { panel: 
       </div>
       {panel ? (
         <svg id="marketing-chart" viewBox="0 0 680 220" role="img" aria-labelledby="marketing-title marketing-desc">
-          <circle className="apx-fade" cx={CX} cy={CY} r={R} fill="#c12591"><title>{`Total revenue ${panel.revenueDisplay}. Marketing is a share within this total.`}</title></circle>
-          {share >= 1 ? <circle className="apx-fade" style={{ '--apx-i': 4 } as CSSProperties} cx={CX} cy={CY} r={R} fill="#3284d8" />
+          <circle className="apx-fade" cx={CX} cy={CY} r={R} fill="var(--dash-accent)"><title>{`Total revenue ${panel.revenueDisplay}. Marketing is a share within this total.`}</title></circle>
+          {share >= 1 ? <circle className="apx-fade" style={{ '--apx-i': 4 } as CSSProperties} cx={CX} cy={CY} r={R} fill="var(--dash-second)" />
             : share > 0 ? (
-              <path className="apx-fade" style={{ '--apx-i': 4 } as CSSProperties} d={`M ${CX} ${CY} L ${CX} ${CY - R} A ${R} ${R} 0 ${share > 0.5 ? 1 : 0} 1 ${ex} ${ey} Z`} fill="#3284d8">
+              <path className="apx-fade" style={{ '--apx-i': 4 } as CSSProperties} d={`M ${CX} ${CY} L ${CX} ${CY - R} A ${R} ${R} 0 ${share > 0.5 ? 1 : 0} 1 ${ex} ${ey} Z`} fill="var(--dash-second)">
                 <title>{`Marketing spend ${panel.spendDisplay} · ${panel.shareDisplay}`}</title>
               </path>
             ) : null}
           <text x={CX} y="99" textAnchor="middle" fill="white" fontSize="12">Revenue</text>
           <text x={CX} y="128" textAnchor="middle" fill="white" fontSize="25">{panel.revenueDisplay}</text>
-          <path className="apx-draw" pathLength={1} style={{ '--apx-len': 1, '--apx-i': 3 } as CSSProperties} d="M 194 22 L 297 22 L 330 55" fill="none" stroke="#3284d8" strokeWidth="1.2" />
-          <circle className="apx-pop" cx="194" cy="22" r="3" fill="#3284d8" />
-          <text x="350" y="71" fill="#4f6f8f" fontSize="12">Marketing spend</text>
-          <text x="350" y="108" fill="#2f78c4" fontSize="29">{panel.spendDisplay}</text>
-          <text x="350" y="135" fill="#5d7489" fontSize="12">{panel.share === null ? 'Share not known' : panel.shareDisplay}</text>
+          <path className="apx-draw" pathLength={1} style={{ '--apx-len': 1, '--apx-i': 3 } as CSSProperties} d="M 194 22 L 297 22 L 330 55" fill="none" stroke="var(--dash-second)" strokeWidth="1.2" />
+          <circle className="apx-pop" cx="194" cy="22" r="3" fill="var(--dash-second)" />
+          <text x="350" y="71" fill="var(--dash-label)" fontSize="12">Marketing spend</text>
+          <text x="350" y="108" fill="var(--dash-blue-text)" fontSize="29">{panel.spendDisplay}</text>
+          <text x="350" y="135" fill="var(--dash-muted)" fontSize="12">{panel.share === null ? 'Share not known' : panel.shareDisplay}</text>
         </svg>
       ) : (
         <p className="marketing-note">No revenue figures for these months yet, so there is nothing to compare marketing spend with.</p>

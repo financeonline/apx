@@ -243,22 +243,22 @@ function TemplateStack() {
   return (
     <svg className="report-template-stack" viewBox="0 0 220 185" role="img" aria-label="Layered report and pitch deck template icons">
       <g transform="translate(25 22) rotate(-10 70 70)">
-        <rect width="122" height="145" rx="8" fill="#f0f7ff" stroke="#c8ddf0" /><rect x="14" y="16" width="70" height="5" rx="2" fill="#3284d8" />
-        <path d="M14 36h88M14 46h65M14 56h79" stroke="#c4d9ed" strokeWidth="3" />
-        <rect x="16" y="82" width="14" height="35" rx="2" fill="#9dc7e8" /><rect x="39" y="70" width="14" height="47" rx="2" fill="#3284d8" /><rect x="62" y="91" width="14" height="26" rx="2" fill="#b9d8ed" />
+        <rect width="122" height="145" rx="8" fill="var(--dash-second-soft)" stroke="var(--dash-line-strong)" /><rect x="14" y="16" width="70" height="5" rx="2" fill="var(--dash-second)" />
+        <path d="M14 36h88M14 46h65M14 56h79" stroke="var(--dash-line-strong)" strokeWidth="3" />
+        <rect x="16" y="82" width="14" height="35" rx="2" fill="var(--dash-second-muted)" /><rect x="39" y="70" width="14" height="47" rx="2" fill="var(--dash-second)" /><rect x="62" y="91" width="14" height="26" rx="2" fill="var(--dash-second-muted)" />
       </g>
       <g transform="translate(80 24) rotate(11 55 66)">
-        <rect width="120" height="145" rx="8" fill="#fff5fc" stroke="#e5bfd9" /><rect x="14" y="16" width="72" height="5" rx="2" fill="#c12591" />
-        <rect x="14" y="35" width="92" height="53" rx="4" fill="#f3d5e9" /><path d="M27 75 48 56 68 66 92 44" stroke="#c12591" fill="none" strokeWidth="3" />
-        <path d="M14 104h87M14 115h62M14 126h76" stroke="#e3c6d9" strokeWidth="3" />
+        <rect width="120" height="145" rx="8" fill="var(--dash-accent-faint)" stroke="var(--dash-accent-line)" /><rect x="14" y="16" width="72" height="5" rx="2" fill="var(--dash-accent)" />
+        <rect x="14" y="35" width="92" height="53" rx="4" fill="var(--dash-accent-soft)" /><path d="M27 75 48 56 68 66 92 44" stroke="var(--dash-accent)" fill="none" strokeWidth="3" />
+        <path d="M14 104h87M14 115h62M14 126h76" stroke="var(--dash-accent-line)" strokeWidth="3" />
       </g>
       <g transform="translate(47 8)">
-        <rect width="126" height="156" rx="8" fill="white" stroke="#d5e3ef" /><rect x="14" y="17" width="45" height="16" rx="3" fill="#f7e8f2" />
-        <text x="21" y="28" fill="#b22e88" fontFamily="Arial,sans-serif" fontSize="7">REPORT</text>
-        <path d="M14 47h97M14 57h73" stroke="#d7e3ee" strokeWidth="3" /><rect x="14" y="73" width="97" height="51" rx="4" fill="#f4f9fe" />
-        <path d="M23 111 44 96 61 101 81 85 102 79" stroke="#3284d8" strokeWidth="2.5" fill="none" />
-        <circle cx="44" cy="96" r="3" fill="#c12591" /><circle cx="81" cy="85" r="3" fill="#c12591" />
-        <path d="M14 137h48M73 137h38" stroke="#e1eaf3" strokeWidth="3" />
+        <rect width="126" height="156" rx="8" fill="var(--dash-card)" stroke="var(--dash-line-strong)" /><rect x="14" y="17" width="45" height="16" rx="3" fill="var(--dash-accent-soft)" />
+        <text x="21" y="28" fill="var(--dash-accent-text)" fontFamily="Arial,sans-serif" fontSize="7">REPORT</text>
+        <path d="M14 47h97M14 57h73" stroke="var(--dash-line-strong)" strokeWidth="3" /><rect x="14" y="73" width="97" height="51" rx="4" fill="var(--dash-tint)" />
+        <path d="M23 111 44 96 61 101 81 85 102 79" stroke="var(--dash-second)" strokeWidth="2.5" fill="none" />
+        <circle cx="44" cy="96" r="3" fill="var(--dash-accent)" /><circle cx="81" cy="85" r="3" fill="var(--dash-accent)" />
+        <path d="M14 137h48M73 137h38" stroke="var(--dash-line)" strokeWidth="3" />
       </g>
     </svg>
   );

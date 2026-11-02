@@ -34,7 +34,7 @@ function PlainSpark({ spark, index }: { spark: Spark; index: number }) {
     : values.map((v, i) => `${(i * 50) / (values.length - 1)},${17 - ((v - lo) / span) * 14}`).join(' ');
   return (
     <svg className="metric-spark" viewBox="0 0 52 20" aria-hidden="true">
-      <polyline className="apx-draw" pathLength={1} style={{ '--apx-len': 1, '--apx-i': index } as CSSProperties} points={points} fill="none" stroke="#cb61a6" strokeWidth="1.3" />
+      <polyline className="apx-draw" pathLength={1} style={{ '--apx-len': 1, '--apx-i': index } as CSSProperties} points={points} fill="none" stroke="var(--dash-spark)" strokeWidth="1.3" />
     </svg>
   );
 }
@@ -48,11 +48,11 @@ function MonthSpark({ spark, labels, index }: { spark: Spark; labels: readonly s
   const y = (v: number) => 24 - ((v - lo) / span) * 17;
   return (
     <svg className="metric-spark month-trend" viewBox="0 0 124 45" role="img" aria-label={`Three-month trend: ${spark.titles.join(', ')}`}>
-      <polyline className="apx-draw" pathLength={1} style={{ '--apx-len': 1, '--apx-i': index } as CSSProperties} points={values.map((v, i) => `${x(i)},${y(v)}`).join(' ')} fill="none" stroke="#c12591" strokeWidth="1.3" />
+      <polyline className="apx-draw" pathLength={1} style={{ '--apx-len': 1, '--apx-i': index } as CSSProperties} points={values.map((v, i) => `${x(i)},${y(v)}`).join(' ')} fill="none" stroke="var(--dash-accent)" strokeWidth="1.3" />
       {values.map((v, i) => (
         <g key={i}>
-          <circle className="apx-pop" style={{ '--apx-i': index * 3 + i } as CSSProperties} cx={x(i)} cy={y(v)} r="2.4" fill="white" stroke="#c12591" strokeWidth="1.3"><title>{spark.titles[i]}</title></circle>
-          <text x={x(i)} y="42" textAnchor="middle" fill="#637388" fontSize="9">{labels[i]}</text>
+          <circle className="apx-pop" style={{ '--apx-i': index * 3 + i } as CSSProperties} cx={x(i)} cy={y(v)} r="2.4" fill="var(--dash-card)" stroke="var(--dash-accent)" strokeWidth="1.3"><title>{spark.titles[i]}</title></circle>
+          <text x={x(i)} y="42" textAnchor="middle" fill="var(--dash-muted)" fontSize="9">{labels[i]}</text>
         </g>
       ))}
     </svg>

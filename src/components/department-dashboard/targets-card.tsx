@@ -154,18 +154,18 @@ export function MonthlyTargetsCard({ orgSlug, targets, initialCheck, currency }:
             <>
               {[0, 0.5, 1].map((f, i) => (
                 <g key={f}>
-                  <line x1={X0} x2={X0 + W} y1={Y0 + H - f * H} y2={Y0 + H - f * H} stroke="#e9edf3" strokeDasharray="3 4" />
-                  <text x={X0 - 7} y={Y0 + H - f * H + 3} textAnchor="end" fill="#637388" fontSize="8">{chart.ticks[i]}</text>
+                  <line x1={X0} x2={X0 + W} y1={Y0 + H - f * H} y2={Y0 + H - f * H} stroke="var(--dash-line)" strokeDasharray="3 4" />
+                  <text x={X0 - 7} y={Y0 + H - f * H + 3} textAnchor="end" fill="var(--dash-muted)" fontSize="8">{chart.ticks[i]}</text>
                 </g>
               ))}
-              <line x1={X0} x2={X0 + W} y1={y(chart.target)} y2={y(chart.target)} stroke="#3284d8" strokeWidth="1.8" strokeDasharray="5 4" />
-              {line ? <polyline key={line} className="apx-draw" pathLength={1} style={{ '--apx-len': 1 } as CSSProperties} points={line} fill="none" stroke="#c12591" strokeWidth="2.5" /> : null}
+              <line x1={X0} x2={X0 + W} y1={y(chart.target)} y2={y(chart.target)} stroke="var(--dash-second)" strokeWidth="1.8" strokeDasharray="5 4" />
+              {line ? <polyline key={line} className="apx-draw" pathLength={1} style={{ '--apx-len': 1 } as CSSProperties} points={line} fill="none" stroke="var(--dash-accent)" strokeWidth="2.5" /> : null}
               {chart.sales.map((v, i) => (
                 <g key={i}>
                   {v === null ? null : (
-                    <circle className="apx-pop" style={{ '--apx-i': i } as CSSProperties} cx={x(i)} cy={y(v)} r="3" fill="white" stroke="#c12591" strokeWidth="1.5"><title>{chart.titles[i]}</title></circle>
+                    <circle className="apx-pop" style={{ '--apx-i': i } as CSSProperties} cx={x(i)} cy={y(v)} r="3" fill="var(--dash-card)" stroke="var(--dash-accent)" strokeWidth="1.5"><title>{chart.titles[i]}</title></circle>
                   )}
-                  <text x={x(i)} y="120" textAnchor="middle" fill="#637388" fontSize="8">{chart.labels[i]}</text>
+                  <text x={x(i)} y="120" textAnchor="middle" fill="var(--dash-muted)" fontSize="8">{chart.labels[i]}</text>
                 </g>
               ))}
             </>

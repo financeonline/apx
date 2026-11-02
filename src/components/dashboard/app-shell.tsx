@@ -7,6 +7,8 @@ import { SidebarNav, type SidebarGroup } from './sidebar';
 import { NAV_COOKIE } from './nav-cookie';
 import { ShellFrame } from './shell-frame';
 import { SignOutButton, SignOutHeaderButton } from './sign-out-button';
+import { THEME_COOKIE, lookFromCookie } from './theme-cookie';
+import { ThemeToggle } from './theme-toggle';
 
 /**
  * The application shell (ADR-155; APX look, ADR-169): the wordmark, the sections, the signed-in
@@ -20,7 +22,7 @@ export async function AppShell({
   groups,
   user,
   footer,
-  look = 'dark',
+  look: defaultLook = 'dark',
   headerActions,
   children,
 }: {
@@ -33,14 +35,17 @@ export async function AppShell({
   user?: { name: string; role: string; href: string };
   footer?: ReactNode;
   /**
-   * `light` (ADR-179): the company pages' white masthead and light menu, the owner's third reference.
-   * Command Centre and Platform keep the dark bar.
+   * The area's DEFAULT look. `light` (ADR-179): the company pages' white masthead and light menu, the
+   * owner's third reference; Command Centre and Platform default to the dark bar. A person's own
+   * choice (the toggle's `apx_theme` cookie, ADR-184) wins over the default.
    */
   look?: 'dark' | 'light';
   /** Light masthead only: links before the signed-in person (the notifications bell). */
   headerActions?: ReactNode;
   children: ReactNode;
 }) {
+  const cookieStore = await cookies();
+  const look = lookFromCookie(cookieStore.get(THEME_COOKIE)?.value, defaultLook);
   const light = look === 'light';
   // Initials: a name's first two words, or an email's first two letters before the @.
   const initials = !user ? ''
@@ -104,11 +109,18 @@ export async function AppShell({
           </span>
         </Link>
       ) : null}
+      <ThemeToggle look="light" />
       <SignOutHeaderButton look="light" />
     </>
   );
+  const darkEnd = (
+    <div className="ml-auto flex items-center gap-2">
+      <ThemeToggle look="dark" />
+      <SignOutHeaderButton />
+    </div>
+  );
   // Hidden by default; shown while this browser session asked for it (`ShellFrame`).
-  const docked = (await cookies()).get(NAV_COOKIE)?.value === 'shown';
+  const docked = cookieStore.get(NAV_COOKIE)?.value === 'shown';
 
   return (
     <ShellFrame
@@ -116,7 +128,7 @@ export async function AppShell({
       brand={brand}
       compactBrand={compactBrand}
       sidebar={sidebar}
-      headerEnd={light ? lightEnd : <SignOutHeaderButton />}
+      headerEnd={light ? lightEnd : darkEnd}
       look={look}
       ribbon={light ? <RibbonArt idPrefix="masthead-ribbon" className="absolute -top-[6.375rem] -left-[5.25rem] -z-10 w-[18.75rem] opacity-95" /> : undefined}
     >

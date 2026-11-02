@@ -124,10 +124,10 @@ function BlockersCard({ blockers }: { blockers: readonly Blocker[] }) {
 }
 
 const CELL_CLASS: Record<CoverageCell, string> = {
-  full: 'bg-[#3284d8] border-[#3284d8]',
-  partial: 'bg-[#cfe2f6] border-[#8fb9e4]',
+  full: 'bg-pink border-pink',
+  partial: 'bg-pink/25 border-pink/60',
   none: 'bg-surface border-line',
-  gap: 'bg-[#fff1f8] border-accent border-dashed',
+  gap: 'bg-accent-soft border-accent border-dashed',
 };
 const CELL_WORDS: Record<CoverageCell, string> = { full: 'Covered', partial: 'Part of the month', none: 'Not covered', gap: 'Missing' };
 
@@ -240,8 +240,8 @@ function SourcesCard({ sources, importsHref }: { sources: readonly ProgressSourc
 }
 
 const STEP_CLASS: Record<StepState, string> = {
-  done: 'border-[#d6e7f6] bg-[#f4faff] text-blue-ink',
-  current: 'border-[#8fb9e4] bg-[#e8f2fc] font-semibold text-blue-ink',
+  done: 'border-pink/30 bg-pink/10 text-blue-ink',
+  current: 'border-pink/60 bg-pink/20 font-semibold text-blue-ink',
   waiting: 'border-accent/50 bg-accent-soft font-semibold text-accent',
   failed: 'border-danger/50 bg-danger-soft font-semibold text-danger',
   stopped: 'border-line bg-surface-sunken text-ink-muted line-through',
