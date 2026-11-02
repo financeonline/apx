@@ -25,12 +25,13 @@ export async function createUserClient(): Promise<Db> {
     userAgent: headerStore.get('user-agent'),
   };
   const token = cookieStore.get(SESSION_COOKIE)?.value;
-  const fs = firestore();
-  const actor = await verifySession(token);
+  let actor = await verifySession(token);
   // A disabled account is signed out on its next request, whatever it asked for (ROUTE_ARCHITECTURE.md
   // §8.4). This check lived in the proxy; it moved here when the proxy became edge-only (ADR-183).
-  if (actor.kind === 'user' && await accountDisabled(fs, actor.userId)) return { fs, actor: { kind: 'anon' }, meta };
-  return { fs, actor, meta };
+  if (actor.kind === 'user' && await accountDisabled(firestore(), actor.userId)) actor = { kind: 'anon' };
+  // Firestore is opened on first use: a page a signed-out visitor sees (sign-in) reads nothing, so
+  // it renders even on a host whose Firebase settings are missing, instead of a 500.
+  return { get fs() { return firestore(); }, actor, meta };
 }
 
 async function accountDisabled(fs: ReturnType<typeof firestore>, uid: string): Promise<boolean> {
