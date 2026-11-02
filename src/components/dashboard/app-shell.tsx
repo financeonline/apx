@@ -8,7 +8,7 @@ import { NAV_COOKIE } from './nav-cookie';
 import { ShellFrame } from './shell-frame';
 import { SignOutButton, SignOutHeaderButton } from './sign-out-button';
 import { THEME_COOKIE, lookFromCookie } from './theme-cookie';
-import { ThemeToggle } from './theme-toggle';
+import { ThemeMenuItem, ThemeToggle } from './theme-toggle';
 
 /**
  * The application shell (ADR-155; APX look, ADR-169): the wordmark, the sections, the signed-in
@@ -69,6 +69,7 @@ export async function AppShell({
       <div className="mt-auto flex flex-col gap-2 pt-6 pb-6">
         {person}
         {footer ? <div className="px-3">{footer}</div> : null}
+        <ThemeMenuItem look={look} />
         <SignOutButton />
         <p className="mt-16 px-3 text-[0.6875rem] leading-relaxed font-semibold tracking-[0.24em] text-ink-muted uppercase">
           Analyse · Plan

@@ -4,19 +4,24 @@ import { useRouter } from 'next/navigation';
 import { Moon, Sun } from 'lucide-react';
 import { THEME_COOKIE, type Look } from './theme-cookie';
 
+function useChooseLook(look: Look) {
+  const router = useRouter();
+  const next: Look = look === 'dark' ? 'light' : 'dark';
+  const choose = () => {
+    document.cookie = `${THEME_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
+    router.refresh();
+  };
+  return { next, choose };
+}
+
 /**
  * Light / dark (ADR-184). Writes the lasting `apx_theme` cookie and asks the server for the page
  * again, which renders the other look: the whole shell changes (masthead, menu, palette), so a
  * server render is the honest way to switch rather than a class flipped on the client.
  */
 export function ThemeToggle({ look, className = '' }: { look: Look; className?: string }) {
-  const router = useRouter();
-  const next: Look = look === 'dark' ? 'light' : 'dark';
+  const { next, choose } = useChooseLook(look);
   const label = next === 'dark' ? 'Switch to dark mode' : 'Switch to light mode';
-  const choose = () => {
-    document.cookie = `${THEME_COOKIE}=${next}; path=/; max-age=31536000; samesite=lax`;
-    router.refresh();
-  };
   return (
     <button
       type="button"
@@ -32,6 +37,23 @@ export function ThemeToggle({ look, className = '' }: { look: Look; className?: 
       {next === 'dark'
         ? <Moon aria-hidden="true" className="size-4" strokeWidth={1.75} />
         : <Sun aria-hidden="true" className="size-4" strokeWidth={1.75} />}
+    </button>
+  );
+}
+
+/** The same choice as a menu item, beside Sign out: the top bar (and its button) is hidden while the menu is shown. */
+export function ThemeMenuItem({ look }: { look: Look }) {
+  const { next, choose } = useChooseLook(look);
+  return (
+    <button
+      type="button"
+      onClick={choose}
+      className="flex w-full items-center gap-3 rounded-xl px-3 py-2 text-[0.9375rem] text-ink transition-colors hover:bg-accent-soft hover:text-accent"
+    >
+      {next === 'dark'
+        ? <Moon aria-hidden="true" className="size-5 shrink-0" strokeWidth={1.75} />
+        : <Sun aria-hidden="true" className="size-5 shrink-0" strokeWidth={1.75} />}
+      {next === 'dark' ? 'Dark mode' : 'Light mode'}
     </button>
   );
 }
