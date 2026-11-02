@@ -5,7 +5,7 @@ import motion from './eslint-rules/index.js';
 
 export default tseslint.config(
   // public/ocr: vendored OCR files copied from node_modules (ADR-175). logs: local, git-ignored run output.
-  { ignores: ['.next/**', 'node_modules/**', 'coverage/**', 'firebase/**', 'next-env.d.ts', 'eslint-rules/**', 'public/ocr/**', 'logs/**'] },
+  { ignores: ['.next/**', 'node_modules/**', 'coverage/**', 'firebase/**', 'next-env.d.ts', 'eslint-rules/**', 'public/ocr/**', 'logs/**', 'netlify/functions/jobs-worker-background.mjs', '.netlify/**'] },
   js.configs.recommended,
   ...tseslint.configs.recommended,
   ...next,
@@ -89,5 +89,10 @@ export default tseslint.config(
       'motion/no-role-name-literals': 'off',
       'motion/no-api-server-outside-server-rpc': 'off',
     },
+  },
+  {
+    // Netlify's scheduled functions (ADR-183): plain ES modules whose only output is the platform log.
+    files: ['netlify/functions/*.mjs'],
+    rules: { 'no-console': 'off', 'import/no-anonymous-default-export': 'off' },
   },
 );

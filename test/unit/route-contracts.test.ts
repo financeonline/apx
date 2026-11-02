@@ -76,20 +76,24 @@ describe('every consumer of a `next` target judges it with the one rule (ROUTE_A
   });
 });
 
-describe('the nightly sweep is scheduled (SERVICE_ARCHITECTURE.md §7, ADR-074)', () => {
-  it('vercel.json names both cron routes, and both exist', () => {
-    const crons = (JSON.parse(readFileSync('vercel.json', 'utf8')) as { crons: Array<{ path: string; schedule: string }> }).crons;
-    const paths = crons.map((c) => c.path);
-    expect(paths).toContain('/api/jobs/run');
-    expect(paths).toContain('/api/jobs/nightly');
-    // ADR-135: the daily recalculation is enqueued hourly so each organisation is due just after ITS
-    // midnight; the database keeps it to one per organisation and local date. ADR-178 addendum (owner,
-    // 2026-10-29): on Vercel's Hobby plan crons may run only once a day, so a daily schedule is
-    // accepted until the move to Pro restores hourly.
-    expect(crons.find((c) => c.path === '/api/jobs/scheduled')?.schedule, 'hourly (or daily on Hobby)').toMatch(/^\d+ (\*|\d+) \* \* \*$/);
-    expect(crons.find((c) => c.path === '/api/jobs/nightly')?.schedule, 'once a day, not once a minute').toMatch(/^\d+ \d+ \* \* \*$/);
-    for (const path of paths) {
+describe('the nightly sweep is scheduled (SERVICE_ARCHITECTURE.md §7, ADR-074, ADR-183)', () => {
+  /*
+   * On Netlify (ADR-183) three scheduled functions replace Vercel's crons: the job worker every five
+   * minutes, the per-organisation daily queue hourly, and the nightly sweep once a day. Each calls a
+   * route or function behind the cron secret; this asserts the schedules and that the routes exist.
+   */
+  const schedule = (file: string) => readFileSync(join('netlify/functions', file), 'utf8').match(/schedule: '([^']+)'/)?.[1];
+
+  it('schedules the worker, the hourly queue and the nightly sweep, and their targets exist', () => {
+    expect(schedule('jobs-tick.mjs'), 'the job worker, every few minutes').toMatch(/^\*\/\d+ \* \* \* \*$/);
+    expect(schedule('jobs-hourly.mjs'), 'hourly').toMatch(/^\d+ \* \* \* \*$/);
+    expect(schedule('jobs-nightly.mjs'), 'once a day, not once a minute').toMatch(/^\d+ \d+ \* \* \*$/);
+    expect(readFileSync('netlify/functions/jobs-tick.mjs', 'utf8')).toContain('/.netlify/functions/jobs-worker-background');
+    expect(readFileSync('netlify/functions/jobs-hourly.mjs', 'utf8')).toContain('/api/jobs/scheduled');
+    expect(readFileSync('netlify/functions/jobs-nightly.mjs', 'utf8')).toContain('/api/jobs/nightly');
+    for (const path of ['/api/jobs/run', '/api/jobs/scheduled', '/api/jobs/nightly']) {
       expect(statSync(join('src/app', path, 'route.ts')).isFile(), `${path} has a handler`).toBe(true);
     }
+    expect(readFileSync('netlify.toml', 'utf8'), 'the worker is bundled on every deploy').toContain('scripts/build-netlify-worker.mjs');
   });
 });

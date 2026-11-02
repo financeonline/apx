@@ -31,17 +31,32 @@ export function storageBucketName(): string {
   return process.env.FIREBASE_STORAGE_BUCKET ?? `${projectId()}.appspot.com`;
 }
 
+/**
+ * The service account: the whole JSON key in FIREBASE_SERVICE_ACCOUNT, or only the two parts the SDK
+ * uses, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY (ADR-183). Netlify gives all of a site's
+ * functions about 4 KB of settings in total, and the full key is most of that; the two parts are
+ * about a third smaller. A private key pasted with literal `\n` is turned back into line breaks.
+ */
+function serviceAccountCredential(): Parameters<typeof cert>[0] | null {
+  const json = process.env.FIREBASE_SERVICE_ACCOUNT;
+  if (json) return JSON.parse(json) as Parameters<typeof cert>[0];
+  const clientEmail = process.env.FIREBASE_CLIENT_EMAIL;
+  const privateKey = process.env.FIREBASE_PRIVATE_KEY;
+  if (clientEmail && privateKey) return { projectId: projectId(), clientEmail, privateKey: privateKey.replace(/\\n/g, '\n') };
+  return null;
+}
+
 function app(): App {
   const existing = getApps().find((a) => a.name === APP_NAME);
   if (existing) return existing;
-  const serviceAccount = process.env.FIREBASE_SERVICE_ACCOUNT;
+  const serviceAccount = usingEmulators() ? null : serviceAccountCredential();
   if (!usingEmulators() && !serviceAccount && !process.env.GOOGLE_APPLICATION_CREDENTIALS) {
-    throw new Error('Firebase is not configured: set the emulator hosts, or FIREBASE_SERVICE_ACCOUNT for a real project');
+    throw new Error('Firebase is not configured: set the emulator hosts, or FIREBASE_SERVICE_ACCOUNT (or FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY) for a real project');
   }
   return initializeApp({
     projectId: projectId(),
     storageBucket: storageBucketName(),
-    ...(serviceAccount && !usingEmulators() ? { credential: cert(JSON.parse(serviceAccount)) } : {}),
+    ...(serviceAccount ? { credential: cert(serviceAccount) } : {}),
   }, APP_NAME);
 }
 

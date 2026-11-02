@@ -3239,3 +3239,15 @@ Decision:
 3. **Fix**: `api.create_assignment` refused an analyst a company they had held before ("already assigned"), because a revoked assignment keeps its document. Only a current (active, not lapsed) assignment blocks now; the earlier one is overwritten and audited as an update.
 
 Checked locally on two throwaway companies (QA Team Test One/Two) and a test analyst: add with one ticked, add a second, untick one, tick it back; the analyst's company list and `/app/<slug>` open only those two, any other company answers 404. `tsc`, `eslint`, unit tests 3286/3286.
+
+### ADR-183 · APX is hosted on Netlify (Free) instead of Vercel
+
+Status: **owner's decision, 2026-11-02** ("I will like to deploy it thru Netlify"; Free plan, accepting slower pages; replace Vercel now; deploy from the GitHub repo). The owner linked `financeonline/apx` to the Netlify project `apxmotion` (apxmotion.netlify.app).
+
+Decision:
+1. **Build**: `netlify.toml` runs `npm run build` (OCR files, then `next build`; Netlify adds its Next.js adapter) and then bundles the job worker. Node 24.
+2. **Jobs**: a Next.js route on Netlify stops at 60 s, and a marketing or investment report is one AI call of up to four minutes — cut off, it would be reclaimed and retried, a paid call each time. The worker therefore runs as a **background function** (`jobs-worker-background`, fifteen minutes, available on Free): `scripts/build-netlify-worker.mjs` bundles `src/worker/netlify-jobs.ts` with esbuild (app code and `next` bundled, other packages external, `server-only` emptied); it claims no new job after nine minutes. Three **scheduled functions** replace `vercel.json`'s crons: `jobs-tick` every five minutes starts the worker (Vercel Hobby ran the queue once a day), `jobs-hourly` calls `/api/jobs/scheduled` at five past each hour, `jobs-nightly` calls `/api/jobs/nightly` at 02:00 UTC. All behind `CRON_SECRET`.
+3. **Settings size**: Netlify gives a site's functions about 4 KB of settings in total; the Firebase key may be given as `FIREBASE_CLIENT_EMAIL` + `FIREBASE_PRIVATE_KEY` instead of the whole `FIREBASE_SERVICE_ACCOUNT` JSON.
+4. **Vercel**: `vercel.json` turns off Vercel's Git deployments; its last deployment stays up until the owner deletes the project.
+
+Consequences: functions run in Netlify's default region (US East) on Free — pages are slower than Vercel's London region, next to the data in `europe-west2`; Pro allows choosing London. Requests (AI Analyst answers, uploads, exports) stop at 60 s instead of 150–300 s. The Netlify address must be an authorised domain in Firebase Auth.
