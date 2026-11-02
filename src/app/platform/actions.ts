@@ -25,9 +25,12 @@ export async function addPlatformUserAction(
     requestId = ctx.requestId;
     assertCan(ctx, 'platform.users.manage');
     const origin = await requestOrigin();
-    const { userId, invited } = await addPlatformUser(
+    const { userId, invited, created } = await addPlatformUser(
       ctx,
-      { email: text(form, 'email'), role: text(form, 'platform_role') },
+      {
+        email: text(form, 'email'), role: text(form, 'platform_role'),
+        fullName: optionalText(form, 'full_name') ?? '', password: (form.get('password') as string | null) ?? '',
+      },
       { redirectTo: `${origin}/account` },
     );
     // ADR-182: the companies ticked on the same form are given at once.
@@ -38,9 +41,11 @@ export async function addPlatformUserAction(
     const access = companies.length === 0
       ? ' They cannot open any company until you tick one.'
       : ` They can open ${companies.length} ${companies.length === 1 ? 'company' : 'companies'}.`;
-    return done((invited
-      ? 'Invited. They will receive an email to set their password.'
-      : 'Added.') + access);
+    return done((created
+      ? 'Added. They can log in now with the email and password you set.'
+      : invited
+        ? 'Invited. They will receive an email to set their password.'
+        : 'Added.') + access);
   } catch (error) {
     return fail(error, { requestId, action: 'platform.addUser' });
   }

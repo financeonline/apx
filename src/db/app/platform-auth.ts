@@ -21,9 +21,9 @@ export function isEmailTaken(error: unknown): boolean {
 }
 
 /** A login with a password the super admin set, email confirmed (the super admin vouches for it). */
-export async function createConfirmedLogin(email: string, password: string): Promise<string> {
-  const user = await auth().createUser({ email, password, emailVerified: true });
-  await ensureProfile(firestore(), user.uid, email, null, new Date().toISOString());
+export async function createConfirmedLogin(email: string, password: string, fullName: string | null = null): Promise<string> {
+  const user = await auth().createUser({ email, password, emailVerified: true, ...(fullName ? { displayName: fullName } : {}) });
+  await ensureProfile(firestore(), user.uid, email, fullName, new Date().toISOString());
   return user.uid;
 }
 

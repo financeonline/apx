@@ -54,8 +54,18 @@ export function AddPlatformUserForm({ companies }: { companies: readonly Company
   const [state, action] = useActionState(addPlatformUserAction, null);
   return (
     <form action={action} className="flex flex-col gap-5">
-      <Field label="Email" htmlFor="email" hint="A new address is sent an invitation. An account that belongs to a company cannot be used.">
-        <Input id="email" name="email" type="email" required />
+      <Field label="Their name" htmlFor="full_name" hint="Shown on this list and in the Command Centre.">
+        <Input id="full_name" name="full_name" autoComplete="off" maxLength={120} placeholder="For example, Sam Carter" />
+      </Field>
+      <Field label="Email (their username)" htmlFor="email" hint="What they will log in with. An account that belongs to a company cannot be used.">
+        <Input id="email" name="email" type="email" required autoComplete="off" />
+      </Field>
+      <Field
+        label="Password (optional)"
+        htmlFor="password"
+        hint="Set it here and they can log in straight away (at least 12 characters). Leave it blank to email them an invitation and let them choose their own."
+      >
+        <Input id="password" name="password" type="password" minLength={12} maxLength={72} autoComplete="new-password" />
       </Field>
       {/* ADR-159: there is one super admin; everyone added here is staff. */}
       <input type="hidden" name="platform_role" value="employee" />

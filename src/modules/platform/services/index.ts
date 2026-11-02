@@ -355,7 +355,10 @@ export async function listPlatformUsers(ctx: AccessContext): Promise<PlatformUse
 
 export interface AddedPlatformUser {
   readonly userId: string;
+  /** An invitation email was sent (no password was given and the address had no login). */
   readonly invited: boolean;
+  /** The login was created here with the password given (ADR-184): they can sign in at once. */
+  readonly created: boolean;
 }
 
 /**
@@ -370,10 +373,26 @@ export async function addPlatformUser(
   options: { readonly redirectTo: string },
 ): Promise<AddedPlatformUser> {
   assertCan(ctx, 'platform.users.manage');
-  const { email, role } = parseInput(AddPlatformUserInput, input);
+  const { email, role, fullName, password } = parseInput(AddPlatformUserInput, input);
 
   let userId = await loginIdByEmail(email);
   let invited = false;
+  let created = false;
+  if (userId && password) {
+    throw new ValidationError('Some details need fixing.', [
+      { path: 'password', message: 'That email already has a login. Leave the password blank to add that account to your team, or use a new email.' },
+    ]);
+  }
+  if (!userId && password) {
+    // ADR-184: the super admin sets the username and password; the account can sign in at once.
+    try {
+      userId = await createConfirmedLogin(email, password, fullName || null);
+    } catch (error) {
+      if (isEmailTaken(error)) throw new ConflictError('That email already has a login.');
+      throw new ValidationError('Some details need fixing.', [{ path: 'password', message: 'Choose a stronger password.' }]);
+    }
+    created = true;
+  }
   if (!userId) {
     try {
       userId = await inviteLogin(email, options.redirectTo);
@@ -386,12 +405,15 @@ export async function addPlatformUser(
   try {
     await callApi(ctx.db, 'grant_platform_role', { p_user: userId, p_role: role }, ctx.requestId);
   } catch (error) {
+    // A login made just now for a grant that failed is removed again: nothing half-made is left.
+    if (created) await removeLogin(userId).catch(() => undefined);
     if (isMotionError(error) && /member of an organi[sz]ation/i.test(error.message)) {
       throw new ConflictError('That email belongs to a company account. Platform admins need their own login.');
     }
     throw error;
   }
-  return { userId, invited };
+  // (An invited person types their own name when they first sign in; an existing account keeps its.)
+  return { userId, invited, created };
 }
 
 /** Each Financial Analyst's companies (organisation ids) that they can open now (ADR-182). */

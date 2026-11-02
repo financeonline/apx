@@ -51,6 +51,18 @@ export type PlatformRole = (typeof PLATFORM_ROLES)[number];
 export const AddPlatformUserInput = z.object({
   email: EMAIL,
   role: z.enum(PLATFORM_ROLES, 'Choose a role'),
+  /** ADR-184: their name, shown on the accounts list and the Command Centre. */
+  fullName: z.string().trim().max(120, 'Keep the name under 120 characters').default(''),
+  /**
+   * ADR-184: optional. When given, the login is created with it and they can sign in at once (the
+   * owner's request: "add a user directly … username, password"); when empty, they are emailed an
+   * invitation and choose their own. Staff passwords are twelve characters or more, as the sign-up
+   * form asks. Never trimmed: spaces are characters.
+   */
+  password: z.union([
+    z.literal(''),
+    z.string().min(12, 'Use at least 12 characters for the password').max(72, 'Keep the password under 72 characters'),
+  ]).default(''),
 });
 export type AddPlatformUserInput = z.infer<typeof AddPlatformUserInput>;
 
