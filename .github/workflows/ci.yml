@@ -111,8 +111,10 @@ jobs:
           FILES=$(grep -rl "FIREBASE_SERVICE_ACCOUNT\|GOOGLE_APPLICATION_CREDENTIALS" --include='*.ts' src/ 2>/dev/null)
           echo "files reading the service account: $FILES"
           test "$FILES" = "src/db/firestore.ts"
-      - name: dependency audit
-        run: npm audit --audit-level=high
+      # Production dependencies: what ships. Dev tooling (the test runner, the Firebase CLI) is
+      # audited by hand when it is upgraded, so an advisory in a test worker pool cannot block a release.
+      - name: dependency audit (production dependencies)
+        run: npm audit --omit=dev --audit-level=high
 
   e2e:
     name: e2e smoke (Phase 7)

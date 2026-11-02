@@ -120,3 +120,7 @@ export {
 
 /** Where a signed-in account belongs; the pages decide this since the proxy became edge-only (ADR-183). */
 export { homePathFor, platformHomeFor } from './services/session-home';
+
+/** Small domain rules used by pages and tests: who creates members; what a person's id looks like. */
+export { createsMembers } from './domain/permissions';
+export { USER_ID_PATTERN, isUserId } from './domain/types';
