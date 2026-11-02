@@ -3,6 +3,7 @@ import { SESSION_COOKIE } from '@/core/db/user-client';
 import { recordAccessEvent } from '@/core/db/server-rpc';
 import { newRequestId } from '@/core/logging';
 import { openSession, sessionCookieOptions } from '@/modules/tenancy';
+import { originOf } from '@/app/_lib/request-origin';
 
 /**
  * Opens a session (SECURITY_MODEL.md §3). The sign-in and sign-up forms POST the Firebase ID token
@@ -18,7 +19,9 @@ import { openSession, sessionCookieOptions } from '@/modules/tenancy';
 export async function POST(request: NextRequest) {
   const requestId = newRequestId();
   const origin = request.headers.get('origin');
-  if (origin && origin !== request.nextUrl.origin) {
+  // The public origin from the forwarded headers, not `nextUrl.origin`: behind Netlify's proxy the
+  // latter is an internal address and every sign-in answered "Not found" (2026-11-02, ADR-183).
+  if (origin && origin !== originOf(request.headers)) {
     return NextResponse.json({ error: { code: 'NOT_FOUND', message: 'Not found', requestId } }, { status: 404 });
   }
   let body: { idToken?: unknown; keepSignedIn?: unknown };

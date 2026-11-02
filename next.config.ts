@@ -9,7 +9,7 @@ const nextConfig: NextConfig = {
     // The upload wizard posts its file through a Server Action, whose body limit defaults to 1 MB —
     // below a phone photo of an invoice (ADR-175). 26 MB covers the 25 MB file limit (validate-file.ts)
     // plus the multipart overhead. A host may cap request bodies lower (Vercel: 4.5 MB).
-    serverActions: { allowedOrigins: ['localhost:3000'], bodySizeLimit: '26mb' },
+    serverActions: { allowedOrigins: ['localhost:3000', 'apxmotion.netlify.app'], bodySizeLimit: '26mb' },
     /*
      * `forbidden()` and the `forbidden.tsx` convention (ADR-091). ROUTE_ARCHITECTURE.md §11 asks for
      * HTTP 403 with the §7.4 denied state on a page a role may not view, and this is the only way a
