@@ -386,15 +386,16 @@ async function platform_staff_login_change(db: Db, args: Record<string, unknown>
     const wantedName = fullName === nameBefore ? null : fullName;
     if (wantedEmail === null && wantedName === null && !password) raise.invalid('nothing to change');
 
+    // Every read (the audit's included) before the first write: a Firestore transaction refuses otherwise.
+    const audit = await prepareAudit(db, {
+      organizationId: null, action: 'platform.staff_login_changed', targetTable: 'profiles', targetId: userId,
+      before: { email, full_name: nameBefore }, after: { email: wantedEmail ?? email, full_name: wantedName ?? nameBefore, password_changed: password },
+    }, tx);
     const now = nowIso();
     const update: Record<string, unknown> = { updated_at: now };
     if (wantedEmail !== null) update.email = wantedEmail;
     if (wantedName !== null) update.full_name = wantedName;
     tx.update(globalRow(db.fs, 'profiles', userId), update);
-    const audit = await prepareAudit(db, {
-      organizationId: null, action: 'platform.staff_login_changed', targetTable: 'profiles', targetId: userId,
-      before: { email, full_name: nameBefore }, after: { email: wantedEmail ?? email, full_name: wantedName ?? nameBefore, password_changed: password },
-    }, tx);
     audit.write(tx);
     return [{ user_id: userId, email: wantedEmail ?? email, email_changed: wantedEmail !== null }];
   });

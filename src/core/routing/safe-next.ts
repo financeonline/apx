@@ -47,5 +47,8 @@ export function safeNextPath(candidate: string | null | undefined, origin: strin
   // authority by the next parser to see it.
   const path = `${parsed.pathname}${parsed.search}`;
   if (path.charAt(0) !== '/' || path.charAt(1) === '/') return DEFAULT_NEXT;
+  // The `/auth/*` handlers are actions (sign out, open a session, email links), not places to go
+  // back to after signing in: a GET there is refused or repeats the action (2026-11-03: HTTP 405).
+  if (parsed.pathname === '/auth' || parsed.pathname.startsWith('/auth/')) return DEFAULT_NEXT;
   return path;
 }

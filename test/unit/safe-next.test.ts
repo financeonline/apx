@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { safeNextPath } from '@/core/routing';
+import { DEFAULT_NEXT, safeNextPath } from '@/core/routing';
 
 /**
  * The `next` target (ROUTE_ARCHITECTURE.md §10; ADR-069; PRODUCTION_AUDIT.md H2).
@@ -53,5 +53,18 @@ describe('safeNextPath keeps a legitimate deep link', () => {
 
   it('drops a fragment: the server never sees one, and the browser has no use for it after a 302', () => {
     expect(safeNextPath('/app/acme/home#x', ORIGIN)).toBe('/app/acme/home');
+  });
+});
+
+describe('the /auth/* handlers are never a place to go back to (2026-11-03)', () => {
+  const origin = 'https://apx.example';
+  it('refuses /auth/sign-out, /auth/session and /auth/callback as targets', () => {
+    for (const target of ['/auth/sign-out', '/auth/session', '/auth/callback?mode=x', '/auth']) {
+      expect(safeNextPath(target, origin)).toBe(DEFAULT_NEXT);
+    }
+  });
+  it('still accepts ordinary paths that merely start with the letters', () => {
+    expect(safeNextPath('/authors', origin)).toBe('/authors');
+    expect(safeNextPath('/portfolio', origin)).toBe('/portfolio');
   });
 });

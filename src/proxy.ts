@@ -31,6 +31,10 @@ const PUBLIC_PREFIXES = [
   '/auth/callback',
   // Where the sign-in form hands over the ID token; it verifies the token itself.
   '/auth/session',
+  // Sign out must always run (it clears the cookies whatever their state) and must never become a
+  // sign-in's "go back to" target: that sent an analyst to GET /auth/sign-out → HTTP 405 after
+  // logging in (owner, 2026-11-03).
+  '/auth/sign-out',
   '/api/health',
   /*
    * The cron routes authenticate themselves — a constant-time compare of `CRON_SECRET`, 404

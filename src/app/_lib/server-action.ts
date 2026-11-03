@@ -17,6 +17,9 @@ export function fail(error: unknown, context: { requestId?: string; action: stri
     requestId: motionError.requestId,
     service: context.action,
     errorCode: motionError.code,
+    // An unexpected failure keeps its original message in the log (never in the reply), so staff
+    // can see what broke instead of only "INTERNAL" (2026-11-03).
+    ...(motionError.code === 'INTERNAL' && error instanceof Error ? { detail: error.message } : {}),
   });
   return { ok: false, error: motionError.toJSON() };
 }

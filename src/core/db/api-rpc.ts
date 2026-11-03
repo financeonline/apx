@@ -1,5 +1,6 @@
 import 'server-only';
-import { InternalError, toMotionError } from '@/core/errors';
+import { InternalError, isMotionError, toMotionError } from '@/core/errors';
+import { log } from '@/core/logging';
 import { API_FUNCTIONS } from '@/db/api';
 import type { Db } from '@/db/types';
 
@@ -23,6 +24,11 @@ export async function callApi<T>(
   try {
     return (await impl(call, args)) as T;
   } catch (error) {
+    // An unexpected throw becomes INTERNAL for the caller; its own message is kept in the log so the
+    // cause can be found (2026-11-03: Edit login answered only "Something went wrong").
+    if (!isMotionError(error)) {
+      log.error('api function threw', { requestId, fn, detail: error instanceof Error ? error.message : String(error) });
+    }
     throw toMotionError(error, requestId);
   }
 }

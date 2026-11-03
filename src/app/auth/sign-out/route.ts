@@ -36,3 +36,12 @@ export async function POST(request: NextRequest) {
   }
   return response;
 }
+
+/**
+ * Opening the sign-out address directly (a bookmark, a reload after signing out) is not a sign-out —
+ * that stays a POST, so a link or an image cannot end a session — but it is not an error page either
+ * (owner, 2026-11-03: HTTP 405 on /auth/sign-out): the browser is sent to sign in.
+ */
+export async function GET(request: NextRequest) {
+  return NextResponse.redirect(new URL('/sign-in', request.url), { status: 303 });
+}
