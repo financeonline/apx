@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { assertCan } from '@/core/permissions';
 import { createCompanyAsPlatform, deleteCompanyAsPlatform, editCompanyAsPlatform, restoreCompanyAsPlatform, changeOwnerLoginAsPlatform, purgeCompanyNowAsPlatform } from '@/modules/platform';
-import { confirmPassword, getPlatformContext } from '@/modules/tenancy';
+import { getPlatformContext } from '@/modules/tenancy';
 import { done, fail, text } from '@/app/_lib/server-action';
 import { requestOrigin } from '@/app/_lib/request-origin';
 import type { ActionResult } from '@/components/action-result';
@@ -17,9 +17,6 @@ export async function createCompanyAction(_previous: ActionResult | null, form: 
   const ctx = await getPlatformContext();
   try {
     assertCan(ctx, 'platform.orgs.manage');
-    // Creating a company needs a sign-in from the last ten minutes; the password here renews it in the same step.
-    const current = form.get('current_password');
-    if (typeof current === 'string' && current !== '') await confirmPassword(ctx, current);
     const created = await createCompanyAsPlatform(ctx, {
       name: text(form, 'name'),
       countryCode: text(form, 'country_code'),
@@ -60,7 +57,6 @@ export async function editCompanyAction(_previous: ActionResult | null, form: Fo
     const emailChanged = newEmail !== '' && newEmail.toLowerCase() !== text(form, 'owner_email_before').toLowerCase();
     let ownerEmail: string | null = null;
     if (emailChanged || raw('owner_password')) {
-      await confirmPassword(ctx, raw('current_password'));
       ownerEmail = await changeOwnerLoginAsPlatform(ctx, orgId, { email: emailChanged ? newEmail : '', password: raw('owner_password') });
     }
     revalidatePath('/platform/organizations');
@@ -101,8 +97,6 @@ export async function purgeCompanyNowAction(_previous: ActionResult | null, form
   const ctx = await getPlatformContext();
   try {
     assertCan(ctx, 'platform.orgs.manage');
-    const value = form.get('current_password');
-    await confirmPassword(ctx, typeof value === 'string' ? value : '');
     await purgeCompanyNowAsPlatform(ctx, text(form, 'org_id'));
     revalidatePath('/platform/organizations');
     return done('Deleting for good now. It leaves this list within a minute.');

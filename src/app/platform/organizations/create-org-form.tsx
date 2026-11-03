@@ -57,12 +57,6 @@ export function CreateCompanyForm() {
           <Input id="owner_password" name="owner_password" type="password" minLength={8} maxLength={72} autoComplete="new-password" />
         </Field>
       </div>
-      <Field
-        label="Your password" htmlFor="create_current_password"
-        hint="Your own sign-in password, to confirm it is you."
-      >
-        <Input id="create_current_password" name="current_password" type="password" required autoComplete="current-password" className="max-w-xs" />
-      </Field>
       <ActionMessage state={state} />
       {link ? (
         <Field label="Invitation link" htmlFor="invitation_link">

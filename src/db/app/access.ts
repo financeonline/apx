@@ -1,7 +1,6 @@
 import 'server-only';
 import { ROLE_MATRIX, type EffectiveRole, type GrantedRole, type Permission } from '@/core/permissions';
 import { raise } from '../raise';
-import { REAUTH_REQUIRED } from '@/core/errors';
 import { globalRow, orgCollection, orgRow, overrideId } from '../schema';
 import { readerOf, uidOf, type Db, type Reader } from '../types';
 import type { Firestore, Transaction } from 'firebase-admin/firestore';
@@ -240,12 +239,14 @@ export function hasRecentAuth(db: Db, seconds = 600): boolean {
   return db.actor.authTime >= Math.floor(Date.now() / 1000) - seconds;
 }
 
-/** `app.require_super_admin(reauth)`: an active super admin, and with `reauth` a recent sign-in. */
-export async function requireSuperAdmin(db: Db, reauth = false, tx?: Transaction): Promise<void> {
+/**
+ * `app.require_super_admin(reauth)`: an active super admin. ADR-185 (owner, 2026-11-03: "once I log
+ * in … don't ask for any more information as an admin"): the ten-minute re-confirmation of
+ * ADR-044.3 no longer applies, so `reauth` is accepted and ignored — the callers still say which
+ * actions were once behind it, and `hasRecentAuth` stays for the Account page's own checks.
+ */
+export async function requireSuperAdmin(db: Db, _reauth = false, tx?: Transaction): Promise<void> {
   if (!(await isSuperAdmin(db.fs, uidOf(db), readerOf(tx)))) {
     raise.denied('platform administration requires the super admin');
-  }
-  if (reauth && !hasRecentAuth(db, 600)) {
-    raise.denied(REAUTH_REQUIRED);
   }
 }

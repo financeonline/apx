@@ -70,7 +70,7 @@ export default async function PlatformAssignmentsPage() {
           </CardBody>
         </Card>
         <Card>
-          <CardHeader icon={<UserPlus />} tint="pink" title="Assign a Financial Analyst" description="Requires a recent re-authentication." />
+          <CardHeader icon={<UserPlus />} tint="pink" title="Assign a Financial Analyst" />
           <CardBody><CreateAssignmentForm companies={companies} analysts={analysts} /></CardBody>
         </Card>
       </div>

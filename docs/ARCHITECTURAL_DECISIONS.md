@@ -3264,3 +3264,11 @@ Decisions:
 3. **No public sign-up.** Companies, their owners and APX's analysts are created on the Platform (ADR-160, ADR-182/184); the owner's team is created by the owner on Settings → Team (unchanged). The "Sign up" link is gone from sign-in, `/sign-up` redirects to sign-in (the form component is kept), and a signed-in person with no company is told to ask APX instead of being offered a create-company form.
 
 Checked locally: toggle on Platform (dark → light → dark) and on a company page (light → dark); analyst "Dana Direct" created with a password, signed in at once and saw only her ticked company; `/sign-up` → 307 `/sign-in`; `tsc`, `eslint .`, unit tests 3286/3286.
+
+### ADR-185 · No password re-confirmation on the Platform
+
+Status: **owner's instruction, 2026-11-03** ("remove this. Once I log in, no information. Don't ask for any more information as an admin after it logs in").
+
+Decision: the ten-minute re-confirmation of ADR-044.3 is withdrawn. `requireSuperAdmin(db, reauth)` accepts and ignores `reauth`; the "Confirm it is you" bar is gone from the platform layout, and so is every "Your password" field on the platform forms (create company, change the owner's login, delete permanently, add a Financial Analyst). A signed-in super admin is the authority. The Account page keeps asking for the current password when a person changes their own password or email (`confirmPassword`, which still returns the fresh session for any caller that wants it). What prompted it: on Netlify the bar's cookie, set from a Server Action, did not reliably reach the browser, so "Add a Financial Analyst" kept answering "confirm it is you" (2026-11-03). Trade-off accepted by the owner: a super admin session left open on a machine can change platform settings without a password; sessions are revocable (`revokeUserSessions`) and every change is in the audit log.
+
+Checked locally: the bar and all password fields gone; an analyst added and given a company with no confirmation; the audit page opens; `tsc`, `eslint .`, unit tests 3294/3294.

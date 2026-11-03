@@ -4,7 +4,6 @@ import { getPlatformContext } from '@/modules/tenancy';
 import { can } from '@/core/permissions';
 import { ROLE_LABELS } from '@/components/labels';
 import { shellUser } from '@/app/_lib/shell-user';
-import { ConfirmItsYou } from './confirm-its-you';
 
 export const dynamic = 'force-dynamic';
 
@@ -37,7 +36,6 @@ export default async function PlatformLayout({ children }: { children: React.Rea
         { label: 'You', links: [{ label: 'Account', href: '/account', icon: 'account' }] },
       ]}
     >
-      <ConfirmItsYou />
       {children}
     </AppShell>
   );

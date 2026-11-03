@@ -19,7 +19,14 @@ import type { AccessContext } from '../context';
  * Supabase client carried its fresh session. Attempts are rate-limited by Firebase Auth. The password
  * is never stored or logged.
  */
-export async function confirmPassword(ctx: AccessContext, password: string): Promise<void> {
+/** The fresh session cookie, for a caller that sets it on a response of its own (`/auth/confirm`). */
+export interface ConfirmedSession {
+  readonly name: string;
+  readonly value: string;
+  readonly options: ReturnType<typeof sessionCookieOptions>;
+}
+
+export async function confirmPassword(ctx: AccessContext, password: string): Promise<ConfirmedSession> {
   if (!password) throw new ValidationError('Enter your password to confirm it is you.');
   const actor = ctx.db.actor;
   const email = actor.kind === 'user' ? actor.email : null;
@@ -34,9 +41,15 @@ export async function confirmPassword(ctx: AccessContext, password: string): Pro
   // Keep the person's "keep me signed in" choice: a persistent cookie stays persistent.
   const persistent = !jar.has(SESSION_ONLY_COOKIE);
   const cookie = await createSessionCookie(signedIn.idToken, SESSION_MAX_SECONDS * 1000);
-  jar.set(SESSION_COOKIE, cookie, sessionCookieOptions(persistent));
+  const options = sessionCookieOptions(persistent);
+  try {
+    jar.set(SESSION_COOKIE, cookie, options);
+  } catch {
+    // A route handler sets the cookie on its own response instead (`/auth/confirm`).
+  }
 
   const refreshed: Actor = { kind: 'user', userId: actor.userId, email, authTime: decoded.auth_time };
   // `Db.actor` is read-only to callers; this is the one place a request's handle learns of a new sign-in.
   (ctx.db as { actor: Actor }).actor = refreshed;
+  return { name: SESSION_COOKIE, value: cookie, options };
 }

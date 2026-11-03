@@ -111,9 +111,6 @@ export function CompanyRowActions({ company }: { company: CompanyRow }) {
                 <Field label="New password (optional)" htmlFor={`owner-pw-${company.id}`} hint="At least 8 characters. Leave empty to keep their password.">
                   <Input id={`owner-pw-${company.id}`} name="owner_password" type="password" minLength={8} maxLength={72} autoComplete="new-password" />
                 </Field>
-                <Field label="Your password" htmlFor={`me-pw-${company.id}`} hint="Needed only when you change the owner's email or password.">
-                  <Input id={`me-pw-${company.id}`} name="current_password" type="password" autoComplete="current-password" />
-                </Field>
               </>
             )}
           </fieldset>
@@ -177,9 +174,6 @@ function ScheduledActions({ company, restored, restore }: {
             Everything it holds — figures, documents, reports, its people&apos;s access — is erased now and cannot be restored.
           </p>
           <input type="hidden" name="org_id" value={company.id} />
-          <Field label="Your password" htmlFor={`purge-pw-${company.id}`} hint="To confirm it is you.">
-            <Input id={`purge-pw-${company.id}`} name="current_password" type="password" required autoComplete="current-password" />
-          </Field>
           <ActionMessage state={purged} />
           <div className="flex flex-wrap justify-end gap-3">
             <Button type="button" tone="secondary" onClick={() => purgeRef.current?.close()} autoFocus>{purged?.ok ? 'Close' : 'No, keep it'}</Button>

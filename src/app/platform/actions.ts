@@ -3,7 +3,7 @@
 import { revalidatePath } from 'next/cache';
 import { callApi, revokeUserSessions } from '@/core/db';
 import { addPlatformUser, setAnalystCompanies } from '@/modules/platform';
-import { confirmPassword, getPlatformContext } from '@/modules/tenancy';
+import { getPlatformContext } from '@/modules/tenancy';
 import { assertCan } from '@/core/permissions';
 import { fail, done, text, optionalText } from '@/app/_lib/server-action';
 import { requestOrigin } from '@/app/_lib/request-origin';
@@ -11,8 +11,7 @@ import type { ActionResult } from '@/components/action-result';
 
 /**
  * Platform actions. Each is authorised twice: assertCan here, and app.require_super_admin() inside
- * the api.* function — which, for these, additionally requires re-authentication within
- * the last ten minutes (ADR-044.3).
+ * the api.* function. (The ten-minute re-confirmation of ADR-044.3 was removed by ADR-185.)
  */
 
 export async function addPlatformUserAction(
@@ -136,23 +135,5 @@ export async function revokeAssignmentAction(
     return done('Assignment revoked.');
   } catch (error) {
     return fail(error, { requestId, action: 'platform.revokeAssignment' });
-  }
-}
-
-/**
- * "Confirm it's you" (ADR-159): a fresh password sign-in, so the changes that need a recent sign-in
- * (creating a company, switching its systems, adding staff, settings) work for the next ten minutes.
- */
-export async function confirmItsYouAction(_previous: ActionResult | null, form: FormData): Promise<ActionResult> {
-  let requestId: string | undefined;
-  try {
-    const ctx = await getPlatformContext();
-    requestId = ctx.requestId;
-    assertCan(ctx, 'system.manage');
-    const value = form.get('current_password');
-    await confirmPassword(ctx, typeof value === 'string' ? value : '');
-    return done('Confirmed. You can make changes for the next ten minutes.');
-  } catch (error) {
-    return fail(error, { requestId, action: 'platform.confirmItsYou' });
   }
 }

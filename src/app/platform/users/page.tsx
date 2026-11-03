@@ -60,7 +60,7 @@ export default async function PlatformUsersPage() {
             icon={<KeyRound />}
             tint="pink"
             title="Add a Financial Analyst to your team"
-            description="Needs your password from the last ten minutes (Confirm it is you, above)."
+            description="Give them a name, their email and, if you like, a password; tick the companies they may open."
           />
           <CardBody><AddPlatformUserForm companies={companies} /></CardBody>
         </Card>
