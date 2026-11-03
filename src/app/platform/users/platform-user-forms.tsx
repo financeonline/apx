@@ -1,7 +1,7 @@
 'use client';
 
 import { useActionState } from 'react';
-import { addPlatformUserAction, revokePlatformRoleAction, setAnalystCompaniesAction } from '../actions';
+import { addPlatformUserAction, editPlatformUserAction, revokePlatformRoleAction, setAnalystCompaniesAction } from '../actions';
 import { Field, Input } from '@/components/ui/field';
 import { SubmitButton, ActionMessage } from '@/components/ui/action-form';
 import { TR, TD } from '@/components/ui/table';
@@ -77,6 +77,30 @@ export function AddPlatformUserForm({ companies }: { companies: readonly Company
   );
 }
 
+/** One analyst's login: name, email (username) and a new password, edited in place (ADR-186). */
+function EditLogin({ userId, email, fullName }: { userId: string; email: string | null; fullName: string | null }) {
+  const [state, action] = useActionState(editPlatformUserAction, null);
+  return (
+    <details className="group mt-1">
+      <summary className="cursor-pointer text-xs font-medium text-accent hover:underline">Edit login</summary>
+      <form action={action} className="mt-3 flex max-w-sm flex-col gap-4">
+        <input type="hidden" name="user_id" value={userId} />
+        <Field label="Their name" htmlFor={`edit-name-${userId}`}>
+          <Input id={`edit-name-${userId}`} name="full_name" defaultValue={fullName ?? ''} maxLength={120} autoComplete="off" />
+        </Field>
+        <Field label="Email (their username)" htmlFor={`edit-email-${userId}`} hint="Changing it signs them out everywhere.">
+          <Input id={`edit-email-${userId}`} name="email" type="email" required defaultValue={email ?? ''} autoComplete="off" />
+        </Field>
+        <Field label="New password (optional)" htmlFor={`edit-pw-${userId}`} hint="At least 12 characters. Leave empty to keep their password. Setting one signs them out everywhere.">
+          <Input id={`edit-pw-${userId}`} name="password" type="password" minLength={12} maxLength={72} autoComplete="new-password" />
+        </Field>
+        <ActionMessage state={state} />
+        <SubmitButton pendingLabel="Saving…">Save login</SubmitButton>
+      </form>
+    </details>
+  );
+}
+
 /** One analyst's companies: the names, and the ticks to change them. */
 function AnalystCompanies({ userId, companies, assigned }: {
   userId: string; companies: readonly CompanyChoice[]; assigned: ReadonlySet<string>;
@@ -112,7 +136,10 @@ export function PlatformUserRow(props: {
   const isSuperAdmin = props.platformRole === 'super_admin';
   return (
     <TR>
-      <TD className="break-all">{props.email ?? <code className="text-xs">{props.userId}</code>}</TD>
+      <TD className="break-all">
+        {props.email ?? <code className="text-xs">{props.userId}</code>}
+        {!isSuperAdmin && props.status === 'active' ? <EditLogin userId={props.userId} email={props.email} fullName={props.fullName} /> : null}
+      </TD>
       <TD>{props.fullName ?? '—'}</TD>
       <TD>{PLATFORM_ROLE_LABELS[props.platformRole] ?? props.platformRole}</TD>
       <TD>

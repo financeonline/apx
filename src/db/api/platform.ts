@@ -357,6 +357,50 @@ async function platform_owner_login_change(db: Db, args: Record<string, unknown>
 }
 
 /**
+ * `api.platform_staff_login_change` (ADR-186): the super admin changes a Financial Analyst's name,
+ * sign-in email and/or password. The password itself is set in Firebase Auth by the service
+ * (`updateLogin`); this records the decision, checks the email is free, and updates the profile.
+ */
+async function platform_staff_login_change(db: Db, args: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
+  const userId = arg.req(args, 'p_user');
+  const password = arg.bool(args, 'p_password') ?? false;
+  const requested: string | null = (arg.str(args, 'p_new_email') ?? '').trim().toLowerCase() || null;
+  const fullName: string | null = (arg.str(args, 'p_full_name') ?? '').trim() || null;
+  await throttle(db.fs, uidOf(db), 'platform_staff_login', 30, 3600);
+  await requireSuperAdmin(db, true);
+
+  return runTx(db, async (tx) => {
+    const staff = await tx.get(globalRow(db.fs, 'platform_users', userId));
+    if (!staff.exists || staff.get('platform_role') !== 'employee') raise.notFound();
+    const profile = await tx.get(globalRow(db.fs, 'profiles', userId));
+    if (!profile.exists) raise.notFound();
+    const email = String(profile.get('email'));
+    const nameBefore = (profile.get('full_name') as string | null) ?? null;
+
+    const wantedEmail = requested === email.toLowerCase() ? null : requested;
+    if (wantedEmail !== null) {
+      if (!EMAIL.test(wantedEmail)) raise.invalid('enter a valid email address');
+      const taken = await tx.get(globalCollection(db.fs, 'profiles').where('email', '==', wantedEmail));
+      if (taken.docs.some((d) => d.id !== userId)) raise.conflict('another login already uses that email');
+    }
+    const wantedName = fullName === nameBefore ? null : fullName;
+    if (wantedEmail === null && wantedName === null && !password) raise.invalid('nothing to change');
+
+    const now = nowIso();
+    const update: Record<string, unknown> = { updated_at: now };
+    if (wantedEmail !== null) update.email = wantedEmail;
+    if (wantedName !== null) update.full_name = wantedName;
+    tx.update(globalRow(db.fs, 'profiles', userId), update);
+    const audit = await prepareAudit(db, {
+      organizationId: null, action: 'platform.staff_login_changed', targetTable: 'profiles', targetId: userId,
+      before: { email, full_name: nameBefore }, after: { email: wantedEmail ?? email, full_name: wantedName ?? nameBefore, password_changed: password },
+    }, tx);
+    audit.write(tx);
+    return [{ user_id: userId, email: wantedEmail ?? email, email_changed: wantedEmail !== null }];
+  });
+}
+
+/**
  * `api.platform_purge_now`: the super admin decides a company's thirty days have passed — the purge
  * itself (`org.purge`) still re-verifies everything.
  */
@@ -972,6 +1016,7 @@ export const functions: DbFunctions = {
   platform_company_owners,
   platform_create_organization,
   platform_owner_login_change,
+  platform_staff_login_change,
   platform_purge_now,
   platform_set_company_owner,
   platform_users_list: (db) => platform_users_list(db),

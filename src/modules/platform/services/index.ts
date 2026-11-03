@@ -430,6 +430,36 @@ export async function analystCompanies(ctx: AccessContext): Promise<ReadonlyMap<
   return byAnalyst;
 }
 
+/**
+ * Change a Financial Analyst's name, sign-in email and/or password (ADR-186). The decision and the
+ * profile go through `api.platform_staff_login_change`; the login itself changes in Firebase Auth
+ * (`updateLogin`). A changed email or password ends the person's other sessions.
+ */
+export async function changeStaffLoginAsPlatform(
+  ctx: AccessContext, userId: string,
+  change: { readonly fullName: string; readonly email: string; readonly password: string },
+): Promise<void> {
+  assertCan(ctx, 'platform.users.manage');
+  const password = change.password;
+  if (password && password.length < 12) throw new ValidationError('Use at least 12 characters for the password.');
+  if (password.length > 72) throw new ValidationError('Keep the password under 72 characters.');
+  const rows = await callApi<Array<{ user_id: string; email: string; email_changed: boolean }>>(
+    ctx.db, 'platform_staff_login_change',
+    { p_user: userId, p_new_email: change.email.trim(), p_full_name: change.fullName.trim(), p_password: Boolean(password) },
+    ctx.requestId,
+  );
+  const result = (rows ?? [])[0];
+  if (!result) throw new NotFound();
+  if (result.email_changed || password) {
+    try {
+      await updateLogin(result.user_id, { email: result.email, password: password || null });
+    } catch (error) {
+      throw new ValidationError(`The login was not changed: ${(error as { message?: string } | null)?.message ?? 'unknown error'}`);
+    }
+    await revokeUserSessions(result.user_id);
+  }
+}
+
 export interface AnalystCompaniesChange {
   readonly added: number;
   readonly removed: number;

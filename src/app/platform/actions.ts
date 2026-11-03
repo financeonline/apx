@@ -2,7 +2,7 @@
 
 import { revalidatePath } from 'next/cache';
 import { callApi, revokeUserSessions } from '@/core/db';
-import { addPlatformUser, setAnalystCompanies } from '@/modules/platform';
+import { addPlatformUser, changeStaffLoginAsPlatform, setAnalystCompanies } from '@/modules/platform';
 import { getPlatformContext } from '@/modules/tenancy';
 import { assertCan } from '@/core/permissions';
 import { fail, done, text, optionalText } from '@/app/_lib/server-action';
@@ -53,6 +53,27 @@ export async function addPlatformUserAction(
 /** The ticked `organization_id` checkboxes of a form. */
 function organizationIds(form: FormData): string[] {
   return [...new Set(form.getAll('organization_id').filter((v): v is string => typeof v === 'string' && v.length > 0))];
+}
+
+/** ADR-186: a Financial Analyst's name, email (username) and password, edited from Platform accounts. */
+export async function editPlatformUserAction(
+  _previous: ActionResult | null,
+  form: FormData,
+): Promise<ActionResult> {
+  let requestId: string | undefined;
+  try {
+    const ctx = await getPlatformContext();
+    requestId = ctx.requestId;
+    assertCan(ctx, 'platform.users.manage');
+    const password = (form.get('password') as string | null) ?? '';
+    await changeStaffLoginAsPlatform(ctx, text(form, 'user_id'), {
+      fullName: optionalText(form, 'full_name') ?? '', email: text(form, 'email'), password,
+    });
+    revalidatePath('/platform/users');
+    return done(password ? 'Saved. They sign in with the new password from now on.' : 'Saved.');
+  } catch (error) {
+    return fail(error, { requestId, action: 'platform.editUser' });
+  }
 }
 
 /** ADR-182: which companies one Financial Analyst can open, from the ticks on Platform accounts. */
