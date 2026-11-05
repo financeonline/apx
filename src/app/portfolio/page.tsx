@@ -27,7 +27,7 @@ export default async function PortfolioPage() {
       <>
         <PageHeader eyebrow="Command Centre" title="Your client organisations" />
         <EmptyState title="You haven't been assigned to any organisations yet.">
-          An APX administrator assigns organisations to you. When that happens they&apos;ll appear here, with their health, alerts and actions.
+          The super admin gives you companies, or you <Link className="font-medium text-accent hover:underline" href="/portfolio/companies">create one yourself</Link>. They&apos;ll appear here, with their health, alerts and actions.
         </EmptyState>
       </>
     );

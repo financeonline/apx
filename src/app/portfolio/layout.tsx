@@ -36,6 +36,8 @@ export default async function PortfolioLayout({ children }: { children: React.Re
           label: 'Command Centre',
           links: [
             { label: 'Overview', href: '/portfolio', icon: 'home' },
+            // ADR-187: an analyst creates and manages their own companies.
+            ...(platformRole === 'employee' ? [{ label: 'Your companies', href: '/portfolio/companies', icon: 'switch' as const }] : []),
             { label: 'Alerts', href: '/portfolio/alerts', icon: 'alerts' },
             { label: 'Actions', href: '/portfolio/actions', icon: 'actions' },
             { label: 'Adviser analyst', href: '/portfolio/analyst', icon: 'analyst' },

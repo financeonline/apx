@@ -40,6 +40,16 @@ export function takesSwitches(role: EffectiveRole | string): boolean {
 }
 
 /**
+ * Whether stored switches change this role's permissions: the four company roles, and a Financial
+ * Analyst — whose switches only the super admin sets, per company (ADR-187). Kept apart from
+ * `takesSwitches`, which also decides who may "Request more information" and whose switches appear
+ * on a company's Team page.
+ */
+export function appliesSwitches(role: EffectiveRole | string): boolean {
+  return OVERRIDABLE_ROLES.has(role) || role === 'employee';
+}
+
+/**
  * Whether this person may "Request more information": a company member whose role takes switches.
  * An owner already holds everything; APX staff are given access by the super admin; a suspended
  * organisation is frozen.
@@ -54,7 +64,7 @@ export function mayRequestAccess(role: EffectiveRole): boolean {
  * 2026-10-14; `app.apply_member_permission` and `app.member_role_changed` are the authority). An
  * allow-list (R2-A-07).
  */
-const OWNER_SWITCH_ROLES: ReadonlySet<string> = new Set<EffectiveRole>(['owner', 'super_admin']);
+const OWNER_SWITCH_ROLES: ReadonlySet<string> = new Set<EffectiveRole>(['owner', 'employee', 'super_admin']);
 
 export function setsOwnerSwitches(role: EffectiveRole | string): boolean {
   return OWNER_SWITCH_ROLES.has(role);
@@ -114,7 +124,7 @@ export function resolvePermissions(
   overrides: readonly PermissionOverride[],
 ): ReadonlySet<Permission> {
   const result = new Set<Permission>(permissionsFor(role));
-  if (role === 'none' || !takesSwitches(role)) return result;
+  if (role === 'none' || !appliesSwitches(role)) return result;
   for (const { permission, granted } of overrides) {
     if (!isSwitchable(permission)) continue;
     if (granted) result.add(permission);
@@ -183,11 +193,11 @@ export function agreedPermissions(
 }
 
 /**
- * Whether a person in this role creates the company's team members (ADR-174; owner, 2026-10-14:
- * "only the owner … can generate a user"): an owner, and nobody else — not an admin, not the super
- * admin. `app.check_member_login_role` is the authority. An allow-list (R2-A-07).
+ * Whether a person in this role creates the company's team members: an owner (ADR-174), the
+ * company's Financial Analyst and the super admin (ADR-187, owner 2026-11-05) — never an admin.
+ * `app.check_member_login_role` is the authority. An allow-list (R2-A-07).
  */
-const MEMBER_CREATOR_ROLES: ReadonlySet<string> = new Set<EffectiveRole>(['owner']);
+const MEMBER_CREATOR_ROLES: ReadonlySet<string> = new Set<EffectiveRole>(['owner', 'employee', 'super_admin']);
 
 export function createsMembers(role: EffectiveRole | string): boolean {
   return MEMBER_CREATOR_ROLES.has(role);

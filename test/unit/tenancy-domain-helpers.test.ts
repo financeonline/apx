@@ -80,9 +80,9 @@ describe('permissions: who set a switch, and who creates members', () => {
     expect(parseOverrideDetails({ permission: 'imports.review' })).toEqual([]);
   });
 
-  it('only an owner creates the company’s members (ADR-174)', () => {
-    expect(createsMembers('owner')).toBe(true);
-    for (const role of ['admin', 'accountant', 'client', 'third_party', 'employee', 'super_admin', '']) {
+  it('the owner, the company’s Financial Analyst and the super admin create its members (ADR-174, ADR-187)', () => {
+    for (const role of ['owner', 'employee', 'super_admin']) expect(createsMembers(role)).toBe(true);
+    for (const role of ['admin', 'accountant', 'client', 'third_party', 'suspended_member', '']) {
       expect(createsMembers(role)).toBe(false);
     }
   });

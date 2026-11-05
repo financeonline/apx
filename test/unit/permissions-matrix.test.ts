@@ -115,21 +115,24 @@ describe('deny by default', () => {
 describe('the answers the brief asked for (RBAC_MATRIX.md §2.2)', () => {
   const holds = (role: GrantedRole, p: Permission) => ROLE_MATRIX[role].has(p);
 
-  it('only owner and super admin can invite users; an admin cannot (ADR-174)', () => {
+  it('owner, Financial Analyst and super admin can invite users; an admin cannot (ADR-174, ADR-187)', () => {
     expect(holds('owner', 'users.invite')).toBe(true);
     expect(holds('admin', 'users.invite')).toBe(false);
     expect(holds('super_admin', 'users.invite')).toBe(true);
-    expect(holds('employee', 'users.invite')).toBe(false);
+    expect(holds('employee', 'users.invite')).toBe(true);
     expect(holds('client', 'users.invite')).toBe(false);
   });
 
-  it('employees operate but never govern (CD-16)', () => {
-    for (const p of ['imports.review', 'financials.edit', 'ai.use', 'documents.view'] as Permission[]) {
+  it('a Financial Analyst manages people and settings of their companies, never billing, deletion or the platform (CD-16, ADR-187)', () => {
+    for (const p of [
+      'imports.review', 'financials.edit', 'ai.use', 'documents.view',
+      'users.view', 'users.invite', 'users.manage', 'settings.manage',
+    ] as Permission[]) {
       expect(holds('employee', p)).toBe(true);
     }
     for (const p of [
-      'users.view', 'users.invite', 'users.manage', 'settings.manage',
-      'audit.view', 'billing.manage', 'org.delete', 'system.manage',
+      'audit.view', 'billing.manage', 'org.delete', 'system.manage', 'assignments.manage',
+      'platform.orgs.manage', 'platform.users.manage',
     ] as Permission[]) {
       expect(holds('employee', p)).toBe(false);
     }

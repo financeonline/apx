@@ -4,6 +4,7 @@ import { useActionState } from 'react';
 import { createCompanyAction } from './actions';
 import { Field, Input, Select } from '@/components/ui/field';
 import { ActionMessage, SubmitButton } from '@/components/ui/action-form';
+import type { ActionResult } from '@/components/action-result';
 
 // The choices `api.platform_create_organization` accepts; the service and the database re-check them.
 const COUNTRIES = [
@@ -21,8 +22,11 @@ function invitationLink(message: string | undefined): string | null {
   return match ? match[1]! : null;
 }
 
-export function CreateCompanyForm() {
-  const [state, action] = useActionState(createCompanyAction, null);
+type CreateAction = (previous: ActionResult | null, form: FormData) => Promise<ActionResult>;
+
+/** The super admin's form; the analyst's Companies page passes its own action (ADR-187). */
+export function CreateCompanyForm({ action: submit = createCompanyAction }: { action?: CreateAction } = {}) {
+  const [state, action] = useActionState(submit, null);
   const link = state?.ok ? invitationLink(state.message) : null;
   return (
     <form action={action} className="flex flex-col gap-5">

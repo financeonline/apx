@@ -5,6 +5,8 @@ Consumed by: `SECURITY_MODEL.md`, `SERVICE_ARCHITECTURE.md`, `ROUTE_ARCHITECTURE
 
 > **Revision 1.1 (red-team round 1, 2026-09-04).** Applies ADR-026 (every permission re-checked inside `api.*` functions; no direct table writes), ADR-037 (Data menu; Employee `users.view` ✗), ADR-038 (suspension at the database, sole-owner disable guard, invitation email binding, MFA and re-authentication for platform users, audited `/platform` tenant views, signed-URL-only Storage). Findings addressed: F-A-01, F-A-02, F-A-04, F-A-06, F-A-07, F-A-10, F-A-12, F-D-07, F-D-14. See `RED_TEAM_REVIEW.md`.
 
+> **Revision 1.7 (ADR-187, 2026-11-05).** A Financial Analyst creates companies and manages the companies they created or the super admin gave them: the people (`users.view`, `users.invite`, `users.manage`, with the owner's ceiling), the company's settings (`settings.manage`), the owner's login and the company's active/deactivated switch. The super admin sets each analyst's departments and permission switches per company (§7). Never `org.delete`, `billing.manage` or `audit.view` unless switched on.
+
 > **Revision 1.3 (ADR-172, 2026-10-14).** Two new company roles, `accountant` and `third_party`; the platform `employee` is shown as **Financial Analyst**; per-person permission switches set by the owner or an admin (§7); "Request more information" (§7.3); and every tenant-data read policy now names a PERMISSION instead of a list of roles, so a switch opens or closes a table for one person (§8). Contract: `src/modules/tenancy/domain/member-access.ts`. Migrations `20261018000017`–`20261018000019`.
 
 > **Revision 1.4 (ADR-172 hardening, independent security review, 2026-10-14).** Never beyond one's own rights on EVERY path that sets access, not only the switch: nobody changes their own role; an owner's switch is locked against admins and survives a role change; a role change and an invitation switch off whatever of the new role's defaults the actor lacks (§3.15–3.18, §7). Detail stored a second time — the audit trail's row copies, raw import text, the overview's jsonb payloads, per-customer pointers — is gated like the detail itself, and a suspended company shows each person what they saw before, no more (§8). Migrations `20261018000032`–`20261018000035`; pgTAP `31_member_access_hardening`.
@@ -66,15 +68,15 @@ All keys live in `src/core/permissions/catalogue.ts` as a `const` union; the rol
 | `actions.update_own` | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | Status + outcome on actions where `owner_user_id = self` |
 | `alerts.manage` | ✓ | ✓ | ✓ | ✓ | ◐ | ◐ | ✗ | Acknowledge/resolve/dismiss alerts; client and accountant may acknowledge only (a 3rd party too, if switched on) |
 | `intelligence.recompute` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Trigger a manual calculation run |
-| `users.view` | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Employee has no member-list page; member names appear only in assignee pickers via `org_member_profiles` (ADR-037) |
-| `users.invite` | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Only the owner creates team members (rev 1.6, ADR-174): `api.begin_member_login`/`finish_member_login` refuse anyone but an owner, the super admin included; the super admin invites a new company's owner by link |
-| `users.manage` | ✓ | ✗ | ✓ | ◐ | ✗ | ✗ | ✗ | Admin may change/remove `admin`/`accountant`/`client`/`third_party`; cannot touch owners; cannot promote to owner. Also: per-person switches and answering access requests (§7) |
+| `users.view` | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | A Financial Analyst manages the people of the companies they created or were given (rev 1.7, ADR-187) |
+| `users.invite` | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | ✗ | The owner, the company's Financial Analysts and the super admin create team members (rev 1.7, ADR-187; was owner only, ADR-174): `api.begin_member_login`/`finish_member_login` refuse anyone else |
+| `users.manage` | ✓ | ✓ | ✓ | ◐ | ✗ | ✗ | ✗ | Admin may change/remove `admin`/`accountant`/`client`/`third_party`; cannot touch owners; cannot promote to owner. A Financial Analyst has the owner's reach in their companies (rev 1.7, ADR-187). Also: per-person switches and answering access requests (§7) |
 | `assignments.view` | ✓ | ◐ | ✓ | ✓ | ✗ | ✗ | ✗ | Employee sees own assignments only, served by `/portfolio` (ADR-037) |
 | `assignments.manage` | ✓ | ✗ | ◐ | ✗ | ✗ | ✗ | ✗ | Only super admin creates; owner may **revoke** an employee's assignment to their org |
 | `documents.view` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | Open/download source documents; audited. Switchable: e.g. on for one client (§7) |
 | `data.export` | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | CSV/XLSX export; audited |
 | `audit.view` | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Org-scoped audit log; super admin sees all |
-| `settings.manage` | ✓ | ✗ | ✓ | ✓ | ✗ | ✗ | ✗ | Org name, fiscal year, currency, alert prefs |
+| `settings.manage` | ✓ | ✓ | ✓ | ✓ | ✗ | ✗ | ✗ | Org name, fiscal year, currency, alert prefs; a Financial Analyst in their companies (rev 1.7, ADR-187) |
 | `billing.manage` | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Plan, invoices (billing itself is post-MVP) |
 | `org.delete` | ✓ | ✗ | ✓ | ✗ | ✗ | ✗ | ✗ | Soft delete + purge job (CD-23) |
 | `system.manage` | ✓ | ✗ | ✗ | ✗ | ✗ | ✗ | ✗ | Everything under `/platform` |

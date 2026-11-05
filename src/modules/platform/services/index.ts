@@ -287,6 +287,14 @@ export interface CreatedCompany {
  */
 export async function createCompanyAsPlatform(ctx: AccessContext, input: unknown): Promise<CreatedCompany> {
   assertCan(ctx, 'platform.orgs.manage');
+  return createCompany(ctx, input);
+}
+
+/**
+ * The creation itself, shared by the super admin and a Financial Analyst (ADR-187).
+ * `api.platform_create_organization` decides who may create, and links an analyst to what they create.
+ */
+export async function createCompany(ctx: { readonly db: AccessContext['db']; readonly requestId: string }, input: unknown): Promise<CreatedCompany> {
   const value = parseInput(CreateCompanyInput, input);
 
   let ownerId: string | null = null;

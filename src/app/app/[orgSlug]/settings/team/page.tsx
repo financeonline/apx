@@ -224,7 +224,7 @@ export default async function TeamPage({ params }: { params: Promise<{ orgSlug: 
           </Card>
         ) : mayManage ? (
           <p className="text-sm text-ink-muted">
-            Only the company’s owner can create team members, accountants and 3rd parties. Ask the owner to
+            Only the company’s owner or its Financial Analyst can create team members, accountants and 3rd parties. Ask them to
             add someone new.
           </p>
         ) : null}

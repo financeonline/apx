@@ -5,7 +5,7 @@ import { raise } from '../raise';
 import { globalRow, newId, nowIso, orgCollection, orgRow, overrideId, uniqueGuard } from '../schema';
 import { readerOf, uidOf, type Db, type Reader } from '../types';
 import { prepareAudit, type PreparedAudit } from './audit';
-import { SWITCHABLE_PERMISSIONS, effectivePermission, overridableRole } from './access';
+import { SWITCHABLE_PERMISSIONS, effectivePermission, overridableRole, platformUserOf } from './access';
 import { fiscalPosition, periodId } from './shared';
 
 /**
@@ -48,14 +48,21 @@ export function roleRank(role: string | null | undefined): number {
 export function ceilingAllows(actorRole: string | null, subjectRole: string | null): boolean {
   const rank = roleRank(subjectRole);
   if (actorRole === 'super_admin') return true;
-  if (actorRole === 'owner') return rank >= 1 && rank <= 3;
+  // ADR-187: a Financial Analyst manages the companies they created or were given with the owner's reach.
+  if (actorRole === 'owner' || actorRole === 'employee') return rank >= 1 && rank <= 3;
   if (actorRole === 'admin') return rank >= 1 && rank <= 2;
   return false;
 }
 
-/** `app.check_member_login_role`: only the company's owner creates logins, never an owner's. */
+/**
+ * `app.check_member_login_role`: the company's owner, its Financial Analysts and the super admin
+ * create logins (ADR-187; was the owner only, ADR-174), never an owner's.
+ */
+export const LOGIN_CREATOR_ROLES: readonly string[] = ['owner', 'employee', 'super_admin'];
 export function checkMemberLoginRole(actorRole: string | null, role: string | null): void {
-  if (actorRole !== 'owner') raise.denied("only the company's owner can create team members");
+  if (!actorRole || !LOGIN_CREATOR_ROLES.includes(actorRole)) {
+    raise.denied("only the company's owner or its Financial Analyst can create team members");
+  }
   if (!role || !['admin', 'accountant', 'client', 'third_party'].includes(role)) {
     raise.invalid('a login can be created for a team member, an accountant or a 3rd party');
   }
@@ -123,10 +130,27 @@ export async function rowByIdAnyOrg(
   return snap.empty ? null : snap.docs[0]!.data();
 }
 
+/**
+ * Who decides with an owner's authority — an owner, the company's Financial Analyst (ADR-187) and the
+ * super admin: their switches and departments are locked against an admin's change.
+ */
+export function setsOwnerSwitchesRole(role: string | null): boolean {
+  return role === 'owner' || role === 'employee' || role === 'super_admin';
+}
+
+/** A Financial Analyst's departments in one company, as the super admin set them (ADR-187), or null (all). */
+export async function analystDepartments(fs: Firestore, orgId: string, userId: string, r: Reader): Promise<string[] | null> {
+  const a = await r.get(orgRow(fs, orgId, 'organization_assignments', userId));
+  if (!a.exists || a.get('status') !== 'active') return null;
+  const d = a.get('departments');
+  return Array.isArray(d) ? (d as string[]) : null;
+}
+
 /** `app.actor_departments(org)`: the caller's own departments, or null (all). */
 export async function actorDepartments(db: Db, orgId: string, r: Reader): Promise<string[] | null> {
   const uid = uidOf(db);
   if (!uid) return null;
+  if ((await platformUserOf(db.fs, uid, r))?.platform_role === 'employee') return analystDepartments(db.fs, orgId, uid, r);
   const m = await membershipOf(db.fs, orgId, uid, r);
   if (!m || m.status !== 'active' || !overridableRole(String(m.role))) return null;
   return Array.isArray(m.departments) ? (m.departments as string[]) : null;
@@ -275,7 +299,7 @@ export async function prepareMemberPermission(
 ): Promise<PreparedSwitch> {
   const r = readerOf(tx);
   const actor = uidOf(db);
-  const ownerActor = input.actorRole === 'owner' || input.actorRole === 'super_admin';
+  const ownerActor = setsOwnerSwitchesRole(input.actorRole);
   const perm = input.permission;
   if (!perm || !isSwitchable(perm)) raise.invalid(`${perm ?? 'that permission'} cannot be switched for one person`);
   if (!input.userId) raise.notFound();

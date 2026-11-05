@@ -110,6 +110,8 @@ function AnalystCompanies({ userId, companies, assigned }: {
   return (
     <div className="flex min-w-0 flex-col gap-2">
       <span className="text-sm text-ink">{names.length === 0 ? 'No companies yet' : names.join(', ')}</span>
+      {/* ADR-187: what this analyst can see in each of their companies. */}
+      <a href={`/platform/users/${userId}`} className="text-xs font-medium text-accent hover:underline">Set access</a>
       <details className="group">
         <summary className="cursor-pointer text-xs font-medium text-accent hover:underline">Change companies</summary>
         <form action={action} className="mt-3 flex flex-col gap-4">

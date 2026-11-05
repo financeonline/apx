@@ -228,9 +228,9 @@ describe('an action goes only to someone who can see the Action Centre', () => {
     expect(offered.find((o) => o.userId === ids.analyst)?.name).toBe(`Analyst ${RUN}`);
   });
 
-  it('lets the Financial Analyst — actions.assign without users.view — list and assign', async () => {
+  it('lets the Financial Analyst list and assign (since ADR-187 they also hold users.view in their companies)', async () => {
     const analyst = await ctxFor('analyst');
-    expect(analyst.permissions.has('users.view')).toBe(false);
+    expect(analyst.permissions.has('actions.assign')).toBe(true);
     expect((await assignableOwners(analyst)).map((o) => o.userId)).toContain(ids.accountant);
     expect(await outcome(assignAction(analyst, actionId, ids.accountant))).toBe('ok');
   });

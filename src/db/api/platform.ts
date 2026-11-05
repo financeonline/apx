@@ -4,10 +4,10 @@ import { callApi } from '@/core/db/api-rpc';
 import { raise } from '../raise';
 import { arg, type DbFunctions } from '../registry';
 import {
-  acrossOrgs, globalCollection, globalRow, newId, nowIso, orgCollection, orgRow, ORG_SINGLETON_ID, uniqueGuard,
+  acrossOrgs, globalCollection, globalRow, newId, nowIso, orgCollection, orgRow, ORG_SINGLETON_ID, overrideId, uniqueGuard,
 } from '../schema';
 import { runTx } from '../tx';
-import { uidOf, type Db } from '../types';
+import { readerOf, uidOf, type Db } from '../types';
 import { isSuperAdmin, requireOrg, requirePermission, requireSuperAdmin } from '../app/access';
 import { prepareAudit, type PreparedAudit } from '../app/audit';
 import { jobRef, prepareEnqueue, releaseQueuedGuard } from '../app/jobs';
@@ -59,6 +59,41 @@ const EMAIL = /^[^@\s]+@[^@\s]+\.[^@\s]+$/;
 
 function writeAll(tx: Transaction, audits: readonly PreparedAudit[]): void {
   for (const a of audits) a.write(tx);
+}
+
+/** An active Financial Analyst (`platform_users.platform_role = 'employee'`). */
+async function isActiveAnalyst(db: Db, userId: string | null, tx?: Transaction): Promise<boolean> {
+  if (!userId) return false;
+  const snap = await (tx ? tx.get(globalRow(db.fs, 'platform_users', userId)) : globalRow(db.fs, 'platform_users', userId).get());
+  return snap.exists && snap.get('platform_role') === 'employee' && snap.get('status') === 'active';
+}
+
+/** An assignment that gives access now: active and inside its window. */
+function liveAssignment(a: DocumentData | undefined | null, now = Date.now()): boolean {
+  if (!a || a.status !== 'active') return false;
+  if (typeof a.starts_at === 'string' && new Date(a.starts_at).getTime() > now) return false;
+  if (typeof a.ends_at === 'string' && new Date(a.ends_at).getTime() <= now) return false;
+  return true;
+}
+
+/**
+ * ADR-187: the super admin, or a Financial Analyst who manages this company — one they created or
+ * were given (a live assignment). Read from the assignment itself, not the effective role, so an
+ * analyst can switch a company they deactivated back on (a deactivated company freezes everyone else
+ * to Home). Anyone else, and any company that does not exist or is deleted, is NOT FOUND.
+ */
+async function requireCompanyManager(db: Db, orgId: string, tx?: Transaction): Promise<'super_admin' | 'employee'> {
+  const actor = uidOf(db);
+  if (await isSuperAdmin(db.fs, actor, readerOf(tx))) return 'super_admin';
+  if (!actor || !(await isActiveAnalyst(db, actor, tx))) raise.denied('platform administration requires the super admin');
+  const [org, assignment] = await Promise.all([
+    tx ? tx.get(globalRow(db.fs, 'organizations', orgId)) : globalRow(db.fs, 'organizations', orgId).get(),
+    tx ? tx.get(orgRow(db.fs, orgId, 'organization_assignments', actor)) : orgRow(db.fs, orgId, 'organization_assignments', actor).get(),
+  ]);
+  if (!org.exists || org.get('status') === 'deleted' || !liveAssignment(assignment.exists ? assignment.data() : null)) {
+    raise.notFound();
+  }
+  return 'employee';
 }
 
 // ── Platform roles ───────────────────────────────────────────────────────────────────────────────
@@ -239,8 +274,11 @@ async function platform_audit_events(db: Db, args: Record<string, unknown>): Pro
 
 /** `api.platform_company_owners`: each listed company's active owners, with their logins. */
 async function platform_company_owners(db: Db, args: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
-  await requireSuperAdmin(db);
   const orgs = [...new Set((arg.arr<string>(args, 'p_orgs') ?? []).filter(Boolean))];
+  // ADR-187: an analyst reads the owners of the companies they manage, and only those.
+  if (!(await isSuperAdmin(db.fs, uidOf(db)))) {
+    for (const org of orgs) await requireCompanyManager(db, org);
+  }
   const perOrg = await Promise.all(orgs.map((org) => orgCollection(db.fs, org, 'organization_memberships')
     .where('role', '==', 'owner').where('status', '==', 'active').get()));
   const members = perOrg.flatMap((s) => s.docs.map((d) => d.data()));
@@ -275,7 +313,9 @@ const DEFAULT_TZ: Record<string, string> = { AE: 'Asia/Dubai', IN: 'Asia/Kolkata
 async function platform_create_organization(db: Db, args: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
   const actor = uidOf(db);
   await throttle(db.fs, actor, 'platform_create_organization', 30, 3600);
-  await requireSuperAdmin(db, true);
+  // ADR-187: a Financial Analyst creates companies too, and manages the ones they create.
+  const byAnalyst = !(await isSuperAdmin(db.fs, actor)) && await isActiveAnalyst(db, actor);
+  if (!byAnalyst) await requireSuperAdmin(db, true);
 
   const name = (arg.str(args, 'p_name') ?? '').trim();
   const country = arg.str(args, 'p_country_code');
@@ -302,9 +342,35 @@ async function platform_create_organization(db: Db, args: Record<string, unknown
   const created = await runTx(db, async (tx) => {
     const org = await prepareNewOrganization(db, tx, {
       name, countryCode: country, baseCurrency: currency, fiscalYearStartMonth: fyMonth,
-      timezone, createdBy: actor, auditExtra: { by: 'platform' },
+      timezone, createdBy: actor, auditExtra: { by: byAnalyst ? 'analyst' : 'platform' },
     });
+    // The analyst who creates a company is linked to it at once, with no end date; the super admin
+    // can still untick it on Platform accounts.
+    let link: { ref: FirebaseFirestore.DocumentReference; row: DocumentData; audits: PreparedAudit[] } | null = null;
+    if (byAnalyst && actor) {
+      const now = nowIso();
+      const row = {
+        id: newId(), organization_id: org.orgId, employee_user_id: actor, assigned_by: actor, grantor_organization_id: null,
+        status: 'active', starts_at: null, ends_at: null, revoked_by: null, revoked_reason: null,
+        created_by_analyst: true, departments: null, created_at: now, updated_at: now,
+      };
+      link = {
+        ref: orgRow(db.fs, org.orgId, 'organization_assignments', actor), row,
+        audits: [
+          // The company is created in this same transaction: these are the bootstrap kind, as its own events are.
+          await prepareRowAudit(db, 'organization_assignments', 'insert', null, row, tx, { bootstrap: true }),
+          await prepareAudit(db, {
+            organizationId: null, action: 'assignment.created', targetTable: 'organization_assignments', targetId: row.id,
+            after: { organization_id: org.orgId, employee_user_id: actor, created_by_analyst: true },
+          }, tx),
+        ],
+      };
+    }
     org.write(tx);
+    if (link) {
+      tx.set(link.ref, link.row);
+      writeAll(tx, link.audits);
+    }
     return { orgId: org.orgId, slug: org.slug };
   });
 
@@ -325,7 +391,7 @@ async function platform_owner_login_change(db: Db, args: Record<string, unknown>
   const password = arg.bool(args, 'p_password') ?? false;
   const requested: string | null = (arg.str(args, 'p_new_email') ?? '').trim().toLowerCase() || null;
   await throttle(db.fs, uidOf(db), 'platform_owner_login', 20, 3600);
-  await requireSuperAdmin(db, true);
+  await requireCompanyManager(db, org); // ADR-187: the super admin, or the company's analyst
 
   return runTx(db, async (tx) => {
     const owners = await tx.get(orgCollection(db.fs, org, 'organization_memberships')
@@ -455,7 +521,7 @@ async function platform_set_company_owner(db: Db, args: Record<string, unknown>)
   const org = arg.req(args, 'p_org');
   const user = arg.req(args, 'p_user');
   await throttleRpc(db);
-  await requireSuperAdmin(db, true);
+  await requireCompanyManager(db, org); // ADR-187: the super admin, or the company's analyst
   const actor = uidOf(db);
 
   return runTx(db, async (tx) => {
@@ -611,6 +677,166 @@ async function revoke_assignment(db: Db, args: Record<string, unknown>): Promise
     writeAll(tx, audits);
     return assignmentId;
   });
+}
+
+// ── Company management by an analyst, and an analyst's access (ADR-187) ──────────────────────────
+
+/**
+ * `api.set_company_status`: deactivate a company (everyone in it is frozen to Home) or switch it back
+ * on. The super admin, or the company's Financial Analyst. Deletion keeps its own path.
+ */
+async function set_company_status(db: Db, args: Record<string, unknown>): Promise<string> {
+  const org = arg.req(args, 'p_org');
+  const status = arg.str(args, 'p_status');
+  await throttle(db.fs, uidOf(db), 'company_status', 30, 3600);
+  if (status !== 'active' && status !== 'suspended') raise.invalid('a company is either active or deactivated');
+  return runTx(db, async (tx) => {
+    const by = await requireCompanyManager(db, org, tx);
+    const ref = globalRow(db.fs, 'organizations', org);
+    const before = (await tx.get(ref)).data()!;
+    if (before.status !== 'active' && before.status !== 'suspended') {
+      raise.conflict('this company is being deleted; restore it first');
+    }
+    if (before.status === status) return org;
+    const after = { ...before, status, updated_at: nowIso() };
+    const audits = [
+      await prepareRowAudit(db, 'organizations', 'update', before, after, tx),
+      await prepareAudit(db, {
+        organizationId: org, action: status === 'active' ? 'org.activated' : 'org.deactivated',
+        targetTable: 'organizations', targetId: org, before: { status: before.status }, after: { status }, metadata: { by },
+      }, tx),
+    ];
+    tx.update(ref, { status, updated_at: after.updated_at });
+    writeAll(tx, audits);
+    return org;
+  });
+}
+
+const ANALYST_SWITCHABLE: readonly string[] = [
+  'dashboard.view', 'financials.view', 'financials.edit', 'imports.create', 'imports.review',
+  'banking.view', 'banking.reconcile', 'customers.view', 'customers.edit', 'reports.view',
+  'reports.generate', 'ai.use', 'actions.view', 'actions.create', 'actions.assign',
+  'actions.update_own', 'alerts.manage', 'intelligence.recompute', 'documents.view',
+  'data.export', 'audit.view',
+];
+const DEPARTMENTS: readonly string[] = [
+  'banking', 'customers', 'actions', 'reports', 'analyst', 'planning', 'tax', 'funding', 'marketing', 'investment',
+];
+
+/**
+ * `api.set_analyst_access` (ADR-187): the super admin sets what one Financial Analyst sees in one
+ * company — the departments (null = all of the company's) and the switchable permissions, each
+ * on, off or back to the analyst's default (null). Stored as the analyst's switches in that company
+ * (`member_permission_overrides`, which `app.effective_permission` reads for an analyst too) and the
+ * departments on the assignment. Only the super admin: an analyst never changes their own access.
+ */
+async function set_analyst_access(db: Db, args: Record<string, unknown>): Promise<string> {
+  const org = arg.req(args, 'p_org');
+  const employee = arg.req(args, 'p_employee');
+  const rawDepartments = args.p_departments;
+  const switches = arg.arr<{ permission?: unknown; granted?: unknown }>(args, 'p_switches') ?? [];
+  await throttleRpc(db);
+  await requireSuperAdmin(db, true);
+  const actor = uidOf(db);
+
+  let departments: string[] | null = null;
+  if (rawDepartments !== null && rawDepartments !== undefined) {
+    if (!Array.isArray(rawDepartments) || !rawDepartments.every((d) => DEPARTMENTS.includes(String(d)))) {
+      raise.invalid('unknown department');
+    }
+    departments = [...new Set(rawDepartments.map(String))].sort();
+  }
+  const wanted = new Map<string, boolean | null>();
+  for (const sw of switches) {
+    const perm = String(sw?.permission ?? '');
+    if (!ANALYST_SWITCHABLE.includes(perm) || wanted.has(perm)) raise.invalid(`${perm || 'that permission'} cannot be switched`);
+    if (sw.granted !== true && sw.granted !== false && sw.granted !== null) raise.invalid('a switch is on, off or the default');
+    wanted.set(perm, sw.granted as boolean | null);
+  }
+
+  return runTx(db, async (tx) => {
+    const staff = await tx.get(globalRow(db.fs, 'platform_users', employee));
+    if (!staff.exists || staff.get('platform_role') !== 'employee') raise.notFound();
+    const aRef = orgRow(db.fs, org, 'organization_assignments', employee);
+    const assignment = await tx.get(aRef);
+    if (!assignment.exists || !liveAssignment(assignment.data())) raise.conflict('give this analyst the company first');
+
+    const existing = await tx.get(orgCollection(db.fs, org, 'member_permission_overrides').where('user_id', '==', employee));
+    const before = new Map(existing.docs.map((d) => [String(d.get('permission')), d.get('granted') === true]));
+    const now = nowIso();
+    const changes: Array<{ permission: string; before: boolean | null; after: boolean | null }> = [];
+    for (const [perm, granted] of wanted) {
+      const was = before.has(perm) ? before.get(perm)! : null;
+      if (was !== granted) changes.push({ permission: perm, before: was, after: granted });
+    }
+    const departmentsBefore = Array.isArray(assignment.get('departments')) ? (assignment.get('departments') as string[]) : null;
+    const departmentsChanged = JSON.stringify(departmentsBefore) !== JSON.stringify(departments);
+    if (changes.length === 0 && !departmentsChanged) return employee;
+
+    const audit = await prepareAudit(db, {
+      organizationId: org, action: 'assignment.access_changed', targetTable: 'organization_assignments',
+      targetId: String(assignment.get('id')),
+      before: { departments: departmentsBefore, switches: changes.map((c) => ({ permission: c.permission, granted: c.before })) },
+      after: { departments, switches: changes.map((c) => ({ permission: c.permission, granted: c.after })) },
+      metadata: { employee_user_id: employee },
+    }, tx);
+    for (const c of changes) {
+      const ref = orgRow(db.fs, org, 'member_permission_overrides', overrideId(employee, c.permission));
+      if (c.after === null) tx.delete(ref);
+      else {
+        tx.set(ref, {
+          organization_id: org, user_id: employee, permission: c.permission, granted: c.after,
+          set_by: actor, set_at: now, set_by_owner: true, ceiling_withhold: false,
+        });
+      }
+    }
+    if (departmentsChanged) tx.update(aRef, { departments, updated_at: now });
+    audit.write(tx);
+    return employee;
+  });
+}
+
+/** `api.analyst_access`: one analyst's switches and departments in one company, for the super admin's page. */
+async function analyst_access(db: Db, args: Record<string, unknown>): Promise<Array<Record<string, unknown>>> {
+  const employee = arg.req(args, 'p_employee');
+  await requireSuperAdmin(db);
+  const assignments = await acrossOrgs(db.fs, 'organization_assignments').where('employee_user_id', '==', employee)
+    .where('status', '==', 'active').get();
+  const live = assignments.docs.filter((d) => liveAssignment(d.data()));
+  return Promise.all(live.map(async (a) => {
+    const org = String(a.get('organization_id'));
+    const overrides = await orgCollection(db.fs, org, 'member_permission_overrides').where('user_id', '==', employee).get();
+    return {
+      organization_id: org,
+      departments: Array.isArray(a.get('departments')) ? a.get('departments') : null,
+      created_by_analyst: a.get('created_by_analyst') === true,
+      ends_at: (a.get('ends_at') as string | null) ?? null,
+      switches: overrides.docs.map((d) => ({ permission: d.get('permission'), granted: d.get('granted') === true })),
+    };
+  }));
+}
+
+/** `api.analyst_companies`: the companies the calling analyst manages, for their Companies page. */
+async function analyst_companies(db: Db): Promise<Array<Record<string, unknown>>> {
+  const actor = uidOf(db);
+  if (!actor || !(await isActiveAnalyst(db, actor))) raise.denied('this page is for Financial Analysts');
+  const assignments = await acrossOrgs(db.fs, 'organization_assignments').where('employee_user_id', '==', actor)
+    .where('status', '==', 'active').get();
+  const live = assignments.docs.filter((d) => liveAssignment(d.data()));
+  if (live.length === 0) return [];
+  const orgs = await db.fs.getAll(...live.map((a) => globalRow(db.fs, 'organizations', String(a.get('organization_id')))));
+  const byId = new Map(orgs.filter((o) => o.exists && o.get('status') !== 'deleted').map((o) => [o.id, o.data()!]));
+  return live
+    .filter((a) => byId.has(String(a.get('organization_id'))))
+    .map((a) => {
+      const o = byId.get(String(a.get('organization_id')))!;
+      return {
+        organization_id: o.id, slug: o.slug, name: o.name, status: o.status, country_code: o.country_code ?? null,
+        base_currency: o.base_currency, created_by_analyst: a.get('created_by_analyst') === true,
+        ends_at: (a.get('ends_at') as string | null) ?? null, created_at: o.created_at,
+      };
+    })
+    .sort((x, y) => String(x.name).localeCompare(String(y.name)));
 }
 
 // ── Settings ─────────────────────────────────────────────────────────────────────────────────────
@@ -1021,6 +1247,10 @@ export const functions: DbFunctions = {
   platform_purge_now,
   platform_set_company_owner,
   platform_users_list: (db) => platform_users_list(db),
+  set_company_status,
+  set_analyst_access,
+  analyst_access,
+  analyst_companies: (db) => analyst_companies(db),
   create_assignment,
   revoke_assignment,
   update_platform_org_settings,

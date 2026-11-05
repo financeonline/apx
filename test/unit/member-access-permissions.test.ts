@@ -117,14 +117,22 @@ describe('resolvePermissions', () => {
     expect([...p].sort()).toEqual(['dashboard.view', 'financials.view', 'reports.view']);
   });
 
-  it('is ignored for an owner, APX staff, a suspended member and `none`', () => {
+  it('is ignored for an owner, the super admin, a suspended member and `none`', () => {
     const off = [{ permission: 'financials.view', granted: false }] as const;
     const on = [{ permission: 'documents.view', granted: true }] as const;
-    for (const role of ['owner', 'super_admin', 'employee'] as const) {
+    for (const role of ['owner', 'super_admin'] as const) {
       expect(resolvePermissions(role, off).has('financials.view'), role).toBe(true);
     }
     expect(resolvePermissions('suspended_member', on).has('documents.view')).toBe(false);
     expect(resolvePermissions('none', on).size).toBe(0);
+  });
+
+  it('applies to a Financial Analyst — the switches the super admin sets per company (ADR-187)', () => {
+    expect(resolvePermissions('employee', [{ permission: 'financials.view', granted: false }]).has('financials.view')).toBe(false);
+    expect(resolvePermissions('employee', [{ permission: 'audit.view', granted: true }]).has('audit.view')).toBe(true);
+    // Never the governance they manage the company with: those are not switchable.
+    const forged = [{ permission: 'users.manage', granted: false }] as unknown as Parameters<typeof resolvePermissions>[1];
+    expect(resolvePermissions('employee', forged).has('users.manage')).toBe(true);
   });
 
   it('can never add a permission that is not switchable', () => {

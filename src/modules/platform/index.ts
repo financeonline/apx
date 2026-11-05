@@ -3,11 +3,15 @@ export {
   loadAiModelSettings, setAiModel, AI_EFFORTS, type AiModelOption, type AiModelSettings, type AiEffortLevel, type AiProvider,
   loadOpenAiKeyStatus, setOpenAiKey, clearOpenAiKey, setActiveAiProvider, type AiProviderChoice,
   updateOrgQuotas, updateOrganizationAsPlatform,
-  setOrgModule, createCompanyAsPlatform, editCompanyAsPlatform, changeOwnerLoginAsPlatform, listCompanyOwners, deleteCompanyAsPlatform, restoreCompanyAsPlatform, purgeCompanyNowAsPlatform, listPlatformUsers, addPlatformUser, setAnalystCompanies, analystCompanies, changeStaffLoginAsPlatform,
+  setOrgModule, createCompany, createCompanyAsPlatform, editCompanyAsPlatform, changeOwnerLoginAsPlatform, listCompanyOwners, deleteCompanyAsPlatform, restoreCompanyAsPlatform, purgeCompanyNowAsPlatform, listPlatformUsers, addPlatformUser, setAnalystCompanies, analystCompanies, changeStaffLoginAsPlatform,
   type CreatedCompany, type AnalystCompaniesChange, type PlatformUser, type AddedPlatformUser,
   type AuditFilters, type OrgQuotas, type OrganizationDetail, type PlatformAuditEvent,
   type PlatformAssignment, type PlatformMember, type PlatformOrganization, type PlatformSetting,
 } from './services';
+export {
+  listManagedCompanies, setCompanyStatus, changeOwnerLogin, loadAnalystAccess, saveAnalystAccess,
+  type ManagedCompany, type AnalystCompanyAccess,
+} from './services/analyst';
 export {
   COMPANY_COUNTRIES, COMPANY_CURRENCIES, COMPANY_PLANS, EditCompanyInput, PLATFORM_ROLES, CreateCompanyInput, AddPlatformUserInput, parseInput,
   type PlatformRole,

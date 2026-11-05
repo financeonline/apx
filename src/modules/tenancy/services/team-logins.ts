@@ -104,13 +104,13 @@ function switchables(values: readonly string[]): SwitchablePermission[] {
   return SWITCHABLE_PERMISSIONS.filter((p) => wanted.has(p));
 }
 
-/** Only the company's owner creates team members (ADR-174); the database refuses anyone else. */
+/** The owner, the company's Financial Analyst or the super admin create team members (ADR-174, ADR-187); the database refuses anyone else. */
 export function mayCreateMembers(ctx: AccessContext): boolean {
   return createsMembers(ctx.effectiveRole) && can(ctx, 'users.invite');
 }
 
 export async function createMemberLogin(ctx: AccessContext, input: unknown): Promise<{ userId: string }> {
-  if (!mayCreateMembers(ctx)) throw new PermissionDenied('create team members — only the owner can');
+  if (!mayCreateMembers(ctx)) throw new PermissionDenied('create team members — only the owner or the company\'s Financial Analyst can');
   const org = orgOf(ctx);
   const value = parse(CreateMemberLoginInput, input);
   if (!canInviteRole(ctx.effectiveRole, value.role)) throw new PermissionDenied(`create a ${value.role} login`);

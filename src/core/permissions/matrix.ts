@@ -52,9 +52,15 @@ const GRANTS: Record<Exclude<GrantedRole, 'suspended_member'>, readonly Permissi
     'actions.update_own',
     'alerts.manage',
     'intelligence.recompute',
+    // ADR-187 (owner, 2026-11-05): an analyst manages the companies they created or were given —
+    // their people, with the owner's ceiling, and their settings.
+    'users.view',
+    'users.invite',
+    'users.manage',
     'assignments.view', // ◐ own assignments only, served by /portfolio
     'documents.view',
     'data.export',
+    'settings.manage', // ADR-187
     'platform.ai_feedback.review', // ◐ assigned organizations only
   ],
 

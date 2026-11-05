@@ -9,14 +9,14 @@ import { runTx } from '../tx';
 import { readerOf, uidOf, type Db, type Reader } from '../types';
 import {
   SWITCHABLE_PERMISSIONS, accessibleOrgRoles, actorTypeOf, effectivePermission, hasPermission, hasPermissionOf,
-  isSuperAdmin, orgRoleOf, overridableRole, requireOrg, requirePermission, requireSuperAdmin,
+  isSuperAdmin, orgRoleOf, overridableRole, requireOrg, requirePermission, requireSuperAdmin, switchedRole,
 } from '../app/access';
 import { prepareAudit, type PreparedAudit } from '../app/audit';
 import { prepareEnqueue, prepareRecalculation, releaseQueuedGuard } from '../app/jobs';
 import { prepareNotify, slugify, writeStandardChart } from '../app/shared';
 import { throttle } from '../app/throttle';
 import {
-  MEMBERSHIP_ROLES, ceilingAllows, checkDepartments, checkMemberLoginRole, guardLastOwner,
+  MEMBERSHIP_ROLES, analystDepartments, ceilingAllows, setsOwnerSwitchesRole, checkDepartments, checkMemberLoginRole, guardLastOwner,
   guardNotPlatformUser, isSwitchable, membershipOf, membershipRef, newMembership, orgPeople, pendingInvitationGuard,
   pendingRequestGuard, pendingTransferGuard, prepareMemberPermission, prepareMembershipDelete, prepareRoleChange,
   prepareRowAudit, profilesById, requireTimezone, roleDefault, roleOrder, rowByIdAnyOrg, same, sortedSet,
@@ -451,11 +451,14 @@ const my_access: DbFunction = async (db, args) => {
   const orgId = String(org.id);
   const role = await orgRoleOf(db.fs, uid, orgId);
   if (!role) return [];
-  const takes = overridableRole(role);
-  const [actorType, overrideSnap, membership] = await Promise.all([
+  const takes = switchedRole(role);
+  const analyst = role === 'employee';
+  const [actorType, overrideSnap, membership, analystDeps] = await Promise.all([
     actorTypeOf(db.fs, uid),
     takes ? orgCollection(db.fs, orgId, 'member_permission_overrides').where('user_id', '==', uid).get() : null,
-    takes ? membershipOf(db.fs, orgId, uid, readerOf()) : null,
+    takes && !analyst ? membershipOf(db.fs, orgId, uid, readerOf()) : null,
+    // ADR-187: the departments the super admin gave this analyst in this company.
+    analyst ? analystDepartments(db.fs, orgId, uid, readerOf()) : null,
   ]);
   const overrides = (overrideSnap?.docs ?? [])
     .map((d) => ({ permission: String(d.get('permission')), granted: d.get('granted') === true }))
@@ -465,8 +468,9 @@ const my_access: DbFunction = async (db, args) => {
   for (const p of candidates) {
     if (await effectivePermission(db.fs, uid, orgId, role, p as Permission)) permissions.push(p);
   }
-  const departments = membership && membership.status === 'active' && Array.isArray(membership.departments)
-    ? (membership.departments as string[]) : null;
+  const departments = analyst ? analystDeps
+    : membership && membership.status === 'active' && Array.isArray(membership.departments)
+      ? (membership.departments as string[]) : null;
   return [{
     organization_id: orgId, slug: org.slug, name: org.name, status: org.status, role, actor_type: actorType,
     features: (org.features as Record<string, unknown> | undefined) ?? {}, overrides, permissions, departments,
@@ -811,6 +815,8 @@ const accept_invitation: DbFunction = async (db, args) => {
       // ADR-160: a company the super admin created has no members yet; its owner's invitation came
       // from the super admin, who counts while still the active super admin.
       if (!inviter && await isSuperAdmin(db.fs, invitedBy, r)) inviter = 'owner';
+      // ADR-187: a company a Financial Analyst created; they invite its owner while still its analyst.
+      if (!inviter && await orgRoleOf(db.fs, invitedBy, orgId, r) === 'employee') inviter = 'employee';
     }
     if (!inviter || !ceilingAllows(inviter, String(inv.role))) {
       raise.denied('the person who invited you can no longer grant this role');
@@ -1321,7 +1327,7 @@ const set_member_departments: DbFunction = async (db, args) => {
   return runTx(db, async (tx) => {
     const r = readerOf(tx);
     const role = await requirePermission(db, orgId, 'users.manage', tx);
-    const ownerActor = role === 'owner' || role === 'super_admin';
+    const ownerActor = setsOwnerSwitchesRole(role);
     if (!userId) raise.notFound();
     if (userId === actor) raise.denied('you cannot change your own access');
     const m = await membershipOf(db.fs, orgId, userId, r);
@@ -1423,7 +1429,7 @@ const finish_member_login: DbFunction = async (db, args) => {
     const departments = (claim.departments as string[] | null) ?? null;
     const membership = newMembership({
       orgId, userId, role: loginRole, invitedBy: actor, departments,
-      departmentsSetByOwner: role === 'owner' || role === 'super_admin',
+      departmentsSetByOwner: setsOwnerSwitchesRole(role),
     });
     const ticked = new Set((claim.permissions as string[] | undefined) ?? []);
     const pieces: Array<{ write(tx: Transaction): void }> = [];

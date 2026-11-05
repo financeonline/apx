@@ -38,8 +38,15 @@ describe('role ceiling (RBAC_MATRIX.md §3.2)', () => {
     expect(ceilingAllows('super_admin', 'owner')).toBe(true);
   });
 
-  it('a client, an employee, a suspended member and `none` may act on nobody', () => {
-    for (const actor of ['client', 'employee', 'suspended_member', 'none'] as const) {
+  it('a Financial Analyst has the owner\'s reach in their companies (ADR-187)', () => {
+    expect(ceilingAllows('employee', 'owner')).toBe(true);
+    expect(ceilingAllows('employee', 'client')).toBe(true);
+    expect(ceilingAllows('employee', 'super_admin')).toBe(false);
+    expect(ceilingAllows('employee', 'employee')).toBe(false);
+  });
+
+  it('a client, a suspended member and `none` may act on nobody', () => {
+    for (const actor of ['client', 'suspended_member', 'none'] as const) {
       expect(ceilingAllows(actor, 'client')).toBe(false);
       expect(ceilingAllows(actor, 'owner')).toBe(false);
     }
@@ -62,8 +69,10 @@ describe('canInviteRole', () => {
     expect(canInviteRole('super_admin', 'owner')).toBe(true);
   });
 
-  it('an employee may never invite (governance is not theirs)', () => {
-    expect(canInviteRole('employee', 'client')).toBe(false);
+  it('a Financial Analyst may invite into their companies, an owner included (ADR-187)', () => {
+    expect(canInviteRole('employee', 'client')).toBe(true);
+    expect(canInviteRole('employee', 'owner')).toBe(true);
+    expect(canInviteRole('client', 'client')).toBe(false);
   });
 });
 

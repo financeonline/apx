@@ -102,13 +102,21 @@ export function overridableRole(role: string | null): boolean {
   return role === 'admin' || role === 'accountant' || role === 'client' || role === 'third_party';
 }
 
+/**
+ * Whose permissions a stored switch changes: the four company roles (ADR-172) and a Financial Analyst,
+ * whose switches only the super admin sets (ADR-187).
+ */
+export function switchedRole(role: string | null): boolean {
+  return overridableRole(role) || role === 'employee';
+}
+
 /** `app.effective_permission`: a per-person switch, else the role's row of the matrix. */
 export async function effectivePermission(
   fs: Firestore, userId: string | null, orgId: string | null, role: string | null, perm: Permission,
   r: Reader = readerOf(),
 ): Promise<boolean> {
   if (!role || !userId || !orgId) return false;
-  if (overridableRole(role)) {
+  if (switchedRole(role)) {
     const o = await r.get(orgRow(fs, orgId, 'member_permission_overrides', overrideId(userId, perm)));
     if (o.exists) return o.get('granted') === true;
   }

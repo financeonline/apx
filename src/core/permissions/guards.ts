@@ -41,7 +41,8 @@ export function ceilingAllows(actorRole: EffectiveRole, subjectRole: string): bo
   if (actorRole === 'super_admin') return true;
   const subject = roleRank(subjectRole);
   if (subject === 0) return false;
-  if (actorRole === 'owner') return subject <= 3;
+  // ADR-187: a Financial Analyst has the owner's reach in the companies they created or were given.
+  if (actorRole === 'owner' || actorRole === 'employee') return subject <= 3;
   if (actorRole === 'admin') return subject <= 2;
   return false;
 }
@@ -82,7 +83,7 @@ export function canRevokeAssignment(actorRole: EffectiveRole): boolean {
  * tab (SECURITY_MODEL.md §4; ADR-075). An admin removing a client does not reach into sessions.
  */
 export function endsSessionsOnRemoval(actorRole: EffectiveRole): boolean {
-  return actorRole === 'super_admin' || actorRole === 'owner';
+  return actorRole === 'super_admin' || actorRole === 'owner' || actorRole === 'employee';
 }
 
 /**
